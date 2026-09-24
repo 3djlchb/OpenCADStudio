@@ -134,6 +134,197 @@ impl ttf_parser::OutlineBuilder for OutlineFlattener {
     }
 }
 
+// ── Hint-reliant ("tricky") fonts ───────────────────────────────────────────
+//
+// 標楷體（DFKai-SB）、細明體（MingLiU）等早期華康字型是「筆畫拼字」：每個字由
+// 筆畫部件組成，部件要靠 TrueType 指令才會移到正確位置。直接讀 `glyf` 原始輪廓
+// 會缺筆畫（「自」變「目」、範／直／啟／動缺筆）。FreeType 稱這類字型為 tricky。
+// 對這些字型改用 skrifa 的 TrueType 解譯器在大字級 hinting，再換回字型單位。
+//
+// DFKai-SB, MingLiU and other early DynaLab fonts build each ideograph from
+// stroke components that only the TrueType instructions move into place, so
+// the raw `glyf` outline is missing strokes. FreeType calls them "tricky".
+// For those fonts we run skrifa's TrueType interpreter at a large ppem and
+// scale the result back to font units; every other font keeps ttf-parser.
+
+/// ppem the interpreter hints at: large enough that grid rounding is only
+/// 1/512 em, so the hinted outline stays close to the design.
+/// 解譯器 hinting 用的字級：夠大，格點捨入只有 1/512 em，輪廓貼近原設計。
+const HINT_PPEM: f32 = 512.0;
+
+/// Identifies one face without hashing its bytes. fontdb may hand out a fresh
+/// buffer on every `with_face_data`, so the slice address is not stable.
+/// 不雜湊整個字型就能辨識一個字面；fontdb 每次可能給新緩衝區，指標不可靠。
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct FaceKey {
+    len: usize,
+    index: u32,
+    checksum_adjustment: u32,
+}
+
+/// `Some(instance)` for a font that needs the interpreter, `None` otherwise.
+/// 需要解譯器的字型存 `Some(hinting 實例)`，其他存 `None`。
+type HintCache = HashMap<FaceKey, Option<Arc<skrifa::outline::HintingInstance>>>;
+
+fn hint_cache() -> &'static Mutex<HintCache> {
+    static CACHE: OnceLock<Mutex<HintCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+/// Hinting instance for `font`, or `None` when it renders correctly unhinted.
+/// `require_interpreter` reads the name table and may checksum tables, so the
+/// answer (and the instance) is cached per face.
+/// 取得該字型的 hinting 實例；不需要解譯器時回 `None`。
+/// `require_interpreter` 會讀 name 表、可能算 checksum，很慢，所以每個字面快取一次。
+fn hinter_for(
+    font: &skrifa::FontRef,
+    key: FaceKey,
+) -> Option<Arc<skrifa::outline::HintingInstance>> {
+    use skrifa::instance::{LocationRef, Size};
+    use skrifa::outline::{Engine, HintingInstance, HintingOptions, Target};
+    use skrifa::MetadataProvider;
+
+    if let Some(hit) = hint_cache().lock().unwrap().get(&key) {
+        return hit.clone();
+    }
+    let outlines = font.outline_glyphs();
+    let built = if outlines.require_interpreter() {
+        // FreeType's recipe for tricky fonts: the bytecode interpreter in
+        // monochrome mode. / FreeType 對 tricky 字型的做法：解譯器＋單色模式。
+        let options = HintingOptions {
+            engine: Engine::Interpreter,
+            target: Target::Mono,
+        };
+        match HintingInstance::new(
+            &outlines,
+            Size::new(HINT_PPEM),
+            LocationRef::default(),
+            options,
+        ) {
+            Ok(instance) => Some(Arc::new(instance)),
+            Err(e) => {
+                // Logged once per face (the `None` is cached): the font falls
+                // back to its raw outlines, which may be missing strokes.
+                // 每個字面只記一次；退回原始輪廓，可能缺筆畫。
+                log::warn!(
+                    "TrueType hinting failed for a hint-reliant font; using raw outlines: {e:?}"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    hint_cache().lock().unwrap().insert(key, built.clone());
+    built
+}
+
+/// One recorded path command, already scaled to font units.
+/// 一筆已換回字型單位的路徑指令。
+enum PathCmd {
+    Move(f32, f32),
+    Line(f32, f32),
+    Quad(f32, f32, f32, f32),
+    Cubic(f32, f32, f32, f32, f32, f32),
+    Close,
+}
+
+/// skrifa pen that records hinted pixel coordinates as font units, so a draw
+/// that fails halfway never leaves a partial glyph in the real builder.
+/// 把 hinting 後的像素座標換回字型單位先記下來；畫到一半失敗也不會污染真正的 builder。
+struct RecordingPen {
+    /// Pixel → font-unit factor (`upem / HINT_PPEM`). / 像素→字型單位係數。
+    k: f32,
+    cmds: Vec<PathCmd>,
+}
+
+impl skrifa::outline::OutlinePen for RecordingPen {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.cmds.push(PathCmd::Move(x * self.k, y * self.k));
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.cmds.push(PathCmd::Line(x * self.k, y * self.k));
+    }
+
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        let k = self.k;
+        self.cmds.push(PathCmd::Quad(cx * k, cy * k, x * k, y * k));
+    }
+
+    fn curve_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
+        let k = self.k;
+        self.cmds.push(PathCmd::Cubic(
+            c1x * k,
+            c1y * k,
+            c2x * k,
+            c2y * k,
+            x * k,
+            y * k,
+        ));
+    }
+
+    fn close(&mut self) {
+        self.cmds.push(PathCmd::Close);
+    }
+}
+
+/// Hinted outline of `gid` in font units, or `None` when the font needs no
+/// interpreter (or hinting failed) and the caller should use ttf-parser.
+/// 回傳字型單位的 hinting 輪廓；字型不需要解譯器（或 hinting 失敗）時回 `None`。
+fn hinted_outline(data: &[u8], index: u32, gid: ttf_parser::GlyphId) -> Option<Vec<PathCmd>> {
+    use skrifa::outline::DrawSettings;
+    use skrifa::raw::TableProvider;
+    use skrifa::MetadataProvider;
+
+    let font = skrifa::FontRef::from_index(data, index).ok()?;
+    let head = font.head().ok()?;
+    let key = FaceKey {
+        len: data.len(),
+        index,
+        checksum_adjustment: head.checksum_adjustment(),
+    };
+    let hinter = hinter_for(&font, key)?;
+    let glyph = font
+        .outline_glyphs()
+        .get(skrifa::GlyphId::new(gid.0 as u32))?;
+    let mut pen = RecordingPen {
+        k: head.units_per_em().max(1) as f32 / HINT_PPEM,
+        cmds: Vec::new(),
+    };
+    glyph
+        .draw(DrawSettings::hinted(&hinter, false), &mut pen)
+        .ok()?;
+    Some(pen.cmds)
+}
+
+/// Outline glyph `gid` of face `index` in `data` into `builder` (font units,
+/// y-up) — the drop-in replacement for `face.outline_glyph` used everywhere in
+/// this file. Hint-reliant fonts go through the TrueType interpreter first.
+/// 把字形輪廓畫進 `builder`（字型單位、y 向上），取代本檔所有 `face.outline_glyph`；
+/// 筆畫拼字字型先經 TrueType 解譯器 hinting。
+fn outline_glyph_into(
+    data: &[u8],
+    index: u32,
+    face: &ttf_parser::Face,
+    gid: ttf_parser::GlyphId,
+    builder: &mut impl ttf_parser::OutlineBuilder,
+) {
+    let Some(cmds) = hinted_outline(data, index, gid) else {
+        face.outline_glyph(gid, builder);
+        return;
+    };
+    for cmd in cmds {
+        match cmd {
+            PathCmd::Move(x, y) => builder.move_to(x, y),
+            PathCmd::Line(x, y) => builder.line_to(x, y),
+            PathCmd::Quad(cx, cy, x, y) => builder.quad_to(cx, cy, x, y),
+            PathCmd::Cubic(c1x, c1y, c2x, c2y, x, y) => builder.curve_to(c1x, c1y, c2x, c2y, x, y),
+            PathCmd::Close => builder.close(),
+        }
+    }
+}
+
 // ── Cache ────────────────────────────────────────────────────────────────────
 
 type GlyphCache = HashMap<(String, char), Option<Arc<Glyph>>>;
@@ -160,7 +351,7 @@ pub fn glyph(family: &str, ch: char) -> Option<Arc<Glyph>> {
         let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
         let mut fl = OutlineFlattener::new(k);
         // A glyph with no outline (e.g. space) still has a valid advance.
-        face.outline_glyph(gid, &mut fl);
+        outline_glyph_into(data, index, &face, gid, &mut fl);
         fl.flush();
         let fill_tris = triangulate_contours(&fl.contours);
 
@@ -406,7 +597,7 @@ fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
 /// text height — so size the substitute by its em box. Everything else keeps the
 /// cap-height normalisation that lines it up with the Latin stroke glyphs.
 #[cfg(not(target_arch = "wasm32"))]
-fn outline_char(face: &ttf_parser::Face, ch: char) -> Option<Glyph> {
+fn outline_char(data: &[u8], index: u32, face: &ttf_parser::Face, ch: char) -> Option<Glyph> {
     let gid = face.glyph_index(ch)?;
     let k = if is_full_width(ch) {
         em_scale(face)
@@ -415,7 +606,7 @@ fn outline_char(face: &ttf_parser::Face, ch: char) -> Option<Glyph> {
     };
     let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
     let mut fl = OutlineFlattener::new(k);
-    face.outline_glyph(gid, &mut fl);
+    outline_glyph_into(data, index, face, gid, &mut fl);
     fl.flush();
     let fill_tris = triangulate_contours(&fl.contours);
     Some(Glyph {
@@ -451,7 +642,7 @@ fn outline_from_fallback_face(ch: char) -> Option<Arc<Glyph>> {
             let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
             let font = fs.get_font(g.font_id, g.font_weight)?;
             let face = ttf_parser::Face::parse(font.data(), face_index).ok()?;
-            let Some(glyph) = outline_char(&face, ch) else {
+            let Some(glyph) = outline_char(font.data(), face_index, &face, ch) else {
                 continue;
             };
             if glyph.strokes.is_empty() && glyph.fill_tris.is_empty() {
@@ -475,7 +666,7 @@ fn installed_family_glyph(ch: char) -> Option<Arc<Glyph>> {
         .find_map(|family| {
             let glyph = sysfont::with_face_data(family, |data, index| {
                 let face = ttf_parser::Face::parse(data, index).ok()?;
-                outline_char(&face, ch)
+                outline_char(data, index, &face, ch)
             })
             .flatten()?;
             // A face that yields no outline (the system font, a space) is not a
@@ -493,15 +684,15 @@ fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
     let script = crate::scene::text::web_font::script_of(ch)?;
     let bytes = crate::scene::text::web_font::request(script)?;
     let face_count = ttf_parser::fonts_in_collection(&bytes).unwrap_or(1);
-    let (face, gid) = (0..face_count).find_map(|face_index| {
+    let (face_index, face, gid) = (0..face_count).find_map(|face_index| {
         let face = ttf_parser::Face::parse(&bytes, face_index).ok()?;
         let gid = face.glyph_index(ch)?;
-        Some((face, gid))
+        Some((face_index, face, gid))
     })?;
     let k = cap_scale(&face);
     let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
     let mut fl = OutlineFlattener::new(k);
-    face.outline_glyph(gid, &mut fl);
+    outline_glyph_into(&bytes, face_index, &face, gid, &mut fl);
     fl.flush();
     if fl.contours.is_empty() {
         return None;
@@ -582,7 +773,10 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
             let pen_y = -(SHAPE_FS * glyph.y_offset) * px_to_9;
             let mut flattener = OutlineFlattener::new(scale);
             flattener.offset = [pen_x, pen_y];
-            face.outline_glyph(
+            outline_glyph_into(
+                font.data(),
+                face_index,
+                &face,
                 ttf_parser::GlyphId(glyph.glyph_id),
                 &mut flattener,
             );
@@ -685,7 +879,13 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
 
             let mut fl = OutlineFlattener::new(scale_g);
             fl.offset = [pen_x, pen_y];
-            face.outline_glyph(ttf_parser::GlyphId(g.glyph_id), &mut fl);
+            outline_glyph_into(
+                font.data(),
+                face_index,
+                &face,
+                ttf_parser::GlyphId(g.glyph_id),
+                &mut fl,
+            );
             fl.flush();
             if !fl.contours.is_empty() {
                 let fill_tris = triangulate_contours(&fl.contours);
@@ -802,5 +1002,163 @@ mod tests {
             }
         }
         assert!(ok, "no family produced an 'A' outline");
+    }
+
+    // ── Hint-reliant fonts / 筆畫拼字字型 ─────────────────────────────────
+
+    /// Bytes of a font in the Windows font folder; `None` (→ skip) elsewhere.
+    /// 讀 Windows 字型資料夾的字型；沒有就回 `None`（測試跳過）。
+    fn windows_font(file: &str) -> Option<Vec<u8>> {
+        let dir = std::env::var_os("WINDIR")?;
+        std::fs::read(std::path::Path::new(&dir).join("Fonts").join(file)).ok()
+    }
+
+    /// Contours of `ch` in font units (flattener scale 1), either straight from
+    /// ttf-parser or through `outline_glyph_into`.
+    /// 取字型單位輪廓：直接 ttf-parser，或走 `outline_glyph_into`。
+    fn contours(data: &[u8], index: u32, ch: char, new_path: bool) -> Vec<Vec<[f32; 2]>> {
+        let face = ttf_parser::Face::parse(data, index).expect("face");
+        let gid = face.glyph_index(ch).expect("glyph");
+        let mut fl = OutlineFlattener::new(1.0);
+        if new_path {
+            outline_glyph_into(data, index, &face, gid, &mut fl);
+        } else {
+            face.outline_glyph(gid, &mut fl);
+        }
+        fl.flush();
+        fl.contours
+    }
+
+    fn require_interpreter(data: &[u8], index: u32) -> bool {
+        use skrifa::MetadataProvider;
+        skrifa::FontRef::from_index(data, index)
+            .expect("font")
+            .outline_glyphs()
+            .require_interpreter()
+    }
+
+    #[test]
+    fn tricky_font_detection_kaiu_yes_msjh_no() {
+        // DFKai-SB is on FreeType's / skrifa's tricky list; Microsoft JhengHei
+        // is not. The cached decision (`hinted_outline`) must agree.
+        // 標楷體在 tricky 名單上、微軟正黑體不在；快取後的判斷也要一致。
+        if let Some(kaiu) = windows_font("kaiu.ttf") {
+            assert!(
+                require_interpreter(&kaiu, 0),
+                "kaiu.ttf must need the interpreter"
+            );
+            let gid = ttf_parser::Face::parse(&kaiu, 0)
+                .unwrap()
+                .glyph_index('自')
+                .unwrap();
+            assert!(
+                hinted_outline(&kaiu, 0, gid).is_some(),
+                "kaiu must take the hinted path"
+            );
+        } else {
+            eprintln!("kaiu.ttf not installed; skipping");
+        }
+        if let Some(msjh) = windows_font("msjh.ttc") {
+            assert!(
+                !require_interpreter(&msjh, 0),
+                "msjh.ttc must not need the interpreter"
+            );
+            let gid = ttf_parser::Face::parse(&msjh, 0)
+                .unwrap()
+                .glyph_index('自')
+                .unwrap();
+            assert!(
+                hinted_outline(&msjh, 0, gid).is_none(),
+                "msjh must keep ttf-parser"
+            );
+        } else {
+            eprintln!("msjh.ttc not installed; skipping");
+        }
+        if let Some(mingliu) = windows_font("mingliu.ttc") {
+            // MingLiU / PMingLiU are on the same list (informational coverage).
+            // 細明體／新細明體也在名單上。
+            assert!(
+                require_interpreter(&mingliu, 0),
+                "mingliu.ttc must need the interpreter"
+            );
+        }
+    }
+
+    #[test]
+    fn kaiu_zi_goes_through_the_interpreter_and_stays_in_the_em() {
+        // Raw DFKai-SB outlines drop strokes ('自' renders as '目'); the hinted
+        // path must produce a different outline, in font units (not 512-px
+        // pixels), filling most of the em square.
+        // 標楷體原始輪廓缺筆（自→目）；新路徑輸出要不同，且是字型單位、落在 em 內。
+        let Some(kaiu) = windows_font("kaiu.ttf") else {
+            eprintln!("kaiu.ttf not installed; skipping");
+            return;
+        };
+        let raw = contours(&kaiu, 0, '自', false);
+        let hinted = contours(&kaiu, 0, '自', true);
+        assert!(!hinted.is_empty(), "hinted '自' has no contours");
+        assert_ne!(raw, hinted, "hinted '自' must differ from the raw outline");
+
+        let face = ttf_parser::Face::parse(&kaiu, 0).unwrap();
+        let upem = face.units_per_em() as f32;
+        let (asc, desc) = (face.ascender() as f32, face.descender() as f32);
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for p in hinted.iter().flatten() {
+            x0 = x0.min(p[0]);
+            y0 = y0.min(p[1]);
+            x1 = x1.max(p[0]);
+            y1 = y1.max(p[1]);
+        }
+        eprintln!(
+            "kaiu '自': upem={upem} asc={asc} desc={desc} raw contours={} hinted contours={} bbox=({x0},{y0})-({x1},{y1})",
+            raw.len(),
+            hinted.len()
+        );
+        let tol = 0.02 * upem;
+        assert!(
+            x0 >= -tol && x1 <= upem + tol,
+            "x outside the em: {x0}..{x1}"
+        );
+        assert!(
+            y0 >= desc - tol && y1 <= asc + tol,
+            "y outside the em: {y0}..{y1}"
+        );
+        // A forgotten pixel → font-unit conversion would halve the ideograph
+        // (512 px vs 1024 upem). '自' is narrow (~0.47 em) but ~0.8 em tall.
+        // 忘了像素→字型單位換算的話字會縮一半；「自」窄（約 0.47 em）但高約 0.8 em。
+        assert!(y1 - y0 > 0.6 * upem, "ideograph too short: {}", y1 - y0);
+        assert!(x1 - x0 > 0.3 * upem, "ideograph too narrow: {}", x1 - x0);
+
+        // The public entry point must use the hinted path too.
+        // 對外的 `glyph()` 也要走 hinting 路徑。
+        if let Some(g) = glyph("DFKai-SB", '自') {
+            let gid = face.glyph_index('自').unwrap();
+            let mut fl = OutlineFlattener::new(cap_scale(&face));
+            face.outline_glyph(gid, &mut fl);
+            fl.flush();
+            assert_ne!(
+                g.strokes, fl.contours,
+                "glyph() still returns the raw outline"
+            );
+        } else {
+            eprintln!("DFKai-SB family not resolvable via sysfont; public-path check skipped");
+        }
+    }
+
+    #[test]
+    fn non_tricky_font_outlines_are_unchanged() {
+        // Fonts that don't need the interpreter keep the exact ttf-parser outline.
+        // 不需要解譯器的字型，輸出與 ttf-parser 完全相同。
+        let Some(msjh) = windows_font("msjh.ttc") else {
+            eprintln!("msjh.ttc not installed; skipping");
+            return;
+        };
+        for ch in "自保持接觸器線圈AgQ1".chars() {
+            assert_eq!(
+                contours(&msjh, 0, ch, true),
+                contours(&msjh, 0, ch, false),
+                "msjh '{ch}' changed"
+            );
+        }
     }
 }
