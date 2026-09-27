@@ -2165,6 +2165,24 @@ pub fn set_saved_active_layout(doc: &mut CadDocument, name: &str) {
 fn sync_current_styles_on_save(doc: &mut CadDocument) {
     use codec::objects::ObjectType;
 
+    // The renderer uses a closed filled arrow when a referenced block is
+    // missing. Persist that same default instead of a dangling hard pointer:
+    // Rhino otherwise drops every dimension using the affected DIMSTYLE.
+    let block_handles: rustc_hash::FxHashSet<_> =
+        doc.block_records.iter().map(|record| record.handle).collect();
+    for style in doc.dim_styles.iter_mut() {
+        for handle in [
+            &mut style.dimblk,
+            &mut style.dimblk1,
+            &mut style.dimblk2,
+            &mut style.dimldrblk,
+        ] {
+            if !handle.is_null() && !block_handles.contains(handle) {
+                *handle = codec::Handle::NULL;
+            }
+        }
+    }
+
     let th = doc
         .text_styles
         .get(&doc.header.current_text_style_name)
@@ -2464,6 +2482,135 @@ fn fix_dxf_layout_plot_settings(doc: &mut CadDocument) {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod dimension_arrow_save_tests {
+    use super::*;
+    use codec::{
+        entities::{Dimension, DimensionLinear},
+        tables::{BlockRecord, DimStyle},
+        types::Vector3,
+        Handle,
+    };
+
+    fn document_with_missing_arrows() -> CadDocument {
+        let mut doc = CadDocument::new();
+        let mut style = DimStyle::new("MissingArrows");
+        style.handle = doc.allocate_handle();
+        style.dimblk = Handle::new(0xDEAD);
+        style.dimblk1 = Handle::new(0xDEAE);
+        style.dimblk2 = Handle::new(0xDEAF);
+        style.dimldrblk = Handle::new(0xDEB0);
+        doc.dim_styles.add(style).unwrap();
+        let mut dimension =
+            DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(100.0, 0.0, 0.0));
+        dimension.base.style_name = "MissingArrows".to_string();
+        dimension.definition_point = Vector3::new(0.0, 20.0, 0.0);
+        dimension.base.definition_point = dimension.definition_point;
+        dimension.base.text_middle_point = Vector3::new(50.0, 20.0, 0.0);
+        doc.add_entity(EntityType::Dimension(Dimension::Linear(dimension)))
+            .unwrap();
+        doc
+    }
+
+    #[test]
+    fn missing_dimension_arrow_blocks_use_the_renderers_default_on_save() {
+        let mut doc = document_with_missing_arrows();
+        sync_current_styles_on_save(&mut doc);
+        let style = doc.dim_styles.get("MissingArrows").unwrap();
+        assert!(
+            [style.dimblk, style.dimblk1, style.dimblk2, style.dimldrblk]
+                .iter()
+                .all(|handle| handle.is_null())
+        );
+    }
+
+    #[test]
+    fn valid_custom_dimension_arrow_blocks_and_metrics_are_preserved() {
+        let mut doc = document_with_missing_arrows();
+        let mut block = BlockRecord::new("CustomArrow");
+        block.handle = doc.allocate_handle();
+        let handle = block.handle;
+        doc.block_records.add(block).unwrap();
+        let style = doc.dim_styles.get_mut("MissingArrows").unwrap();
+        style.dimblk = handle;
+        style.dimblk1 = handle;
+        style.dimblk2 = handle;
+        style.dimldrblk = handle;
+        style.dimsah = true;
+        style.dimasz = 6.0;
+        style.dimtxt = 3.0;
+        style.dimscale = 15.0;
+
+        sync_current_styles_on_save(&mut doc);
+        let style = doc.dim_styles.get("MissingArrows").unwrap();
+        assert_eq!(
+            [style.dimblk, style.dimblk1, style.dimblk2, style.dimldrblk],
+            [handle; 4]
+        );
+        assert!(style.dimsah);
+        assert_eq!(
+            (style.dimasz, style.dimtxt, style.dimscale),
+            (6.0, 3.0, 15.0)
+        );
+    }
+
+    #[test]
+    fn dwg_and_dxf_saves_do_not_emit_missing_dimension_arrow_references() {
+        let doc = document_with_missing_arrows();
+        for ext in ["dwg", "dxf"] {
+            let bytes = save_to_bytes(&doc, ext, codec::DxfVersion::AC1032).unwrap();
+            let loaded = if ext == "dwg" {
+                DwgReader::from_stream(std::io::Cursor::new(bytes))
+                    .read()
+                    .unwrap()
+            } else {
+                DxfReader::from_reader(std::io::Cursor::new(bytes))
+                    .unwrap()
+                    .read()
+                    .unwrap()
+            };
+            assert_eq!(
+                loaded
+                    .entities()
+                    .filter(|entity| matches!(entity, EntityType::Dimension(_)))
+                    .count(),
+                1
+            );
+            let style = loaded.dim_styles.get("MissingArrows").unwrap();
+            assert!(
+                [style.dimblk, style.dimblk1, style.dimblk2, style.dimldrblk]
+                    .iter()
+                    .all(|handle| handle.is_null()),
+                "{ext}"
+            );
+
+            let path =
+                std::env::temp_dir().join(format!("ocs_dim_arrows_{}.{ext}", std::process::id()));
+            save_as_version(&doc, &path, codec::DxfVersion::AC1032).unwrap();
+            let loaded = load_file(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            assert_eq!(
+                loaded
+                    .entities()
+                    .filter(|entity| matches!(entity, EntityType::Dimension(_)))
+                    .count(),
+                1
+            );
+            let style = loaded.dim_styles.get("MissingArrows").unwrap();
+            assert!(
+                [style.dimblk, style.dimblk1, style.dimblk2, style.dimldrblk]
+                    .iter()
+                    .all(|handle| handle.is_null()),
+                "disk {ext}"
+            );
+        }
+        assert_eq!(
+            doc.dim_styles.get("MissingArrows").unwrap().dimblk,
+            Handle::new(0xDEAD)
+        );
     }
 }
 
