@@ -201,11 +201,8 @@ impl OpenCADStudio {
             self.command_line.record_recent(cmd);
             if self.tabs[i].active_cmd.is_none() {
                 self.ribbon.deactivate_tool();
-                return Task::none();
-            } else {
-                self.sync_dyn_fields();
-                return self.focus_cmd_input();
             }
+            return self.finish_dispatch(cmd);
         }
 
         // Command families are dispatched in source order (see
