@@ -620,26 +620,25 @@ fn dynamic_data_text(data: &DynamicBlockData) -> String {
             value.class_version
         ),
         DynamicBlockData::MoveAction(value) => format!(
-            "{}; dependencies {}; actions {}; offsets {:.6},{:.6}; angle {:.6}",
+            "{}; dependencies {}; parameters {}; distance multiplier {:.6}; angle {:.6}",
             value.action.element.name,
             value.action.dependencies.len(),
-            value.action.action_ids.len(),
-            value.offsets.offset_x,
-            value.offsets.offset_y,
+            value.action.parameter_ids.len(),
+            value.offsets.distance_multiplier,
             value.offsets.angle_offset
         ),
         DynamicBlockData::FlipAction(value) => format!(
-            "{}; dependencies {}; actions {}; connections {}",
+            "{}; dependencies {}; parameters {}; connections {}",
             value.action.element.name,
             value.action.dependencies.len(),
-            value.action.action_ids.len(),
+            value.action.parameter_ids.len(),
             value.connections.len()
         ),
         DynamicBlockData::RotateAction(value) | DynamicBlockData::ScaleAction(value) => format!(
-            "{}; dependencies {}; actions {}; base {:.6},{:.6},{:.6}; dependent {}",
+            "{}; dependencies {}; parameters {}; base {:.6},{:.6},{:.6}; dependent {}",
             value.action.action.element.name,
             value.action.action.dependencies.len(),
-            value.action.action.action_ids.len(),
+            value.action.action.parameter_ids.len(),
             value.action.base_point.x,
             value.action.base_point.y,
             value.action.base_point.z,
@@ -653,13 +652,13 @@ fn dynamic_data_text(data: &DynamicBlockData) -> String {
             value.row_offset
         ),
         DynamicBlockData::LookupAction(value) => format!(
-            "{}; dependencies {}; table {}×{}; expressions {}; rows {}",
+            "{}; dependencies {}; table {}×{}; expressions {}; columns {}",
             value.action.element.name,
             value.action.dependencies.len(),
             value.row_count,
             value.column_count,
             value.expressions.len(),
-            value.rows.len()
+            value.columns.len()
         ),
         DynamicBlockData::StretchAction(value) => format!(
             "{}; dependencies {}; points {}; handles {}; codes {}",
@@ -698,8 +697,7 @@ fn dynamic_data_text(data: &DynamicBlockData) -> String {
             value.record_history
         ),
         DynamicBlockData::SolidHistoryNode(value) => history_operation_text(value),
-        DynamicBlockData::PropertiesTable
-        | DynamicBlockData::AlignmentParameterEntity
+        DynamicBlockData::AlignmentParameterEntity
         | DynamicBlockData::BasePointParameterEntity
         | DynamicBlockData::FlipParameterEntity
         | DynamicBlockData::LinearParameterEntity
