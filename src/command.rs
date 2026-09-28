@@ -1569,6 +1569,7 @@ pub enum CmdResult {
     /// page; the host creates or reuses the definitions and commits them all
     /// in one undo step, then ends the command.
     AttachPdfPages {
+        kind: codec::entities::UnderlayType,
         path: String,
         pages: Vec<(String, EntityType)>,
     },

@@ -303,7 +303,8 @@ pub fn wildcard_match(name: &str, pattern: &str) -> bool {
 pub enum RefKind {
     DwgXref,
     Image,
-    Pdf,
+    /// A PDF, DWF or DGN underlay.
+    Underlay,
 }
 
 /// Lifecycle state of a [`ReferenceEntry`].

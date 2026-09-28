@@ -1,0 +1,235 @@
+//! DWF and DGN underlay content: sheet (DWF) or model (DGN) names, each
+//! sheet's geometry in its own units, a display raster of it and the
+//! vectors object snaps use — the counterpart of `pdf_raster` and
+//! `pdf_vector` for the other underlay kinds.
+//!
+//! A DWF sheet is in the model units it was plotted from, with the plot's
+//! model origin at the underlay's insertion point; a DGN model is in its
+//! master units with the global origin there.
+
+mod dgn7;
+mod dgn8;
+mod dwf;
+mod model;
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use codec::entities::UnderlayType;
+
+pub use model::{Path, Segment, Sheet, SubPath};
+
+use super::pdf_raster::{source_bytes, PdfPage};
+
+/// Sheet names (DWF) or model names (DGN) of a file.
+pub fn item_names(kind: UnderlayType, path: &str) -> Option<Vec<String>> {
+    let bytes = source_bytes(path)?;
+    match kind {
+        UnderlayType::Dwf => dwf::sheet_names(&bytes),
+        UnderlayType::Dgn if dgn7::is_v7(&bytes) => dgn7::model_names(&bytes),
+        UnderlayType::Dgn => dgn8::model_names(&bytes),
+        UnderlayType::Pdf => None,
+    }
+}
+
+type Key = (String, String);
+
+fn sheet_cache() -> &'static Mutex<HashMap<Key, Option<Arc<Sheet>>>> {
+    static CACHE: OnceLock<Mutex<HashMap<Key, Option<Arc<Sheet>>>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+fn raster_cache() -> &'static Mutex<HashMap<Key, Option<Arc<PdfPage>>>> {
+    static CACHE: OnceLock<Mutex<HashMap<Key, Option<Arc<PdfPage>>>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Forget what was read from `path` (its bytes changed).
+pub fn forget(path: &str) {
+    sheet_cache().lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k.0 != path);
+    raster_cache().lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k.0 != path);
+    vector_cache().lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k.0 != path);
+}
+
+/// The named sheet or model (the first when the name is empty or unknown),
+/// memoised. Its text is drawn as strokes with the drawing's text engine.
+pub fn sheet(kind: UnderlayType, path: &str, item: &str) -> Option<Arc<Sheet>> {
+    let key = (path.to_string(), item.to_string());
+    if let Some(hit) = sheet_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return hit.clone();
+    }
+    let read = || -> Option<Sheet> {
+        let bytes = source_bytes(path)?;
+        let mut sheet = match kind {
+            UnderlayType::Dwf => dwf::sheet(&bytes, item)?,
+            UnderlayType::Dgn if dgn7::is_v7(&bytes) => dgn7::model(&bytes)?,
+            UnderlayType::Dgn => dgn8::model(&bytes, item)?,
+            UnderlayType::Pdf => return None,
+        };
+        outline_texts(&mut sheet);
+        Some(sheet)
+    };
+    let value = read().map(Arc::new);
+    sheet_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
+    value
+}
+
+/// Text as strokes (and fills for outline fonts), in the text's colour.
+fn outline_texts(sheet: &mut Sheet) {
+    for t in std::mem::take(&mut sheet.texts) {
+        let (strokes, fills) = crate::scene::text::lff::tessellate_text_ex(
+            [t.origin[0] as f32, t.origin[1] as f32],
+            t.height as f32,
+            t.rotation as f32,
+            t.width_factor as f32,
+            0.0,
+            "txt",
+            &t.text,
+        );
+        let at = |p: [f32; 2]| [p[0] as f64, p[1] as f64];
+        let subpaths: Vec<SubPath> = strokes
+            .iter()
+            .filter(|s| s.len() >= 2)
+            .map(|s| SubPath { segments: s.windows(2).map(|w| Segment::Line(at(w[0]), at(w[1]))).collect(), closed: false })
+            .collect();
+        if !subpaths.is_empty() {
+            sheet.paths.push(Path { subpaths, stroke: Some((t.color, -1.0)), fill: None });
+        }
+        let triangles: Vec<SubPath> = fills
+            .chunks_exact(3)
+            .map(|t| SubPath {
+                segments: vec![Segment::Line(at(t[0]), at(t[1])), Segment::Line(at(t[1]), at(t[2])), Segment::Line(at(t[2]), at(t[0]))],
+                closed: true,
+            })
+            .collect();
+        if !triangles.is_empty() {
+            sheet.paths.push(Path { subpaths: triangles, stroke: None, fill: Some(t.color) });
+        }
+    }
+}
+
+/// Longest side of a sheet's display raster, pixels.
+const RASTER_SIDE: f64 = 3072.0;
+
+/// The sheet drawn on a transparent background, straight alpha, rows from
+/// the top, memoised.
+pub fn display_raster(kind: UnderlayType, path: &str, item: &str) -> Option<Arc<PdfPage>> {
+    let key = (path.to_string(), item.to_string());
+    if let Some(hit) = raster_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return hit.clone();
+    }
+    let value = sheet(kind, path, item).and_then(|s| rasterize(&s)).map(Arc::new);
+    raster_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
+    value
+}
+
+fn rasterize(sheet: &Sheet) -> Option<PdfPage> {
+    let [x0, y0, x1, y1] = sheet.rect;
+    let (w, h) = (x1 - x0, y1 - y0);
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let scale = RASTER_SIDE / w.max(h);
+    let (pw, ph) = ((w * scale).ceil().max(1.0) as u32, (h * scale).ceil().max(1.0) as u32);
+    let mut pixmap = tiny_skia::Pixmap::new(pw, ph)?;
+    let to_px = |p: [f64; 2]| (((p[0] - x0) * scale) as f32, ((y1 - p[1]) * scale) as f32);
+    for path in &sheet.paths {
+        let mut pb = tiny_skia::PathBuilder::new();
+        for sp in &path.subpaths {
+            let Some(first) = sp.segments.first() else { continue };
+            let s = to_px(first.start());
+            pb.move_to(s.0, s.1);
+            for seg in &sp.segments {
+                match seg {
+                    Segment::Line(_, b) => {
+                        let b = to_px(*b);
+                        pb.line_to(b.0, b.1);
+                    }
+                    Segment::Cubic(_, c1, c2, b) => {
+                        let (c1, c2, b) = (to_px(*c1), to_px(*c2), to_px(*b));
+                        pb.cubic_to(c1.0, c1.1, c2.0, c2.1, b.0, b.1);
+                    }
+                }
+            }
+            if sp.closed {
+                pb.close();
+            }
+        }
+        let Some(p) = pb.finish() else { continue };
+        if let Some(c) = path.fill {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color_rgba8(c[0], c[1], c[2], 255);
+            // Fills that share an edge (triangle strips) would show a seam.
+            paint.anti_alias = false;
+            pixmap.fill_path(&p, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+        }
+        if let Some((c, width)) = path.stroke {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color_rgba8(c[0], c[1], c[2], 255);
+            paint.anti_alias = true;
+            let stroke = tiny_skia::Stroke {
+                // A negative width is in pixels (DGN line weights).
+                width: if width < 0.0 { (-width) as f32 } else { ((width * scale) as f32).max(1.0) },
+                line_cap: tiny_skia::LineCap::Round,
+                line_join: tiny_skia::LineJoin::Round,
+                ..Default::default()
+            };
+            pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+        }
+    }
+    let mut pixels = pixmap.take();
+    for px in pixels.chunks_exact_mut(4) {
+        let a = px[3] as u32;
+        if a > 0 && a < 255 {
+            for c in &mut px[..3] {
+                *c = ((*c as u32 * 255 + a / 2) / a).min(255) as u8;
+            }
+        }
+    }
+    Some(PdfPage { pixels: Arc::new(pixels), width: pw, height: ph, dpi: 0.0 })
+}
+
+fn vector_cache() -> &'static Mutex<HashMap<Key, Option<Arc<super::pdf_vector::PageVectors>>>> {
+    static CACHE: OnceLock<Mutex<HashMap<Key, Option<Arc<super::pdf_vector::PageVectors>>>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// The sheet's geometry as page vectors for object snaps, in sheet units,
+/// memoised.
+pub fn page_vectors(kind: UnderlayType, path: &str, item: &str) -> Option<Arc<super::pdf_vector::PageVectors>> {
+    let key = (path.to_string(), item.to_string());
+    if let Some(hit) = vector_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return hit.clone();
+    }
+    let value = sheet(kind, path, item).map(|s| Arc::new(to_page_vectors(&s)));
+    vector_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
+    value
+}
+
+fn to_page_vectors(sheet: &Sheet) -> super::pdf_vector::PageVectors {
+    use super::pdf_vector as pv;
+    let paths = sheet
+        .paths
+        .iter()
+        .map(|p| pv::PdfPath {
+            subpaths: p
+                .subpaths
+                .iter()
+                .map(|sp| pv::SubPath {
+                    segments: sp
+                        .segments
+                        .iter()
+                        .map(|s| match s {
+                            Segment::Line(a, b) => pv::Segment::Line(*a, *b),
+                            Segment::Cubic(a, b, c, d) => pv::Segment::Cubic(*a, *b, *c, *d),
+                        })
+                        .collect(),
+                    closed: sp.closed,
+                })
+                .collect(),
+            stroke: p.stroke.map(|(c, w)| (c, w.max(0.0))),
+            fill: p.fill,
+        })
+        .collect();
+    pv::PageVectors { paths, ..Default::default() }
+}

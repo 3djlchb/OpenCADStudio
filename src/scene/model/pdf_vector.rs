@@ -629,8 +629,7 @@ pub fn underlay_snap_points(
     let Some(def) = crate::entities::underlay::definition(u, document) else {
         return Vec::new();
     };
-    let source = super::pdf_layers::underlay_source(u, &def.file_path);
-    let Some(vectors) = page_vectors(&source, crate::entities::underlay::page_of(def)) else {
+    let Some(vectors) = underlay_vectors(u, def) else {
         return Vec::new();
     };
     let world = |p: [f64; 2]| {
@@ -665,6 +664,21 @@ pub fn underlay_snap_points(
     out
 }
 
+/// The page's vectors in page units: PDF through its layer overrides, DWF
+/// and DGN from their sheet.
+fn underlay_vectors(
+    u: &codec::entities::Underlay,
+    def: &codec::entities::UnderlayDefinition,
+) -> Option<Arc<PageVectors>> {
+    let page = crate::entities::underlay::page_of(def);
+    match def.underlay_type {
+        codec::entities::UnderlayType::Pdf => {
+            page_vectors(&super::pdf_layers::underlay_source(u, &def.file_path), page)
+        }
+        kind => super::underlay_vector::page_vectors(kind, &def.file_path, page),
+    }
+}
+
 /// Most points of the snap-only geometry wire of one underlay.
 // ponytail: flat cap; a spatial index over page segments for huge drawings.
 const MAX_GEOMETRY_POINTS: usize = 200_000;
@@ -693,8 +707,7 @@ pub fn underlay_snap_geometry(
     if def.unloaded {
         return Vec::new();
     }
-    let source = super::pdf_layers::underlay_source(u, &def.file_path);
-    let Some(vectors) = page_vectors(&source, crate::entities::underlay::page_of(def)) else {
+    let Some(vectors) = underlay_vectors(u, def) else {
         return Vec::new();
     };
     let world = |p: [f64; 2]| crate::entities::underlay::local_to_world(u, p);

@@ -191,18 +191,23 @@ impl ImageModel {
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
             return None;
         }
-        if !matches!(def.underlay_type, UnderlayType::Pdf) || def.unloaded {
+        if def.unloaded {
             return None;
         }
-        let page = if def.page_name.trim().is_empty() {
-            "1"
-        } else {
-            def.page_name.trim()
+        let page = crate::entities::underlay::page_of(def);
+        let rect = crate::entities::underlay::definition_rect(def)?;
+        let (source, raster) = match def.underlay_type {
+            UnderlayType::Pdf => {
+                // Hidden PDF layers come from the underlay's layer overrides.
+                let source = super::pdf_layers::underlay_source(u, &def.file_path);
+                let raster = pdf_raster::rasterize_page_display(&source, page)?;
+                (source, raster)
+            }
+            kind => (
+                def.file_path.clone(),
+                super::underlay_vector::display_raster(kind, &def.file_path, page)?,
+            ),
         };
-        let (page_w, page_h) = pdf_raster::page_size_inches(&def.file_path, page)?;
-        // Hidden PDF layers come from the underlay's layer overrides.
-        let source = super::pdf_layers::underlay_source(u, &def.file_path);
-        let raster = pdf_raster::rasterize_page_display(&source, page)?;
         // Dark means an HSL lightness under one half: pure blue counts as
         // light, (0, 128, 0) as dark.
         let bg_max = background[0].max(background[1]).max(background[2]);
@@ -216,11 +221,17 @@ impl ImageModel {
                 contrast: u.contrast.min(100),
                 monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
                 adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND),
-                dark_background: bg_lum < 0.5,
+                // A DGN model is drawn for a black background, so its
+                // colours turn over on a light one instead (white text stays
+                // light on a dark background, as the reference shows it).
+                dark_background: (bg_lum < 0.5) != (def.underlay_type == UnderlayType::Dgn),
             },
         );
 
-        // Page size in drawing units (1 unit per PDF inch), entity scale applied.
+        // The page rectangle in drawing units (1 unit per PDF inch, or per
+        // DWF/DGN sheet unit), entity scale applied, from its lower-left
+        // corner.
+        let (page_w, page_h) = (rect[2] - rect[0], rect[3] - rect[1]);
         let w_du = page_w * u.x_scale;
         let h_du = page_h * u.y_scale;
         if w_du.abs() <= 0.0 || h_du.abs() <= 0.0 {
@@ -230,9 +241,7 @@ impl ImageModel {
         let (uxv, uyv) = (c * w_du, s * w_du);
         let (vxv, vyv) = (-s * h_du, c * h_du);
 
-        let oxv = u.insertion_point.x;
-        let oyv = u.insertion_point.y;
-        let ozv = u.insertion_point.z;
+        let [oxv, oyv, ozv] = crate::entities::underlay::local_to_world(u, [rect[0], rect[1]]);
         let ox = oxv as f32;
         let oy = oyv as f32;
         let oz = ozv as f32;
@@ -249,7 +258,7 @@ impl ImageModel {
         ];
         let corners_low = [[oxl, oyl, ozl]; 4];
 
-        let tris_uv = underlay_visible_uv(u, page_w, page_h);
+        let tris_uv = underlay_visible_uv(u, rect);
         let verts: Vec<ImageQuadVertex> = tris_uv
             .iter()
             .map(|&[fu, fv]| {
@@ -281,7 +290,8 @@ impl ImageModel {
 /// Visible region of an underlay page as triangles in page UV (0..1, y up):
 /// the whole page, the clip polygon, or — for an inverted clip — the page
 /// with the polygon cut out.
-fn underlay_visible_uv(u: &codec::entities::Underlay, page_w: f64, page_h: f64) -> Vec<[f64; 2]> {
+fn underlay_visible_uv(u: &codec::entities::Underlay, rect: [f64; 4]) -> Vec<[f64; 2]> {
+    let (page_w, page_h) = (rect[2] - rect[0], rect[3] - rect[1]);
     use codec::entities::UnderlayDisplayFlags;
     let page = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let whole = || vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
@@ -289,7 +299,10 @@ fn underlay_visible_uv(u: &codec::entities::Underlay, page_w: f64, page_h: f64) 
     if !u.flags.contains(UnderlayDisplayFlags::CLIPPING) || clip.len() < 3 {
         return whole();
     }
-    let ring: Vec<[f64; 2]> = clip.iter().map(|p| [p[0] / page_w, p[1] / page_h]).collect();
+    let ring: Vec<[f64; 2]> = clip
+        .iter()
+        .map(|p| [(p[0] - rect[0]) / page_w, (p[1] - rect[1]) / page_h])
+        .collect();
     let (points, triangles) = if u.clip_inverted {
         kernel::geom2d::triangulate(&page, &[ring])
     } else {

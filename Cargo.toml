@@ -42,6 +42,10 @@ flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
 hayro = "0.7.1"
 kurbo = "0.13"
+# DWF/DWFx packages, their XPS pages and DWF/DGN underlay rasters.
+zip = { version = "8", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"
+tiny-skia = "0.11"
 # Rasterises assets/logo.svg into the window icon at startup, so the taskbar
 # icon comes from the same file every other build target does. Already in the
 # tree behind iced's svg feature; named here only to use it directly.

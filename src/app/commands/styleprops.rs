@@ -1022,6 +1022,8 @@ impl OpenCADStudio {
                     | "DWFFRAME"
                     | "DGNFRAME"
                     | "PDFOSNAP"
+                    | "DWFOSNAP"
+                    | "DGNOSNAP"
                     | "UOSNAP"
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
@@ -1181,7 +1183,9 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if matches!(name.as_str(), "PDFOSNAP" | "UOSNAP") {
+                    // ponytail: one flag for every underlay kind; split it if a drawing
+                    // needs PDF snaps on while DWF/DGN snaps are off.
+                    if matches!(name.as_str(), "PDFOSNAP" | "DWFOSNAP" | "DGNOSNAP" | "UOSNAP") {
                         let current = i16::from(crate::scene::model::pdf_vector::pdf_osnap());
                         if let Some(value) = &value {
                             match value.parse::<i16>().ok().filter(|value| (0..=1).contains(value)) {

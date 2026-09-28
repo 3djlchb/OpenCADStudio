@@ -3851,6 +3851,8 @@ pub enum Message {
     XAttachPickResult(Result<std::path::PathBuf, String>),
     /// ATTACH: pick a drawing, image or PDF to reference.
     AttachPick,
+    /// DWFATTACH / DGNATTACH: pick the file (the result goes the ATTACH way).
+    UnderlayAttachPick(codec::entities::UnderlayType),
     /// The Reference slide-out's xref fading: amount dragged, drag done,
     /// switch.
     XrefFadeSlide(u8),

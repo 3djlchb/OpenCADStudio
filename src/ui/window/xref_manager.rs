@@ -1087,7 +1087,6 @@ impl XrefManagerPanel {
 /// directly — mirrors the three [`collect_entries`] scans so nested entries
 /// (foreign handles) classify correctly even on handle collisions.
 fn direct_identities(doc: &CadDocument) -> HashSet<(u64, String)> {
-    use codec::entities::UnderlayType;
     use codec::objects::ObjectType;
 
     let mut ids: HashSet<(u64, String)> = HashSet::new();
@@ -1102,9 +1101,7 @@ fn direct_identities(doc: &CadDocument) -> HashSet<(u64, String)> {
                 ids.insert((handle.value(), def.file_name.clone()));
             }
             ObjectType::UnderlayDefinition(def) => {
-                if def.underlay_type == UnderlayType::Pdf {
-                    ids.insert((handle.value(), def.file_path.clone()));
-                }
+                ids.insert((handle.value(), def.file_path.clone()));
             }
             _ => {}
         }
@@ -1185,7 +1182,17 @@ fn type_text(entry: &ReferenceEntry) -> std::borrow::Cow<'static, str> {
         // Raster images display their file format (spec: type column shows
         // the image format); unknown extensions fall back to Image.
         RefKind::Image => image_format(&entry.saved_path),
-        RefKind::Pdf => crate::t!("PDF"),
+        RefKind::Underlay => {
+            let ext = std::path::Path::new(&entry.saved_path.replace('\\', "/"))
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_uppercase())
+                .unwrap_or_default();
+            match ext.as_str() {
+                "DWF" | "DWFX" => crate::t!("DWF"),
+                "DGN" => crate::t!("DGN"),
+                _ => crate::t!("PDF"),
+            }
+        }
     }
 }
 
@@ -2118,7 +2125,7 @@ fn reference_preview(entry: &ReferenceEntry) -> Option<image::RgbaImage> {
             let img = image::open(found).ok()?;
             Some(img.thumbnail(PREVIEW_MAX, PREVIEW_MAX).to_rgba8())
         }
-        RefKind::Pdf => None,
+        RefKind::Underlay => None,
     }
 }
 
