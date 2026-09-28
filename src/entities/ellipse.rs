@@ -30,13 +30,28 @@ fn to_render(ell: &Ellipse) -> RenderEntity {
         .map(crate::entities::curve::snap_from)
         .unwrap_or_default();
 
+    let is_full = ell.is_full()
+        || (ell.end_parameter - ell.start_parameter).abs() >= std::f64::consts::TAU - 1e-9;
+    let (start_param, end_param) = if is_full {
+        (0.0, std::f64::consts::TAU)
+    } else {
+        let s = ell.start_parameter.rem_euclid(std::f64::consts::TAU);
+        let raw = ell.end_parameter - ell.start_parameter;
+        let sweep = if raw <= 0.0 {
+            raw.rem_euclid(std::f64::consts::TAU)
+        } else {
+            raw
+        };
+        (s, s + sweep)
+    };
+
     let tangent = TangentGeom::PlanarEllipse {
         center: [ell.center.x, ell.center.y, ell.center.z],
         major_axis: [ell.major_axis.x, ell.major_axis.y, ell.major_axis.z],
         normal: [ell.normal.x, ell.normal.y, ell.normal.z],
         minor_axis_ratio: ell.minor_axis_ratio,
-        start_param: ell.start_parameter,
-        end_param: ell.end_parameter,
+        start_param,
+        end_param,
     };
 
     // The points come from the entity's own kernel curve and angular policy.
@@ -339,20 +354,58 @@ fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(ell, t, |entity, p1, p2| {
-        crate::scene::view::transform::reflect_xy_point(
-            &mut entity.center.x,
-            &mut entity.center.y,
-            p1,
-            p2,
-        );
-        crate::scene::view::transform::reflect_xy_point(
-            &mut entity.major_axis.x,
-            &mut entity.major_axis.y,
-            p1,
-            p2,
-        );
-    });
+    use codec::types::{Transform, Vector3};
+    let transform = match t {
+        EntityTransform::Translate(d) => {
+            ell.center = ell.center + Vector3::new(d.x, d.y, d.z);
+            return;
+        }
+        EntityTransform::Rotate { center, axis, angle_rad } => {
+            let axis_norm = Vector3::new(axis.x, axis.y, axis.z);
+            let axis_len = axis_norm.length();
+            let axis_v = if axis_len > 1e-12 { axis_norm / axis_len } else { Vector3::UNIT_Z };
+            Transform::from_translation(Vector3::new(-center.x, -center.y, -center.z))
+                .then(&Transform::from_rotation(axis_v, *angle_rad))
+                .then(&Transform::from_translation(Vector3::new(center.x, center.y, center.z)))
+        }
+        EntityTransform::Scale { center, factor } => {
+            let s = *factor;
+            Transform::from_scaling_with_origin(
+                Vector3::new(s, s, s),
+                Vector3::new(center.x, center.y, center.z),
+            )
+        }
+        EntityTransform::Mirror { p1, p2, working_normal } => {
+            crate::scene::view::transform::reflection_about_working_line(
+                *p1,
+                *p2,
+                *working_normal,
+            )
+        }
+        EntityTransform::Affine(tr) => tr.clone(),
+    };
+
+    if let Some((c, m, n, ratio, s, e)) = crate::scene::view::transform::transform_ellipse_geometry(
+        ell.center,
+        ell.major_axis,
+        ell.normal,
+        ell.minor_axis_ratio,
+        ell.start_parameter,
+        ell.end_parameter,
+        &transform,
+    ) {
+        ell.center = c;
+        ell.major_axis = m;
+        ell.normal = n;
+        ell.minor_axis_ratio = ratio;
+        ell.start_parameter = s;
+        let is_full = (e - s - std::f64::consts::TAU).abs() < 1e-9;
+        ell.end_parameter = if is_full {
+            std::f64::consts::TAU
+        } else {
+            e.rem_euclid(std::f64::consts::TAU)
+        };
+    }
 }
 
 impl RenderConvertible for Ellipse {
@@ -486,5 +539,51 @@ mod grip_tests {
             (xy_len(&e) * e.minor_axis_ratio - 10.0).abs() < 1e-6,
             "minor still 10 — no ballooning"
         );
+    }
+
+    #[test]
+    fn test_apply_transform_negative_scale_and_rotation() {
+        let mut e = ell(10.0, 0.5);
+        e.start_parameter = 0.0;
+        e.end_parameter = std::f64::consts::FRAC_PI_2;
+
+        let rot = EntityTransform::Rotate {
+            center: DVec3::ZERO,
+            axis: DVec3::Z,
+            angle_rad: -std::f64::consts::FRAC_PI_4,
+        };
+        apply_transform(&mut e, &rot);
+
+        let scale = EntityTransform::Scale {
+            center: DVec3::ZERO,
+            factor: -1.0,
+        };
+        apply_transform(&mut e, &scale);
+
+        assert!((xy_len(&e) - 10.0).abs() < 1e-9);
+        assert!((e.minor_axis_ratio - 0.5).abs() < 1e-9);
+        assert!((e.normal.z - 1.0).abs() < 1e-9);
+        // Start parameter was 0, rotated by -45 then scaled by -1 (180 rotation) -> net effect
+        assert!(e.start_parameter >= 0.0 && e.start_parameter < std::f64::consts::TAU);
+    }
+
+    #[test]
+    fn test_apply_transform_mirror() {
+        let mut e = ell(10.0, 0.5);
+        e.start_parameter = 0.1;
+        e.end_parameter = 1.5;
+
+        // Mirror across Y axis (p1=(0,0,0), p2=(0,1,0))
+        let mirror = EntityTransform::Mirror {
+            p1: DVec3::ZERO,
+            p2: DVec3::Y,
+            working_normal: DVec3::Z,
+        };
+        apply_transform(&mut e, &mirror);
+
+        // Major axis should be reflected to (-10, 0, 0)
+        assert!((e.major_axis.x - (-10.0)).abs() < 1e-9);
+        // Normal should flip to -Z to preserve counter-clockwise traversal
+        assert!(e.normal.z < 0.0);
     }
 }
