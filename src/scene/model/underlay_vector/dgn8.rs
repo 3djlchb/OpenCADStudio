@@ -157,10 +157,15 @@ impl<'a> Cfb<'a> {
 
 /// A DGN stream: raw, or zlib data after a 16-byte header.
 fn inflate(data: &[u8]) -> Vec<u8> {
+    // Far above any real element stream; stops a crafted one from
+    // inflating until memory runs out.
+    const STREAM_LIMIT: u64 = 512 << 20;
     for skip in [16usize, 0] {
         if let Some(z) = data.get(skip..) {
             let mut out = Vec::new();
-            if flate2::read::ZlibDecoder::new(z).read_to_end(&mut out).is_ok() && !out.is_empty() {
+            if flate2::read::ZlibDecoder::new(z).take(STREAM_LIMIT).read_to_end(&mut out).is_ok()
+                && !out.is_empty()
+            {
                 return out;
             }
         }
@@ -237,8 +242,16 @@ fn extended_colors(cfb: &Cfb) -> Vec<[u8; 3]> {
         if a & 0x0f != 8 || ((a as u16) << 8 | b as u16) % 31 != 0 {
             continue;
         }
+        // The record is a short XML list; the cap keeps a stream that
+        // inflates without end (or a crafted one) from exhausting memory.
+        const RECORD_LIMIT: u64 = 4 << 20;
         let mut out = Vec::new();
-        if flate2::read::ZlibDecoder::new(&attrs[at..]).read_to_end(&mut out).is_err() || out.len() < 2 {
+        if flate2::read::ZlibDecoder::new(&attrs[at..])
+            .take(RECORD_LIMIT)
+            .read_to_end(&mut out)
+            .is_err()
+            || out.len() < 2
+        {
             continue;
         }
         let units: Vec<u16> = out.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();

@@ -14,11 +14,15 @@ fn unzip(bytes: &[u8]) -> Option<HashMap<String, Vec<u8>>> {
     // the offset itself.
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
     let mut files = HashMap::new();
+    // Total inflated size a package may reach: far above any real sheet
+    // set, and a crafted archive cannot exhaust memory.
+    let mut budget: u64 = 1 << 30;
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).ok()?;
+        let file = archive.by_index(i).ok()?;
         let name = file.name().replace('\\', "/").trim_start_matches('/').to_string();
         let mut data = Vec::new();
-        file.read_to_end(&mut data).ok()?;
+        file.take(budget + 1).read_to_end(&mut data).ok()?;
+        budget = budget.checked_sub(data.len() as u64)?;
         files.insert(name, data);
     }
     Some(files)
