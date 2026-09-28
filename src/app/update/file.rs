@@ -4416,9 +4416,9 @@ impl OpenCADStudio {
     ///
     /// On CUPS platforms (Linux, macOS) the driver's options are listed in an
     /// in-line editor and applied to every job for that printer through
-    /// `lp -o`. On Windows the driver's own document-properties sheet is
-    /// shown and its result stored as the printer's preferences, which the
-    /// print job honours. Without a named printer, or where the options
+    /// `lp -o`. On Windows the system opens the driver's own printing
+    /// preferences in its own process, and the print job honours what the
+    /// user saves there. Without a named printer, or where the options
     /// cannot be listed, the platform's printer settings open instead.
     fn on_printer_properties(&mut self) -> Task<Message> {
         // "Default" is a real printer: its preferences sheet is the one to
@@ -4429,12 +4429,18 @@ impl OpenCADStudio {
             .clone()
             .or_else(|| self.plot_dialog.default_printer.clone());
         let Some(printer) = chosen.filter(|_| !self.plot_dialog.to_file) else {
-            self.open_printer_settings_fallback();
+            self.open_printer_settings(None);
             return Task::none();
         };
         #[cfg(target_os = "windows")]
         {
-            return self.edit_windows_printer_preferences(printer);
+            // The driver's sheet is modal: it pumps messages itself until the
+            // user closes it. Hosted on our event-loop thread it starves the
+            // loop it is sharing, so the window stops painting and a core
+            // spins. The system's own preferences process pumps its own
+            // messages instead, which leaves ours free.
+            self.open_printer_settings(Some(&printer));
+            return Task::none();
         }
         #[allow(unreachable_code)]
         {
@@ -4456,40 +4462,11 @@ impl OpenCADStudio {
         }
     }
 
-    /// The driver's document-properties sheet, owned by the main window so
-    /// it sits on top of the plot dialog.
-    #[cfg(target_os = "windows")]
-    fn edit_windows_printer_preferences(&mut self, printer: String) -> Task<Message> {
-        let Some(window) = self.main_window else {
-            self.open_printer_settings_fallback();
-            return Task::none();
-        };
-        iced::window::run(window, move |w| {
-            use iced::window::raw_window_handle::RawWindowHandle;
-            let owner = match w.window_handle().ok().map(|h| h.as_raw()) {
-                Some(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
-                _ => 0,
-            };
-            match crate::io::print_to_printer::edit_printer_preferences(&printer, owner) {
-                Ok(true) => Ok(crate::tf!("Printing preferences saved for {printer}.").into_owned()),
-                Ok(false) => Ok(crate::t!("Printing preferences unchanged.").into_owned()),
-                Err(error) => Err(error),
-            }
-        })
-        .then(|result| {
-            Task::done(Message::BackgroundIoFinished(
-                result.map(|message| message),
-                false,
-            ))
-        })
-    }
-
-    /// The platform's printer settings surface: a settings panel on Linux,
-    /// the printers control panel on Windows, System Settings on macOS.
-    fn open_printer_settings_fallback(&mut self) {
-        match crate::io::print_to_printer::open_printer_properties(
-            self.plot_dialog.printer.as_deref(),
-        ) {
+    /// The platform's printer settings surface: the driver's printing
+    /// preferences for `printer`, or — without one — a settings panel on
+    /// Linux, the printers control panel on Windows, System Settings on macOS.
+    fn open_printer_settings(&mut self, printer: Option<&str>) {
+        match crate::io::print_to_printer::open_printer_properties(printer) {
             Ok(()) => self
                 .command_line
                 .push_info(crate::t!("Opened printer properties.").as_ref()),
