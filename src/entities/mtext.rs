@@ -212,6 +212,42 @@ fn to_render(t: &MText, document: &codec::CadDocument) -> RenderEntity {
     }
 }
 
+/// EXPLODE: one single-line TEXT per laid-out run, at the run's own baseline
+/// origin, height, rotation and width, so the result sits where the MTEXT was
+/// drawn. Inline colours carry over as true colours. (#760)
+// ponytail: one TEXT per run (word), not merged per line; merge same-format runs if users ask.
+pub(crate) fn explode_mtext(t: &MText, document: &codec::CadDocument) -> Vec<codec::EntityType> {
+    let RenderObject::Text(strokes) = to_render(t, document).object else {
+        return Vec::new();
+    };
+    strokes
+        .into_iter()
+        .filter_map(|stroke| {
+            let run = stroke.run?;
+            if run.text.trim().is_empty() {
+                return None;
+            }
+            let mut text = codec::entities::Text::with_value(
+                run.text,
+                codec::types::Vector3::new(stroke.origin[0], stroke.origin[1], t.insertion_point.z),
+            );
+            text.common = t.common.clone();
+            text.common.handle = codec::Handle::NULL;
+            if let Some([r, g, b]) = stroke.color {
+                let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                text.common.color = codec::types::Color::Rgb { r: byte(r), g: byte(g), b: byte(b) };
+            }
+            text.style = t.style.clone();
+            text.height = run.height as f64;
+            text.rotation = run.rotation as f64;
+            text.width_factor = run.width_factor as f64;
+            text.oblique_angle = run.oblique as f64;
+            text.normal = t.normal;
+            Some(codec::EntityType::Text(text))
+        })
+        .collect()
+}
+
 /// The MTEXT's attachment anchors in the shared layout vocabulary.
 fn attach_anchors(t: &MText) -> (f32, MTextVAnchor) {
     let h: f32 = match t.attachment_point {

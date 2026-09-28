@@ -114,6 +114,7 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
         }
         EntityType::MLine(ml) => explode_mline(ml),
         EntityType::Dimension(dim) => explode_dimension(dim, document),
+        EntityType::MText(t) => crate::entities::mtext::explode_mtext(t, document),
         _ => vec![],
     }
 }
