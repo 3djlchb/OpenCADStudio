@@ -495,11 +495,13 @@ impl OpenCADStudio {
         self.notify_plugins_document_changed();
         // OTRACK acquires tracking points only while a command or grip drag is
         // running; drop them once neither is active so the temporary tracking
-        // points / vectors disappear when the command ends (issue #64).
+        // points / vectors disappear when the command ends (issue #64). A grip
+        // drag's polar/ortho guide sets the vector with no tracking point, so
+        // it is dropped too. (#1456)
         let i = self.active_tab;
         if self.tabs[i].active_cmd.is_none()
             && self.tabs[i].active_grip.is_none()
-            && !self.snapper.tracking_points.is_empty()
+            && (!self.snapper.tracking_points.is_empty() || self.otrack_active.is_some())
         {
             self.snapper.clear_tracking();
             self.otrack_active = None;
