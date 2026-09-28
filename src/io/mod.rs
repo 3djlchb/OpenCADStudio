@@ -1877,6 +1877,34 @@ fn replace_save_file(temp_path: &Path, path: &Path) -> std::io::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn replace_save_file(temp_path: &Path, path: &Path) -> std::io::Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
+    // The temp name starts with a dot, and a Samba share stores such files
+    // as Hidden; that attribute rides the rename onto the drawing. Only a
+    // drawing that was hidden before the save stays hidden. (#1414)
+    let was_hidden = std::fs::metadata(path)
+        .is_ok_and(|meta| meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0);
+    replace_save_file_inner(temp_path, path)?;
+    if !was_hidden {
+        if let Ok(meta) = std::fs::metadata(path) {
+            let attributes = meta.file_attributes();
+            if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+                use std::os::windows::ffi::OsStrExt;
+                let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+                unsafe {
+                    windows_sys::Win32::Storage::FileSystem::SetFileAttributesW(
+                        wide.as_ptr(),
+                        attributes & !FILE_ATTRIBUTE_HIDDEN,
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn replace_save_file_inner(temp_path: &Path, path: &Path) -> std::io::Result<()> {
     if !path.exists() {
         return std::fs::rename(temp_path, path);
     }
