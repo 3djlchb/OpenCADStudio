@@ -47,6 +47,44 @@ impl OpenCADStudio {
         }
     }
 
+    /// Per-command start state every new command begins from — also used by
+    /// entry points that install a command without going through dispatch
+    /// (the block palette), so they don't inherit the previous command's last
+    /// point, snaps or dynamic-input values. (#1525)
+    pub(in crate::app) fn reset_command_start_state(&mut self, i: usize) {
+        // A command parked behind a transparent zoom / MTP goes with it.
+        self.tabs[i].suspended_cmd = None;
+        self.tabs[i].transparent_resume = false;
+        // Starting any command leaves interactive navigation modes (their own
+        // command arms below re-enable the selected one).
+        self.tabs[i].pan_mode = false;
+        self.tabs[i].orbit_mode = false;
+        self.tabs[i].zoom_dynamic_mode = false;
+        // Reset the last committed point so the first click of the new command
+        // is not constrained by ortho/polar relative to a previous command's endpoint.
+        self.last_point = None;
+        // A new command collects its own points, so the previous command's
+        // accepted snaps must not leak into it.
+        self.clear_accepted_snaps();
+        // Starting a command restarts the right-click cycle, so its first
+        // right-click acts as Enter rather than opening the context menu.
+        self.tabs[i]
+            .scene
+            .selection
+            .borrow_mut()
+            .right_click_entered = false;
+        // A fresh command starts at the polar/cartesian default — clear
+        // any `,`-driven reshape and locked dynamic-input values from a
+        // previous command. Otherwise a bare Enter on the first point prompt
+        // can commit that stale coordinate instead of accepting the command's
+        // default (LIMITS then compares an unintended lower-left point with
+        // the displayed default upper-right).
+        self.dyn_user_reshaped = false;
+        self.dyn_coord_absolute = false;
+        self.tabs[i].dyn_fields.clear();
+        self.tabs[i].dyn_active = 0;
+    }
+
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
         self.dispatch_command_inner(cmd, false)
     }
@@ -138,37 +176,7 @@ impl OpenCADStudio {
             // template-property override too (#239).
             self.restore_add_selected_defaults();
         }
-        // A command parked behind a transparent zoom / MTP goes with it.
-        self.tabs[i].suspended_cmd = None;
-        self.tabs[i].transparent_resume = false;
-        // Starting any command leaves interactive navigation modes (their own
-        // command arms below re-enable the selected one).
-        self.tabs[i].pan_mode = false;
-        self.tabs[i].orbit_mode = false;
-        self.tabs[i].zoom_dynamic_mode = false;
-        // Reset the last committed point so the first click of the new command
-        // is not constrained by ortho/polar relative to a previous command's endpoint.
-        self.last_point = None;
-        // A new command collects its own points, so the previous command's
-        // accepted snaps must not leak into it.
-        self.clear_accepted_snaps();
-        // Starting a command restarts the right-click cycle, so its first
-        // right-click acts as Enter rather than opening the context menu.
-        self.tabs[i]
-            .scene
-            .selection
-            .borrow_mut()
-            .right_click_entered = false;
-        // A fresh command starts at the polar/cartesian default — clear
-        // any `,`-driven reshape and locked dynamic-input values from a
-        // previous command. Otherwise a bare Enter on the first point prompt
-        // can commit that stale coordinate instead of accepting the command's
-        // default (LIMITS then compares an unintended lower-left point with
-        // the displayed default upper-right).
-        self.dyn_user_reshaped = false;
-        self.dyn_coord_absolute = false;
-        self.tabs[i].dyn_fields.clear();
-        self.tabs[i].dyn_active = 0;
+        self.reset_command_start_state(i);
 
         if let Some(path_str) = cmd.strip_prefix("OPEN_RECENT:") {
             let path = PathBuf::from(path_str);

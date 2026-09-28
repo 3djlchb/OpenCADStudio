@@ -741,6 +741,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         use crate::modules::insert::insert_block::InsertBlockCommand;
         let cmd = InsertBlockCommand::new_for_block(name.to_string(), wires, glam::Vec3::ZERO);
         use crate::command::CadCommand;
+        self.reset_command_start_state(i);
         self.command_line.push_info(&cmd.prompt());
         self.tabs[i].active_cmd = Some(Box::new(cmd));
         self.block_palette.placing = Some(name.to_string());
