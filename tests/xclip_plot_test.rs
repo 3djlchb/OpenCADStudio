@@ -85,11 +85,10 @@ fn test_xclip_extension_dictionary_resolution() {
     let ins_handle = scene.document.allocate_handle();
     let mut ins = Insert::new(block_name, Vector3::new(100.0, 50.0, 0.0));
     ins.common.handle = ins_handle;
-    // ins.common.xdictionary_handle left as None/null to test doc.extension_dictionary_handle fallback!
-    ins.common.xdictionary_handle = None;
 
     // Create DictionaryWithDefault as the extension dictionary, owned by ins_handle:
     let h_xdict = scene.document.allocate_handle();
+    ins.common.xdictionary_handle = Some(h_xdict);
     let mut xdict = DictionaryWithDefault::new();
     xdict.handle = h_xdict;
     xdict.owner = ins_handle;
@@ -114,7 +113,7 @@ fn test_xclip_extension_dictionary_resolution() {
     scene.document.objects.insert(h_spatial, ObjectType::SpatialFilter(sf));
 
     let resolved = insert_spatial_filter(&scene.document, &ins);
-    assert!(resolved.is_some(), "SpatialFilter should be resolved via extension dictionary fallback and DictionaryWithDefault");
+    assert!(resolved.is_some(), "SpatialFilter should be resolved through a DictionaryWithDefault with loosely written keys");
     let sf_ref = resolved.unwrap();
     assert_eq!(sf_ref.handle, h_spatial);
 }

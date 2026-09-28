@@ -46,6 +46,17 @@ fn resolve_extension_dictionary(doc: &CadDocument, owner: Handle) -> Option<Hand
     })
 }
 
+/// The INSERT's extension dictionary through its own link or the document's
+/// index — both O(1). Render walks ask this for every INSERT, so it must not
+/// fall back to [`resolve_extension_dictionary`]'s scan of every object.
+fn linked_extension_dictionary(doc: &CadDocument, ins: &Insert) -> Option<Handle> {
+    ins.common
+        .xdictionary_handle
+        .filter(|h| !h.is_null())
+        .or_else(|| doc.extension_dictionary_handle(ins.common.handle))
+        .filter(|h| !h.is_null())
+}
+
 /// Resolve the enabled XCLIP spatial filter for `ins`, if any.
 ///
 /// Walks the INSERT's extension dictionary: `xdictionary → ACAD_FILTER
@@ -56,11 +67,7 @@ pub fn insert_spatial_filter<'a>(
     doc: &'a CadDocument,
     ins: &Insert,
 ) -> Option<&'a SpatialFilter> {
-    let xdict = ins
-        .common
-        .xdictionary_handle
-        .filter(|h| !h.is_null())
-        .or_else(|| resolve_extension_dictionary(doc, ins.common.handle))?;
+    let xdict = linked_extension_dictionary(doc, ins)?;
     let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
     let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
     match doc.objects.get(&spatial)? {
@@ -80,11 +87,7 @@ pub fn filter_handle(doc: &CadDocument, insert: Handle) -> Option<Handle> {
     let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
         return None;
     };
-    let xdict = ins
-        .common
-        .xdictionary_handle
-        .filter(|h| !h.is_null())
-        .or_else(|| resolve_extension_dictionary(doc, insert))?;
+    let xdict = linked_extension_dictionary(doc, ins)?;
     let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
     let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
     matches!(doc.objects.get(&spatial), Some(ObjectType::SpatialFilter(_))).then_some(spatial)

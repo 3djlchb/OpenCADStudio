@@ -1633,6 +1633,36 @@ impl Scene {
                     }
                     model.boundary = std::sync::Arc::new(clipped);
                 }
+                if !context.clips.is_empty() {
+                    // The plane-local outline is a second copy of the boundary
+                    // that viewport plotting prefers; rebuild it from the
+                    // clipped outline or the XCLIP is lost there. (#1508)
+                    model.fill_plane_boundary = model.fill_plane.map(|plane| {
+                        let origin = glam::DVec3::from_array(plane.origin);
+                        let (x_axis, y_axis) = (
+                            glam::DVec3::from_array(plane.x_axis),
+                            glam::DVec3::from_array(plane.y_axis),
+                        );
+                        std::sync::Arc::new(
+                            model
+                                .boundary
+                                .iter()
+                                .map(|&[x, y]| {
+                                    if x.is_nan() || y.is_nan() {
+                                        return [f32::NAN, f32::NAN];
+                                    }
+                                    let world = glam::DVec3::new(
+                                        model.world_origin[0] + x as f64,
+                                        model.world_origin[1] + y as f64,
+                                        origin.z,
+                                    );
+                                    let local = world - origin;
+                                    [local.dot(x_axis) as f32, local.dot(y_axis) as f32]
+                                })
+                                .collect(),
+                        )
+                    });
+                }
                 if tint_selected && self.selected.contains(&context.root_handle) {
                     model.color = [0.15, 0.55, 1.00, model.color[3]];
                 }
