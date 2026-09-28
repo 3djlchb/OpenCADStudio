@@ -316,7 +316,10 @@ pub fn text_run_placement_at_scale(
             HA::Aligned | HA::Fit => 0.0,
         };
         // Vertical anchor uses the inked extent (cap / baseline geometry).
+        // `Middle` (72 = 4) centres on half the text height whatever its
+        // vertical code says; its baseline sits h/2 below the point. (#767)
         let ay = match t.vertical_alignment {
+            _ if matches!(t.horizontal_alignment, HA::Middle) => height * 0.5,
             VA::Baseline => 0.0,
             VA::Bottom => b.ink_min[1],
             VA::Middle => (b.ink_min[1] + b.ink_max[1]) * 0.5,
