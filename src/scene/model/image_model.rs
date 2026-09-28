@@ -94,6 +94,9 @@ pub struct ImageModel {
     /// Magnified pixels stay square (raster images); otherwise they blend
     /// (PDF pages, OLE pictures).
     pub pixelated: bool,
+    /// Pixel alpha applies. A raster image whose transparency is off draws
+    /// every pixel opaque in its stored colour.
+    pub use_alpha: bool,
 }
 
 impl ImageModel {
@@ -165,6 +168,9 @@ impl ImageModel {
             draw_depth: 0.0,
             verts,
             pixelated: true,
+            use_alpha: img
+                .flags
+                .contains(codec::entities::ImageDisplayFlags::TRANSPARENCY_ON),
         })
     }
 }
@@ -321,6 +327,7 @@ impl ImageModel {
             draw_depth: 0.0,
             verts,
             pixelated: false,
+            use_alpha: true,
         })
     }
 }
@@ -406,6 +413,7 @@ impl ImageModel {
             draw_depth: 0.0,
             verts,
             pixelated: false,
+            use_alpha: true,
         })
     }
 }

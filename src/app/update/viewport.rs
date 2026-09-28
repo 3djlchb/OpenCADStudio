@@ -1417,7 +1417,7 @@ impl OpenCADStudio {
             // The engaged grip is the rubber-band origin. Perpendicular
             // snapping must drop its foot from this point, including when a
             // hot-grip set is moved by the same drag vector.
-            self.snapper.from_point = Some(grip.origin_world.as_vec3());
+            self.snapper.from_point = Some(grip.origin_world);
             let (go, gr) = self.drafting_grid_basis(i);
             let base = grip.origin_world;
             let construction_ray =
@@ -2137,10 +2137,9 @@ impl OpenCADStudio {
                 )
             } else {
                 let (go, gr) = self.drafting_grid_basis(i);
-                // The snapper is a screen-space (f32) engine; the f64
-                // base only matters for typed-input precision, so hand it
-                // the downcast point here.
-                self.snapper.from_point = self.last_point.map(|p| p.as_vec3());
+                // Construction anchor for perpendicular and tangent snaps
+                // in full f64 precision.
+                self.snapper.from_point = self.last_point;
 
                 let construction_ray = if is_window_corner {
                     None
@@ -2556,8 +2555,15 @@ impl OpenCADStudio {
                     .as_ref()
                     .map(|c| c.object_pick_hover_previews(&self.tabs[i].scene, effective))
                     .unwrap_or_default();
+                let live_tangent = self.tabs[i].snap_result.and_then(|s| {
+                    if s.snap_type == crate::snap::SnapType::Tangent {
+                        s.tangent_obj
+                    } else {
+                        None
+                    }
+                });
                 if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                    p.extend(cmd.on_preview_wires(effective));
+                    p.extend(cmd.on_preview_wires_with_tangent(effective, live_tangent));
                 }
                 p
             } else if needs_entity && deferred_command_hover {
@@ -2693,10 +2699,17 @@ impl OpenCADStudio {
             } else if let Some(wires) = self.dimension_preview_wires(i, effective) {
                 wires
             } else {
+                let live_tangent = self.tabs[i].snap_result.and_then(|s| {
+                    if s.snap_type == crate::snap::SnapType::Tangent {
+                        s.tangent_obj
+                    } else {
+                        None
+                    }
+                });
                 self.tabs[i]
                     .active_cmd
                     .as_mut()
-                    .map(|c| c.on_preview_wires(effective))
+                    .map(|c| c.on_preview_wires_with_tangent(effective, live_tangent))
                     .unwrap_or_default()
             };
             // Polar tracking guide line: dotted line from last_point along
@@ -2943,7 +2956,7 @@ impl OpenCADStudio {
         // Perpendicular and tangent measure from `from`, else the running
         // command's last point; the live cursor's base point is restored.
         let live_from = self.snapper.from_point;
-        self.snapper.from_point = from.or(self.last_point).map(|p| p.as_vec3());
+        self.snapper.from_point = from.or(self.last_point);
         let (go, gr) = self.drafting_grid_basis(i);
         let hit = self
             .snapper
@@ -3784,7 +3797,7 @@ impl OpenCADStudio {
                     )
                 } else {
                     let (go, gr) = self.drafting_grid_basis(i);
-                    self.snapper.from_point = self.last_point.map(|p| p.as_vec3());
+                    self.snapper.from_point = self.last_point;
 
                     let construction_ray = if is_window_corner {
                         None

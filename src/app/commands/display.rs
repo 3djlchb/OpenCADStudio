@@ -929,6 +929,55 @@ impl OpenCADStudio {
                     }
                 }
             }
+            // TRANSPARENCY — raster images show transparent pixels (ON) or
+            // draw every pixel in its colour (OFF).
+            "TRANSPARENCY" => {
+                let c = crate::modules::insert::image_transparency::TransparencyCommand::new();
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+            "TRANSPARENCY MODE" | "TRANSPARENCY ON" | "TRANSPARENCY OFF" => {
+                use codec::entities::ImageDisplayFlags;
+                let images: Vec<(codec::Handle, bool)> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .iter()
+                    .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
+                    .filter_map(|(handle, _)| match self.tabs[i].scene.document.get_entity(*handle) {
+                        Some(codec::EntityType::RasterImage(image)) => {
+                            Some((*handle, image.flags.contains(ImageDisplayFlags::TRANSPARENCY_ON)))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let Some(&(_, first_on)) = images.first() else {
+                    return Some(Task::none());
+                };
+                let handles: Vec<codec::Handle> = images.iter().map(|(handle, _)| *handle).collect();
+                if cmd == "TRANSPARENCY MODE" {
+                    let c = crate::modules::insert::image_transparency::TransparencyCommand::mode(
+                        handles, first_on,
+                    );
+                    self.command_line.push_info(&c.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                } else {
+                    let on = cmd == "TRANSPARENCY ON";
+                    self.push_undo_snapshot(i, "TRANSPARENCY");
+                    for handle in &handles {
+                        if let Some(codec::EntityType::RasterImage(image)) =
+                            self.tabs[i].scene.document.get_entity_mut(*handle)
+                        {
+                            image.flags.set(ImageDisplayFlags::TRANSPARENCY_ON, on);
+                        }
+                    }
+                    let changes: Vec<_> = handles
+                        .iter()
+                        .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
+                        .collect();
+                    self.tabs[i].scene.bump_entities(&changes);
+                    self.tabs[i].dirty = true;
+                }
+            }
             // UNDERLAY — edit properties of selected PDF/DWF/DGN underlay entities.
             // Usage:
             //   UNDERLAY FADE <0-80>

@@ -9,6 +9,7 @@ mod content_browser;
 pub(crate) mod create_block;
 mod design_center;
 mod edit_block;
+pub(crate) mod image_transparency;
 pub(crate) mod insert_block;
 mod landxml;
 pub(crate) mod picker;

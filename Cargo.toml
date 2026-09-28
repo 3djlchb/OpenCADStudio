@@ -33,10 +33,10 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-codec = { package = "opencadcodec", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "42b44d2", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "4e67cd7", features = ["acis", "offset"] }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "4e67cd7" }
-graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "d89a9c5" }
+codec = { package = "opencadcodec", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "ad16215", features = ["serde"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "237827e", features = ["acis", "offset"] }
+kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "237827e" }
+graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "fe36957" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
@@ -58,6 +58,9 @@ rustc-hash = "2"
 sha2 = "0.10"
 fontdb = "0.23"
 ttf-parser = "0.25"
+# TrueType interpreter for hint-reliant ("tricky") fonts such as DFKai-SB and
+# MingLiU, whose raw outlines are missing strokes. Already in the tree (hayro).
+skrifa = "0.42.1"
 cosmic-text = "0.15"
 unicode-bidi = "0.3"
 lyon_tessellation = "1.0.20"
@@ -85,11 +88,6 @@ objc2 = "0.5"
 objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSResponder", "NSRunningApplication", "NSEvent", "block2"] }
 block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
-
-# Frame header variables (DWFFRAME/DGNFRAME) until the codec change is released;
-# every crate that pulls the codec must see the same build.
-[patch."https://github.com/HakanSeven12/opencadcodec.git"]
-opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "ea5edaa" }
 
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
