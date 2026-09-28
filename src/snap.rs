@@ -1603,7 +1603,29 @@ impl Snapper {
         if self.is_on(SnapType::Perpendicular) {
             if let Some(q) = self.from_point {
                 if let Some(segments) = &local_segments {
+                    // A curved wire's feet come from its exact geometry once,
+                    // not from each chord of the tessellation. (#1495)
+                    let mut exact: HashMap<u32, bool> = HashMap::default();
                     for seg in segments {
+                        let wire = wires.source_wire(seg.wire);
+                        let handled = *exact.entry(seg.wire).or_insert_with(|| {
+                            let Some(feet) = wire.and_then(|w| exact_perpendicular_feet(w, q))
+                            else {
+                                return false;
+                            };
+                            for foot in feet {
+                                try_pt(
+                                    foot,
+                                    SnapType::Perpendicular,
+                                    wire.and_then(wire_source),
+                                    None,
+                                );
+                            }
+                            true
+                        });
+                        if handled {
+                            continue;
+                        }
                         if let Some(foot) = perp_foot(q, seg.a, seg.b) {
                             try_pt(
                                 foot,
@@ -1616,6 +1638,12 @@ impl Snapper {
                 } else {
                     for wire in in_range_wires.iter() {
                         let src = wire_source(wire);
+                        if let Some(feet) = exact_perpendicular_feet(wire, q) {
+                            for foot in feet {
+                                try_pt(foot, SnapType::Perpendicular, src, None);
+                            }
+                            continue;
+                        }
                         for i in 0..wire.points.len().saturating_sub(1) {
                             if let Some(foot) = perp_foot(q, wp_f64(wire, i), wp_f64(wire, i + 1)) {
                                 try_pt(foot, SnapType::Perpendicular, src, None);
@@ -3020,6 +3048,21 @@ fn curves_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Vec<
     }
 
     Some(curves)
+}
+
+/// Perpendicular feet from `from` onto a wire's exact curves, or `None` when
+/// the wire has no curved geometry and its segments are already exact.
+fn exact_perpendicular_feet(wire: &WireModel, from: DVec3) -> Option<Vec<DVec3>> {
+    let frame = wire_plane(wire)?;
+    let curves = curves_in_frame(wire, &frame, 1e-7)?;
+    let from = frame.to_2d(from);
+    Some(
+        curves
+            .iter()
+            .flat_map(|curve| kernel::geom2d::perpendicular_from(curve, from))
+            .map(|foot| frame.to_3d(foot.point))
+            .collect(),
+    )
 }
 
 pub(crate) fn exact_curve_intersections(
