@@ -1291,6 +1291,9 @@ fn emit_hatch(
         g = 1.0;
         b = 1.0;
     } else if !color_overridden
+        // `aci == 0` is an explicit true colour: it plots as drawn, only
+        // indexed colours meant for the dark screen are adapted. (#1417)
+        && hatch.aci != 0
         && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
     {
         let is_light = r > 0.80 && g > 0.80 && b > 0.80;
