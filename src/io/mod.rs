@@ -757,6 +757,8 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
             let mut doc = DwgReader::from_stream(Cursor::new(bytes))
                 .read()
                 .map_err(|e| e.to_string())?;
+            let version = doc.version;
+            fix_pre_r2000_layer_plot_flags(&mut doc, version);
             fix_viewport_status_flags(&mut doc);
             fix_current_style_names(&mut doc);
             Ok(doc)
@@ -1027,6 +1029,10 @@ fn finalize_loaded_outcome(
     mut outcome: codec::ReadOutcome,
 ) -> Result<codec::ReadOutcome, String> {
     let doc = &mut outcome.document;
+    if outcome.stats.source_format == Some(codec::SourceFormat::Dwg) {
+        let version = doc.version;
+        fix_pre_r2000_layer_plot_flags(doc, version);
+    }
     normalize_block_origins(doc);
     normalize_knotless_splines(doc);
     if outcome.stats.source_format == Some(codec::SourceFormat::Dxf) {
@@ -2388,6 +2394,31 @@ pub fn purge_corrupt_entities(doc: &mut CadDocument) -> usize {
     n
 }
 
+/// An R13 / R14 drawing cannot mark a layer as "don't plot" — the LAYER
+/// record only carries frozen, off, frozen-in-new-viewport and locked as four
+/// separate bits. The plot flag (and the lineweight, in the same packed
+/// bit-short) arrived with R2000, so the reader has no bit to read for the
+/// older versions and leaves the field at the `false` it starts from.
+///
+/// That default then marks every layer of such a drawing as "don't plot":
+/// display and plot visibility are separate flags, so the drawing looked right
+/// on screen while PLOT, the plot preview and QUICKPRINT all rendered a blank
+/// page. What the older format means by default is what a freshly created
+/// layer gets — `is_plottable: true` — so restore it here.
+fn fix_pre_r2000_layer_plot_flags(doc: &mut CadDocument, version: codec::types::DxfVersion) {
+    use codec::types::DxfVersion;
+    // AC1012 is R13 and AC1014 is R14, the two versions with the four-bit LAYER
+    // record. From AC1015 (R2000) on, the file's own flag is authoritative and
+    // is read, so nothing is touched there. `Unknown` is left alone too: a
+    // version that could not be identified is the wrong thing to reason from.
+    if !matches!(version, DxfVersion::AC1012 | DxfVersion::AC1014) {
+        return;
+    }
+    for layer in doc.layers.iter_mut() {
+        layer.is_plottable = true;
+    }
+}
+
 /// opencadcodec's ViewportStatusFlags::from_bits() maps bit 0 → is_on and bit 15 → locked,
 /// but the real DXF/DWG spec uses bit 15 (0x8000) → viewport on and bit 14 (0x4000) → locked.
 /// Files from AutoCAD and other tools always set bit 15 for active viewports, leaving bit 0
@@ -2892,5 +2923,123 @@ mod corrupt_guard_tests {
     fn keeps_a_plain_insert() {
         let i = codec::entities::Insert::new("BLOCK", Vector3::ZERO);
         assert!(!is_entity_corrupt(&EntityType::Insert(i)));
+    }
+}
+
+#[cfg(test)]
+mod pre_r2000_layer_plot_tests {
+    use super::*;
+    use codec::tables::layer::Layer as DocLayer;
+    use codec::types::DxfVersion;
+
+    fn drawing_with_layers() -> CadDocument {
+        let mut doc = CadDocument::new();
+        crate::io::linetypes::populate_document(&mut doc);
+        for name in ["COARSE", "FINE"] {
+            let mut layer = DocLayer::new(name);
+            layer.handle = doc.allocate_handle();
+            doc.layers.add(layer).unwrap();
+        }
+        doc
+    }
+
+    fn saved_path(version: DxfVersion) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ocs_plotflag_{}.dwg", version.as_str()))
+    }
+
+    /// The LAYER record only grew a plot flag in R2000. Reading an R14 drawing
+    /// must therefore leave every layer plottable — reading the missing bit as
+    /// "don't plot" blanked the whole sheet in PLOT, the preview and QUICKPRINT
+    /// while the drawing still looked right on screen (display and plot
+    /// visibility are separate flags).
+    #[test]
+    fn an_r14_drawing_reads_back_with_every_layer_plottable() {
+        let doc = drawing_with_layers();
+        let path = saved_path(DxfVersion::AC1014);
+        save_as_version(&doc, &path, DxfVersion::AC1014).expect("save R14 DWG");
+        let bytes = std::fs::read(&path).expect("read R14 DWG");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(&bytes[..6], b"AC1014", "writer did not emit an R14 header");
+
+        let loaded = load_bytes("r14.dwg", bytes).expect("load R14 DWG");
+        assert_eq!(loaded.version, DxfVersion::AC1014);
+        assert!(
+            loaded.layers.iter().all(|layer| layer.is_plottable),
+            "an R14 layer came back unplottable: {:?}",
+            loaded
+                .layers
+                .iter()
+                .filter(|layer| !layer.is_plottable)
+                .map(|layer| layer.name.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// R13 carries the same four-bit LAYER record as R14, and a path-based open
+    /// runs its fixes through `finalize_loaded_outcome` rather than
+    /// `load_bytes`, so this covers that second entry point too.
+    #[test]
+    fn an_r13_drawing_reads_back_with_every_layer_plottable() {
+        let doc = drawing_with_layers();
+        let path = saved_path(DxfVersion::AC1012);
+        save_as_version(&doc, &path, DxfVersion::AC1012).expect("save R13 DWG");
+        let loaded = load_file(&path).expect("load R13 DWG");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            loaded.layers.iter().all(|layer| layer.is_plottable),
+            "an R13 layer came back unplottable"
+        );
+    }
+
+    /// From R2000 on the flag is in the file, so what the file says wins — a
+    /// layer stored unplottable (DEFPOINTS, say) must stay unplottable.
+    #[test]
+    fn a_modern_drawing_keeps_the_plot_flag_it_stored() {
+        let mut doc = drawing_with_layers();
+        doc.layers.get_mut("FINE").unwrap().is_plottable = false;
+        let path = saved_path(DxfVersion::AC1032);
+        save_as_version(&doc, &path, DxfVersion::AC1032).expect("save R2018 DWG");
+        let loaded = load_file(&path).expect("load R2018 DWG");
+        let _ = std::fs::remove_file(&path);
+        assert!(!loaded.layers.get("FINE").unwrap().is_plottable);
+        assert!(loaded.layers.get("COARSE").unwrap().is_plottable);
+    }
+
+    /// The plot pass keeps a wire only when it is marked plottable, so an R14
+    /// drawing whose layers came back unplottable plotted a blank sheet while
+    /// every entity still drew on screen. Lock the whole chain here: load an
+    /// R14 drawing and check the wires the plot paths consume.
+    #[test]
+    fn every_wire_of_an_r14_drawing_stays_plottable() {
+        use codec::entities::Line;
+        use codec::types::Vector3;
+        use codec::EntityType;
+
+        let mut doc = drawing_with_layers();
+        for (index, layer) in ["COARSE", "FINE"].into_iter().enumerate() {
+            let x = index as f64 * 10.0;
+            let mut line = Line::from_points(
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x + 5.0, 5.0, 0.0),
+            );
+            line.common.layer = layer.to_string();
+            doc.add_entity(EntityType::Line(line)).expect("add line");
+        }
+        let path = saved_path(DxfVersion::AC1014);
+        save_as_version(&doc, &path, DxfVersion::AC1014).expect("save R14 DWG");
+        let bytes = std::fs::read(&path).expect("read R14 DWG");
+        let _ = std::fs::remove_file(&path);
+
+        let mut scene = crate::scene::Scene::new();
+        scene.document = load_bytes("r14.dwg", bytes).expect("load R14 DWG");
+        let (wires, _) = scene.plot_wire_groups(None);
+        assert!(!wires.is_empty(), "the R14 drawing tessellated to no wires");
+        let dropped = wires.iter().filter(|wire| !wire.plot_visible).count();
+        assert_eq!(
+            dropped,
+            0,
+            "{dropped} of {} wires would be dropped from the plot",
+            wires.len()
+        );
     }
 }
