@@ -1058,7 +1058,9 @@ impl Scene {
             return;
         }
         use codec::objects::{ImageDefinition, ObjectType};
-        let def_handle = Handle::new(self.document.next_handle());
+        // Allocate, not peek: a peeked handle is then handed to the image
+        // itself, and the DWG writer drops the definition that shares it. (#1421)
+        let def_handle = self.document.allocate_handle();
         if self.is_recording_undo() {
             self.record_undo_object_before(def_handle, None);
         }
