@@ -252,11 +252,11 @@ pub struct Snapper {
     /// parallel to this, the point locks onto that parallel line; the point half
     /// marks the reference on screen. Works with only the Parallel object snap
     /// on — independent of OTRACK (#277).
-    pub parallel_ref: Option<(Vec3, Vec3)>,
+    pub parallel_ref: Option<(DVec3, DVec3)>,
     /// Dwell state for acquiring/removing `parallel_ref`: the candidate line
     /// direction + point under the cursor, when it was first hovered, and
     /// whether this dwell has already fired (so it acquires/toggles once).
-    parallel_dwell: Option<(Vec3, Vec3, Instant, bool)>,
+    parallel_dwell: Option<(DVec3, DVec3, Instant, bool)>,
     /// One-shot snap override (Shift+RMB menu): the (enabled set, snap on)
     /// pair saved when the override engaged, restored when it is consumed by
     /// the next point pick or cancelled. While `Some`, `enabled` holds only
@@ -1025,7 +1025,7 @@ impl Snapper {
     /// is undefined. Call on every viewport move. (#277)
     pub fn update_parallel<W: WireSource + ?Sized>(
         &mut self,
-        cursor_world: Vec3,
+        cursor_world: DVec3,
         wires: &W,
         view_rot: glam::Mat4,
         eye: glam::DVec3,
@@ -1038,7 +1038,7 @@ impl Snapper {
             return;
         }
         const PAR_DWELL_MS: u128 = 150;
-        let parallel = |a: Vec3, b: Vec3| (a.x * b.x + a.y * b.y).abs() > 0.9998;
+        let parallel = |a: DVec3, b: DVec3| (a.x * b.x + a.y * b.y).abs() > 0.9998;
         let Some((dir, pt)) = nearest_segment(
             cursor_world,
             wires,
@@ -1081,8 +1081,8 @@ impl Snapper {
     /// of that line). Independent of OTRACK. (#277)
     pub fn parallel_snap(
         &self,
-        cursor_world: Vec3,
-        base: Option<Vec3>,
+        cursor_world: DVec3,
+        base: Option<DVec3>,
         view_rot: glam::Mat4,
         eye: glam::DVec3,
         bounds: iced::Rectangle,
@@ -1095,18 +1095,18 @@ impl Snapper {
         let d = cursor_world - base;
         // Need a bit of travel from the base, and the cursor must be pulling
         // roughly along the reference (not backward-only noise near the base).
-        if (d.x * d.x + d.y * d.y).sqrt() < self.grid_spacing * 0.01 {
+        if (d.x * d.x + d.y * d.y).sqrt() < self.grid_spacing as f64 * 0.01 {
             return None;
         }
         let t = d.x * dir.x + d.y * dir.y;
         let locked = base + dir * t;
-        let sl = world_to_screen(locked.as_dvec3(), view_rot, eye, bounds);
-        let sc = world_to_screen(cursor_world.as_dvec3(), view_rot, eye, bounds);
+        let sl = world_to_screen(locked, view_rot, eye, bounds);
+        let sc = world_to_screen(cursor_world, view_rot, eye, bounds);
         if dist2(sl, sc) > self.osnap_radius_px * self.osnap_radius_px {
             return None; // cursor not near the parallel line — don't lock
         }
         Some(SnapResult {
-            world: locked.as_dvec3(),
+            world: locked,
             screen: sl,
             snap_type: SnapType::Parallel,
             tangent_obj: None,
@@ -3475,16 +3475,16 @@ pub(crate) fn foot_on_triangle(
 /// Center snap hint and "parallel to a curve" is meaningless. Used to acquire
 /// the Parallel-snap reference. (#277)
 fn nearest_segment<W: WireSource + ?Sized>(
-    cursor_world: Vec3,
+    cursor_world: DVec3,
     wires: &W,
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
     aperture_px: f32,
-) -> Option<(Vec3, Vec3)> {
-    let cs = world_to_screen(cursor_world.as_dvec3(), view_rot, eye, bounds);
+) -> Option<(DVec3, DVec3)> {
+    let cs = world_to_screen(cursor_world, view_rot, eye, bounds);
     let mut best_d2 = aperture_px * aperture_px;
-    let mut best: Option<(Vec3, Vec3)> = None;
+    let mut best: Option<(DVec3, DVec3)> = None;
     if let Some(segments) = indexed_segments(wires) {
         for segment in segments {
             let Some(wire) = wires.source_wire(segment.wire) else {
@@ -3506,9 +3506,8 @@ fn nearest_segment<W: WireSource + ?Sized>(
                 let l = (dx * dx + dy * dy).sqrt();
                 if l > 1e-9 {
                     best_d2 = d2;
-                    let dir = Vec3::new((dx / l) as f32, (dy / l) as f32, 0.0);
-                    let np =
-                        nearest_on_segment(cursor_world.as_dvec3(), segment.a, segment.b).as_vec3();
+                    let dir = DVec3::new(dx / l, dy / l, 0.0);
+                    let np = nearest_on_segment(cursor_world, segment.a, segment.b);
                     best = Some((dir, np));
                 }
             }
@@ -3538,8 +3537,8 @@ fn nearest_segment<W: WireSource + ?Sized>(
                 let l = (dx * dx + dy * dy).sqrt();
                 if l > 1e-9 {
                     best_d2 = d2;
-                    let dir = Vec3::new((dx / l) as f32, (dy / l) as f32, 0.0);
-                    let np = nearest_on_segment(cursor_world.as_dvec3(), a, b).as_vec3();
+                    let dir = DVec3::new(dx / l, dy / l, 0.0);
+                    let np = nearest_on_segment(cursor_world, a, b);
                     best = Some((dir, np));
                 }
             }
@@ -3552,16 +3551,16 @@ fn nearest_segment<W: WireSource + ?Sized>(
 /// line through `line_pt` along `line_dir`. Used to tell whether a hovered line
 /// is the acquired parallel reference (same line) regardless of zoom. (#277)
 fn screen_perp_dist(
-    q: Vec3,
-    line_pt: Vec3,
-    line_dir: Vec3,
+    q: DVec3,
+    line_pt: DVec3,
+    line_dir: DVec3,
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
 ) -> f32 {
-    let sq = world_to_screen(q.as_dvec3(), view_rot, eye, bounds);
-    let s0 = world_to_screen(line_pt.as_dvec3(), view_rot, eye, bounds);
-    let s1 = world_to_screen((line_pt + line_dir).as_dvec3(), view_rot, eye, bounds);
+    let sq = world_to_screen(q, view_rot, eye, bounds);
+    let s0 = world_to_screen(line_pt, view_rot, eye, bounds);
+    let s1 = world_to_screen(line_pt + line_dir, view_rot, eye, bounds);
     let ex = s1.x - s0.x;
     let ey = s1.y - s0.y;
     let l = (ex * ex + ey * ey).sqrt();

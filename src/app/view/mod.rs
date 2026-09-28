@@ -789,7 +789,7 @@ bg={bg_ms:.1}ms n={view_count}"
             let parallel_ref_marker: Option<iced::Point> =
                 match (otrack_proj, self.snapper.parallel_ref) {
                     (Some((view_rot, eye, ob)), Some((_, pt))) => {
-                        let s = ost_project(pt.as_dvec3(), view_rot, eye, ob);
+                        let s = ost_project(pt, view_rot, eye, ob);
                         (s.x.is_finite() && s.y.is_finite()).then_some(s)
                     }
                     _ => None,

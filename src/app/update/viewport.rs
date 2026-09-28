@@ -2293,7 +2293,7 @@ impl OpenCADStudio {
                 Instant::now(),
             );
             self.snapper.update_parallel(
-                cursor_world.as_vec3(),
+                cursor_world,
                 &snap_candidates,
                 view_rot,
                 eye,
@@ -2324,8 +2324,8 @@ impl OpenCADStudio {
             // (#277)
             if axis_lock.is_none() && self.tabs[i].snap_result.is_none() && otrack_hit.is_none() {
                 if let Some(par) = self.snapper.parallel_snap(
-                    cursor_world.as_vec3(),
-                    self.last_point.map(|p| p.as_vec3()),
+                    cursor_world,
+                    self.last_point,
                     view_rot,
                     eye,
                     bounds,
@@ -2333,7 +2333,7 @@ impl OpenCADStudio {
                     if let (Some(base), Some((dir, _))) =
                         (self.last_point, self.snapper.parallel_ref)
                     {
-                        self.otrack_active = Some((base, dir.as_dvec3()));
+                        self.otrack_active = Some((base, dir));
                         self.otrack_cross = None;
                     }
                     self.tabs[i].snap_result = Some(par);
