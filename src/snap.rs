@@ -246,7 +246,7 @@ pub struct Snapper {
     /// origin), if any. Perpendicular snap drops its foot from here so the new
     /// segment is genuinely perpendicular to the target — without it, perp
     /// would just give the nearest point on the line. Set before each `snap`.
-    pub from_point: Option<Vec3>,
+    pub from_point: Option<glam::DVec3>,
     /// Parallel snap: the acquired reference as (unit direction, a point on the
     /// line). When the cursor's direction from the command's start point runs
     /// parallel to this, the point locks onto that parallel line; the point half
@@ -1601,7 +1601,7 @@ impl Snapper {
         // ── Perpendicular — foot of perpendicular from the drawing base ──
         // Perpendicular requires a drawing base; cursor fallback acts like Nearest. (#716)
         if self.is_on(SnapType::Perpendicular) {
-            if let Some(q) = self.from_point.map(|v| v.as_dvec3()) {
+            if let Some(q) = self.from_point {
                 if let Some(segments) = &local_segments {
                     for seg in segments {
                         if let Some(foot) = perp_foot(q, seg.a, seg.b) {
@@ -2049,15 +2049,24 @@ impl Snapper {
                             let dc = dist2(cursor_screen, sc).sqrt();
                             let edge_d = (dc - sr).abs();
                             let w = if let Some(from) = self.from_point {
-                                let Some((t0, t1)) = circle_tangent_points(from, cv, r) else {
-                                    continue;
-                                };
-                                let s0 = world_to_screen(t0.as_dvec3(), view_rot, eye, bounds);
-                                let s1 = world_to_screen(t1.as_dvec3(), view_rot, eye, bounds);
-                                if dist2(s0, cursor_screen) <= dist2(s1, cursor_screen) {
-                                    t0
+                                if let Some((t0, t1)) = circle_tangent_points(from.as_vec3(), cv, r) {
+                                    let s0 = world_to_screen(t0.as_dvec3(), view_rot, eye, bounds);
+                                    let s1 = world_to_screen(t1.as_dvec3(), view_rot, eye, bounds);
+                                    if dist2(s0, cursor_screen) <= dist2(s1, cursor_screen) {
+                                        t0
+                                    } else {
+                                        t1
+                                    }
                                 } else {
-                                    t1
+                                    let dx = cursor_screen.x - sc.x;
+                                    let dy = cursor_screen.y - sc.y;
+                                    let dl = (dx * dx + dy * dy).sqrt();
+                                    let (nx, ny) = if dl > 1e-6 {
+                                        (dx / dl, -dy / dl)
+                                    } else {
+                                        (1.0, 0.0)
+                                    };
+                                    Vec3::new(cv.x + r * nx, cv.y + r * ny, cv.z)
                                 }
                             } else {
                                 let dx = cursor_screen.x - sc.x;
@@ -2080,26 +2089,36 @@ impl Snapper {
                             start_angle,
                             end_angle,
                         } => {
-                            let Some(from) = self.from_point else {
-                                continue;
+                            let candidate = self.from_point.and_then(|from| {
+                                arc_tangent_points(
+                                    from,
+                                    *center,
+                                    *axis_x,
+                                    *axis_y,
+                                    *radius,
+                                    *start_angle,
+                                    *end_angle,
+                                )
+                                .into_iter()
+                                .min_by(|a, b| {
+                                    let sa = world_to_screen(*a, view_rot, eye, bounds);
+                                    let sb = world_to_screen(*b, view_rot, eye, bounds);
+                                    dist2(sa, cursor_screen).total_cmp(&dist2(sb, cursor_screen))
+                                })
+                            });
+                            let fallback = || {
+                                (0..wire.points.len())
+                                    .map(|index| wp_f64(wire, index))
+                                    .filter(|point| point.is_finite())
+                                    .min_by(|a, b| {
+                                        let sa = world_to_screen(*a, view_rot, eye, bounds);
+                                        let sb = world_to_screen(*b, view_rot, eye, bounds);
+                                        dist2(sa, cursor_screen)
+                                            .total_cmp(&dist2(sb, cursor_screen))
+                                    })
+                                    .unwrap_or_else(|| DVec3::from_array(*center))
                             };
-                            let Some(world) = arc_tangent_points(
-                                from.as_dvec3(),
-                                *center,
-                                *axis_x,
-                                *axis_y,
-                                *radius,
-                                *start_angle,
-                                *end_angle,
-                            )
-                            .into_iter()
-                            .min_by(|a, b| {
-                                let sa = world_to_screen(*a, view_rot, eye, bounds);
-                                let sb = world_to_screen(*b, view_rot, eye, bounds);
-                                dist2(sa, cursor_screen).total_cmp(&dist2(sb, cursor_screen))
-                            }) else {
-                                continue;
-                            };
+                            let world = candidate.unwrap_or_else(fallback);
                             let edge_d2 = wire
                                 .points
                                 .windows(2)
@@ -2127,7 +2146,7 @@ impl Snapper {
                             let cv = DVec3::from_array(*center);
                             let candidate = self.from_point.and_then(|from| {
                                 planar_circle_tangent_points(
-                                    from.as_dvec3(),
+                                    from,
                                     *center,
                                     *axis_x,
                                     *axis_y,
@@ -2140,9 +2159,6 @@ impl Snapper {
                                     dist2(sa, cursor_screen).total_cmp(&dist2(sb, cursor_screen))
                                 })
                             });
-                            if self.from_point.is_some() && candidate.is_none() {
-                                continue;
-                            }
                             let fallback = || {
                                 (0..wire.points.len())
                                     .map(|index| wp_f64(wire, index))
@@ -2174,7 +2190,34 @@ impl Snapper {
                                 .fold(f32::INFINITY, f32::min);
                             (world, edge_d2)
                         }
-                        TangentGeom::PlanarEllipse { .. } => continue,
+                        TangentGeom::PlanarEllipse {
+                            center,
+                            major_axis,
+                            normal,
+                            minor_axis_ratio,
+                            ..
+                        } => {
+                            let c = DVec3::from_array(*center);
+                            let u_vec = DVec3::from_array(*major_axis);
+                            let a = u_vec.length();
+                            if a > 1e-9 {
+                                let u_hat = u_vec / a;
+                                let n_hat = DVec3::from_array(*normal).normalize_or_zero();
+                                let v_hat = n_hat.cross(u_hat).normalize_or_zero();
+                                let b = (a * minor_axis_ratio).max(1e-9);
+
+                                let d_vec = cursor_world - c;
+                                let u_proj = d_vec.dot(u_hat);
+                                let v_proj = d_vec.dot(v_hat);
+                                let t = (v_proj / b).atan2(u_proj / a);
+                                let world = c + u_hat * (a * t.cos()) + v_hat * (b * t.sin());
+                                let screen_pt = world_to_screen(world, view_rot, eye, bounds);
+                                let edge_d2 = dist2(screen_pt, cursor_screen);
+                                (world, edge_d2)
+                            } else {
+                                (c, f32::INFINITY)
+                            }
+                        }
                     };
                     let (tier, sub) = (
                         snap_tier(SnapType::Tangent),
@@ -2211,7 +2254,18 @@ impl Snapper {
                                     radius: *radius,
                                 }
                             }
-                            TangentGeom::PlanarEllipse { .. } => unreachable!(),
+                            TangentGeom::PlanarEllipse {
+                                center,
+                                major_axis,
+                                normal,
+                                minor_axis_ratio,
+                                ..
+                            } => TangentObject::Ellipse {
+                                center: glam::DVec3::from_array(*center),
+                                major_axis: glam::DVec3::from_array(*major_axis),
+                                normal: glam::DVec3::from_array(*normal),
+                                minor_axis_ratio: *minor_axis_ratio,
+                            },
                         };
                         best = Some(SnapResult {
                             world: world_pt,
