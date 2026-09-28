@@ -155,8 +155,9 @@ pub fn apply_explode_replacements(
     replacements: Vec<(Handle, Vec<EntityType>)>,
 ) -> usize {
     let exploded = replacements.len();
-    for (handle, pieces) in replacements {
-        scene.erase_entities(&[handle]);
+    let handles: Vec<Handle> = replacements.iter().map(|(h, _)| *h).collect();
+    scene.erase_entities(&handles);
+    for (_, pieces) in replacements {
         for piece in pieces {
             scene.add_entity(piece);
         }
@@ -171,7 +172,7 @@ fn explode_polyline(p: &Polyline) -> Vec<EntityType> {
     }
     let closed = p.flags.is_closed();
     let n_segs = if closed { n } else { n - 1 };
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(n_segs);
     for i in 0..n_segs {
         let v0 = &p.vertices[i];
         let v1 = &p.vertices[(i + 1) % n];
@@ -194,7 +195,7 @@ fn explode_polyline3d(p: &codec::entities::Polyline3D) -> Vec<EntityType> {
     }
     let closed = p.is_closed();
     let n_segs = if closed { n } else { n - 1 };
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(n_segs);
     for i in 0..n_segs {
         let v0 = &p.vertices[i];
         let v1 = &p.vertices[(i + 1) % n];
@@ -224,7 +225,7 @@ fn explode_polyline2d(p: &Polyline2D) -> Vec<EntityType> {
     let normal = Vector3::new(normal.x, normal.y, normal.z);
     let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
 
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(n_segs);
     for i in 0..n_segs {
         let v0 = &p.vertices[i];
         let v1 = &p.vertices[(i + 1) % n];
@@ -303,7 +304,7 @@ fn explode_lwpolyline(p: &LwPolyline) -> Vec<EntityType> {
     let elevation = p.elevation;
     let n_segs = if p.is_closed { n } else { n - 1 };
 
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(n_segs);
     for i in 0..n_segs {
         let v0 = &p.vertices[i];
         let v1 = &p.vertices[(i + 1) % n];
@@ -389,7 +390,7 @@ fn explode_mline(ml: &MLine) -> Vec<EntityType> {
     let closed = ml.flags.contains(codec::entities::MLineFlags::CLOSED);
     let scale = ml.scale_factor;
     let n_segs = if closed { n } else { n - 1 };
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(n_segs * 3);
 
     // Helper: build a Line from two Vector3 positions.
     let make_line = |common: &codec::entities::EntityCommon,

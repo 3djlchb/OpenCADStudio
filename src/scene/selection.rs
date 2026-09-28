@@ -979,6 +979,18 @@ impl Scene {
     fn remove_entities(&mut self, handles: &[Handle], respect_layer_locks: bool) {
         let erase_handles = self.handles_expanded_for_leader_annotations(handles);
 
+        // One pass over document.objects instead of a scan per erased handle.
+        let mut managers_by_section: HashMap<Handle, Vec<Handle>> = HashMap::default();
+        for (handle, object) in self.document.objects.iter() {
+            if let ObjectType::ClassObject(object) = object {
+                if let codec::objects::ClassObjectData::SectionManager(manager) = &object.data {
+                    for &section in &manager.sections {
+                        managers_by_section.entry(section).or_default().push(*handle);
+                    }
+                }
+            }
+        }
+
         let mut handle_set: HashSet<Handle> = HashSet::default();
         let mut erased: Vec<(Handle, ChangeKind)> = Vec::new();
         let mut selection_changed = false;
@@ -996,22 +1008,10 @@ impl Scene {
                 }) if !data.settings_handle.is_null() => Some(data.settings_handle),
                 _ => None,
             });
-            let section_managers: Vec<Handle> = self
-                .document
-                .objects
-                .iter()
-                .filter_map(|(handle, object)| match object {
-                    ObjectType::ClassObject(object) => match &object.data {
-                        codec::objects::ClassObjectData::SectionManager(manager)
-                            if manager.sections.contains(&h) =>
-                        {
-                            Some(*handle)
-                        }
-                        _ => None,
-                    },
-                    _ => None,
-                })
-                .collect();
+            let section_managers: Vec<Handle> = managers_by_section
+                .get(&h)
+                .cloned()
+                .unwrap_or_default();
             // Delta-undo: capture the removed entity so an undo can re-insert it.
             if self.is_recording_undo() {
                 let before = self.document.get_entity_arc(h);
