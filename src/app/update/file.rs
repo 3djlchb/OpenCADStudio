@@ -19,6 +19,21 @@ use codec::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
+/// Write an exported file: to disk on the desktop, as a browser download on
+/// the web, where there is no filesystem behind the dialog's path. (#761)
+fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let name = path.file_name().map_or_else(|| "export".into(), |n| n.to_string_lossy());
+        crate::sys::download_bytes(&name, bytes);
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::fs::write(path, bytes).map_err(|e| e.to_string())
+    }
+}
+
 pub(super) fn background_task<T, F, M>(work: F, map: M) -> Task<Message>
 where
     T: Send + 'static,
@@ -2006,7 +2021,7 @@ impl OpenCADStudio {
                 let mesh_refs: Vec<_> = meshes.iter().collect();
                 let bytes = crate::io::stl::build_stl(&mesh_refs)
                     .ok_or_else(|| "no mesh data to export".to_string())?;
-                std::fs::write(&worker_path, bytes).map_err(|e| e.to_string())
+                write_export(&worker_path, &bytes)
             },
             move |result| Message::StlExportFinished(path, result),
         )
@@ -2027,7 +2042,7 @@ impl OpenCADStudio {
                 let mesh_refs: Vec<_> = meshes.iter().collect();
                 let text = crate::io::step::build_step(&mesh_refs)
                     .ok_or_else(|| "no mesh data to export".to_string())?;
-                std::fs::write(&worker_path, text.as_bytes()).map_err(|e| e.to_string())
+                write_export(&worker_path, text.as_bytes())
             },
             move |result| Message::StepExportFinished(path, result),
         )
