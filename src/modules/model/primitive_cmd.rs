@@ -272,6 +272,17 @@ fn sphere_tangent_local(object: TangentObject, plane: WorkingPlane) -> TangentOb
             center: plane.to_local(center),
             radius,
         },
+        TangentObject::Ellipse {
+            center,
+            major_axis,
+            normal,
+            minor_axis_ratio,
+        } => TangentObject::Ellipse {
+            center: plane.to_local(center),
+            major_axis: plane.vector_to_local(major_axis),
+            normal: plane.vector_to_local(normal),
+            minor_axis_ratio,
+        },
     }
 }
 
@@ -285,6 +296,29 @@ fn sphere_tangent_curve(object: TangentObject) -> KernelCurve {
             centre: [center.x, center.y],
             radius,
         }),
+        TangentObject::Ellipse {
+            center,
+            major_axis,
+            minor_axis_ratio,
+            ..
+        } => {
+            let a = major_axis.length();
+            let major_axis_2d = if a > 1e-9 {
+                [major_axis.x / a, major_axis.y / a]
+            } else {
+                [1.0, 0.0]
+            };
+            KernelCurve::Ellipse(kernel::geom2d::EllipseArc {
+                ellipse: kernel::geom2d::Ellipse {
+                    centre: [center.x, center.y],
+                    major_radius: a,
+                    minor_radius: a * minor_axis_ratio,
+                    major_axis: major_axis_2d,
+                },
+                start_parameter: 0.0,
+                end_parameter: std::f64::consts::TAU,
+            })
+        }
     }
 }
 
@@ -757,10 +791,13 @@ impl PrimitiveCommand {
         else {
             return None;
         };
-        let candidates = crate::modules::draw::draw::circle::ttr_candidates(first, second, radius);
-        let local = crate::modules::draw::draw::circle::best_of(
-            &candidates,
-            (first_hit + second_hit) * 0.5,
+        let local = crate::modules::draw::draw::circle::pick_best_ttr_candidate(
+            first,
+            second,
+            radius,
+            first_hit,
+            second_hit,
+            None,
         )?;
         Some(self.plane.to_world(local))
     }

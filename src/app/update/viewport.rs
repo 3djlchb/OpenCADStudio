@@ -1415,7 +1415,7 @@ impl OpenCADStudio {
             // The engaged grip is the rubber-band origin. Perpendicular
             // snapping must drop its foot from this point, including when a
             // hot-grip set is moved by the same drag vector.
-            self.snapper.from_point = Some(grip.origin_world.as_vec3());
+            self.snapper.from_point = Some(grip.origin_world);
             let (go, gr) = self.drafting_grid_basis(i);
             let base = grip.origin_world;
             let construction_ray =
@@ -2135,10 +2135,9 @@ impl OpenCADStudio {
                 )
             } else {
                 let (go, gr) = self.drafting_grid_basis(i);
-                // The snapper is a screen-space (f32) engine; the f64
-                // base only matters for typed-input precision, so hand it
-                // the downcast point here.
-                self.snapper.from_point = self.last_point.map(|p| p.as_vec3());
+                // Construction anchor for perpendicular and tangent snaps
+                // in full f64 precision.
+                self.snapper.from_point = self.last_point;
 
                 let construction_ray = if is_window_corner {
                     None
@@ -2554,8 +2553,15 @@ impl OpenCADStudio {
                     .as_ref()
                     .map(|c| c.object_pick_hover_previews(&self.tabs[i].scene, effective))
                     .unwrap_or_default();
+                let live_tangent = self.tabs[i].snap_result.and_then(|s| {
+                    if s.snap_type == crate::snap::SnapType::Tangent {
+                        s.tangent_obj
+                    } else {
+                        None
+                    }
+                });
                 if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                    p.extend(cmd.on_preview_wires(effective));
+                    p.extend(cmd.on_preview_wires_with_tangent(effective, live_tangent));
                 }
                 p
             } else if needs_entity && deferred_command_hover {
@@ -2691,10 +2697,17 @@ impl OpenCADStudio {
             } else if let Some(wires) = self.dimension_preview_wires(i, effective) {
                 wires
             } else {
+                let live_tangent = self.tabs[i].snap_result.and_then(|s| {
+                    if s.snap_type == crate::snap::SnapType::Tangent {
+                        s.tangent_obj
+                    } else {
+                        None
+                    }
+                });
                 self.tabs[i]
                     .active_cmd
                     .as_mut()
-                    .map(|c| c.on_preview_wires(effective))
+                    .map(|c| c.on_preview_wires_with_tangent(effective, live_tangent))
                     .unwrap_or_default()
             };
             // Polar tracking guide line: dotted line from last_point along
@@ -2940,7 +2953,7 @@ impl OpenCADStudio {
         // Perpendicular and tangent measure from `from`, else the running
         // command's last point; the live cursor's base point is restored.
         let live_from = self.snapper.from_point;
-        self.snapper.from_point = from.or(self.last_point).map(|p| p.as_vec3());
+        self.snapper.from_point = from.or(self.last_point);
         let (go, gr) = self.drafting_grid_basis(i);
         let hit = self
             .snapper
@@ -3781,7 +3794,7 @@ impl OpenCADStudio {
                     )
                 } else {
                     let (go, gr) = self.drafting_grid_basis(i);
-                    self.snapper.from_point = self.last_point.map(|p| p.as_vec3());
+                    self.snapper.from_point = self.last_point;
 
                     let construction_ray = if is_window_corner {
                         None
@@ -6993,6 +7006,70 @@ mod selection_preview_tests {
             "direction grip drag must point the xline along +X, got {:?}",
             moved.direction
         );
+    }
+
+    #[test]
+    fn test_coincident_line_and_arc_grip_move() {
+        use codec::{types::Vector3, EntityType};
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+
+        let pt = glam::DVec3::new(-2.8146711761917635, 12.22681563180158, 0.0);
+
+        // Line ending at pt
+        let mut line = codec::entities::Line::new();
+        line.start = Vector3::new(-20.0, 12.22681563180158, 0.0);
+        line.end = Vector3::new(pt.x, pt.y, pt.z);
+        let line_h = app.tabs[i].scene.add_entity(EntityType::Line(line));
+
+        // Arc starting at pt
+        let mut arc = codec::entities::Arc::new();
+        arc.center = Vector3::new(0.0, 0.0, 0.0);
+        arc.radius = (pt.x * pt.x + pt.y * pt.y).sqrt();
+        let sa = (pt.y).atan2(pt.x);
+        arc.start_angle = sa;
+        arc.end_angle = sa + 1.0;
+        let arc_h = app.tabs[i].scene.add_entity(EntityType::Arc(arc));
+
+        app.tabs[i].scene.selected.insert(line_h);
+        app.tabs[i].scene.selected.insert(arc_h);
+        app.refresh_selected_grips();
+
+        println!("selected grips count: {}", app.tabs[i].selected_grips.len());
+        for (g_idx, g) in app.tabs[i].selected_grips.iter().enumerate() {
+            let h = app.tabs[i].selected_grip_handles[g_idx];
+            println!("grip idx {g_idx}: handle {:?}, id {}, world {:?}", h, g.id, g.world);
+        }
+
+        let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
+        let cursor = app.tabs[i].scene.camera.borrow().project(pt, bounds).unwrap();
+        app.tabs[i].scene.selection.borrow_mut().last_move_pos =
+            Some(iced::Point::new(cursor.x, cursor.y));
+        let _ = app.on_viewport_left_press();
+
+        let active = app.tabs[i].active_grip.as_ref().expect("grip must engage");
+        println!("active grip targets len: {}", active.targets.len());
+        for t in &active.targets {
+            println!("target: handle {:?}, grip_id {}, last_world {:?}", t.handle, t.grip_id, t.last_world);
+        }
+
+        // Drag cursor by (5.0, 5.0)
+        let new_target = pt + glam::DVec3::new(5.0, 5.0, 0.0);
+        let new_cursor = app.tabs[i].scene.camera.borrow().project(new_target, bounds).unwrap();
+        let _ = app.on_viewport_move(iced::Point::new(new_cursor.x, new_cursor.y));
+
+        let EntityType::Line(moved_line) = app.tabs[i].scene.document.get_entity(line_h).unwrap() else { panic!() };
+        let EntityType::Arc(moved_arc) = app.tabs[i].scene.document.get_entity(arc_h).unwrap() else { panic!() };
+
+        println!("moved line end: {:?}", moved_line.end);
+        let arc_start_moved = glam::DVec3::new(
+            moved_arc.center.x + moved_arc.radius * moved_arc.start_angle.cos(),
+            moved_arc.center.y + moved_arc.radius * moved_arc.start_angle.sin(),
+            0.0,
+        );
+        println!("moved arc start: {:?}", arc_start_moved);
     }
 
     #[test]

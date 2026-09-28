@@ -255,12 +255,19 @@ pub enum EntityTransform {
 // ── Tangent object ─────────────────────────────────────────────────────────
 
 /// Geometric representation of a tangent-snap target.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TangentObject {
     /// Infinite line through two world-space XZ-plane points.
     Line { p1: DVec3, p2: DVec3 },
     /// Circle in the world XY plane.
     Circle { center: DVec3, radius: f64 },
+    /// Planar ellipse in world space.
+    Ellipse {
+        center: DVec3,
+        major_axis: DVec3,
+        normal: DVec3,
+        minor_axis_ratio: f64,
+    },
 }
 
 /// One unit of input to the active command's step machine.
@@ -2726,6 +2733,16 @@ pub trait CadCommand: Send {
     /// Default: forwards to `on_mouse_move` for backwards compatibility.
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
         self.on_mouse_move(pt).into_iter().collect()
+    }
+
+    /// Called on every mouse-move with optional live tangent snap target under the cursor.
+    /// Default: forwards to `on_preview_wires(pt)`.
+    fn on_preview_wires_with_tangent(
+        &mut self,
+        pt: DVec3,
+        _tangent: Option<TangentObject>,
+    ) -> Vec<WireModel> {
+        self.on_preview_wires(pt)
     }
 
     /// Source entities replaced by the current live preview. The host removes

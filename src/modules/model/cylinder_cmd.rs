@@ -248,10 +248,13 @@ impl CylinderCommand {
         else {
             return None;
         };
-        let candidates = crate::modules::draw::draw::circle::ttr_candidates(first, second, radius);
-        let local = crate::modules::draw::draw::circle::best_of(
-            &candidates,
-            (first_hit + second_hit) * 0.5,
+        let local = crate::modules::draw::draw::circle::pick_best_ttr_candidate(
+            first,
+            second,
+            radius,
+            first_hit,
+            second_hit,
+            None,
         )?;
         Some(self.plane.to_world(local))
     }
