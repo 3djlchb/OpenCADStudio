@@ -118,6 +118,52 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
     }
 }
 
+/// Explode every entity; one piece list per input, input order preserved,
+/// empty lists kept. Used by benchmarks and regression tests.
+pub fn explode_batch(
+    items: &[(Handle, &EntityType)],
+    doc: &CadDocument,
+) -> Vec<Vec<EntityType>> {
+    items.iter().map(|(_, e)| explode_entity(e, doc)).collect()
+}
+
+/// Plan the EXPLODE command for an already lock-filtered selection:
+/// order-preserving, empty pieces dropped (matching the command arm).
+pub fn plan_explode(
+    selected: &[(Handle, &EntityType)],
+    doc: &CadDocument,
+) -> Vec<(Handle, Vec<EntityType>)> {
+    selected
+        .iter()
+        .filter_map(|(handle, entity)| {
+            let pieces = explode_entity(entity, doc);
+            if pieces.is_empty() {
+                None
+            } else {
+                Some((*handle, pieces))
+            }
+        })
+        .collect()
+}
+
+/// Apply precomputed EXPLODE replacements. Initial version is a
+/// byte-for-byte extraction of the command arm's loop (erase one handle,
+/// add pieces one at a time); optimizations change its internals only.
+/// Returns the number of exploded sources.
+pub fn apply_explode_replacements(
+    scene: &mut crate::scene::Scene,
+    replacements: Vec<(Handle, Vec<EntityType>)>,
+) -> usize {
+    let exploded = replacements.len();
+    for (handle, pieces) in replacements {
+        scene.erase_entities(&[handle]);
+        for piece in pieces {
+            scene.add_entity(piece);
+        }
+    }
+    exploded
+}
+
 fn explode_polyline(p: &Polyline) -> Vec<EntityType> {
     let n = p.vertices.len();
     if n < 2 {

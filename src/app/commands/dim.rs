@@ -1202,40 +1202,27 @@ impl OpenCADStudio {
             }
 
             "EXPLODE" => {
-                use crate::modules::draw::modify::explode::explode_entity;
-                let entities: Vec<_> = self.tabs[i]
+                use crate::modules::draw::modify::explode::{
+                    apply_explode_replacements, plan_explode,
+                };
+                let selected: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
                     .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
-                if entities.is_empty() {
+                if selected.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("EXPLODE");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let replacements: Vec<(codec::Handle, Vec<codec::EntityType>)> = entities
-                        .iter()
-                        .filter_map(|(h, e)| {
-                            let pieces = explode_entity(e, &self.tabs[i].scene.document);
-                            if pieces.is_empty() {
-                                None
-                            } else {
-                                Some((*h, pieces))
-                            }
-                        })
-                        .collect();
+                    let replacements = plan_explode(&selected, &self.tabs[i].scene.document);
                     let exploded = replacements.len();
                     if exploded > 0 {
                         self.push_undo_snapshot(i, "EXPLODE");
                     }
-                    for (handle, pieces) in replacements {
-                        self.tabs[i].scene.erase_entities(&[handle]);
-                        for piece in pieces {
-                            self.tabs[i].scene.add_entity(piece);
-                        }
-                    }
+                    apply_explode_replacements(&mut self.tabs[i].scene, replacements);
                     if exploded > 0 {
                         self.tabs[i].dirty = true;
                         self.refresh_properties();

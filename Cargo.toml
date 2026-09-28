@@ -151,3 +151,7 @@ strip = true
 [[bench]]
 name = "performance_benchmarks"
 harness = false
+
+[[bench]]
+name = "command_benchmarks"
+harness = false
