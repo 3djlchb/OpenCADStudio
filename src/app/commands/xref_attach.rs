@@ -402,8 +402,25 @@ impl OpenCADStudio {
                         } else {
                             codec::entities::UnderlayType::Dwf
                         };
-                        let i = self.active_tab;
-                        self.start_underlay_attach(i, kind, &path.to_string_lossy());
+                        let path = path.to_string_lossy().into_owned();
+                        match std::fs::read(&path) {
+                            Ok(bytes) => {
+                                crate::scene::model::pdf_raster::register_source(&path, std::sync::Arc::new(bytes));
+                                crate::scene::model::underlay_vector::forget(&path);
+                                if crate::scene::model::underlay_vector::item_names(kind, &path).is_some_and(|n| !n.is_empty()) {
+                                    self.open_underlay_attach_dialog(kind, &path);
+                                } else {
+                                    self.command_line.push_error(&format!(
+                                        "{} not found.",
+                                        crate::entities::underlay::display_path(&path)
+                                    ));
+                                }
+                            }
+                            Err(_) => self.command_line.push_error(&format!(
+                                "{} not found.",
+                                crate::entities::underlay::display_path(&path)
+                            )),
+                        }
                         Task::none()
                     }
                     "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" => {

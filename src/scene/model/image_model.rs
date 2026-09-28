@@ -207,7 +207,8 @@ impl ImageModel {
         let page = crate::entities::underlay::page_of(def);
         let rect = crate::entities::underlay::definition_rect(def)?;
         // The page's longest side on screen, pixels (the view scale is taken
-        // a step finer, so the raster is never enlarged on screen).
+        // a step coarser, so the raster is never reduced on screen and its
+        // one-pixel lines stay unbroken).
         let screen_side = world_per_pixel
             .filter(|wpp| *wpp > 0.0)
             .map(|wpp| {
@@ -258,8 +259,15 @@ impl ImageModel {
             &raster,
             PageAdjust {
                 contrast: u.contrast.min(100),
+                // Measured: PDF 0.5; DWF 0.243, or 0.73 once its colours are
+                // turned over for a dark background; DGN 0.65.
                 contrast_pivot: match def.underlay_type {
                     UnderlayType::Pdf => 500,
+                    UnderlayType::Dwf
+                        if u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND) && bg_lum < 0.5 =>
+                    {
+                        730
+                    }
                     UnderlayType::Dwf => 243,
                     UnderlayType::Dgn => 650,
                 },

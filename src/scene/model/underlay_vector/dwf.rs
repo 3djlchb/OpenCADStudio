@@ -164,10 +164,67 @@ pub fn sheet(bytes: &[u8], name: &str) -> Option<Sheet> {
         w2d::read(data)?
     } else {
         let w2x = entry.w2x.as_ref().and_then(|p| files.get(p));
-        xps::read(data, w2x.map(|v| v.as_slice()), entry)?
+        // An embedded font (FontUri, relative to the page) names its family.
+        let page_dir = entry.graphics.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+        let family = |uri: &str| -> Option<String> {
+            let uri = uri.trim_start_matches("./");
+            let key = if let Some(abs) = uri.strip_prefix('/') { abs.to_string() } else { format!("{page_dir}/{uri}") };
+            let data = files.get(&key)?;
+            let name = key.rsplit('/').next()?;
+            font_family(&deobfuscate(data, name)?)
+        };
+        xps::read(data, w2x.map(|v| v.as_slice()), entry, &family)?
     };
     let rect = view.or_else(|| paths_bounds(&paths))?;
     Some(Sheet { rect, paths, texts, sub_per_master: 1.0 })
+}
+
+/// An XPS obfuscated font (.odttf): its first 32 bytes are XORed with the
+/// GUID of its file name, byte order reversed.
+fn deobfuscate(data: &[u8], file_name: &str) -> Option<Vec<u8>> {
+    let hex: String = file_name.split('.').next()?.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    if hex.len() != 32 || data.len() < 32 {
+        return None;
+    }
+    let bytes: Vec<u8> = (0..16).filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()).collect();
+    let key: Vec<u8> = bytes.into_iter().rev().collect();
+    let mut out = data.to_vec();
+    for i in 0..32 {
+        out[i] ^= key[i % 16];
+    }
+    Some(out)
+}
+
+/// The family name (name id 1) of a TrueType font.
+fn font_family(font: &[u8]) -> Option<String> {
+    let u16be = |at: usize| Some(u16::from_be_bytes(font.get(at..at + 2)?.try_into().ok()?));
+    let u32be = |at: usize| Some(u32::from_be_bytes(font.get(at..at + 4)?.try_into().ok()?));
+    let tables = u16be(4)? as usize;
+    let name = (0..tables).find_map(|t| {
+        let at = 12 + t * 16;
+        (font.get(at..at + 4)? == b"name").then(|| u32be(at + 8)).flatten()
+    })? as usize;
+    let count = u16be(name + 2)? as usize;
+    let strings = name + u16be(name + 4)? as usize;
+    let mut fallback = None;
+    for r in 0..count {
+        let at = name + 6 + r * 12;
+        let (platform, name_id) = (u16be(at)?, u16be(at + 6)?);
+        if name_id != 1 {
+            continue;
+        }
+        let (len, off) = (u16be(at + 8)? as usize, u16be(at + 10)? as usize);
+        let raw = font.get(strings + off..strings + off + len)?;
+        match platform {
+            // Windows: UTF-16 big endian.
+            3 | 0 => {
+                let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+                return Some(String::from_utf16_lossy(&units));
+            }
+            _ => fallback = Some(String::from_utf8_lossy(raw).to_string()),
+        }
+    }
+    fallback
 }
 
 /// The default colour map of a W2D stream: ten system colours, a 6×6×6
@@ -619,7 +676,12 @@ mod xps {
     }
 
     /// The fixed page's paths and text in model units, and the plotted view.
-    pub fn read(page: &[u8], w2x: Option<&[u8]>, entry: &SheetEntry) -> Option<(Vec<Path>, Option<[f64; 4]>, Vec<Text>)> {
+    pub fn read(
+        page: &[u8],
+        w2x: Option<&[u8]>,
+        entry: &SheetEntry,
+        family: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<(Vec<Path>, Option<[f64; 4]>, Vec<Text>)> {
         let mut units = Units::identity();
         let mut view_log = None;
         if let Some(w2x) = w2x.and_then(|b| std::str::from_utf8(b).ok()) {
@@ -662,9 +724,7 @@ mod xps {
             };
             if node.tag_name().name() == "Glyphs" {
                 // Text: its baseline origin and em size in page units (y
-                // down), drawn in the plotted family.
-                // ponytail: the embedded font is obfuscated and not read;
-                // DWFx text is drawn in Arial.
+                // down), drawn in the embedded font's family.
                 let num = |name: &str| attr(node, name).and_then(|v| v.parse::<f64>().ok());
                 let (Some(em), Some(text)) = (num("FontRenderingEmSize"), attr(node, "UnicodeString")) else { return };
                 let o = [num("OriginX").unwrap_or(0.0), num("OriginY").unwrap_or(0.0)];
@@ -679,7 +739,7 @@ mod xps {
                         width_factor: if len(up) > 0.0 { len(along) / len(up) } else { 1.0 },
                         rotation: (along[1] - a[1]).atan2(along[0] - a[0]),
                         color: attr(node, "Fill").and_then(parse_color).unwrap_or([0, 0, 0]),
-                        font: "Arial".to_string(),
+                        font: attr(node, "FontUri").and_then(family).unwrap_or_else(|| "Arial".to_string()),
                     });
                 }
                 return;

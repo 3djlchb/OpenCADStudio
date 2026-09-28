@@ -93,15 +93,31 @@ pub fn sheet_without(kind: UnderlayType, path: &str, item: &str, hidden: &[Strin
             UnderlayType::Dgn => dgn8::model(&bytes, item, hidden).unwrap_or_default(),
             UnderlayType::Pdf => return None,
         };
-        outline_texts(&mut sheet);
-        // A DGN model's extent is its geometry, text included (a DWF sheet
-        // keeps its plotted view).
+        // A DGN model's extent includes its text: each text's box runs its
+        // length along the baseline and 1.5 × its height above it (as the
+        // reference measures a model). A DWF sheet keeps its plotted view.
         if kind == UnderlayType::Dgn {
-            if let Some(b) = model::paths_bounds(&sheet.paths) {
-                let r = sheet.rect;
-                sheet.rect = [r[0].min(b[0]), r[1].min(b[1]), r[2].max(b[2]), r[3].max(b[3])];
+            let mut r = sheet.rect;
+            for t in &sheet.texts {
+                let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
+                    [0.0, 0.0],
+                    t.height as f32,
+                    0.0,
+                    t.width_factor as f32,
+                    0.0,
+                    &t.font,
+                    &t.text,
+                );
+                let length = strokes.iter().flatten().map(|p| p[0] as f64).fold(0.0, f64::max);
+                let (c, s) = (t.rotation.cos(), t.rotation.sin());
+                for [x, y] in [[0.0, 0.0], [length, 0.0], [length, 1.5 * t.height], [0.0, 1.5 * t.height]] {
+                    let p = [t.origin[0] + x * c - y * s, t.origin[1] + x * s + y * c];
+                    r = [r[0].min(p[0]), r[1].min(p[1]), r[2].max(p[0]), r[3].max(p[1])];
+                }
             }
+            sheet.rect = r;
         }
+        outline_texts(&mut sheet);
         if !hidden.is_empty() {
             sheet.rect = sheet_without(kind, path, item, &[])?.rect;
         }
@@ -206,10 +222,13 @@ fn rasterize(sheet: &Sheet, side: f64) -> Option<PdfPage> {
         if let Some((c, width)) = path.stroke {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(c[0], c[1], c[2], 255);
-            paint.anti_alias = true;
+            // A negative width is in pixels (DGN line weights).
+            let px = if width < 0.0 { (-width) as f32 } else { ((width * scale) as f32).max(1.0) };
+            // Hairlines are drawn solid, one pixel wide, as the reference
+            // draws them; anti-aliasing would spread them to half intensity.
+            paint.anti_alias = px > 1.5;
             let stroke = tiny_skia::Stroke {
-                // A negative width is in pixels (DGN line weights).
-                width: if width < 0.0 { (-width) as f32 } else { ((width * scale) as f32).max(1.0) },
+                width: px,
                 line_cap: tiny_skia::LineCap::Round,
                 line_join: tiny_skia::LineJoin::Round,
                 ..Default::default()

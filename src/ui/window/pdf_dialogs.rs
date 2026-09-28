@@ -24,6 +24,8 @@ pub enum PdfDialogMsg {
     AttachName(String),
     AttachBrowse,
     AttachPage(usize),
+    /// DGN conversion units: sub (true) or master.
+    AttachSubUnits(bool),
     AttachPathType(PathTypeChoice),
     AttachInsertOnScreen(bool),
     AttachInsert(usize, String),
@@ -129,6 +131,23 @@ pub fn page_thumbs(path: &str) -> Vec<PageThumb> {
                 let page = rasterize_page_at_dpi(path, &label, dpi)?;
                 Some(image::Handle::from_rgba(page.width, page.height, page.pixels.to_vec()))
             });
+            PageThumb { label, image }
+        })
+        .collect()
+}
+
+/// Thumbnails of a file's pages (PDF), sheets (DWF) or models (DGN).
+pub fn item_thumbs(kind: codec::entities::UnderlayType, path: &str) -> Vec<PageThumb> {
+    use crate::scene::model::underlay_vector;
+    if kind == codec::entities::UnderlayType::Pdf {
+        return page_thumbs(path);
+    }
+    underlay_vector::item_names(kind, path)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|label| {
+            let image = underlay_vector::display_raster(kind, path, &label, &[], 220.0)
+                .map(|page| image::Handle::from_rgba(page.width, page.height, page.pixels.to_vec()));
             PageThumb { label, image }
         })
         .collect()
@@ -413,6 +432,12 @@ impl Default for AttachMemory {
 pub static ATTACH_MEMORY: std::sync::Mutex<Option<AttachMemory>> = std::sync::Mutex::new(None);
 
 pub struct PdfAttachState {
+    /// PDF pages, DWF sheets or DGN models.
+    pub kind: codec::entities::UnderlayType,
+    /// DGN: sub units chosen (the scale then turns them into master units).
+    pub sub_units: bool,
+    /// DGN: sub units per master unit of the chosen model.
+    pub sub_per_master: f64,
     /// The file read (absolute).
     pub path: String,
     pub name: String,
@@ -444,6 +469,9 @@ impl PdfAttachState {
             .unwrap_or_default();
         let names = existing.iter().map(|(name, _)| name.clone()).collect();
         Self {
+            kind: codec::entities::UnderlayType::Pdf,
+            sub_units: false,
+            sub_per_master: 1.0,
             path: String::new(),
             name: String::new(),
             existing,
@@ -501,9 +529,13 @@ pub fn view_attach<'a>(
     .size(12)
     .padding([5, 8])
     .width(Fill);
-    let count = container(
-        text(crate::tf!("{count} pages", count = state.pages.len())).size(11).style(accent_text),
-    )
+    use codec::entities::UnderlayType;
+    let count_text = match state.kind {
+        UnderlayType::Pdf => crate::tf!("{count} pages", count = state.pages.len()),
+        UnderlayType::Dwf => crate::tf!("{count} sheets", count = state.pages.len()),
+        UnderlayType::Dgn => crate::tf!("{count} models", count = state.pages.len()),
+    };
+    let count = container(text(count_text).size(11).style(accent_text))
     .padding([4, 10])
     .style(well_style);
     let file = row![
@@ -519,15 +551,20 @@ pub fn view_attach<'a>(
 
     // Pages: the thumbnails, then which ones are chosen.
     let chosen = state.page_labels().join(", ");
+    let (items_title, chosen_text, size_label) = match state.kind {
+        UnderlayType::Pdf => (t!("Pages"), crate::tf!("Selected pages: {pages}", pages = chosen), t!("Page size:")),
+        UnderlayType::Dwf => (t!("Sheets"), crate::tf!("Selected sheet: {sheet}", sheet = chosen), t!("Sheet size:")),
+        UnderlayType::Dgn => (t!("Models"), crate::tf!("Selected model: {model}", model = chosen), t!("Model size:")),
+    };
     let pages = card(
-        t!("Pages").into_owned(),
+        items_title.into_owned(),
         column![
             container(page_tiles(&state.pages, &state.selected, PdfDialogMsg::AttachPage))
                 .padding(6)
                 .height(Length::Fixed(226.0))
                 .width(Fill)
                 .style(well_style),
-            text(crate::tf!("Selected pages: {pages}", pages = chosen)).size(11).style(muted_style),
+            text(chosen_text).size(11).style(muted_style),
         ]
         .spacing(6),
     );
@@ -588,14 +625,35 @@ pub fn view_attach<'a>(
         column![
             info_line(t!("Found in:").into_owned(), &state.found_in),
             info_line(t!("Saved path:").into_owned(), &state.saved_path),
-            info_line(t!("Page size:").into_owned(), &state.page_size),
+            info_line(size_label.into_owned(), &state.page_size),
         ]
         .spacing(4),
     );
 
+    let mut right = column![placement, path].spacing(8).width(Length::FillPortion(2));
+    // A DGN model is attached in its master or its sub units.
+    if state.kind == UnderlayType::Dgn {
+        right = right.push(card(
+            t!("Conversion units").into_owned(),
+            column![
+                segmented(
+                    vec![(false, t!("Master units").into_owned()), (true, t!("Sub units").into_owned())],
+                    state.sub_units,
+                    PdfDialogMsg::AttachSubUnits,
+                ),
+                text(crate::tf!(
+                    "Sub units make the default scale {scale}",
+                    scale = 1.0 / state.sub_per_master.max(1e-12)
+                ))
+                .size(11)
+                .style(muted_style),
+            ]
+            .spacing(6),
+        ));
+    }
     let body = row![
         column![pages, details].spacing(8).width(Length::FillPortion(3)),
-        column![placement, path].spacing(8).width(Length::FillPortion(2)),
+        right,
     ]
     .spacing(10);
 
