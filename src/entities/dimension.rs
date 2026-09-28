@@ -4331,8 +4331,20 @@ fn tessellate_dimension_inner(
         }
     }
 
-    if let Some(synth_text_entity) = dimension_text_entity(dim, dim_txt, style, document, dim_scale)
+    if let Some(mut synth_text_entity) =
+        dimension_text_entity(dim, dim_txt, style, document, dim_scale)
     {
+        // The glyphs take their colour from the text entity itself, which
+        // copies the dimension's (usually ByLayer); an explicit DIMCLRT has to
+        // be on the entity or the layer colour wins. (#898)
+        let text_index = dim_color_index(
+            xd,
+            crate::entities::dim_override::DIMCLRT,
+            style.map(|s| s.dimclrt).unwrap_or(0),
+        );
+        if (1..=255).contains(&text_index) {
+            synth_text_entity.common_mut().color = AcadColor::from_index(text_index);
+        }
         // Tolerance Text rendered separately so DIMTFAC scales its height
         // and DIMTOLJ aligns it vertically against the primary text.
         let tol_entity = dimension_tolerance_entity(dim, style, &synth_text_entity, dim_txt);
