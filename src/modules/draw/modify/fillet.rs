@@ -817,6 +817,14 @@ fn compute_fillet_entities(
     radius: f64,
 ) -> Option<(EntityType, EntityType, Option<EntityType>)> {
     let z = e1.elevation();
+    // A polyline arc segment would be filleted as its straight chord.
+    let picks_arc_segment = |entity: &FilletEntity| {
+        matches!(entity, FilletEntity::LwPoly { poly, seg_idx, .. }
+            if poly.vertices.get(*seg_idx).is_some_and(|vertex| vertex.bulge.abs() > 1e-12))
+    };
+    if picks_arc_segment(e1) || picks_arc_segment(e2) {
+        return None;
+    }
 
     match (e1, e2) {
         // ── Line × Line ───────────────────────────────────────────────────
@@ -848,24 +856,39 @@ fn compute_fillet_entities(
                 ..
             },
         ) if h1 == h2 => {
-            // Adjacent segments share a corner vertex — fillet that corner.
-            let (low, high) = if *s1 < *s2 { (*s1, *s2) } else { (*s2, *s1) };
             let n = p1.vertices.len();
-            // The wrap-around corner of a closed polyline joins the last
-            // segment (n-1) and the first (0); their shared vertex is v0.
-            let wrap = p1.is_closed && low == 0 && high == n.saturating_sub(1);
-            // Segments must be consecutive, or the wrap-around pair above.
-            if !(high == low + 1 || wrap) {
+            let closed = p1.is_closed;
+            let seg_count = if closed { n } else { n.saturating_sub(1) };
+            let next = |seg: usize| if closed { (seg + 1) % n } else { seg + 1 };
+            let straight = |seg: usize| seg < seg_count && p1.vertices[seg].bulge.abs() < 1e-12;
+            // `before` runs into the corner and `after` leaves it. Between them
+            // sits nothing (a sharp corner), an old fillet arc being replaced,
+            // or — on an open polyline — the gap between its two ends, which
+            // the fillet closes. Arc segments themselves are never filleted:
+            // treating one as its chord bent the result across the shape.
+            enum Between {
+                Corner,
+                Arc(usize),
+                OpenEnds,
+            }
+            let order = |a: usize, b: usize| {
+                if next(a) == b {
+                    Some((a, b, Between::Corner))
+                } else if next(a) < seg_count
+                    && next(next(a)) == b
+                    && !straight(next(a))
+                {
+                    Some((a, b, Between::Arc(next(a))))
+                } else if !closed && seg_count >= 2 && a == seg_count - 1 && b == 0 {
+                    Some((a, b, Between::OpenEnds))
+                } else {
+                    None
+                }
+            };
+            let (before_seg, after_seg, between) = order(*s1, *s2).or_else(|| order(*s2, *s1))?;
+            if !straight(before_seg) || !straight(after_seg) {
                 return None;
             }
-            // `before_seg` ends at the shared corner vertex, `after_seg` starts
-            // there. For the wrap corner that is seg n-1 → v0 → seg 0; for a
-            // normal corner it is seg low → v[high] → seg high.
-            let (before_seg, after_seg, corner_idx) = if wrap {
-                (high, low, 0)
-            } else {
-                (low, high, high)
-            };
             let l1 = lwpoly_seg_as_line(p1, before_seg);
             let l2 = lwpoly_seg_as_line(p1, after_seg);
             // Re-map click to whichever segment each was picked on.
@@ -874,23 +897,49 @@ fn compute_fillet_entities(
             } else {
                 (click2, click1)
             };
-            match compute_fillet(&l1, c1, &l2, c2, radius)? {
-                (EntityType::Line(tl1), EntityType::Line(tl2), maybe_arc) => {
-                    let t1 = [tl1.end.x, tl1.end.y]; // trimmed end of seg before corner
-                    let t2 = [tl2.start.x, tl2.start.y]; // trimmed start of seg after corner
-                    let bulge = if let Some(EntityType::Arc(ref fa)) = maybe_arc {
-                        // center from arc entity
-                        compute_bulge(t1, t2, [fa.center.x, fa.center.y])
-                    } else {
-                        0.0 // r=0, sharp corner
-                    };
-                    let new_poly = lwpoly_replace_corner(p1, corner_idx, t1, t2, bulge);
-                    let et = EntityType::LwPolyline(new_poly);
-                    // Return same rebuilt poly for both slots; caller uses only h1.
-                    Some((et.clone(), et, None))
+            let (EntityType::Line(tl1), EntityType::Line(tl2), maybe_arc) =
+                compute_fillet(&l1, c1, &l2, c2, radius)?
+            else {
+                return None;
+            };
+            let t1 = [tl1.end.x, tl1.end.y]; // trimmed end of seg before corner
+            let t2 = [tl2.start.x, tl2.start.y]; // trimmed start of seg after corner
+            let bulge = match maybe_arc {
+                Some(EntityType::Arc(ref fa)) => compute_bulge(t1, t2, [fa.center.x, fa.center.y]),
+                _ => 0.0, // r=0, sharp corner
+            };
+            let new_poly = match between {
+                Between::Corner => lwpoly_replace_corner(p1, after_seg, t1, t2, bulge),
+                // The old arc runs from its own vertex to the `after` vertex:
+                // move both onto the new tangent points.
+                Between::Arc(arc_seg) => {
+                    let mut poly = p1.clone();
+                    poly.common.handle = Handle::NULL;
+                    poly.vertices[arc_seg].location.x = t1[0];
+                    poly.vertices[arc_seg].location.y = t1[1];
+                    poly.vertices[arc_seg].bulge = bulge;
+                    poly.vertices[after_seg].location.x = t2[0];
+                    poly.vertices[after_seg].location.y = t2[1];
+                    poly
                 }
-                _ => None,
-            }
+                // The last vertex becomes the start of the fillet and the
+                // closing segment is the fillet itself.
+                Between::OpenEnds => {
+                    let mut poly = p1.clone();
+                    poly.common.handle = Handle::NULL;
+                    let last = n - 1;
+                    poly.vertices[last].location.x = t1[0];
+                    poly.vertices[last].location.y = t1[1];
+                    poly.vertices[last].bulge = bulge;
+                    poly.vertices[0].location.x = t2[0];
+                    poly.vertices[0].location.y = t2[1];
+                    poly.is_closed = true;
+                    poly
+                }
+            };
+            let et = EntityType::LwPolyline(new_poly);
+            // Return same rebuilt poly for both slots; caller uses only h1.
+            Some((et.clone(), et, None))
         }
         // ── LwPoly × LwPoly (different entities) ──────────────────────────
         (
