@@ -94,6 +94,11 @@ thread_local! {
         RefCell::new(HashMap::default());
 }
 
+/// Dropdown items that report a state and cannot be picked.
+pub(super) fn is_disabled_item(cmd: &str) -> bool {
+    cmd == "FRAMES3"
+}
+
 fn ribbon_label_bounds(
     renderer: &iced::Renderer,
     label: &str,
@@ -678,13 +683,18 @@ pub(super) fn render_small<'a>(
                 container(make_icon(cur_icon, SMALL_ICON)).width(Length::Fixed(SMALL_W)),
                 text(localized_label.clone()).size(10).wrapping(advanced_text::Wrapping::None),
             ].spacing(3).align_y(iced::Center);
+            // A state that is only shown (not chosen) opens the list instead.
             let face_btn = button(face)
-                .on_press(Message::RibbonToolClick {
-                    tool_id: last.to_string(),
-                    event: ModuleEvent::Command(last.to_string()),
+                .on_press(if is_disabled_item(last) {
+                    Message::ToggleRibbonDropdown(id.to_string())
+                } else {
+                    Message::RibbonToolClick {
+                        tool_id: last.to_string(),
+                        event: ModuleEvent::Command(last.to_string()),
+                    }
                 })
                 .style(move |theme: &Theme, status| tool_btn_style(theme, active, status))
-                .width(Length::Fixed(LABELED_SMALL_W)).height(ROW_H).padding([3, 4]);
+                .width(Length::Shrink).height(ROW_H).padding([3, 4]);
             let arrow = button(container(icons::themed_arrow_down(8.0))
                 .width(Fill).height(Fill).align_x(iced::Center).align_y(iced::Center))
                 .on_press(Message::ToggleRibbonDropdown(id.to_string()))

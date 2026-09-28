@@ -366,6 +366,9 @@ pub struct UserSettings {
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
     pub grip_object_limit: i32,
+    /// IMAGEFRAME of the profile: used by new drawings and by drawings that
+    /// carry no image variables of their own.
+    pub image_frame: i16,
     /// Nested-copy symbol handling: false inserts, true binds.
     pub ncopy_bind: bool,
     /// Last Options page; unknown saved names fall back without rejecting the config.
@@ -653,6 +656,7 @@ impl Default for UserSettings {
             right_click_mode: RightClickMode::ShortcutMenu,
             right_click_hold_ms: 250,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
+            image_frame: 1,
             ncopy_bind: false,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,

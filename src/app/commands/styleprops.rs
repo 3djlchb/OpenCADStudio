@@ -10,6 +10,8 @@ impl OpenCADStudio {
             "FRAMES0" => return self.dispatch_styleprops("SETVAR FRAME 0", i),
             "FRAMES1" => return self.dispatch_styleprops("SETVAR FRAME 1", i),
             "FRAMES2" => return self.dispatch_styleprops("SETVAR FRAME 2", i),
+            // The mixed state is shown, never chosen.
+            "FRAMES3" => return Some(Task::none()),
             "UOSNAP0" => return self.dispatch_styleprops("SETVAR UOSNAP 0", i),
             "UOSNAP1" => return self.dispatch_styleprops("SETVAR UOSNAP 1", i),
             // COLOR <ByLayer|ByBlock|1-255|name> — the colour applied to new
@@ -1017,6 +1019,8 @@ impl OpenCADStudio {
                     | "FRAME"
                     | "IMAGEFRAME"
                     | "PDFFRAME"
+                    | "DWFFRAME"
+                    | "DGNFRAME"
                     | "PDFOSNAP"
                     | "UOSNAP"
                     | "PDFIMPORTMODE"
@@ -1283,13 +1287,23 @@ impl OpenCADStudio {
                                             self.tabs[i].scene.bump_entities(&changes);
                                         }
                                         self.tabs[i].dirty = true;
+                                        // IMAGEFRAME also lands in the profile.
+                                        self.save_config();
                                     }
                                     self.command_line
-                                        .push_output(&crate::tf!("{name} = {mode}"));
+                                        .push_output(crate::t!("Regenerating model.").as_ref());
                                 }
-                                _ => self.command_line.push_error(
-                                    crate::tf!("SETVAR: {name} requires 0, 1, or 2.").as_ref(),
-                                ),
+                                // Out of range: say so and ask again.
+                                _ => {
+                                    self.command_line.push_error(
+                                        crate::t!("Requires an integer between 0 and 2.").as_ref(),
+                                    );
+                                    self.command_line.push_output(
+                                        crate::tf!("Enter new value for {name} <{current}>:")
+                                            .as_ref(),
+                                    );
+                                    self.pending_setvar = Some(name.clone());
+                                }
                             },
                             None => {
                                 self.command_line.push_output(crate::tf!(

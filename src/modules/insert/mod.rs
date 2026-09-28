@@ -63,9 +63,12 @@ impl CadModule for InsertModule {
                             label: "",
                             icon: FRAMES_ICON,
                             items: vec![
-                                ("FRAMES0", "Frames Off", FRAMES_ICON),
-                                ("FRAMES1", "Frames On", FRAMES_ICON),
-                                ("FRAMES2", "Frames On, Not Plotted", FRAMES_ICON),
+                                ("FRAMES0", "Hide frames", FRAMES_ICON),
+                                ("FRAMES1", "Display and plot frames", FRAMES_ICON),
+                                ("FRAMES2", "Display but don't plot frames", FRAMES_ICON),
+                                // Shown (not selectable) while the frame
+                                // variables differ from each other.
+                                ("FRAMES3", "*Frames vary*", FRAMES_ICON),
                             ],
                             default: "FRAMES1",
                         },

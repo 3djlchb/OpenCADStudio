@@ -249,6 +249,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(segment.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if wire.point_marker.is_some() {
                 continue;
             }
@@ -277,6 +280,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     } else {
         // Q: lazy projection — no Vec allocation per wire; NaN resets the segment chain.
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             if wire.point_marker.is_some() {
                 continue;
             }
@@ -329,6 +335,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(triangle.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if let Some(depth) = triangle_ref_hit_depth(
                 cursor,
                 wire,
@@ -345,6 +354,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
         }
     } else {
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             if wire.fill_tris.is_empty() {
                 continue;
             }
@@ -381,6 +393,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(triangle.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if let Some(depth) = triangle_ref_hit_depth(
                 cursor,
                 wire,
@@ -397,6 +412,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
         }
     } else {
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             if wire.pick_tris.is_empty() {
                 continue;
             }
@@ -438,6 +456,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(glyph.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             let start = glyph.start as usize;
             let Some(vertices) = wire.text_verts.get(start..start + 6) else {
                 continue;
@@ -451,6 +472,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
         }
     } else {
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             if wire.text_verts.is_empty() {
                 continue;
             }
@@ -516,6 +540,9 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(segment.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if wire.point_marker.is_some() {
                 continue;
             }
@@ -550,6 +577,9 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
         }));
     } else {
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             if wire.point_marker.is_some() {
                 continue;
             }
@@ -593,6 +623,9 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(triangle.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if hits.iter().any(|&(_, name)| name == wire.name) {
                 matched.insert(triangle.wire);
                 continue;
@@ -614,6 +647,9 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
         }
     } else {
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             if wire.fill_tris.is_empty() || hits.iter().any(|&(_, name)| name == wire.name) {
                 continue;
             }
@@ -647,6 +683,9 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(triangle.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if hits.iter().any(|&(_, name)| name == wire.name) {
                 matched.insert(triangle.wire);
                 continue;
@@ -668,6 +707,9 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
         }
     } else {
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             if wire.pick_tris.is_empty() || hits.iter().any(|&(_, name)| name == wire.name) {
                 continue;
             }
@@ -697,6 +739,9 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(glyph.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if hits.iter().any(|&(_, name)| name == wire.name) {
                 matched.insert(glyph.wire);
                 continue;
@@ -712,6 +757,9 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
         }
     } else {
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             if wire.text_verts.is_empty() || hits.iter().any(|&(_, name)| name == wire.name) {
                 continue;
             }
@@ -1252,6 +1300,9 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
     // path below run identical code.
     let hit_name = |segment: &SegmentRef| -> Option<&'a str> {
         let wire = wires.source_wire(segment.wire)?;
+        if wire.snap_only {
+            return None;
+        }
         let start = segment.start as usize;
         if start + 1 >= wire.points.len() {
             return None;
@@ -1310,6 +1361,9 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(triangle.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if already(&wire_hit, triangle.wire) {
                 continue;
             }
@@ -1334,6 +1388,9 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
         let Some(wire) = wires.source_wire(glyph.wire) else {
             continue;
         };
+        if wire.snap_only {
+            continue;
+        }
         if already(&wire_hit, glyph.wire) {
             continue;
         }
@@ -1355,6 +1412,9 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
 
     // Degenerate point-only wires have no indexed segment or surface primitive.
     for wire in wires.iter() {
+        if wire.snap_only {
+            continue;
+        }
         if wire.points.len() >= 2
             || !wire.fill_tris.is_empty()
             || !wire.pick_tris.is_empty()
@@ -1411,6 +1471,9 @@ pub fn poly_fence_hit<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(segment.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             let start = segment.start as usize;
             if start + 1 >= wire.points.len() || seen.contains(wire.name.as_str()) {
                 continue;
@@ -1442,6 +1505,9 @@ pub fn poly_fence_hit<'a, W: WireSource + ?Sized>(
         return out;
     }
     for wire in wires.iter() {
+        if wire.snap_only {
+            continue;
+        }
         if wire.points.len() < 2 {
             continue;
         }
@@ -1480,6 +1546,9 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         let Some(wire) = wires.source_wire(segment.wire) else {
             continue;
         };
+        if wire.snap_only {
+            continue;
+        }
         let start = segment.start as usize;
         if start + 1 >= wire.points.len() {
             continue;
@@ -1524,6 +1593,9 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
             let Some(wire) = wires.source_wire(triangle.wire) else {
                 continue;
             };
+            if wire.snap_only {
+                continue;
+            }
             if seen.contains(wire.name.as_str()) {
                 continue;
             }
@@ -1546,6 +1618,9 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         let Some(wire) = wires.source_wire(glyph.wire) else {
             continue;
         };
+        if wire.snap_only {
+            continue;
+        }
         if seen.contains(wire.name.as_str()) {
             continue;
         }
@@ -1565,6 +1640,9 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         }
     }
     for wire in wires.iter() {
+        if wire.snap_only {
+            continue;
+        }
         if wire.points.len() >= 2
             || !wire.fill_tris.is_empty()
             || !wire.pick_tris.is_empty()
@@ -1644,6 +1722,9 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
         let mut out = Vec::new();
         let mut seen = HashSet::default();
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             // Fallback: when wire has no line geometry (e.g. greek text emits
             // only fill_tris) treat the AABB rectangle as the hit-test shape
             // so low-LOD text stays selectable. See #19.
@@ -1729,6 +1810,9 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
         let mut seen = HashSet::default();
 
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             let name = wire.name.as_str();
             if disqualified.contains(name) {
                 continue;
@@ -1838,6 +1922,9 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
         let mut out = Vec::new();
         let mut seen = HashSet::default();
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             // Same AABB fallback as `box_hit`: when a wire has no line
             // geometry (e.g. greek-LOD text emits only fill_tris) treat the
             // AABB rectangle as the hit-test shape so low-LOD text stays
@@ -1925,6 +2012,9 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
         let mut seen = HashSet::default();
 
         for wire in wires.iter() {
+            if wire.snap_only {
+                continue;
+            }
             let aabb_pts: Vec<[f32; 3]>;
             let empty_pts: [[f32; 3]; 0] = [];
             let pts: &[[f32; 3]] = if !wire.points.is_empty() {
