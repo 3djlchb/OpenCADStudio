@@ -16,6 +16,15 @@ use crate::t;
 
 /// Triangulate a planar polygon through the kernel.
 pub(crate) fn triangulate_planar(poly: &[[f64; 3]]) -> Vec<[f64; 3]> {
+    triangulate_planar_indices(poly)
+        .into_iter()
+        .flat_map(|triangle| triangle.map(|index| poly[index]))
+        .collect()
+}
+
+/// Triangles of a planar polygon as indices into `poly` — for callers that
+/// carry per-vertex data (normals) alongside the positions.
+pub(crate) fn triangulate_planar_indices(poly: &[[f64; 3]]) -> Vec<[usize; 3]> {
     if poly.len() < 3 {
         return Vec::new();
     }
@@ -51,7 +60,7 @@ pub(crate) fn triangulate_planar(poly: &[[f64; 3]]) -> Vec<[f64; 3]> {
     }
     triangles
         .into_iter()
-        .flat_map(|triangle| triangle.map(|index| poly[source[index]]))
+        .map(|triangle| triangle.map(|index| source[index]))
         .collect()
 }
 
