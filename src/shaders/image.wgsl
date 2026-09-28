@@ -64,5 +64,10 @@ fn vs_main(in: VertIn) -> VertOut {
 fn fs_main(in: VertOut) -> @location(0) vec4<f32> {
     let col = textureSample(img_texture, img_sampler, in.uv);
     let alpha = select(1.0, col.a, img_params.use_alpha > 0.5);
+    // A fully transparent pixel leaves no depth behind, so what lies under
+    // the image (drawn before or after it) shows through.
+    if (alpha * img_params.opacity <= 0.0) {
+        discard;
+    }
     return vec4<f32>(col.rgb, alpha * img_params.opacity);
 }
