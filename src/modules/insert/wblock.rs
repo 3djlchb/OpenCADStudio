@@ -50,29 +50,7 @@ pub fn extract_block_into(
         .into_owned());
     }
 
-    // Copy layers referenced by the block entities.
-    for h in &handles {
-        if let Some(e) = src.get_entity(*h) {
-            let layer = e.common().layer.clone();
-            if !layer.is_empty() && !layer.eq("0") && out.layers.get(&layer).is_none() {
-                if let Some(src_layer) = src.layers.get(&layer) {
-                    let _ = out.layers.add(src_layer.clone());
-                }
-            }
-        }
-    }
-
-    for h in handles {
-        if let Some(entity) = src.get_entity(h) {
-            if matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_)) {
-                continue;
-            }
-            let mut clone = entity.clone();
-            clone.common_mut().handle = codec::types::Handle::NULL;
-            clone.common_mut().owner_handle = codec::types::Handle::NULL;
-            let _ = out.add_entity(clone);
-        }
-    }
+    copy_with_dependencies(src, &handles, out, None);
 
     if out.entities().count() == 0 {
         return Err(t!(
@@ -106,30 +84,37 @@ pub fn extract_entities_into(
         return Err(t!("No entities selected for WBLOCK.").into_owned());
     }
 
-    for &h in handles {
-        if let Some(entity) = src.get_entity(h) {
-            if matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_)) {
-                continue;
-            }
-            // Copy layer definition.
-            let layer = entity.common().layer.clone();
-            if !layer.is_empty() && !layer.eq("0") && out.layers.get(&layer).is_none() {
-                if let Some(src_layer) = src.layers.get(&layer) {
-                    let _ = out.layers.add(src_layer.clone());
-                }
-            }
-            let mut clone = entity.clone();
-            clone.common_mut().handle = codec::types::Handle::NULL;
-            clone.common_mut().owner_handle = codec::types::Handle::NULL;
-            let _ = out.add_entity(clone);
-        }
-    }
+    copy_with_dependencies(src, handles, out, None);
 
     if out.entities().count() == 0 {
         return Err(t!("None of the selected entities could be exported.").into_owned());
     }
 
     Ok(())
+}
+
+/// Copy entities into `out` the way a cross-drawing paste does: fresh handles,
+/// plus the layers, linetypes, styles, block definitions and baked dimension
+/// blocks they use — without those an exported INSERT points at nothing and
+/// the file opens empty or needs recovery. (#1111)
+fn copy_with_dependencies(
+    src: &CadDocument,
+    handles: &[codec::Handle],
+    out: &mut CadDocument,
+    translate: Option<&crate::command::EntityTransform>,
+) {
+    let handles: Vec<codec::Handle> = handles
+        .iter()
+        .copied()
+        .filter(|&handle| {
+            !matches!(
+                src.get_entity(handle),
+                Some(EntityType::Block(_) | EntityType::BlockEnd(_))
+            )
+        })
+        .collect();
+    let (entities, deps) = crate::app::copy_to_clipboard_kernel(src, &handles);
+    crate::app::paste_entities_kernel(out, &entities, &deps, translate);
 }
 
 /// Translate every entity of `out` so the overall bounds minimum lands on
@@ -193,18 +178,13 @@ pub fn extract_entities_to_doc_with_base(
 ) -> Result<CadDocument, String> {
     let mut out = CadDocument::new();
     out.header.insertion_units = unit;
-    extract_entities_into(src, handles, &mut out)?;
-    if base_point != glam::DVec3::ZERO {
-        let shift = crate::command::EntityTransform::Affine(
-            codec::types::Transform::from_translation(codec::types::Vector3::new(
-                -base_point.x,
-                -base_point.y,
-                -base_point.z,
-            )),
-        );
-        for entity in out.entities_mut() {
-            crate::scene::view::dispatch::apply_transform(entity, &shift);
-        }
+    if handles.is_empty() {
+        return Err(t!("No entities selected for WBLOCK.").into_owned());
+    }
+    let shift = crate::command::EntityTransform::Translate(-base_point);
+    copy_with_dependencies(src, handles, &mut out, Some(&shift));
+    if out.entities().count() == 0 {
+        return Err(t!("None of the selected entities could be exported.").into_owned());
     }
     Ok(out)
 }

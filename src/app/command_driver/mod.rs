@@ -94,7 +94,9 @@ mod text_edit;
 mod constraint;
 mod dim_edit;
 
-pub(crate) use clipboard::{copy_to_clipboard_kernel, remap_ext_subtree_reference};
+pub(crate) use clipboard::{
+    copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference,
+};
 
 impl OpenCADStudio {
     /// Applies one command result, then — when that result ended the active
