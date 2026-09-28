@@ -729,6 +729,41 @@ impl Scene {
         self.refresh_fill_model(handle);
     }
 
+    /// A copied associative hatch must follow the copied boundary, not the
+    /// source one — otherwise editing the source regenerates the copy onto the
+    /// source's outline and the copy seems to vanish. A path whose boundary
+    /// was not copied along loses its association. (#1370)
+    pub(crate) fn copy_hatch_associations(
+        &mut self,
+        handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+    ) {
+        let mut touched = false;
+        for &copy in handle_map.values() {
+            let Some(EntityType::Hatch(hatch)) = self.document.get_entity_mut(copy) else {
+                continue;
+            };
+            if !hatch.is_associative {
+                continue;
+            }
+            for path in &mut hatch.paths {
+                if path.boundary_handles.iter().all(|source| handle_map.contains_key(source)) {
+                    for source in &mut path.boundary_handles {
+                        *source = handle_map[source];
+                    }
+                } else {
+                    path.boundary_handles.clear();
+                    path.flags.set_external(false);
+                }
+            }
+            hatch.is_associative =
+                hatch.paths.iter().any(|path| !path.boundary_handles.is_empty());
+            touched = true;
+        }
+        if touched {
+            self.associative_hatch_source_cache.borrow_mut().take();
+        }
+    }
+
     pub(crate) fn edit_hatch_boundary_handles(
         &mut self,
         hatch_handle: Handle,

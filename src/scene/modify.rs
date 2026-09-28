@@ -810,6 +810,7 @@ impl Scene {
         // entry as targeted object deltas inside copy_complete_groups.
         self.copy_complete_groups(&handle_map);
         self.copy_dimension_associations(&handle_map);
+        self.copy_hatch_associations(&handle_map);
         // The copies are new handles (natural memo misses, tessellated fresh)
         // and reference only already-cached blocks — no block defn changes.
         // Report them as additions so derived caches patch in exactly the copies.
