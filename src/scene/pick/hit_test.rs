@@ -197,7 +197,24 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     bounds: Rectangle,
     lw_display: bool,
     base_radius_px: f32,
+    draw_depth: &HashMap<u64, [f32; 2]>,
 ) -> Option<&'a str> {
+    // Coincident edges (a rectangle side on an xline) sit at the same pixel
+    // distance give or take float noise; within this band the front-most
+    // entity in draw order wins instead of whichever was measured first. (#1439)
+    const TIE_PX: f32 = 0.5;
+    let front = |name: &str| {
+        crate::scene::Scene::handle_from_wire_name(name)
+            .and_then(|handle| draw_depth.get(&handle.value()))
+            .map_or(f32::MIN, |depth| depth[0])
+    };
+    let beats = |d: f32, name: &str, best_dist: f32, best: Option<&str>| {
+        if (d - best_dist).abs() > TIE_PX {
+            return d < best_dist;
+        }
+        let (mine, theirs) = (front(name), best.map_or(f32::MIN, front));
+        mine > theirs || (mine == theirs && d < best_dist)
+    };
     // A click outside the pane rectangle (e.g. on the paper around a floating
     // viewport) must not reach geometry scissored out of the viewport.
     if cursor.x < 0.0 || cursor.x > bounds.width || cursor.y < 0.0 || cursor.y > bounds.height {
@@ -224,7 +241,7 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
             );
             if let Some(start) = previous {
                 let distance = dist_point_to_segment(cursor, start, screen);
-                if distance < tolerance && distance < best_dist {
+                if distance < tolerance && beats(distance, &wire.name, best_dist, best) {
                     best_dist = distance;
                     best = Some(wire.name.as_str());
                 }
@@ -272,7 +289,9 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
                 bounds,
             );
             let d = dist_point_to_segment(cursor, p0, p1);
-            if d < pick_tolerance_px(wire, lw_display, base_radius_px) && d < best_dist {
+            if d < pick_tolerance_px(wire, lw_display, base_radius_px)
+                && beats(d, &wire.name, best_dist, best)
+            {
                 best_dist = d;
                 best = Some(&wire.name);
             }
@@ -310,7 +329,7 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
                 );
                 if let Some(p0) = prev {
                     let d = dist_point_to_segment(cursor, p0, cur);
-                    if d < tol && d < best_dist {
+                    if d < tol && beats(d, &wire.name, best_dist, best) {
                         best_dist = d;
                         best = Some(&wire.name);
                     }
@@ -2681,16 +2700,16 @@ mod aabb_reject_tests {
 
         let eye = glam::DVec3::ZERO;
         assert_eq!(
-            click_hit(cursor, std::slice::from_ref(&near), vp, eye, bounds, true, 8.0),
+            click_hit(cursor, std::slice::from_ref(&near), vp, eye, bounds, true, 8.0, &HashMap::default()),
             Some("5")
         );
         assert_eq!(
-            click_hit(cursor, std::slice::from_ref(&far), vp, eye, bounds, true, 8.0),
+            click_hit(cursor, std::slice::from_ref(&far), vp, eye, bounds, true, 8.0, &HashMap::default()),
             None
         );
         // The far wire must be rejected without hiding the near one.
         assert_eq!(
-            click_hit(cursor, &[far, near], vp, eye, bounds, true, 8.0),
+            click_hit(cursor, &[far, near], vp, eye, bounds, true, 8.0, &HashMap::default()),
             Some("5")
         );
     }

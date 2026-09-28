@@ -2591,6 +2591,7 @@ impl OpenCADStudio {
                     bounds,
                     self.tabs[i].scene.document.header.lineweight_display,
                     crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                    &self.tabs[i].scene.draw_depth_map(),
                 )
                 .and_then(|s| Scene::handle_from_wire_name(s))
                 .or_else(|| {
@@ -3581,6 +3582,7 @@ impl OpenCADStudio {
                 bounds,
                 self.tabs[i].scene.document.header.lineweight_display,
                 crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
             )
             .and_then(Scene::handle_from_wire_name)
             .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
@@ -4110,6 +4112,7 @@ impl OpenCADStudio {
                     bounds,
                     self.tabs[i].scene.document.header.lineweight_display,
                     crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                    &self.tabs[i].scene.draw_depth_map(),
                 )
                 .and_then(|s| Scene::handle_from_wire_name(s))
                 .or_else(|| {
@@ -4858,6 +4861,7 @@ properties={:.1}ms picked={}",
                                 bounds,
                                 self.tabs[i].scene.document.header.lineweight_display,
                                 crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                                &self.tabs[i].scene.draw_depth_map(),
                             )
                             .and_then(|s| Scene::handle_from_wire_name(s))
                             .or_else(|| {
@@ -5237,6 +5241,7 @@ properties={:.1}ms picked={}",
                     bounds,
                     self.tabs[i].scene.document.header.lineweight_display,
                     crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                    &self.tabs[i].scene.draw_depth_map(),
                 )
                 .and_then(|s| Scene::handle_from_wire_name(s))
                 .or_else(|| {
@@ -5382,6 +5387,7 @@ properties={:.1}ms picked={}",
                     bounds,
                     self.tabs[i].scene.document.header.lineweight_display,
                     crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                    &self.tabs[i].scene.draw_depth_map(),
                 )
                 .and_then(|s| Scene::handle_from_wire_name(s));
 
@@ -5915,6 +5921,7 @@ properties={:.1}ms picked={}",
             bounds,
             self.tabs[i].scene.document.header.lineweight_display,
             crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+            &self.tabs[i].scene.draw_depth_map(),
         )
         .and_then(Scene::handle_from_wire_name);
         let wire_ms = wire_started.elapsed().as_secs_f64() * 1000.0;
