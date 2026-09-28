@@ -2658,8 +2658,25 @@ impl OpenCADStudio {
                     }) => {
                         #[cfg(target_arch = "wasm32")]
                         let accel = modifiers.command();
-                        let shortcut_modifier =
-                            modifiers.control() || modifiers.alt() || modifiers.logo();
+                        // AltGr reaches Windows apps as Ctrl+Alt, and a macOS
+                        // layout types some characters with Option: when such a
+                        // chord produces a printable glyph (`@`, `<`, `{` on many
+                        // European layouts) it is typing, not a shortcut. (#1236)
+                        let types_glyph = text.as_deref().is_some_and(|value| {
+                            !value.is_empty()
+                                && value
+                                    .chars()
+                                    .all(|ch| !ch.is_control() && !ch.is_whitespace())
+                        });
+                        let altgr = modifiers.control() && modifiers.alt();
+                        let mac_option = cfg!(target_os = "macos")
+                            && modifiers.alt()
+                            && !modifiers.control()
+                            && !modifiers.logo();
+                        let shortcut_modifier = (modifiers.control()
+                            || modifiers.alt()
+                            || modifiers.logo())
+                            && !(types_glyph && (altgr || mac_option));
                         // Any key that produces a printable glyph types it,
                         // even when its logical key resolves to navigation
                         // (NumLock-on Numpad8 / Numpad2 arrive as
