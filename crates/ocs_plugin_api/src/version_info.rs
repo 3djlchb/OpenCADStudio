@@ -148,7 +148,10 @@ mod tests {
             Some(env!("CARGO_PKG_VERSION"))
         );
         assert_eq!(value["api_version"].as_i64(), Some(crate::API_VERSION as i64));
-        assert_eq!(value["api_version_min_supported"].as_i64(), Some(2));
+        assert_eq!(
+            value["api_version_min_supported"].as_i64(),
+            Some(crate::API_VERSION_MIN_SUPPORTED as i64)
+        );
 
         // acadrust_version should have a patch component (e.g. "0.4.0").
         let opencadcodec = value["acadrust_version"].as_str().expect("acadrust_version string");

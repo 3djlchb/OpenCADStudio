@@ -553,16 +553,18 @@ description = "Template plugin"
 repository = "https://github.com/example/opencad-my-plugin.git"
 
 [opencad]
-api_version = 2
+api_version = 3
 ribbon_order = 60
 command_prefixes = ["MP_"]
 xdata_apps = ["MYPLUGIN_RECORD"]
 "#;
         let p = parse_plugin_toml(toml).expect("parsed");
-        assert_eq!(p.api_version, 2);
+        assert_eq!(p.api_version, 3);
         assert_eq!(p.repository.as_deref(), Some("example/opencad-my-plugin"));
         assert!(p.command_prefixes.contains(&"MP_".to_string()));
-        assert!(p.api_compatible(), "V2 plugins must be accepted by the V4 host");
+        assert!(p.api_compatible(), "V3 plugins must be accepted by the current host");
+        let v2 = parse_plugin_toml("id=\"old\"\napi_version = 2").expect("parsed");
+        assert!(!v2.api_compatible(), "V2 plugins are no longer loaded");
     }
 
     #[test]
@@ -710,7 +712,7 @@ rustc_version = "{host}"
 id = "opencad.test"
 name = "Test"
 version = "0.1.0"
-api_version = 2
+api_version = 3
 
 [opencad]
 rustc_version = "rustc 0.0.0-fake"
@@ -720,7 +722,7 @@ rustc_version = "rustc 0.0.0-fake"
         assert!(p.rustc_declared);
         assert!(
             p.rustc_compatible(),
-            "API v2 plugin should bypass rustc gate"
+            "API v3 plugin should bypass rustc gate"
         );
         assert!(p.loadable());
     }
@@ -826,7 +828,7 @@ acadrust_source = "{host}"
 id = "opencad.test"
 name = "Test"
 version = "0.1.0"
-api_version = 2
+api_version = 3
 
 [opencad]
 acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908da7#0908da7b6e4f702a6c78359a57f53e2b79cf39eb"
@@ -836,7 +838,7 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
         assert!(p.acadrust_declared);
         assert!(
             p.acadrust_compatible(),
-            "API v2 plugin should bypass opencadcodec gate"
+            "API v3 plugin should bypass opencadcodec gate"
         );
         assert!(p.loadable());
     }
