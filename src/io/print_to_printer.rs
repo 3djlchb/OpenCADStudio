@@ -625,13 +625,17 @@ fn with_printer_devmode(
             return None;
         }
         let result = (|| {
+            // The size query is the one call that takes no mode flags at all:
+            // with DM_OUT_BUFFER and no output buffer to write into, the
+            // driver reports failure (-1) instead of the size, and every
+            // caller below silently lost the driver's DEVMODE.
             let needed = DocumentPropertiesW(
                 std::ptr::null_mut(),
                 handle,
                 device_wide.as_ptr(),
                 std::ptr::null_mut(),
                 std::ptr::null(),
-                DM_OUT_BUFFER,
+                0,
             );
             if needed <= 0 {
                 return None;
@@ -1516,6 +1520,77 @@ mod printer_properties_tests {
             printer_properties_command(None),
             ("control.exe", vec!["printers".to_string()]),
         );
+    }
+
+    /// The driver's DEVMODE has to come back for a real printer. It stopped
+    /// coming back once the size query asked with `DM_OUT_BUFFER` and no
+    /// output buffer, which drivers answer with -1: `with_printer_devmode`
+    /// then returned `None` for every printer, so the plot's sheet and
+    /// orientation never reached the job's DEVMODE and the printer report
+    /// could never name a default sheet.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn printer_devmode_comes_back_for_a_real_printer() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Graphics::Gdi::DEVMODEW;
+
+        let device: Vec<u16> = std::ffi::OsStr::new("Microsoft Print to PDF")
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let devmode = super::with_printer_devmode(&device, |_, _| true)
+            .expect("the driver must report a DEVMODE for an installed printer");
+        assert!(
+            devmode.len() >= std::mem::size_of::<DEVMODEW>(),
+            "DEVMODE buffer is {} bytes, shorter than the public struct",
+            devmode.len()
+        );
+        // SAFETY: the buffer holds at least a public DEVMODEW, just checked.
+        let named = unsafe { (*(devmode.as_ptr() as *const DEVMODEW)).dmSize } as usize;
+        assert!(named > 0 && named <= devmode.len(), "dmSize {named} outside the buffer");
+
+        // And the symptom the lost DEVMODE produced: the driver's default
+        // sheet is one of the sheets it lists, so the report can name it.
+        let caps = crate::io::plot_device::printer_capabilities("Microsoft Print to PDF")
+            .expect("an installed printer reports sheets");
+        assert!(
+            caps.default_paper.is_some(),
+            "the driver's default sheet should resolve to one of its {} listed sheets",
+            caps.media.len()
+        );
+    }
+
+    /// The plot's orientation has to survive into the DEVMODE the print job
+    /// is spooled with. While the DEVMODE query was broken this silently
+    /// returned `None` for every printer and `CreateDC` fell back to the
+    /// driver's own default, so a landscape plot came out however the driver
+    /// happened to be set. The GDI ink tests cannot catch that: they accept
+    /// the raster-rotation fallback as an equally good outcome.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_plot_orientation_reaches_the_job_devmode() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Graphics::Gdi::{
+            DEVMODEW, DMORIENT_LANDSCAPE, DMORIENT_PORTRAIT, DM_ORIENTATION,
+        };
+
+        let device: Vec<u16> = std::ffi::OsStr::new("Microsoft Print to PDF")
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        for (landscape, want) in [(false, DMORIENT_PORTRAIT), (true, DMORIENT_LANDSCAPE)] {
+            let buf = super::oriented_printer_devmode(&device, landscape, None)
+                .unwrap_or_else(|| panic!("landscape={landscape}: the driver reported no DEVMODE"));
+            // SAFETY: `with_printer_devmode` sizes the buffer from the driver.
+            let dm = unsafe { &*(buf.as_ptr() as *const DEVMODEW) };
+            assert!(
+                dm.dmFields & DM_ORIENTATION != 0,
+                "landscape={landscape}: DM_ORIENTATION not marked as set"
+            );
+            // SAFETY: the printer branch of the DEVMODE union.
+            let got = unsafe { dm.Anonymous1.Anonymous1.dmOrientation };
+            assert_eq!(got, want as i16, "landscape={landscape}: wrong dmOrientation");
+        }
     }
 
     #[cfg(target_os = "macos")]
