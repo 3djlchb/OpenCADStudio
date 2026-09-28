@@ -108,28 +108,30 @@ fn outline_texts(sheet: &mut Sheet) {
     }
 }
 
-/// Longest side of a sheet's display raster, pixels.
-const RASTER_SIDE: f64 = 3072.0;
+/// Longest side of a sheet's full-size display raster, pixels.
+pub const RASTER_SIDE: f64 = 3072.0;
 
-/// The sheet drawn on a transparent background, straight alpha, rows from
-/// the top, memoised.
-pub fn display_raster(kind: UnderlayType, path: &str, item: &str) -> Option<Arc<PdfPage>> {
-    let key = (path.to_string(), item.to_string());
+/// The sheet drawn on a transparent background with `side` pixels on its
+/// longest side (at most [`RASTER_SIDE`]), straight alpha, rows from the
+/// top, memoised per size.
+pub fn display_raster(kind: UnderlayType, path: &str, item: &str, side: f64) -> Option<Arc<PdfPage>> {
+    let side = side.clamp(16.0, RASTER_SIDE).round();
+    let key = (path.to_string(), format!("{item}@{side}"));
     if let Some(hit) = raster_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return hit.clone();
     }
-    let value = sheet(kind, path, item).and_then(|s| rasterize(&s)).map(Arc::new);
+    let value = sheet(kind, path, item).and_then(|s| rasterize(&s, side)).map(Arc::new);
     raster_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
     value
 }
 
-fn rasterize(sheet: &Sheet) -> Option<PdfPage> {
+fn rasterize(sheet: &Sheet, side: f64) -> Option<PdfPage> {
     let [x0, y0, x1, y1] = sheet.rect;
     let (w, h) = (x1 - x0, y1 - y0);
     if !(w > 0.0 && h > 0.0) {
         return None;
     }
-    let scale = RASTER_SIDE / w.max(h);
+    let scale = side / w.max(h);
     let (pw, ph) = ((w * scale).ceil().max(1.0) as u32, (h * scale).ceil().max(1.0) as u32);
     let mut pixmap = tiny_skia::Pixmap::new(pw, ph)?;
     let to_px = |p: [f64; 2]| (((p[0] - x0) * scale) as f32, ((y1 - p[1]) * scale) as f32);

@@ -181,10 +181,14 @@ impl ImageModel {
     /// limits the drawn area to its inside, or to the page outside it when
     /// inverted. `None` when the underlay is off, non-PDF, or the page can't
     /// be rendered (caller keeps the outline placeholder).
+    /// `world_per_pixel` is the view's scale: the page is rasterised near
+    /// the size it shows on screen (full size when `None` or when larger),
+    /// so thin lines stay one crisp pixel wide when zoomed out.
     pub fn from_underlay(
         u: &codec::entities::Underlay,
         def: &codec::entities::UnderlayDefinition,
         background: [f32; 4],
+        world_per_pixel: Option<f64>,
     ) -> Option<Self> {
         use codec::entities::{UnderlayDisplayFlags, UnderlayType};
         use super::pdf_raster::{self, PageAdjust};
@@ -196,16 +200,36 @@ impl ImageModel {
         }
         let page = crate::entities::underlay::page_of(def);
         let rect = crate::entities::underlay::definition_rect(def)?;
+        // The page's longest side on screen, pixels (the view scale is taken
+        // a step finer, so the raster is never enlarged on screen).
+        let screen_side = world_per_pixel
+            .filter(|wpp| *wpp > 0.0)
+            .map(|wpp| {
+                let w = (rect[2] - rect[0]) * u.x_scale.abs();
+                let h = (rect[3] - rect[1]) * u.y_scale.abs();
+                w.max(h) / wpp
+            });
         let (source, raster) = match def.underlay_type {
             UnderlayType::Pdf => {
                 // Hidden PDF layers come from the underlay's layer overrides.
                 let source = super::pdf_layers::underlay_source(u, &def.file_path);
-                let raster = pdf_raster::rasterize_page_display(&source, page)?;
+                let inches = (rect[2] - rect[0]).max(rect[3] - rect[1]);
+                let raster = match screen_side {
+                    Some(side) if inches > 0.0 && side / inches < pdf_raster::DISPLAY_DPI as f64 => {
+                        pdf_raster::rasterize_page_display_at(&source, page, (side / inches).max(8.0) as f32)?
+                    }
+                    _ => pdf_raster::rasterize_page_display(&source, page)?,
+                };
                 (source, raster)
             }
             kind => (
                 def.file_path.clone(),
-                super::underlay_vector::display_raster(kind, &def.file_path, page)?,
+                super::underlay_vector::display_raster(
+                    kind,
+                    &def.file_path,
+                    page,
+                    screen_side.unwrap_or(super::underlay_vector::RASTER_SIDE),
+                )?,
             ),
         };
         // Dark means an HSL lightness under one half: pure blue counts as

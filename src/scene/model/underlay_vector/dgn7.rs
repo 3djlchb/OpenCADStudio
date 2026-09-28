@@ -198,9 +198,9 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
         }
         let symbology = uint16(e, 34).unwrap_or(0);
         let color = colors[(symbology >> 8) as usize];
-        let weight = ((symbology & 0xf8) >> 3) as f64;
-        // Weights are screen pixels: a negative width asks for pixels.
-        let stroke = Some((color, -(weight * 2.0 + 1.0)));
+        // One pixel wide, as V8 models draw: the element weight is a
+        // lineweight, not shown while lineweights are off.
+        let stroke = Some((color, -1.0));
         let fill = fill_index(e).map(|i| colors[i as usize]);
         let int_pt = |i: usize| -> Option<[f64; 2]> { Some([int32(e, i)? as f64, int32(e, i + 4)? as f64]) };
         match kind {
@@ -268,7 +268,7 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
                 // B-spline curve header: order, pole count.
                 let order = ((e.get(40).copied().unwrap_or(0) & 0x0f) + 2) as usize;
                 let poles = uint16(e, 42).unwrap_or(0) as usize;
-                spline = Some((order, poles, color, -(weight * 2.0 + 1.0)));
+                spline = Some((order, poles, color, -1.0));
                 knots.clear();
             }
             26 => {

@@ -75,6 +75,15 @@ pub fn rasterize_page_display(path: &str, page: &str) -> Option<Arc<PdfPage>> {
     rasterize_cached(path, page, RASTER_DPI, true)
 }
 
+/// The display raster at a lower DPI for a page shown small on screen
+/// (never above the on-screen 150 DPI).
+pub fn rasterize_page_display_at(path: &str, page: &str, dpi: f32) -> Option<Arc<PdfPage>> {
+    rasterize_cached(path, page, dpi.clamp(1.0, RASTER_DPI), true)
+}
+
+/// The DPI of the full-size display raster.
+pub const DISPLAY_DPI: f32 = RASTER_DPI;
+
 fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool) -> Option<Arc<PdfPage>> {
     let key = (path.to_string(), page.to_string(), dpi.to_bits(), transparent);
     if let Some(hit) = page_cache()
@@ -228,7 +237,8 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
     if identity {
         return raster.pixels.clone();
     }
-    let key = (path.to_string(), page.to_string(), adjust);
+    // One entry per raster size: a page is rasterised again for the zoom.
+    let key = (path.to_string(), format!("{page}@{}x{}", raster.width, raster.height), adjust);
     if let Some(hit) = adjusted_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())

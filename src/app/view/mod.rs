@@ -2544,7 +2544,10 @@ impl OpenCADStudio {
         // driven by input events, but once the cursor stops no event would fire
         // the one full-quality frame that re-renders hatches — this tick does,
         // then the scene-render cache holds it and the subscription auto-stops.
-        let nav_settle = if self.tabs[self.active_tab].scene.is_settling() {
+        // Underlay rasters follow the zoom once it settles; tick until then.
+        let nav_settle = if self.tabs[self.active_tab].scene.is_settling()
+            || self.tabs[self.active_tab].scene.underlay_resolution_stale()
+        {
             window::frames().map(Message::Tick)
         } else {
             Subscription::none()
