@@ -79,7 +79,9 @@ struct ImageParams {
     /// Signed draw-order depth (-1,1); applied as a clip-z bias in the shader
     /// so the raster orders against other entity types. 0.0 = neutral.
     draw_depth: f32,
-    _pad: [f32; 2],
+    /// 1.0 when pixel alpha applies, 0.0 when pixels draw opaque.
+    use_alpha: f32,
+    _pad: f32,
 } // 16 bytes
 
 // ── Per-image GPU handle ──────────────────────────────────────────────────
@@ -196,7 +198,8 @@ impl ImageGpu {
         let params = ImageParams {
             opacity: model.opacity.clamp(0.0, 1.0),
             draw_depth: 0.0,
-            _pad: [0.0; 2],
+            use_alpha: if model.use_alpha { 1.0 } else { 0.0 },
+            _pad: 0.0,
         };
         let params_buf = Arc::new(super::gpu_upload::upload_buffer(
             device,
