@@ -345,8 +345,7 @@ pub fn mark_sentinel_survived() {
     if text.lines().any(|l| l.trim() == SURVIVED_MARKER) {
         return;
     }
-    let _ = std::fs::write(&p, format!("{text}{SURVIVED_MARKER}
-"));
+    let _ = std::fs::write(&p, format!("{text}{SURVIVED_MARKER}\n"));
 }
 
 pub fn arm_sentinel(backend: &str) {

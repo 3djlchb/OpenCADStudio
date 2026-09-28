@@ -403,14 +403,6 @@ pub fn percent_encode(s: &str) -> String {
     out
 }
 
-/// Web renderer-error surface (#414): wgpu / naga report pipeline and shader
-/// failures through the `log` facade and then leave the canvas empty — with no
-/// logger installed the message is lost, so a broken GPU path looks like "the
-/// app draws nothing" with a clean console. Mirror every Error-level record to
-/// the browser console AND into a fixed DOM banner whose text is selectable
-/// (the canvas UI is not), with a one-click Copy button, so a failing user can
-/// paste the exact error into a bug report. Panics land in the same banner via
-/// a chained hook.
 /// Desktop crash log.
 ///
 /// A release build hides the console (`windows_subsystem = "windows"`) and is
@@ -581,6 +573,14 @@ pub mod crash_log {
     }
 }
 
+/// Web renderer-error surface (#414): wgpu / naga report pipeline and shader
+/// failures through the `log` facade and then leave the canvas empty — with no
+/// logger installed the message is lost, so a broken GPU path looks like "the
+/// app draws nothing" with a clean console. Mirror every Error-level record to
+/// the browser console AND into a fixed DOM banner whose text is selectable
+/// (the canvas UI is not), with a one-click Copy button, so a failing user can
+/// paste the exact error into a bug report. Panics land in the same banner via
+/// a chained hook.
 #[cfg(target_arch = "wasm32")]
 pub mod web_diag {
     use std::sync::Mutex;
