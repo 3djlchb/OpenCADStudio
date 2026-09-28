@@ -561,6 +561,9 @@ impl Scene {
                 .map(|l| l.is_plottable)
                 .unwrap_or(true)
         };
+        // Plot items are stacked by draw depth; a fill left at 0 lands above
+        // or below lines by chance instead of where DRAWORDER put it. (#1345)
+        let depth_map = self.draw_depth_map();
         let mut models = Vec::new();
         for (&handle, model) in self.hatches.iter() {
             let Some(source) = self.document.get_entity(handle) else {
@@ -609,6 +612,7 @@ impl Scene {
             hatch.color = style.0;
             hatch.aci = style.4;
             hatch.line_weight_px = style.3;
+            hatch.draw_depth = depth_map.get(&handle.value()).map_or(0.0, |depth| depth[0]);
             if let EntityType::Hatch(dxf) = entity {
                 if let model::hatch_model::HatchPattern::Pattern(_) = &hatch.pattern {
                     if dxf.pattern.lines.is_empty() {
