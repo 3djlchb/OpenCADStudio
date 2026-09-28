@@ -242,8 +242,10 @@ fn emit_image(
     {
         return Err("Cannot plot bitmap: invalid coordinates, clip boundary, or opacity.".into());
     }
+    // The low bit (free: the pixel buffer is aligned) keeps the opaque copy
+    // of a picture apart from its transparent one.
     let key = (
-        std::sync::Arc::as_ptr(&image.pixels) as usize,
+        std::sync::Arc::as_ptr(&image.pixels) as usize | usize::from(!image.use_alpha),
         image.width,
         image.height,
     );
@@ -255,7 +257,14 @@ fn emit_image(
             doc.resources.xobjects.map.insert(
                 id.clone(),
                 printpdf::XObject::Image(printpdf::RawImage {
-                    pixels: printpdf::RawImageData::U8(image.pixels.as_ref().clone()),
+                    pixels: printpdf::RawImageData::U8(if image.use_alpha {
+                        image.pixels.as_ref().clone()
+                    } else {
+                        // Transparency off: every pixel opaque in its colour.
+                        let mut opaque = image.pixels.as_ref().clone();
+                        opaque.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+                        opaque
+                    }),
                     width: image.width as usize,
                     height: image.height as usize,
                     data_format: printpdf::RawImageFormat::RGBA8,
