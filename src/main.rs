@@ -75,6 +75,13 @@ fn main() -> iced::Result {
             return Ok(());
         }
 
+        // Crash log. A release build hides the console, so before this a
+        // panic ended the process with nothing on screen and nothing on disk
+        // (#635, #845). Installed after the child-process handoffs above: a
+        // GPU probe aborting is how an unusable backend is detected, not a
+        // crash worth filing.
+        OpenCADStudio::sys::crash_log::install();
+
         // Opt-in logging. `--log LEVEL` seeds RUST_LOG; the subscriber then
         // surfaces wgpu / iced / winit diagnostics that are otherwise silent.
         if let Some(level) = &args.log {
