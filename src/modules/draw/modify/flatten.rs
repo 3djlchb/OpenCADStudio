@@ -289,45 +289,41 @@ fn z_axis_normal(normal: codec::types::Vector3) -> bool {
 pub fn collect_flatten_handles(scene: &Scene) -> Vec<Handle> {
     let sel = scene.selected_entities();
     if sel.is_empty() {
-        scene
-            .document
-            .entities()
-            .map(|e| e.common().handle)
-            .filter(|handle| {
-                scene.entity_belongs_to_active_space(*handle)
-                    && !scene.is_layer_locked(*handle)
-            })
-            .collect()
+        let mut out = Vec::with_capacity(scene.document.entities().size_hint().0);
+        for handle in scene.document.entities().map(|e| e.common().handle) {
+            if scene.entity_belongs_to_active_space(handle) && !scene.is_layer_locked(handle) {
+                out.push(handle);
+            }
+        }
+        out
     } else {
-        sel.into_iter()
-            .map(|(h, _)| h)
-            .filter(|handle| {
-                scene.entity_belongs_to_active_space(*handle)
-                    && !scene.is_layer_locked(*handle)
-            })
-            .collect()
+        let mut out = Vec::with_capacity(sel.len());
+        for (handle, _) in sel {
+            if scene.entity_belongs_to_active_space(handle) && !scene.is_layer_locked(handle) {
+                out.push(handle);
+            }
+        }
+        out
     }
 }
 
 /// The replacement entities for candidates that actually move (None for
 /// unsupported / already-flat entities, exactly as the arm filtered them).
 pub fn plan_flatten(scene: &Scene, handles: &[Handle]) -> Vec<EntityType> {
-    handles
-        .iter()
-        .filter_map(|&handle| scene.document.get_entity(handle))
-        .filter_map(flatten_entity_z)
-        .collect()
+    let mut out = Vec::with_capacity(handles.len());
+    for &handle in handles {
+        if let Some(entity) = scene.document.get_entity(handle) {
+            if let Some(flattened) = flatten_entity_z(entity) {
+                out.push(flattened);
+            }
+        }
+    }
+    out
 }
 
 /// Publish flattened replacements; returns how many entities moved.
 pub fn apply_flatten_updates(scene: &mut Scene, updates: Vec<EntityType>) -> usize {
-    let mut moved = 0usize;
-    for entity in updates {
-        if scene.update_entity(entity) {
-            moved += 1;
-        }
-    }
-    moved
+    scene.update_entities(updates)
 }
 
 #[cfg(test)]

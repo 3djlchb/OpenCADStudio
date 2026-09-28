@@ -1146,12 +1146,10 @@ impl OpenCADStudio {
                         0
                     } else {
                         self.push_undo_snapshot(i, "FLATTEN");
-                        let mut moved = 0usize;
-                        for entity in updates {
-                            if self.tabs[i].scene.update_entity(entity) {
-                                moved += 1;
-                            }
-                        }
+                        let moved = crate::modules::draw::modify::flatten::apply_flatten_updates(
+                            &mut self.tabs[i].scene,
+                            updates,
+                        );
                         if moved == 0 {
                             self.discard_last_undo_entry(i);
                         }
