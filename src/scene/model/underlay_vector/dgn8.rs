@@ -39,16 +39,24 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
 
 impl<'a> Cfb<'a> {
     fn open(b: &'a [u8]) -> Option<Self> {
-        if !b.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
+        // The 512-byte header, with the only two sector sizes the format
+        // has (512 and 4096 bytes); anything else is not a compound file.
+        if b.len() < 512 || !b.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
             return None;
         }
-        let sector = 1usize << u16::from_le_bytes([b[30], b[31]]);
+        let sector_shift = u16::from_le_bytes([b[30], b[31]]);
+        if sector_shift != 9 && sector_shift != 12 {
+            return None;
+        }
+        let sector = 1usize << sector_shift;
         let mini_sector_shift = u16::from_le_bytes([b[32], b[33]]);
         if mini_sector_shift != 6 {
             return None;
         }
         let mut difat: Vec<u32> = (0..109).filter_map(|i| u32_at(b, 76 + i * 4)).filter(|&v| v < END).collect();
-        let (mut next, mut count) = (u32_at(b, 68)?, u32_at(b, 72)?);
+        // The DIFAT chain cannot hold more sectors than the file does, so a
+        // looping chain stops there.
+        let (mut next, mut count) = (u32_at(b, 68)?, u32_at(b, 72)?.min((b.len() / sector) as u32));
         while count > 0 && next < END {
             let at = (next as usize + 1) * sector;
             for i in 0..sector / 4 - 1 {

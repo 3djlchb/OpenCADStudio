@@ -270,7 +270,9 @@ mod w2d {
                     _ => {}
                 }
             }
-            let body = &self.b[start + 1..self.i.saturating_sub(1)];
+            // A stream cut off right after its '(' has no body at all.
+            let end = self.i.saturating_sub(1).max(start + 1);
+            let body = self.b.get(start + 1..end)?;
             let name_len = body.iter().position(|c| c.is_ascii_whitespace() || *c == b'(').unwrap_or(body.len());
             Some((String::from_utf8_lossy(&body[..name_len]).to_string(), &body[name_len..]))
         }
