@@ -22,6 +22,30 @@ use crate::scene::model::wire_model::{
 
 const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
 
+/// Resolve the extension dictionary handle for an object or entity, checking the entity's
+/// field, document lookup tables, and owned Dictionary / DictionaryWithDefault objects.
+fn resolve_extension_dictionary(doc: &CadDocument, owner: Handle) -> Option<Handle> {
+    if let Some(entity) = doc.get_entity(owner) {
+        if let Some(h) = entity.common().xdictionary_handle {
+            if !h.is_null() {
+                return Some(h);
+            }
+        }
+    }
+    if let Some(h) = doc.extension_dictionary_handle(owner) {
+        if !h.is_null() {
+            return Some(h);
+        }
+    }
+    doc.objects.iter().find_map(|(handle, object)| match object {
+        ObjectType::Dictionary(d) if d.owner == owner && !handle.is_null() => Some(*handle),
+        ObjectType::DictionaryWithDefault(d) if d.owner == owner && !handle.is_null() => {
+            Some(*handle)
+        }
+        _ => None,
+    })
+}
+
 /// Resolve the enabled XCLIP spatial filter for `ins`, if any.
 ///
 /// Walks the INSERT's extension dictionary: `xdictionary → ACAD_FILTER
@@ -32,7 +56,11 @@ pub fn insert_spatial_filter<'a>(
     doc: &'a CadDocument,
     ins: &Insert,
 ) -> Option<&'a SpatialFilter> {
-    let xdict = ins.common.xdictionary_handle?;
+    let xdict = ins
+        .common
+        .xdictionary_handle
+        .filter(|h| !h.is_null())
+        .or_else(|| resolve_extension_dictionary(doc, ins.common.handle))?;
     let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
     let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
     match doc.objects.get(&spatial)? {
@@ -52,7 +80,12 @@ pub fn filter_handle(doc: &CadDocument, insert: Handle) -> Option<Handle> {
     let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
         return None;
     };
-    let acad_filter = dict_entry(doc, ins.common.xdictionary_handle?, "ACAD_FILTER")?;
+    let xdict = ins
+        .common
+        .xdictionary_handle
+        .filter(|h| !h.is_null())
+        .or_else(|| resolve_extension_dictionary(doc, insert))?;
+    let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
     let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
     matches!(doc.objects.get(&spatial), Some(ObjectType::SpatialFilter(_))).then_some(spatial)
 }
@@ -141,6 +174,7 @@ pub fn remove_insert_clip(doc: &mut CadDocument, insert: Handle) -> bool {
     if let Some(xdict) = doc.extension_dictionary_handle(spatial) {
         let children: Vec<Handle> = match doc.objects.get(&xdict) {
             Some(ObjectType::Dictionary(d)) => d.entries.iter().map(|(_, h)| *h).collect(),
+            Some(ObjectType::DictionaryWithDefault(d)) => d.entries.iter().map(|(_, h)| *h).collect(),
             _ => Vec::new(),
         };
         for child in children {
@@ -150,8 +184,10 @@ pub fn remove_insert_clip(doc: &mut CadDocument, insert: Handle) -> bool {
     }
     doc.objects.remove(&spatial);
     for object in doc.objects.values_mut() {
-        if let ObjectType::Dictionary(d) = object {
-            d.entries.retain(|(_, h)| *h != spatial);
+        match object {
+            ObjectType::Dictionary(d) => d.entries.retain(|(_, h)| *h != spatial),
+            ObjectType::DictionaryWithDefault(d) => d.entries.retain(|(_, h)| *h != spatial),
+            _ => {}
         }
     }
     true
@@ -220,11 +256,16 @@ pub fn set_insert_clip(
             [inv[0][3], inv[1][3], inv[2][3], inv[3][3]],
         ],
     };
-    let existing_xdict = ins.common.xdictionary_handle;
+    let existing_xdict = resolve_extension_dictionary(doc, insert);
     remove_insert_clip(doc, insert);
 
     // insert → extension dictionary → ACAD_FILTER → SPATIAL
-    let xdict = match existing_xdict.filter(|h| matches!(doc.objects.get(h), Some(ObjectType::Dictionary(_)))) {
+    let xdict = match existing_xdict.filter(|h| {
+        matches!(
+            doc.objects.get(h),
+            Some(ObjectType::Dictionary(_) | ObjectType::DictionaryWithDefault(_))
+        )
+    }) {
         Some(h) => h,
         None => {
             let h = doc.allocate_handle();
@@ -244,8 +285,12 @@ pub fn set_insert_clip(
             let mut d = Dictionary::new();
             (d.handle, d.owner, d.hard_owner) = (h, xdict, true);
             doc.objects.insert(h, ObjectType::Dictionary(d));
-            if let Some(ObjectType::Dictionary(parent)) = doc.objects.get_mut(&xdict) {
-                parent.add_entry("ACAD_FILTER", h);
+            match doc.objects.get_mut(&xdict) {
+                Some(ObjectType::Dictionary(parent)) => parent.add_entry("ACAD_FILTER", h),
+                Some(ObjectType::DictionaryWithDefault(parent)) => {
+                    parent.entries.push(("ACAD_FILTER".to_string(), h))
+                }
+                _ => {}
             }
             h
         }
@@ -268,14 +313,22 @@ pub fn set_insert_clip(
     filter.inverse_block_transform = inverse;
     filter.clip_bound_transform = Matrix4::identity();
     doc.objects.insert(spatial, ObjectType::SpatialFilter(filter));
-    if let Some(ObjectType::Dictionary(parent)) = doc.objects.get_mut(&acad_filter) {
-        parent.add_entry("SPATIAL", spatial);
+    match doc.objects.get_mut(&acad_filter) {
+        Some(ObjectType::Dictionary(parent)) => parent.add_entry("SPATIAL", spatial),
+        Some(ObjectType::DictionaryWithDefault(parent)) => {
+            parent.entries.push(("SPATIAL".to_string(), spatial))
+        }
+        _ => {}
     }
     if inverted {
         let fdict = doc.ensure_extension_dictionary(spatial);
         let record = doc.allocate_handle();
-        if let Some(ObjectType::Dictionary(d)) = doc.objects.get_mut(&fdict) {
-            d.add_entry(ROUNDTRIP, record);
+        match doc.objects.get_mut(&fdict) {
+            Some(ObjectType::Dictionary(d)) => d.add_entry(ROUNDTRIP, record),
+            Some(ObjectType::DictionaryWithDefault(d)) => {
+                d.entries.push((ROUNDTRIP.to_string(), record))
+            }
+            _ => {}
         }
         let mut x = XRecord::new();
         (x.handle, x.owner) = (record, fdict);
@@ -291,12 +344,15 @@ pub fn set_insert_clip(
 }
 
 fn dict_entry(doc: &CadDocument, dict: Handle, key: &str) -> Option<Handle> {
-    match doc.objects.get(&dict)? {
-        ObjectType::Dictionary(d) => {
-            d.entries.iter().find(|(k, _)| k == key).map(|(_, h)| *h)
-        }
-        _ => None,
-    }
+    let entries = match doc.objects.get(&dict)? {
+        ObjectType::Dictionary(d) => &d.entries,
+        ObjectType::DictionaryWithDefault(d) => &d.entries,
+        _ => return None,
+    };
+    entries
+        .iter()
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case(key))
+        .map(|(_, h)| *h)
 }
 
 /// Build the clip boundary as a closed world-space ring in the same f32 XY
@@ -323,6 +379,9 @@ fn world_clip_polygon_f64(
 /// Build the clip boundary with the exact transform used by the corresponding
 /// block instance. Callers that resolve block base points or parent instances
 /// pass their composed transform here so geometry and clipping share one space.
+///
+/// The filter's `inverse_block_transform` is used as stored: the codec decodes
+/// the on-disk column-major 4x3 layout into row-major `Matrix4`.
 pub fn world_clip_polygon_for_transform(
     sf: &SpatialFilter,
     xform: &Transform,
