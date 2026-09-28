@@ -1498,8 +1498,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "This printer reports no driver options." => Some(("plot", "this-printer-reports-no-driver-options")),
         "Could not read the printer's options: {error}" => Some(("plot", "could-not-read-the-printer-s-options-error")),
         "Reading the printer's options…" => Some(("plot", "reading-the-printer-s-options")),
-        "Printing preferences saved for {printer}." => Some(("plot", "printing-preferences-saved-for-printer")),
-        "Printing preferences unchanged." => Some(("plot", "printing-preferences-unchanged")),
         "Printer properties" => Some(("plot", "printer-properties")),
         "Layout renamed: '{old_name}' → '{new_name}'" => Some(("common", "layout-renamed-old-name-new-name")),
         "Layouts" => Some(("layout", "layouts")),
