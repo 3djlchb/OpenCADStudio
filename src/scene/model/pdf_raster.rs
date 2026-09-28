@@ -214,8 +214,11 @@ pub fn page_size_inches(path: &str, page: &str) -> Option<(f64, f64)> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PageAdjust {
     /// 0..=100; 100 keeps the colours, lower values pull their lightness
-    /// towards one third.
+    /// towards `contrast_pivot` (hue and saturation kept).
     pub contrast: u8,
+    /// The lightness contrast 0 leaves every colour at, in thousandths:
+    /// measured 500 for PDF, 243 for DWF and 650 for DGN underlays.
+    pub contrast_pivot: u16,
     pub monochrome: bool,
     /// Lighten dark, unsaturated content on a dark background (black lines
     /// and text become white), keeping coloured content.
@@ -266,11 +269,12 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
             rgb = hsl_to_rgb(h, s, (1.0 - l + 20.0 / 255.0).min(1.0));
         }
         if adjust.contrast < 100 {
-            // Lightness is pulled towards one third, hue and saturation kept:
-            // contrast 0 leaves every colour at a third of full lightness.
+            // Lightness is pulled towards the pivot, hue and saturation kept:
+            // contrast 0 leaves every colour at the pivot's lightness.
             let (h, s, l) = rgb_to_hsl(rgb);
             let k = adjust.contrast as f32 / 100.0;
-            rgb = hsl_to_rgb(h, s, 1.0 / 3.0 + (l - 1.0 / 3.0) * k);
+            let pivot = adjust.contrast_pivot as f32 / 1000.0;
+            rgb = hsl_to_rgb(h, s, pivot + (l - pivot) * k);
         }
         for (dst, c) in px[..3].iter_mut().zip(rgb) {
             *dst = (c.clamp(0.0, 1.0) * 255.0).round() as u8;

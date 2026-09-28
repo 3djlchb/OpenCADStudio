@@ -222,15 +222,24 @@ impl ImageModel {
                 };
                 (source, raster)
             }
-            kind => (
-                def.file_path.clone(),
-                super::underlay_vector::display_raster(
+            kind => {
+                let hidden = super::pdf_layers::hidden_layers(u);
+                // The adjusted-pixel memo keys on the source: one per set of
+                // hidden layers.
+                let source = if hidden.is_empty() {
+                    def.file_path.clone()
+                } else {
+                    format!("{}#{}", def.file_path, hidden.join("|"))
+                };
+                let raster = super::underlay_vector::display_raster(
                     kind,
                     &def.file_path,
                     page,
+                    &hidden,
                     screen_side.unwrap_or(super::underlay_vector::RASTER_SIDE),
-                )?,
-            ),
+                )?;
+                (source, raster)
+            }
         };
         // Dark means an HSL lightness under one half: pure blue counts as
         // light, (0, 128, 0) as dark.
@@ -243,6 +252,11 @@ impl ImageModel {
             &raster,
             PageAdjust {
                 contrast: u.contrast.min(100),
+                contrast_pivot: match def.underlay_type {
+                    UnderlayType::Pdf => 500,
+                    UnderlayType::Dwf => 243,
+                    UnderlayType::Dgn => 650,
+                },
                 monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
                 adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND),
                 // A DGN model is drawn for a black background, so its

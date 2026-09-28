@@ -1613,7 +1613,7 @@ bg={bg_ms:.1}ms n={view_count}"
             } else if let Some(ctx) = self.ribbon.underlay_context() {
                 let ctx = ctx.clone();
                 crate::ui::side_toolbar::view_with_active(
-                    &crate::ui::ribbon::pdf_underlay_tools(),
+                    &crate::ui::ribbon::pdf_underlay_tools(ctx.kind),
                     &move |id| match id {
                         "_PDFULMONO" => ctx.monochrome,
                         "_PDFULSHOW" => ctx.shown,

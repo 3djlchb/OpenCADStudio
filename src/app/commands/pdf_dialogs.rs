@@ -73,8 +73,7 @@ impl OpenCADStudio {
             crate::entities::underlay::display_path(&self.pdf_stored_path(path, state.path_type.0));
     }
 
-    /// ULAYERS: every PDF underlay of the drawing, the selected one first
-    /// shown.
+    /// ULAYERS: every underlay of the drawing, the selected one first shown.
     pub(in crate::app) fn open_underlay_layers_dialog(&mut self, i: usize) {
         let document = &self.tabs[i].scene.document;
         let selected: Vec<codec::Handle> = self.tabs[i]
@@ -88,9 +87,6 @@ impl OpenCADStudio {
             let codec::EntityType::Underlay(u) = entity else {
                 continue;
             };
-            if u.underlay_type != codec::entities::UnderlayType::Pdf {
-                continue;
-            }
             let Some(def) = crate::entities::underlay::definition(u, document) else {
                 continue;
             };
@@ -99,10 +95,13 @@ impl OpenCADStudio {
             if same > 0 {
                 name = format!("{name} ({})", same + 1);
             }
-            let mut layers: Vec<String> = crate::scene::model::pdf_layers::layers(&def.file_path)
-                .into_iter()
-                .map(|l| l.name)
-                .collect();
+            let mut layers: Vec<String> = match u.underlay_type {
+                codec::entities::UnderlayType::Pdf => crate::scene::model::pdf_layers::layers(&def.file_path)
+                    .into_iter()
+                    .map(|l| l.name)
+                    .collect(),
+                kind => crate::scene::model::underlay_vector::layer_names(kind, &def.file_path),
+            };
             layers.sort_by_key(|n| n.to_lowercase());
             layers.dedup();
             targets.push(LayerTarget {
@@ -113,7 +112,7 @@ impl OpenCADStudio {
             });
         }
         if targets.is_empty() {
-            self.command_line.push_error("No PDF underlays found.");
+            self.command_line.push_error("No underlays found.");
             return;
         }
         let current = targets
@@ -152,7 +151,7 @@ impl OpenCADStudio {
 
     /// Writes the layers each underlay turns off, as one undo step.
     fn apply_underlay_layers(&mut self, i: usize, targets: Vec<LayerTarget>) {
-        use crate::scene::model::pdf_layers::{hidden_layers, LAYER_OVERRIDE_APP};
+        use crate::scene::model::pdf_layers::{hidden_layers, DGN_OVERRIDE_PLACEHOLDER, LAYER_OVERRIDE_APP};
         let changed: Vec<LayerTarget> = targets
             .into_iter()
             .filter(|t| match self.tabs[i].scene.document.get_entity(t.handle) {
@@ -182,6 +181,10 @@ impl OpenCADStudio {
                 data.remove_record(LAYER_OVERRIDE_APP);
                 if !target.hidden.is_empty() {
                     let mut record = codec::xdata::ExtendedDataRecord::new(LAYER_OVERRIDE_APP);
+                    // A DGN underlay's names follow a placeholder string.
+                    if u.underlay_type == codec::entities::UnderlayType::Dgn {
+                        record.add_value(codec::xdata::XDataValue::String(DGN_OVERRIDE_PLACEHOLDER.to_string()));
+                    }
                     for name in &target.hidden {
                         record.add_value(codec::xdata::XDataValue::String(name.clone()));
                     }

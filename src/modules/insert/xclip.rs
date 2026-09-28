@@ -16,7 +16,6 @@
 // underlay as PDFCLIP, a raster image as IMAGECLIP, a layout viewport as
 // VPCLIP, anything else is "*Invalid selection*".
 
-use codec::entities::UnderlayType;
 use codec::types::Handle;
 use codec::EntityType;
 use glam::DVec3;
@@ -488,7 +487,7 @@ impl CadCommand for ClipCommand {
                 self.inner = Some(Box::new(XclipCommand::for_inserts(vec![handle], false)));
                 CmdResult::NeedPoint
             }
-            Some(EntityType::Underlay(u)) if u.underlay_type == UnderlayType::Pdf => {
+            Some(EntityType::Underlay(u)) => {
                 self.inner = Some(Box::new(PdfClipCommand::for_underlay(handle, u)));
                 CmdResult::NeedPoint
             }

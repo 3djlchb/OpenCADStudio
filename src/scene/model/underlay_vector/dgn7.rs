@@ -262,6 +262,7 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
                     width_factor: if height > 0.0 { width / height } else { 1.0 },
                     rotation: (rotation as f64 / 360000.0).to_radians(),
                     color,
+                    font: "txt".to_string(),
                 });
             }
             27 => {
@@ -380,14 +381,65 @@ fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Raw>, depth: usize, out: 
     }
 }
 
-/// The model's geometry, in master units.
-pub fn model(bytes: &[u8]) -> Option<Sheet> {
+/// A level's number (0-63) from an element header.
+fn level(e: &[u8]) -> u8 {
+    e[0] & 0x3f
+}
+
+/// Level names from the level name table (type 66 elements on level 6):
+/// each entry is a level number followed by its name.
+// ponytail: entries are found by that pattern rather than by the table's
+// record layout; read the layout if a file lists a level wrongly.
+fn level_names(all: &[&[u8]]) -> HashMap<u8, String> {
+    let mut names = HashMap::new();
+    for e in all.iter().filter(|e| e[1] & 0x7f == 66 && level(e) == 6) {
+        for j in 36..e.len().saturating_sub(3) {
+            let n = u16::from_le_bytes([e[j], e[j + 1]]);
+            if !(1..=63).contains(&n) || (j > 36 && e[j - 1] != 0) || names.contains_key(&(n as u8)) {
+                continue;
+            }
+            let rest = &e[j + 2..];
+            let len = rest.iter().position(|c| !(c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'$'))).unwrap_or(rest.len());
+            if len > 0 && rest.get(len) == Some(&0) {
+                names.insert(n as u8, String::from_utf8_lossy(&rest[..len]).to_string());
+            }
+        }
+    }
+    names
+}
+
+/// The used levels' names (or numbers), for the underlay layers list.
+pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
+    if !is_v7(bytes) {
+        return None;
+    }
+    let all = elements(bytes);
+    let names = level_names(&all);
+    let mut used: Vec<u8> = all
+        .iter()
+        .filter(|e| !matches!(e[1] & 0x7f, 9 | 8 | 10 | 5 | 66 | 34) && level(e) > 0)
+        .map(|e| level(e))
+        .collect();
+    used.sort_unstable();
+    used.dedup();
+    Some(used.into_iter().map(|l| names.get(&l).cloned().unwrap_or_else(|| l.to_string())).collect())
+}
+
+/// The model's geometry, in master units, without the `hidden` levels.
+pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
     if !is_v7(bytes) {
         return None;
     }
     let u = units(bytes)?;
     let all = elements(bytes);
     let colors = color_table(&all).unwrap_or_else(default_colors);
+    let names = level_names(&all);
+    let off = |e: &[u8]| {
+        let l = level(e);
+        let name = names.get(&l).cloned().unwrap_or_else(|| l.to_string());
+        hidden.iter().any(|h| h.eq_ignore_ascii_case(&name))
+    };
+    let all: Vec<&[u8]> = all.into_iter().filter(|e| !off(e)).collect();
     // Shared cell definitions (type 34) and their components are drawn only
     // where instances place them; everything else is the model itself.
     let mut defs: HashMap<String, Raw> = HashMap::new();

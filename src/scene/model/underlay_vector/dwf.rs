@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
-use super::model::{arc_cubics, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath};
+use super::model::{arc_cubics, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text, CAP_PER_EM};
 
 /// The package's files, with `\` separators turned into `/`.
 fn unzip(bytes: &[u8]) -> Option<HashMap<String, Vec<u8>>> {
@@ -160,37 +160,58 @@ pub fn sheet(bytes: &[u8], name: &str) -> Option<Sheet> {
         .find(|s| s.name.eq_ignore_ascii_case(name))
         .or_else(|| (name.is_empty()).then(|| entries.first()).flatten())?;
     let data = files.get(&entry.graphics)?;
-    let (paths, view) = if entry.graphics.to_ascii_lowercase().ends_with(".w2d") {
+    let (paths, view, texts) = if entry.graphics.to_ascii_lowercase().ends_with(".w2d") {
         w2d::read(data)?
     } else {
         let w2x = entry.w2x.as_ref().and_then(|p| files.get(p));
         xps::read(data, w2x.map(|v| v.as_slice()), entry)?
     };
     let rect = view.or_else(|| paths_bounds(&paths))?;
-    Some(Sheet { rect, paths, texts: Vec::new(), sub_per_master: 1.0 })
+    Some(Sheet { rect, paths, texts, sub_per_master: 1.0 })
 }
 
-/// The default colour map of a W2D stream: black, a 6×6×6 colour cube from
-/// index 10 (red 180 steps, green 30, blue 5), greys after it.
+/// The default colour map of a W2D stream: ten system colours, a 6×6×6
+/// colour cube from index 10 (red 36 steps, green 6, blue 1), a grey ramp
+/// at 226-245 and ten more system colours (measured against plotted files:
+/// the cube, the ramp, 7 and 248).
 fn default_color(index: u8) -> [u8; 3] {
     let i = index as usize;
     const LEVELS: [u8; 6] = [0, 51, 102, 153, 204, 255];
-    // ponytail: only the cube is confirmed against plotted files; the entries
-    // around it are a grey ramp until a file uses them.
+    const LOW: [[u8; 3]; 10] = [
+        [0, 0, 0],
+        [128, 0, 0],
+        [0, 128, 0],
+        [128, 128, 0],
+        [0, 0, 128],
+        [128, 0, 128],
+        [0, 128, 128],
+        [192, 192, 192],
+        [192, 220, 192],
+        [166, 202, 240],
+    ];
+    const HIGH: [[u8; 3]; 10] = [
+        [255, 251, 240],
+        [160, 160, 164],
+        [128, 128, 128],
+        [255, 0, 0],
+        [0, 255, 0],
+        [255, 255, 0],
+        [0, 0, 255],
+        [255, 0, 255],
+        [0, 255, 255],
+        [255, 255, 255],
+    ];
     match i {
+        0..=9 => LOW[i],
         10..=225 => {
             let c = i - 10;
             [LEVELS[c / 36], LEVELS[(c / 6) % 6], LEVELS[c % 6]]
         }
-        0 => [0, 0, 0],
-        1..=9 => {
-            let g = (i * 255 / 10) as u8;
+        226..=245 => {
+            let g = ((i - 226) * 255 / 19) as u8;
             [g, g, g]
         }
-        _ => {
-            let g = ((i - 226) * 255 / 29) as u8;
-            [g, g, g]
-        }
+        _ => HIGH[i - 246],
     }
 }
 
@@ -286,9 +307,13 @@ mod w2d {
         (r[0] < r[2] && r[1] < r[3]).then_some(r)
     }
 
-    /// The stream's geometry in model units, and its plotted view.
-    pub fn read(b: &[u8]) -> Option<(Vec<Path>, Option<[f64; 4]>)> {
+    /// The stream's geometry and text in model units, and its plotted view.
+    pub fn read(b: &[u8]) -> Option<(Vec<Path>, Option<[f64; 4]>, Vec<Text>)> {
         let mut r = Reader { b, i: 0 };
+        // The current font: family, em height (graphics units), rotation
+        // (radians) and width scale.
+        let mut font = (String::from("Arial"), 0.0f64, 0.0f64, 1.0f64);
+        let mut texts: Vec<(String, [f64; 2], (String, f64, f64, f64), [u8; 3])> = Vec::new();
         let mut units = Units::identity();
         let mut view: Option<[f64; 4]> = None;
         let mut color = [0u8, 0, 0];
@@ -320,6 +345,13 @@ mod w2d {
                             let v = super::numbers(&String::from_utf8_lossy(body));
                             if v.len() >= 3 {
                                 color = [v[0] as u8, v[1] as u8, v[2] as u8];
+                            }
+                        }
+                        // "(FontExtension 'logfont name' 'canonical name')"
+                        "FontExtension" => {
+                            let body = String::from_utf8_lossy(body);
+                            if let Some(name) = body.split('\'').nth(1).filter(|n| !n.is_empty()) {
+                                font.0 = name.to_string();
                             }
                         }
                         _ => {}
@@ -426,12 +458,47 @@ mod w2d {
                     let fill = op == b'E';
                     raw.push((arc_path(c, major, minor, tilt * turn, s * turn, sweep), color, if fill { -1.0 } else { weight }, visible));
                 }
-                b'x' => {
-                    // Text: relative position and a string (drawn as the
-                    // outlines that follow it, so only the position counts).
+                0x06 => {
+                    // Font: a field mask, then the fields it names in order.
                     r.i += 1;
-                    rel(&mut at, r.i32()? as f64, r.i32()? as f64);
-                    skip_string(&mut r)?;
+                    let mask = r.u16()?;
+                    if mask & !0x07fe != 0 {
+                        // A font name field (or one unknown here) — its
+                        // encoding is not read, so stop.
+                        break;
+                    }
+                    for bit in 1..11 {
+                        if mask & (1 << bit) == 0 {
+                            continue;
+                        }
+                        match 1u16 << bit {
+                            // charset, pitch, family, style
+                            0x0002 | 0x0004 | 0x0008 | 0x0010 => {
+                                r.u8()?;
+                            }
+                            0x0020 => font.1 = r.i32()? as f64,
+                            0x0040 => font.2 = r.u16()? as f64 * std::f64::consts::TAU / 65536.0,
+                            0x0080 => font.3 = r.u16()? as f64 / 1024.0,
+                            // oblique, spacing
+                            0x0100 | 0x0200 => {
+                                r.u16()?;
+                            }
+                            _ => {
+                                r.i32()?;
+                            }
+                        }
+                    }
+                }
+                b'x' => {
+                    // Text at a relative position. Stroke-font text is also
+                    // plotted as outlines with the text itself hidden, so only
+                    // visible text is kept.
+                    r.i += 1;
+                    let p = rel(&mut at, r.i32()? as f64, r.i32()? as f64);
+                    let s = read_string(&mut r)?;
+                    if visible && font.1 > 0.0 && !s.trim().is_empty() {
+                        texts.push((s, p, font.clone(), color));
+                    }
                 }
                 _ => break,
             }
@@ -453,22 +520,42 @@ mod w2d {
             let b = units.model([v[2], v[3]]);
             [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]
         });
-        Some((paths, view))
+        let texts = texts
+            .into_iter()
+            .map(|(text, p, (family, em, rotation, width), color)| Text {
+                text,
+                origin: units.model(p),
+                height: units.length(em) * CAP_PER_EM,
+                width_factor: width,
+                rotation,
+                color,
+                font: family,
+            })
+            .collect();
+        Some((paths, view, texts))
     }
 
     /// A W2D string: quoted ASCII, or a count followed by UTF-16 units.
-    fn skip_string(r: &mut Reader) -> Option<()> {
+    fn read_string(r: &mut Reader) -> Option<String> {
         if r.b.get(r.i) == Some(&b'\'') {
             r.i += 1;
+            let start = r.i;
             while *r.b.get(r.i)? != b'\'' {
                 r.i += 1;
             }
             r.i += 1;
+            Some(String::from_utf8_lossy(&r.b[start..r.i - 1]).to_string())
         } else {
             let n = r.count()?;
+            let units: Vec<u16> = r
+                .b
+                .get(r.i..r.i + n * 2)?
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
             r.i += n * 2;
+            Some(String::from_utf16_lossy(&units))
         }
-        Some(())
     }
 }
 
@@ -529,8 +616,8 @@ mod xps {
         })
     }
 
-    /// The fixed page's paths in model units, and the plotted view.
-    pub fn read(page: &[u8], w2x: Option<&[u8]>, entry: &SheetEntry) -> Option<(Vec<Path>, Option<[f64; 4]>)> {
+    /// The fixed page's paths and text in model units, and the plotted view.
+    pub fn read(page: &[u8], w2x: Option<&[u8]>, entry: &SheetEntry) -> Option<(Vec<Path>, Option<[f64; 4]>, Vec<Text>)> {
         let mut units = Units::identity();
         let mut view_log = None;
         if let Some(w2x) = w2x.and_then(|b| std::str::from_utf8(b).ok()) {
@@ -565,12 +652,37 @@ mod xps {
             [(x - offset[0]) / scale[0], (y - offset[1]) / scale[1]]
         };
         let mut paths = Vec::new();
+        let mut texts = Vec::new();
         walk(doc.root_element(), [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], &mut |node, m| {
-            let Some(data) = attr(node, "Data") else { return };
             let m = match attr(node, "RenderTransform").and_then(parse_affine) {
                 Some(local) => mul(m, local),
                 None => m,
             };
+            if node.tag_name().name() == "Glyphs" {
+                // Text: its baseline origin and em size in page units (y
+                // down), drawn in the plotted family.
+                // ponytail: the embedded font is obfuscated and not read;
+                // DWFx text is drawn in Arial.
+                let num = |name: &str| attr(node, name).and_then(|v| v.parse::<f64>().ok());
+                let (Some(em), Some(text)) = (num("FontRenderingEmSize"), attr(node, "UnicodeString")) else { return };
+                let o = [num("OriginX").unwrap_or(0.0), num("OriginY").unwrap_or(0.0)];
+                let map = |p: [f64; 2]| units.model(to_logical(apply(m, p)));
+                let (a, along, up) = (map(o), map([o[0] + em, o[1]]), map([o[0], o[1] - em]));
+                let len = |p: [f64; 2]| ((p[0] - a[0]).powi(2) + (p[1] - a[1]).powi(2)).sqrt();
+                if !text.trim().is_empty() {
+                    texts.push(Text {
+                        text: text.to_string(),
+                        origin: a,
+                        height: len(up) * CAP_PER_EM,
+                        width_factor: if len(up) > 0.0 { len(along) / len(up) } else { 1.0 },
+                        rotation: (along[1] - a[1]).atan2(along[0] - a[0]),
+                        color: attr(node, "Fill").and_then(parse_color).unwrap_or([0, 0, 0]),
+                        font: "Arial".to_string(),
+                    });
+                }
+                return;
+            }
+            let Some(data) = attr(node, "Data") else { return };
             let map = |p: [f64; 2]| units.model(to_logical(apply(m, p)));
             let subpaths: Vec<SubPath> = parse_data(data).into_iter().map(|sp| map_subpath(sp, map)).collect();
             if subpaths.is_empty() {
@@ -591,7 +703,7 @@ mod xps {
             let b = units.model([v[2], v[3]]);
             [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]
         });
-        Some((paths, view))
+        Some((paths, view, texts))
     }
 
     fn walk(node: roxmltree::Node, m: Affine, f: &mut impl FnMut(roxmltree::Node, Affine)) {
@@ -604,7 +716,7 @@ mod xps {
                     };
                     walk(child, m2, f);
                 }
-                "Path" => f(child, m),
+                "Path" | "Glyphs" => f(child, m),
                 _ => {}
             }
         }

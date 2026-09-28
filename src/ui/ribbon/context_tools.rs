@@ -1,4 +1,4 @@
-//! Selection-driven tools: while only PDF underlays (or only xrefs) are
+//! Selection-driven tools: while only underlays of one kind (or only xrefs) are
 //! selected their actions show on the right-edge toolbar; they go when the
 //! selection changes. Contrast and fade stay in the Properties panel.
 
@@ -9,6 +9,7 @@ use crate::modules::{ModuleEvent, ToolDef};
 /// as on.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnderlayContext {
+    pub kind: codec::entities::UnderlayType,
     pub monochrome: bool,
     pub shown: bool,
     pub snap: bool,
@@ -27,10 +28,11 @@ const CLIP: &[u8] = include_bytes!("../../../assets/icons/xclip.svg");
 /// The clip icon with a small red cross at its lower right.
 const UNCLIP: &[u8] = include_bytes!("../../../assets/icons/xclip_remove.svg");
 
-/// PDF underlay tools: display, clipping, options, layers and import.
-pub fn pdf_underlay_tools() -> Vec<ToolDef> {
+/// Underlay tools: display, clipping, options, layers and (PDF only)
+/// import.
+pub fn pdf_underlay_tools(kind: codec::entities::UnderlayType) -> Vec<ToolDef> {
     const FRAMES: &[u8] = include_bytes!("../../../assets/icons/underlay_frames.svg");
-    vec![
+    let mut tools = vec![
         tool("_PDFULMONO", "Display in\nMonochrome", FRAMES),
         tool("_PDFULCLIP", "Create Clipping\nBoundary", CLIP),
         tool("_PDFULUNCLIP", "Remove\nClipping", UNCLIP),
@@ -46,12 +48,15 @@ pub fn pdf_underlay_tools() -> Vec<ToolDef> {
             "Edit\nLayers",
             include_bytes!("../../../assets/icons/underlay_layers.svg"),
         ),
-        tool(
+    ];
+    if kind == codec::entities::UnderlayType::Pdf {
+        tools.push(tool(
             "_PDFULIMPORT",
             "Import As\nObjects",
             include_bytes!("../../../assets/icons/cui_import.svg"),
-        ),
-    ]
+        ));
+    }
+    tools
 }
 
 /// External reference tools: edit, open, clipping and the palette.

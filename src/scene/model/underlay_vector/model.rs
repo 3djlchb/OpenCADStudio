@@ -169,7 +169,16 @@ pub struct Text {
     pub width_factor: f64,
     pub rotation: f64,
     pub color: [u8; 3],
+    /// The font the text is drawn in: a stroke font name or a TrueType
+    /// family.
+    pub font: String,
 }
+
+/// Height of a TrueType font's capitals per em (Arial and its kin), which
+/// turns a plotted em size into a text height.
+// ponytail: one ratio for every family; read the font's own metrics if a
+// serif family plots noticeably off.
+pub const CAP_PER_EM: f64 = 0.716;
 
 /// Points of a B-spline curve: its order, control points and knot vector
 /// (clamped: `order` equal knots at each end).

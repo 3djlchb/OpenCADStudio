@@ -1405,7 +1405,26 @@ impl Scene {
                     && z[1].is_finite()
             })
             .collect();
-        if wires.is_empty() && mesh_aabbs.is_empty() && infinite_base_pts.is_empty() {
+        // Raster images and underlays draw as GPU quads; with their frames
+        // hidden they carry no wire outline, so fold their corners in too.
+        let image_corners: Vec<glam::Vec3> = self
+            .images
+            .iter()
+            .filter(|(h, _)| {
+                let handle = **h;
+                self.mesh_entity_visible(handle)
+                    && self.document.get_entity(handle).is_some_and(|entity| {
+                        self.belongs_to_visible_block(handle, entity.common().owner_handle, layout_block)
+                    })
+            })
+            .flat_map(|(_, image)| {
+                image.corners.iter().zip(image.corners_low.iter()).map(|(c, low)| {
+                    glam::Vec3::new(c[0] + low[0], c[1] + low[1], c[2] + low[2])
+                })
+            })
+            .filter(|p| p.is_finite())
+            .collect();
+        if wires.is_empty() && mesh_aabbs.is_empty() && infinite_base_pts.is_empty() && image_corners.is_empty() {
             return;
         }
 
@@ -1449,7 +1468,7 @@ impl Scene {
                 });
             }
         }
-        if cents.is_empty() && mesh_aabbs.is_empty() && infinite_base_pts.is_empty() {
+        if cents.is_empty() && mesh_aabbs.is_empty() && infinite_base_pts.is_empty() && image_corners.is_empty() {
             return;
         }
 
@@ -1515,6 +1534,10 @@ impl Scene {
         for ([ax, ay, bx, by], [az, bz]) in &mesh_aabbs {
             min = min.min(glam::Vec3::new(*ax, *ay, *az));
             max = max.max(glam::Vec3::new(*bx, *by, *bz));
+        }
+        for p in &image_corners {
+            min = min.min(*p);
+            max = max.max(*p);
         }
         // Drawing holds only infinite construction geometry: fit the view to
         // its base points rather than leaving the camera unchanged.

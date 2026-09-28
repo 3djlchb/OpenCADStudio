@@ -210,15 +210,22 @@ struct Styles {
     colors: Vec<[u8; 3]>,
     /// Level id → colour index.
     levels: HashMap<u32, u32>,
+    /// Levels the underlay turns off: their elements are left out.
+    hidden: std::collections::HashSet<u32>,
 }
 
 impl Styles {
     fn color(&self, e: &[u8]) -> [u8; 3] {
-        let explicit = u32_at(e, 44).unwrap_or(u32::MAX);
-        let index = if explicit < 256 {
-            explicit
-        } else {
+        // The colour word: an index into the colour table, 0xFFFFFFFF for
+        // the level's colour, or a true colour — n × 256 plus the index of
+        // its nearest table colour.
+        // ponytail: a true colour draws as that nearest index; the RGB it
+        // stands for is not read.
+        let explicit = u32_at(e, 52).unwrap_or(u32::MAX);
+        let index = if explicit == u32::MAX {
             self.levels.get(&u32_at(e, 12).unwrap_or(0)).copied().unwrap_or(0)
+        } else {
+            explicit & 0xff
         };
         self.colors.get(index as usize).copied().unwrap_or([255, 255, 255])
     }
@@ -237,6 +244,32 @@ struct Instance {
     name: String,
     m: [f64; 4],
     origin: [f64; 2],
+}
+
+/// A 3D element (flag 0x0800 of its properties word): three coordinates a
+/// point, orientations as quaternions. Its plan view is drawn.
+fn is_3d(e: &[u8]) -> bool {
+    u32_at(e, 40).is_some_and(|v| v & 0x0800 != 0)
+}
+
+/// The in-plane x and y axes (projected onto the plan) of a 3D element's
+/// orientation quaternion w, x, y, z stored at `at` (the rows of its
+/// rotation matrix).
+fn quat_axes(e: &[u8], at: usize) -> Option<([f64; 2], [f64; 2])> {
+    let (w, x, y, z) = (f64_at(e, at)?, f64_at(e, at + 8)?, f64_at(e, at + 16)?, f64_at(e, at + 24)?);
+    Some((
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z)],
+        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z)],
+    ))
+}
+
+/// An elliptical arc on axes `u` and `v` (plan projections) as cubics.
+fn projected_arc(c: [f64; 2], a: f64, b: f64, u: [f64; 2], v: [f64; 2], start: f64, sweep: f64) -> Vec<Segment> {
+    let map = |p: [f64; 2]| [c[0] + a * p[0] * u[0] + b * p[1] * v[0], c[1] + a * p[0] * u[1] + b * p[1] * v[1]];
+    arc_cubics([0.0, 0.0], 1.0, 1.0, 0.0, start, sweep)
+        .into_iter()
+        .map(|[p0, p1, p2, p3]| Segment::Cubic(map(p0), map(p1), map(p2), map(p3)))
+        .collect()
 }
 
 fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
@@ -272,12 +305,13 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
         }
     }
     for e in run {
-        if e.len() < 104 {
+        if e.len() < 104 || styles.hidden.contains(&u32_at(e, 12).unwrap_or(0)) {
             continue;
         }
         let color = styles.color(e);
         let stroke = Some((color, -1.0));
         let p2 = |at: usize| -> Option<[f64; 2]> { Some([f64_at(e, at)?, f64_at(e, at + 8)?]) };
+        let d3 = is_3d(e);
         match kind(e) {
             12 | 14 => {
                 let n = u32_at(e, 104).unwrap_or(0) as usize;
@@ -287,13 +321,14 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
                 }
             }
             3 => {
-                if let (Some(a), Some(b)) = (p2(104), p2(120)) {
+                if let (Some(a), Some(b)) = (p2(104), p2(if d3 { 128 } else { 120 })) {
                     push(&mut raw, &mut complex, Path { subpaths: vec![SubPath { segments: vec![Segment::Line(a, b)], closed: false }], stroke, fill: None });
                 }
             }
             4 | 6 | 11 => {
                 let n = u32_at(e, 104).unwrap_or(0) as usize;
-                let pts: Vec<[f64; 2]> = (0..n).filter_map(|k| p2(112 + k * 16)).collect();
+                let stride = if d3 { 24 } else { 16 };
+                let pts: Vec<[f64; 2]> = (0..n).filter_map(|k| p2(112 + k * stride)).collect();
                 if pts.len() >= 2 {
                     let mut pb = PathBuilder::default();
                     pb.move_to(pts[0]);
@@ -305,6 +340,24 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
                     }
                     push(&mut raw, &mut complex, Path { subpaths: pb.finish(), stroke, fill: None });
                 }
+            }
+            15 | 16 if d3 => {
+                // Axes, orientation and centre: ellipse a 104, b 112,
+                // quaternion 120, centre 152; arc start 104, sweep 112, a 120,
+                // b 128, quaternion 136, centre 168.
+                let arc = if kind(e) == 15 {
+                    (|| Some((f64_at(e, 104)?, f64_at(e, 112)?, quat_axes(e, 120)?, p2(152)?, 0.0, std::f64::consts::TAU)))()
+                } else {
+                    (|| Some((f64_at(e, 120)?, f64_at(e, 128)?, quat_axes(e, 136)?, p2(168)?, f64_at(e, 104)?, f64_at(e, 112)?)))()
+                };
+                let Some((a, b, (u, v), c, start, sweep)) = arc else { continue };
+                let sweep = if sweep == 0.0 { std::f64::consts::TAU } else { sweep };
+                let closed = sweep.abs() >= std::f64::consts::TAU - 1e-9;
+                push(
+                    &mut raw,
+                    &mut complex,
+                    Path { subpaths: vec![SubPath { segments: projected_arc(c, a, b, u, v, start, sweep), closed }], stroke, fill: None },
+                );
             }
             15 | 16 => {
                 let arc = if kind(e) == 15 {
@@ -321,6 +374,24 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
                     Path { subpaths: vec![SubPath { segments: pieces.into_iter().map(|[a, b, c, d]| Segment::Cubic(a, b, c, d)).collect(), closed }], stroke, fill: None },
                 );
             }
+            17 if d3 => {
+                // Width 112, height 120, quaternion 144, origin 176; the
+                // characters follow the string marker.
+                let (Some(width), Some(height), Some((u, _)), Some(origin)) = (f64_at(e, 112), f64_at(e, 120), quat_axes(e, 144), p2(176)) else {
+                    continue;
+                };
+                let Some(text) = marked_string(e, 200) else { continue };
+                let (height, width) = (height * 6.0 / 1000.0, width * 6.0 / 1000.0);
+                raw.texts.push(Text {
+                    text,
+                    origin,
+                    height,
+                    width_factor: if height > 0.0 { width / height } else { 1.0 },
+                    rotation: u[1].atan2(u[0]),
+                    color,
+                    font: "txt".to_string(),
+                });
+            }
             17 => {
                 let (Some(width), Some(height), Some(rotation), Some(origin)) = (f64_at(e, 112), f64_at(e, 120), f64_at(e, 144), p2(152)) else {
                     continue;
@@ -331,7 +402,7 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
                 let Some(chars) = e.get(174..170 + count.max(4)) else { continue };
                 let text = String::from_utf8_lossy(chars).trim_end_matches(char::from(0)).to_string();
                 let (height, width) = (height * 6.0 / 1000.0, width * 6.0 / 1000.0);
-                raw.texts.push(Text { text, origin, height, width_factor: if height > 0.0 { width / height } else { 1.0 }, rotation, color });
+                raw.texts.push(Text { text, origin, height, width_factor: if height > 0.0 { width / height } else { 1.0 }, rotation, color, font: "txt".to_string() });
             }
             35 => {
                 let (Some(m0), Some(m1), Some(m3), Some(m4), Some(origin)) = (f64_at(e, 160), f64_at(e, 168), f64_at(e, 184), f64_at(e, 192), p2(232)) else {
@@ -457,23 +528,59 @@ pub fn model_names(bytes: &[u8]) -> Option<Vec<String>> {
     (!names.is_empty()).then_some(names)
 }
 
-pub fn model(bytes: &[u8], name: &str) -> Option<Sheet> {
+/// The level table (the table entries after a header of table 1): id,
+/// name and colour index. The default level (64) is listed as "0", as the
+/// reference names it.
+fn level_table(nm: &[&[u8]]) -> Vec<(u32, String, u32)> {
+    let mut out = Vec::new();
+    let mut in_levels = false;
+    for e in nm {
+        match kind(e) {
+            96 => in_levels = u32_at(e, 12) == Some(1),
+            95 if in_levels && e.len() >= 80 => {
+                let (Some(id), Some(color)) = (u32_at(e, 32), u32_at(e, 72)) else { continue };
+                let mut name = marked_string(e, 32).unwrap_or_default();
+                if id == 64 && name.eq_ignore_ascii_case("Default") {
+                    name = "0".to_string();
+                }
+                out.push((id, name, color));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn non_model(cfb: &Cfb) -> Vec<u8> {
+    cfb.streams().iter().find(|(p, _)| p == "Dgn^Nm/$1").map(|(_, e)| inflate(&cfb.stream(e))).unwrap_or_default()
+}
+
+/// Level names of the file, for the underlay layers list.
+pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
+    let cfb = Cfb::open(bytes)?;
+    let nm = non_model(&cfb);
+    Some(level_table(&elements(&nm)).into_iter().map(|l| l.1).filter(|n| !n.is_empty()).collect())
+}
+
+pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
     let cfb = Cfb::open(bytes)?;
     let all = models(&cfb);
     let (_, graphics, header) = all.iter().find(|m| m.0.eq_ignore_ascii_case(name)).or_else(|| all.first())?;
-    let non_model = cfb.streams().iter().find(|(p, _)| p == "Dgn^Nm/$1").map(|(_, e)| inflate(&cfb.stream(e))).unwrap_or_default();
+    let non_model = non_model(&cfb);
     let nm = elements(&non_model);
     let colors = nm
         .iter()
         .find(|e| kind(e) == 5 && e.len() >= 37 + 768)
         .map(|e| (0..256).map(|i| [e[37 + i * 3], e[38 + i * 3], e[39 + i * 3]]).collect())
         .unwrap_or_else(|| vec![[255, 255, 255]; 256]);
-    let levels = nm
+    let table = level_table(&nm);
+    let levels = table.iter().map(|l| (l.0, l.2)).collect();
+    let hidden = table
         .iter()
-        .filter(|e| kind(e) == 95 && e.len() >= 80)
-        .filter_map(|e| Some((u32_at(e, 32)?, u32_at(e, 72)?)))
+        .filter(|l| hidden.iter().any(|h| h.eq_ignore_ascii_case(&l.1)))
+        .map(|l| l.0)
         .collect();
-    let styles = Styles { colors, levels };
+    let styles = Styles { colors, levels, hidden };
     // Shared cell definitions: a type-34 element and its components.
     let mut defs = HashMap::new();
     let mut i = 0;

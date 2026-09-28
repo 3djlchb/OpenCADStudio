@@ -39,6 +39,15 @@ fn sheet_cache() -> &'static Mutex<HashMap<Key, Option<Arc<Sheet>>>> {
     CACHE.get_or_init(Default::default)
 }
 
+/// The cache key of an item seen without some layers.
+fn layered_item(item: &str, hidden: &[String]) -> String {
+    if hidden.is_empty() {
+        item.to_string()
+    } else {
+        format!("{item}#{}", hidden.join("|"))
+    }
+}
+
 fn raster_cache() -> &'static Mutex<HashMap<Key, Option<Arc<PdfPage>>>> {
     static CACHE: OnceLock<Mutex<HashMap<Key, Option<Arc<PdfPage>>>>> = OnceLock::new();
     CACHE.get_or_init(Default::default)
@@ -51,10 +60,28 @@ pub fn forget(path: &str) {
     vector_cache().lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k.0 != path);
 }
 
+/// Layer (DWF) or level (DGN) names of a file; empty when it has none.
+pub fn layer_names(kind: UnderlayType, path: &str) -> Vec<String> {
+    let Some(bytes) = source_bytes(path) else { return Vec::new() };
+    match kind {
+        // A plotted DWF carries no layers.
+        UnderlayType::Dwf | UnderlayType::Pdf => None,
+        UnderlayType::Dgn if dgn7::is_v7(&bytes) => dgn7::layer_names(&bytes),
+        UnderlayType::Dgn => dgn8::layer_names(&bytes),
+    }
+    .unwrap_or_default()
+}
+
 /// The named sheet or model (the first when the name is empty or unknown),
 /// memoised. Its text is drawn as strokes with the drawing's text engine.
 pub fn sheet(kind: UnderlayType, path: &str, item: &str) -> Option<Arc<Sheet>> {
-    let key = (path.to_string(), item.to_string());
+    sheet_without(kind, path, item, &[])
+}
+
+/// The sheet without the `hidden` layers / levels, on the full sheet's
+/// rectangle (turning layers off never moves the underlay), memoised.
+pub fn sheet_without(kind: UnderlayType, path: &str, item: &str, hidden: &[String]) -> Option<Arc<Sheet>> {
+    let key = (path.to_string(), layered_item(item, hidden));
     if let Some(hit) = sheet_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return hit.clone();
     }
@@ -62,11 +89,22 @@ pub fn sheet(kind: UnderlayType, path: &str, item: &str) -> Option<Arc<Sheet>> {
         let bytes = source_bytes(path)?;
         let mut sheet = match kind {
             UnderlayType::Dwf => dwf::sheet(&bytes, item)?,
-            UnderlayType::Dgn if dgn7::is_v7(&bytes) => dgn7::model(&bytes)?,
-            UnderlayType::Dgn => dgn8::model(&bytes, item)?,
+            UnderlayType::Dgn if dgn7::is_v7(&bytes) => dgn7::model(&bytes, hidden).unwrap_or_default(),
+            UnderlayType::Dgn => dgn8::model(&bytes, item, hidden).unwrap_or_default(),
             UnderlayType::Pdf => return None,
         };
         outline_texts(&mut sheet);
+        // A DGN model's extent is its geometry, text included (a DWF sheet
+        // keeps its plotted view).
+        if kind == UnderlayType::Dgn {
+            if let Some(b) = model::paths_bounds(&sheet.paths) {
+                let r = sheet.rect;
+                sheet.rect = [r[0].min(b[0]), r[1].min(b[1]), r[2].max(b[2]), r[3].max(b[3])];
+            }
+        }
+        if !hidden.is_empty() {
+            sheet.rect = sheet_without(kind, path, item, &[])?.rect;
+        }
         Some(sheet)
     };
     let value = read().map(Arc::new);
@@ -83,7 +121,7 @@ fn outline_texts(sheet: &mut Sheet) {
             t.rotation as f32,
             t.width_factor as f32,
             0.0,
-            "txt",
+            &t.font,
             &t.text,
         );
         let at = |p: [f32; 2]| [p[0] as f64, p[1] as f64];
@@ -114,13 +152,13 @@ pub const RASTER_SIDE: f64 = 3072.0;
 /// The sheet drawn on a transparent background with `side` pixels on its
 /// longest side (at most [`RASTER_SIDE`]), straight alpha, rows from the
 /// top, memoised per size.
-pub fn display_raster(kind: UnderlayType, path: &str, item: &str, side: f64) -> Option<Arc<PdfPage>> {
+pub fn display_raster(kind: UnderlayType, path: &str, item: &str, hidden: &[String], side: f64) -> Option<Arc<PdfPage>> {
     let side = side.clamp(16.0, RASTER_SIDE).round();
-    let key = (path.to_string(), format!("{item}@{side}"));
+    let key = (path.to_string(), format!("{}@{side}", layered_item(item, hidden)));
     if let Some(hit) = raster_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return hit.clone();
     }
-    let value = sheet(kind, path, item).and_then(|s| rasterize(&s, side)).map(Arc::new);
+    let value = sheet_without(kind, path, item, hidden).and_then(|s| rasterize(&s, side)).map(Arc::new);
     raster_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
     value
 }
@@ -198,12 +236,12 @@ fn vector_cache() -> &'static Mutex<HashMap<Key, Option<Arc<super::pdf_vector::P
 
 /// The sheet's geometry as page vectors for object snaps, in sheet units,
 /// memoised.
-pub fn page_vectors(kind: UnderlayType, path: &str, item: &str) -> Option<Arc<super::pdf_vector::PageVectors>> {
-    let key = (path.to_string(), item.to_string());
+pub fn page_vectors(kind: UnderlayType, path: &str, item: &str, hidden: &[String]) -> Option<Arc<super::pdf_vector::PageVectors>> {
+    let key = (path.to_string(), layered_item(item, hidden));
     if let Some(hit) = vector_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return hit.clone();
     }
-    let value = sheet(kind, path, item).map(|s| Arc::new(to_page_vectors(&s)));
+    let value = sheet_without(kind, path, item, hidden).map(|s| Arc::new(to_page_vectors(&s)));
     vector_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
     value
 }

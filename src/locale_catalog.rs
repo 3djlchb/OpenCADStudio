@@ -2985,7 +2985,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Page size:" => Some(("insert", "pdfui-page-size")),
         "Reference name:" => Some(("insert", "pdfui-reference-name")),
         "Search for layer" => Some(("insert", "pdfui-search-for-layer")),
-        "This file does not contain any layers." => Some(("insert", "pdfui-this-file-does-not-contain-any-layers")),
+        "This file does not contain any layers" => Some(("insert", "pdfui-this-file-does-not-contain-any-layers")),
         "Select an underlay to view its layers." => Some(("insert", "pdfui-select-an-underlay-to-view-its-layers")),
         "PDF data to import" => Some(("insert", "pdfui-pdf-data-to-import")),
         "Vector geometry" => Some(("insert", "pdfui-vector-geometry")),
