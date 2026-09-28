@@ -766,6 +766,19 @@ impl Scene {
                 if let Some(model) = new_model {
                     self.hatches.insert(h, model);
                 }
+                // Images draw from a derived model, not the wire frame; without
+                // one the copy shows only its frame. (#829)
+                let image = self.document.get_entity(h).and_then(|entity| {
+                    matches!(
+                        entity,
+                        EntityType::RasterImage(_) | EntityType::Ole2Frame(_) | EntityType::Underlay(_)
+                    )
+                    .then(|| self.image_seed_for(entity))
+                    .flatten()
+                });
+                if let Some(model) = image {
+                    self.images.insert(h, model);
+                }
                 let rebuilt_history =
                     self.copy_solid_history(src_handle, h) && self.transform_solid_history(h, t);
                 if !rebuilt_history
