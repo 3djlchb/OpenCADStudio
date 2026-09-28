@@ -62,6 +62,7 @@ impl OpenCADStudio {
         }
         if let Some(handle) = committed {
             self.apply_continuous_constraints(i, &[handle]);
+            self.notify_entities_committed(i, &[handle]);
         }
         self.tabs[i].dirty = true;
         let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
@@ -123,6 +124,7 @@ impl OpenCADStudio {
             committed.extend(handle);
         }
         self.apply_continuous_constraints(i, &committed);
+        self.notify_entities_committed(i, &committed);
         self.tabs[i].dirty = true;
         self.tabs[i].scene.clear_preview_wire();
         let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
@@ -133,6 +135,18 @@ impl OpenCADStudio {
             self.commit_undo_delta(i, pd);
         }
         None
+    }
+
+    /// Hand the stored copies of freshly committed entities to the command
+    /// that is still running.
+    fn notify_entities_committed(&mut self, i: usize, handles: &[codec::Handle]) {
+        let entities: Vec<codec::EntityType> = handles
+            .iter()
+            .filter_map(|handle| self.tabs[i].scene.document.get_entity(*handle).cloned())
+            .collect();
+        if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+            command.on_entities_committed(&entities);
+        }
     }
 
     pub(super) fn handle_commit_entities_and_exit(

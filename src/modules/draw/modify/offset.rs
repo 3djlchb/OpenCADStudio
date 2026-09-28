@@ -818,6 +818,11 @@ impl CadCommand for OffsetCommand {
         }
     }
 
+    fn on_entities_committed(&mut self, entities: &[EntityType]) {
+        self.all_entities.extend(entities.iter().cloned());
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
+    }
+
     fn on_hover_entity(&mut self, handle: Handle, _pt: DVec3) -> Vec<WireModel> {
         if handle.is_null() || !matches!(self.step, Step::SelectObject { .. }) {
             return vec![];
