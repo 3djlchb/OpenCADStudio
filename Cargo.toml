@@ -54,7 +54,6 @@ rustc-hash = "2"
 sha2 = "0.10"
 fontdb = "0.23"
 ttf-parser = "0.25"
-# TrueType 指令解譯器：標楷體／細明體等「筆畫拼字」字型要先 hinting 才有正確輪廓。
 # TrueType interpreter for hint-reliant ("tricky") fonts such as DFKai-SB and
 # MingLiU, whose raw outlines are missing strokes. Already in the tree (hayro).
 skrifa = "0.42.1"
