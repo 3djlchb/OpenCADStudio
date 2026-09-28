@@ -931,6 +931,7 @@ fn tessellate_entity_inner(
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -1176,6 +1177,7 @@ fn tessellate_entity_inner(
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -1296,6 +1298,8 @@ fn tessellate_entity_inner(
             wire.points_low = points_low;
             wire.display_visible = false;
             wire.plot_visible = false;
+            // Snaps find it; a click on the page does not select the underlay.
+            wire.snap_only = true;
             if let Some((center, radius)) = piece.circle {
                 wire.tangent_geoms = vec![crate::scene::model::wire_model::TangentGeom::PlanarCircle {
                     center,
@@ -1549,6 +1553,7 @@ fn lod_stub_wire(
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
@@ -1645,6 +1650,7 @@ fn lod_stub_wire_3d(
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,

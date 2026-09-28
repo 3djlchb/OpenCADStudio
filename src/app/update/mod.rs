@@ -326,7 +326,24 @@ impl OpenCADStudio {
         if self.tabs.get(self.active_tab).map(|tab| tab.id) != before {
             self.sync_underlay_tab();
         }
+        self.sync_frame_dropdown();
         task
+    }
+
+    /// The Frames list on the ribbon shows the active drawing's frame state
+    /// (FRAME), however it was changed: the list, a command, undo or another
+    /// drawing.
+    fn sync_frame_dropdown(&mut self) {
+        let Some(tab) = self.tabs.get(self.active_tab).filter(|tab| !tab.is_start) else {
+            return;
+        };
+        let current = match crate::scene::frame::master_mode(&tab.scene.document) {
+            0 => "FRAMES0",
+            1 => "FRAMES1",
+            2 => "FRAMES2",
+            _ => "FRAMES3",
+        };
+        self.ribbon.set_dropdown_current("FRAMES_DROPDOWN", current);
     }
 
     fn update_message(&mut self, msg: Message) -> Task<Message> {

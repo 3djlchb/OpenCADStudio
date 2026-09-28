@@ -506,6 +506,9 @@ pub struct WireModel {
     pub depth_override: Option<f32>,
     /// Whether this wire is drawn in the normal viewport pass.
     pub display_visible: bool,
+    /// Geometry that only object snaps use (the content of an underlay):
+    /// never drawn, plotted or picked.
+    pub snap_only: bool,
     /// Whether this wire is included in plotted output.
     pub plot_visible: bool,
     /// `true` when [`fill_tris`] is a real 3-D surface (PolyfaceMesh /
@@ -580,6 +583,7 @@ impl WireModel {
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
@@ -1009,6 +1013,7 @@ impl Default for WireModel {
             fill_tris_low: Vec::new(),
             depth_override: None,
             display_visible: true,
+            snap_only: false,
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,

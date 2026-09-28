@@ -178,9 +178,9 @@ impl RenderConvertible for RasterImage {
             path.is_empty() || crate::scene::model::image_model::resolve_image(path).is_some();
         if resolvable {
             return Some(RenderEntity {
-                // Interior pick surface: the image selects on a click anywhere
-                // inside its frame, not just on the border.
-                pick_tris: crate::entities::common::quad_pick_tris(&corners),
+                // Picked on its frame only (shown or hidden), like the other
+                // framed objects: a click inside the picture selects nothing.
+                pick_tris: vec![],
                 object: RenderObject::Lines(pts),
                 snap_pts: vec![],
                 tangent_geoms: vec![],
@@ -269,7 +269,7 @@ impl RenderConvertible for RasterImage {
         }
 
         Some(RenderEntity {
-            pick_tris: crate::entities::common::quad_pick_tris(&corners),
+            pick_tris: vec![],
             object: RenderObject::Text(groups),
             snap_pts: vec![],
             tangent_geoms: vec![],
@@ -512,30 +512,6 @@ fn wipeout_axis_length(axis: &codec::types::Vector3, size: f64) -> f64 {
     (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt() * size.abs()
 }
 
-fn wipeout_pick_rings(wipeout: &Wipeout) -> Vec<Vec<[f64; 3]>> {
-    let boundary = wipeout_boundary(wipeout);
-    if wipeout_is_polygonal(wipeout)
-        && matches!(
-            wipeout.clip_mode,
-            codec::entities::WipeoutClipMode::Inside
-        )
-    {
-        vec![
-            image_corners(
-                &wipeout.insertion_point,
-                &wipeout.u_vector,
-                &wipeout.v_vector,
-                wipeout.size.x,
-                wipeout.size.y,
-            )
-            .to_vec(),
-            boundary,
-        ]
-    } else {
-        vec![boundary]
-    }
-}
-
 fn wipeout_world_to_clip(wipeout: &Wipeout, world: [f64; 3]) -> Option<codec::types::Vector2> {
     let [x, y] = wipeout_plane(wipeout).project(world)?;
     Some(codec::types::Vector2::new(
@@ -553,10 +529,8 @@ impl RenderConvertible for Wipeout {
         }
 
         Some(RenderEntity {
-            pick_tris: kernel::space::polygon::triangulate_rings(
-                &wipeout_pick_rings(self),
-                kernel::geom2d::Tolerance::default(),
-            ),
+            // Picked on its frame only; the masked area selects nothing.
+            pick_tris: vec![],
             object: RenderObject::Lines(pts),
             snap_pts: boundary
                 .iter()

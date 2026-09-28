@@ -82,6 +82,11 @@ objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSResponder", "
 block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
+# Frame header variables (DWFFRAME/DGNFRAME) until the codec change is released;
+# every crate that pulls the codec must see the same build.
+[patch."https://github.com/HakanSeven12/opencadcodec.git"]
+opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "ea5edaa" }
+
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }

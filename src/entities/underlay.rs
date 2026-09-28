@@ -288,21 +288,20 @@ impl RenderConvertible for Underlay {
             });
         }
 
-        // Pick surface over the shown area so a click inside selects it.
-        let pick_ring: Vec<[f64; 3]> = if !clip.is_empty() && !self.clip_inverted {
+        // Picked on its frame only; the page itself selects nothing.
+        let key_ring: Vec<[f64; 3]> = if !clip.is_empty() && !self.clip_inverted {
             clip.clone()
         } else {
             quad.map(|q| q.to_vec()).unwrap_or_default()
         };
-        let pick_tris = crate::entities::mesh::triangulate_planar(&pick_ring);
         let mut snap_pts = vec![insertion_snap];
         snap_pts.extend(crate::scene::model::pdf_vector::underlay_snap_points(self, document));
         Some(RenderEntity {
-            pick_tris,
+            pick_tris: vec![],
             object: RenderObject::Lines(pts),
             snap_pts,
             tangent_geoms: vec![],
-            key_vertices: pick_ring,
+            key_vertices: key_ring,
             fill_tris: vec![],
         })
     }

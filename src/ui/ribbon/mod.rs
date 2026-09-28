@@ -477,6 +477,14 @@ impl Ribbon {
         self.close_dropdown();
     }
 
+    /// Show `cmd` as the current item of a dropdown that mirrors a drawing
+    /// setting, without running it.
+    pub fn set_dropdown_current(&mut self, dropdown_id: &'static str, cmd: &'static str) {
+        if self.last_cmd.get(dropdown_id) != Some(&cmd) {
+            self.last_cmd.insert(dropdown_id, cmd);
+        }
+    }
+
     // ── View ──────────────────────────────────────────────────────────────
 
     pub fn view(
@@ -873,6 +881,7 @@ impl Ribbon {
             .iter()
             .map(|(cmd, label, item_icon)| {
                 let is_current = *cmd == last_cmd;
+                let disabled = widgets::is_disabled_item(cmd);
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_current);
                 let icon_el: Element<Message> =
@@ -884,7 +893,7 @@ impl Ribbon {
                         .size(11)
                         .wrapping(iced::advanced::text::Wrapping::None)
                         .style(move |theme: &Theme| iced::widget::text::Style {
-                            color: (!is_current).then_some(
+                            color: (!is_current || disabled).then_some(
                                 theme
                                     .palette()
                                     .background
@@ -899,10 +908,10 @@ impl Ribbon {
                         .spacing(4)
                         .align_y(iced::Center),
                 )
-                .on_press(Message::DropdownSelectItem {
+                .on_press_maybe((!disabled).then_some(Message::DropdownSelectItem {
                     dropdown_id: dd_id,
                     cmd: *cmd,
-                })
+                }))
                 .style(popup_row_style)
                 .width(Fill)
                 .padding([4, 10])

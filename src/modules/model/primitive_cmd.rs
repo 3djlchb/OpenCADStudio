@@ -3647,6 +3647,7 @@ fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
+        snap_only: false,
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
