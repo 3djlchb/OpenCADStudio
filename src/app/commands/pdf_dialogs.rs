@@ -5,7 +5,7 @@ use super::*;
 use crate::io::xref_model::Pathtype;
 use crate::modules::insert::pdf_import::{self, PdfFileImport};
 use crate::ui::window::pdf_dialogs::{
-    click_page, page_thumbs, LayerTarget, PdfAttachState, PdfDialogMsg, PdfImportFileState,
+    click_page, item_thumbs, page_thumbs, LayerTarget, PdfAttachState, PdfDialogMsg, PdfImportFileState,
     RotationChoice, UnderlayLayersState,
 };
 
@@ -14,6 +14,23 @@ fn page_size_text(path: &str, page: &str) -> String {
     crate::scene::model::pdf_raster::page_size_inches(path, page)
         .map(|(w, h)| format!("{w:.4} × {h:.4}"))
         .unwrap_or_default()
+}
+
+/// The page's (PDF, inches) or the sheet's / model's size.
+fn item_size_text(kind: codec::entities::UnderlayType, path: &str, item: &str) -> String {
+    if kind == codec::entities::UnderlayType::Pdf {
+        return page_size_text(path, item);
+    }
+    crate::scene::model::underlay_vector::sheet(kind, path, item)
+        .map(|s| format!("{:.4} × {:.4}", s.rect[2] - s.rect[0], s.rect[3] - s.rect[1]))
+        .unwrap_or_default()
+}
+
+fn sub_per_master(kind: codec::entities::UnderlayType, path: &str, item: &str) -> f64 {
+    crate::scene::model::underlay_vector::sheet(kind, path, item)
+        .map(|s| s.sub_per_master)
+        .filter(|v| *v > 0.0)
+        .unwrap_or(1.0)
 }
 
 fn file_stem(path: &str) -> String {
@@ -45,10 +62,18 @@ impl OpenCADStudio {
 
     /// PDFATTACH after the file is chosen.
     pub(in crate::app) fn open_pdf_attach_dialog(&mut self, path: &str) {
+        self.open_underlay_attach_dialog(codec::entities::UnderlayType::Pdf, path);
+    }
+
+    /// PDFATTACH / DWFATTACH / DGNATTACH after the file is chosen.
+    pub(in crate::app) fn open_underlay_attach_dialog(&mut self, kind: codec::entities::UnderlayType, path: &str) {
         let i = self.active_tab;
         let mut existing: Vec<(String, String)> = Vec::new();
         for object in self.tabs[i].scene.document.objects.values() {
             if let codec::objects::ObjectType::UnderlayDefinition(def) = object {
+                if def.underlay_type != kind {
+                    continue;
+                }
                 let name = file_stem(&def.file_path);
                 if !existing.iter().any(|(n, _)| *n == name) {
                     existing.push((name, def.file_path.clone()));
@@ -56,6 +81,7 @@ impl OpenCADStudio {
             }
         }
         let mut state = PdfAttachState::new(existing);
+        state.kind = kind;
         self.load_pdf_attach_file(&mut state, path);
         self.pdf_attach = Some(state);
         self.active_modal = Some(crate::app::ModalKind::PdfAttach);
@@ -64,11 +90,14 @@ impl OpenCADStudio {
     fn load_pdf_attach_file(&self, state: &mut PdfAttachState, path: &str) {
         state.path = path.to_string();
         state.name = file_stem(path);
-        state.pages = page_thumbs(path);
+        state.pages = item_thumbs(state.kind, path);
         state.selected = vec![0];
         state.anchor = 0;
         state.found_in = crate::entities::underlay::display_path(path);
-        state.page_size = page_size_text(path, "1");
+        let first = state.page_labels().into_iter().next().unwrap_or_else(|| "1".to_string());
+        state.page_size = item_size_text(state.kind, path, &first);
+        state.sub_per_master = sub_per_master(state.kind, path, &first);
+        state.sub_units = false;
         state.saved_path =
             crate::entities::underlay::display_path(&self.pdf_stored_path(path, state.path_type.0));
     }
@@ -206,7 +235,14 @@ impl OpenCADStudio {
         let i = self.active_tab;
         match message {
             PdfDialogMsg::Help(which) => {
+                let kind = self.pdf_attach.as_ref().map(|s| s.kind);
                 let text = match which {
+                    "attach" if kind == Some(codec::entities::UnderlayType::Dwf) => {
+                        crate::t!("Attaches a DWF or DWFx file as an underlay.")
+                    }
+                    "attach" if kind == Some(codec::entities::UnderlayType::Dgn) => {
+                        crate::t!("Attaches a DGN file as an underlay.")
+                    }
                     "attach" => crate::t!("Attaches a PDF file as an underlay."),
                     "layers" => crate::t!("Turns the layers of a PDF underlay on or off."),
                     _ => crate::t!("Imports the geometry, fills, raster images and text of a PDF file as drawing objects."),
@@ -220,10 +256,21 @@ impl OpenCADStudio {
 
             // ── Attach ────────────────────────────────────────────────────
             PdfDialogMsg::AttachBrowse => {
+                let kind = self.pdf_attach.as_ref().map(|s| s.kind).unwrap_or(codec::entities::UnderlayType::Pdf);
                 if let Some(state) = &self.pdf_attach {
                     state.remember();
                 }
+                if kind != codec::entities::UnderlayType::Pdf {
+                    return Task::done(Message::UnderlayAttachPick(kind));
+                }
                 return Task::done(Message::PdfAttachPick);
+            }
+            PdfDialogMsg::AttachSubUnits(sub) => {
+                if let Some(s) = self.pdf_attach.as_mut() {
+                    s.sub_units = sub;
+                    // The scale offered follows the units, as on the command line.
+                    s.scale = if sub { format!("{}", 1.0 / s.sub_per_master) } else { "1.0000".to_string() };
+                }
             }
             PdfDialogMsg::AttachName(name) => {
                 let Some(mut state) = self.pdf_attach.take() else {
@@ -237,9 +284,16 @@ impl OpenCADStudio {
             PdfDialogMsg::AttachPage(page) => {
                 let (ctrl, shift) = (self.ctrl_down, self.shift_down);
                 if let Some(state) = self.pdf_attach.as_mut() {
-                    click_page(&mut state.selected, &mut state.anchor, page, ctrl, shift);
+                    if state.kind == codec::entities::UnderlayType::Pdf {
+                        click_page(&mut state.selected, &mut state.anchor, page, ctrl, shift);
+                    } else {
+                        // One sheet or model at a time.
+                        state.selected = vec![page];
+                        state.anchor = page;
+                    }
                     let first = state.page_labels().into_iter().next().unwrap_or_default();
-                    state.page_size = page_size_text(&state.path, &first);
+                    state.page_size = item_size_text(state.kind, &state.path, &first);
+                    state.sub_per_master = sub_per_master(state.kind, &state.path, &first);
                 }
             }
             PdfDialogMsg::AttachPathType(choice) => {
@@ -475,12 +529,14 @@ impl OpenCADStudio {
         }
         self.close_active_modal();
         let insunits = self.tabs[i].scene.document.header.insertion_units;
-        let mut command = crate::modules::insert::pdf_attach::PdfAttachCommand::from_dialog(
+        let mut command = crate::modules::insert::pdf_attach::PdfAttachCommand::from_kind_dialog(
+            state.kind,
             &state.path,
             &stored,
             &state.page_labels(),
             scale,
             rotation,
+            state.sub_units,
             insunits,
         );
         match insertion {

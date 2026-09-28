@@ -24,7 +24,11 @@ impl OpenCADStudio {
             Some(K::LayerTranslator) => crate::t!("Layer Translator").into_owned(),
             Some(K::DrawingUnits) => crate::t!("Drawing Units").into_owned(),
             Some(K::BlockDefinition) => crate::t!("Block Definition").into_owned(),
-            Some(K::PdfAttach) => crate::t!("Attach PDF Underlay").into_owned(),
+            Some(K::PdfAttach) => match self.pdf_attach.as_ref().map(|s| s.kind) {
+                Some(codec::entities::UnderlayType::Dwf) => crate::t!("Attach DWF Underlay").into_owned(),
+                Some(codec::entities::UnderlayType::Dgn) => crate::t!("Attach DGN Underlay").into_owned(),
+                _ => crate::t!("Attach PDF Underlay").into_owned(),
+            },
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
             Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
             Some(K::PdfImportFile) => crate::t!("Import PDF").into_owned(),

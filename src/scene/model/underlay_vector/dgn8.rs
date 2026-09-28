@@ -212,19 +212,57 @@ struct Styles {
     levels: HashMap<u32, u32>,
     /// Levels the underlay turns off: their elements are left out.
     hidden: std::collections::HashSet<u32>,
+    /// True colours, in the order colour words number them (1 first).
+    extended: Vec<[u8; 3]>,
+}
+
+/// The true colours of the file: a zlib-packed UTF-16 record in the
+/// non-model attributes stream reading
+/// `<ExtendedColors><Entry Color="(r,g,b)"/>…</ExtendedColors>`.
+fn extended_colors(cfb: &Cfb) -> Vec<[u8; 3]> {
+    let Some(attrs) = cfb.streams().iter().find(|(p, _)| p == "Dgn^NmA/$1").map(|(_, e)| inflate(&cfb.stream(e))) else {
+        return Vec::new();
+    };
+    for at in 0..attrs.len().saturating_sub(2) {
+        // A zlib header: deflate, and a check value divisible by 31.
+        let (a, b) = (attrs[at], attrs[at + 1]);
+        if a & 0x0f != 8 || ((a as u16) << 8 | b as u16) % 31 != 0 {
+            continue;
+        }
+        let mut out = Vec::new();
+        if flate2::read::ZlibDecoder::new(&attrs[at..]).read_to_end(&mut out).is_err() || out.len() < 2 {
+            continue;
+        }
+        let units: Vec<u16> = out.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let text = String::from_utf16_lossy(&units);
+        if !text.contains("<ExtendedColors") {
+            continue;
+        }
+        return text
+            .split("Color=\"(")
+            .skip(1)
+            .filter_map(|rest| {
+                let v: Vec<u8> = rest.split(')').next()?.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                (v.len() == 3).then(|| [v[0], v[1], v[2]])
+            })
+            .collect();
+    }
+    Vec::new()
 }
 
 impl Styles {
     fn color(&self, e: &[u8]) -> [u8; 3] {
         // The colour word: an index into the colour table, 0xFFFFFFFF for
-        // the level's colour, or a true colour — n × 256 plus the index of
-        // its nearest table colour.
-        // ponytail: a true colour draws as that nearest index; the RGB it
-        // stands for is not read.
+        // the level's colour, or true colour n (from 1) × 256 plus the index
+        // of its nearest table colour, drawn in its own RGB when the file
+        // lists it.
         let explicit = u32_at(e, 52).unwrap_or(u32::MAX);
         let index = if explicit == u32::MAX {
             self.levels.get(&u32_at(e, 12).unwrap_or(0)).copied().unwrap_or(0)
         } else {
+            if let Some(rgb) = (explicit >> 8).checked_sub(1).and_then(|n| self.extended.get(n as usize)) {
+                return *rgb;
+            }
             explicit & 0xff
         };
         self.colors.get(index as usize).copied().unwrap_or([255, 255, 255])
@@ -580,7 +618,7 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         .filter(|l| hidden.iter().any(|h| h.eq_ignore_ascii_case(&l.1)))
         .map(|l| l.0)
         .collect();
-    let styles = Styles { colors, levels, hidden };
+    let styles = Styles { colors, levels, hidden, extended: extended_colors(&cfb) };
     // Shared cell definitions: a type-34 element and its components.
     let mut defs = HashMap::new();
     let mut i = 0;

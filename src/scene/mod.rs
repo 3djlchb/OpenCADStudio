@@ -2753,7 +2753,7 @@ impl Scene {
         let Some(wpp) = self.world_per_pixel() else {
             return;
         };
-        let step = (f64::from(wpp).log2() * 4.0).floor() as i32;
+        let step = (f64::from(wpp).log2() * 4.0).ceil() as i32;
         let current = self.underlay_world_per_pixel.map(|w| (w.log2() * 4.0).round() as i32);
         if current == Some(step) {
             self.underlay_scale_pending = None;
@@ -2783,7 +2783,7 @@ impl Scene {
         let Some(wpp) = self.world_per_pixel() else {
             return false;
         };
-        let step = (f64::from(wpp).log2() * 4.0).floor() as i32;
+        let step = (f64::from(wpp).log2() * 4.0).ceil() as i32;
         self.underlay_world_per_pixel.map(|w| (w.log2() * 4.0).round() as i32) != Some(step)
     }
 

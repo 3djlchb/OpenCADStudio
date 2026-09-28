@@ -23,19 +23,10 @@ use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
 use crate::scene::model::wire_model::WireModel;
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::IconKind;
 
 pub const ICON: IconKind =
     IconKind::Svg(include_bytes!("../../../assets/icons/underlay_layers.svg"));
-
-pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "PDFATTACH",
-        label: "Attach PDF",
-        icon: ICON,
-        event: ModuleEvent::Command("PDFATTACH".to_string()),
-    }
-}
 
 /// Units the Unit option offers: keyword, the name the prompt shows.
 const UNITS: [(&str, &str); 9] = [
@@ -172,11 +163,6 @@ impl PdfAttachCommand {
         }
     }
 
-    /// PDFATTACH with a file already chosen: starts at the page prompt.
-    pub fn with_file(path: &str, insunits: i16) -> Self {
-        Self::with_kind_file(UnderlayType::Pdf, path, insunits)
-    }
-
     /// DWFATTACH / DGNATTACH / PDFATTACH with the file chosen: starts at the
     /// page, sheet or model prompt.
     pub fn with_kind_file(kind: UnderlayType, path: &str, insunits: i16) -> Self {
@@ -216,23 +202,34 @@ impl PdfAttachCommand {
         }
     }
 
-    /// The dialog's attach with the insertion point asked on screen: pages
-    /// chosen, the path to store, and any scale / rotation already given.
-    pub fn from_dialog(
+    /// The DWF / DGN (or PDF) Attach dialog: the sheet or model chosen and,
+    /// for DGN, whether sub units were chosen (their scale is then offered).
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_kind_dialog(
+        kind: UnderlayType,
         read_path: &str,
         stored_path: &str,
         pages: &[String],
         scale: Option<f64>,
         rotation_deg: Option<f64>,
+        sub_units: bool,
         insunits: i16,
     ) -> Self {
-        let mut command = Self::with_file(read_path, insunits);
+        let mut command = Self::with_kind_file(kind, read_path, insunits);
         command.stored_path = Some(stored_path.to_string());
         if let Some((first, rest)) = pages.split_first() {
             command.page = first.clone();
             command.extra_pages = rest.to_vec();
         }
         command.rect = command.page_rect(&command.page);
+        if kind == UnderlayType::Dgn && sub_units {
+            let sub = crate::scene::model::underlay_vector::sheet(kind, read_path, &command.page)
+                .map(|s| s.sub_per_master)
+                .filter(|v| *v > 0.0)
+                .unwrap_or(1.0);
+            command.default_scale = 1.0 / sub;
+            command.scale = command.default_scale;
+        }
         command.preset_scale = scale;
         if let Some(s) = scale {
             command.scale = s;
