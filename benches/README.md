@@ -68,8 +68,9 @@ cargo bench --bench performance_benchmarks -- --quick
 
 ## Command Benchmarks
 
-First benchmarked command: **EXPLODE** (metrics `explode_geometry`,
-`explode_scene_apply`).
+First benchmarked commands: **EXPLODE** (metrics `explode_geometry`,
+`explode_scene_apply`) and **FLATTEN** (metrics `flatten_plan`,
+`flatten_scene_apply`).
 
 ```bash
 cargo bench --bench command_benchmarks -- --filter explode
