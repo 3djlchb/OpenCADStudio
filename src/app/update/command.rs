@@ -1934,6 +1934,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 } else {
                     None
                 };
+                if matches!(item.action, GripMenuAction::AboveDimLine) {
+                    crate::entities::dim_override::set_property(
+                        &mut self.tabs[i].scene.document,
+                        popup.handle,
+                        "dim_text_pos_vert",
+                        "Above",
+                    );
+                }
                 if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(popup.handle) {
                     entity.apply_grip_menu(popup.grip_id, item.action);
                 }
