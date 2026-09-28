@@ -1133,21 +1133,26 @@ fn emit_wire_fills(
         if a < 0.01 {
             continue;
         }
-        let mut screening = 1.0;
-        let mut color_overridden = false;
-        if let Some(table) = plot_style {
-            if wire.aci > 0 {
-                if let Some(color) = table.resolve_color(wire.aci) {
-                    [r, g, b] = color;
-                    color_overridden = true;
+        if wire.bg_adapt.as_deref().is_some_and(|adapt| adapt.canvas_color) {
+            // A background mask: it covers with the paper itself.
+            [r, g, b] = [1.0, 1.0, 1.0];
+        } else {
+            let mut screening = 1.0;
+            let mut color_overridden = false;
+            if let Some(table) = plot_style {
+                if wire.aci > 0 {
+                    if let Some(color) = table.resolve_color(wire.aci) {
+                        [r, g, b] = color;
+                        color_overridden = true;
+                    }
+                    screening = table.resolve_screening(wire.aci);
                 }
-                screening = table.resolve_screening(wire.aci);
             }
+            if !color_overridden {
+                [r, g, b] = adapt_text_color([r, g, b]);
+            }
+            [r, g, b] = plotted_color([r, g, b], a, screening, options);
         }
-        if !color_overridden {
-            [r, g, b] = adapt_text_color([r, g, b]);
-        }
-        [r, g, b] = plotted_color([r, g, b], a, screening, options);
         ops.push(Op::SetFillColor {
             col: Color::Rgb(Rgb {
                 r,

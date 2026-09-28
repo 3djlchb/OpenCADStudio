@@ -8573,7 +8573,7 @@ impl Scene {
     }
 
     /// Background colour for the current layout (model vs paper).
-    fn current_bg(&self) -> [f32; 4] {
+    pub(crate) fn current_bg(&self) -> [f32; 4] {
         if self.current_layout != "Model" {
             self.paper_bg_color
         } else {

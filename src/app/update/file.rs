@@ -412,12 +412,24 @@ fn plot_scene_content(
                     }))
     });
     model_wires.retain(|wire| wire.plot_visible);
+    // A text / leader background mask is filled with the canvas colour so it
+    // hides what is behind it; on paper that colour is the sheet's, not the
+    // dark screen's. Mark such fills so the export paints them paper-white
+    // instead of plotting the canvas colour (or turning it black). (#1072)
+    let canvas = scene.current_bg();
     let with_depth = |wires: Vec<crate::scene::WireModel>| {
         let depths = scene.plot_wire_depths(&wires);
         wires
             .into_iter()
             .zip(depths)
             .map(|(mut wire, draw_depth)| {
+                if !wire.fill_tris.is_empty() && wire.color[..3] == canvas[..3] {
+                    wire.bg_adapt = Some(Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                        raw_color: wire.color,
+                        canvas_color: true,
+                        ..Default::default()
+                    }));
+                }
                 plot_owner_aci(scene, &mut wire);
                 crate::io::pdf_export::PlotWire { wire, draw_depth }
             })
