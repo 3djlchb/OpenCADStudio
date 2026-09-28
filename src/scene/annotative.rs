@@ -1336,6 +1336,21 @@ pub fn translate_annotation_contexts(
     entity_handle: Handle,
     delta: glam::DVec3,
 ) -> bool {
+    transform_annotation_contexts(
+        doc,
+        entity_handle,
+        &crate::command::EntityTransform::Translate(delta),
+    )
+}
+
+/// Carry every annotation-scale representation of an entity through `t`, not
+/// only the displayed one — otherwise MOVE/ROTATE/SCALE leave the other scales
+/// where they were and they reappear there on a scale switch. (#700)
+pub fn transform_annotation_contexts(
+    doc: &mut CadDocument,
+    entity_handle: Handle,
+    t: &crate::command::EntityTransform,
+) -> bool {
     let Some(base_entity) = doc.get_entity(entity_handle).cloned() else {
         return false;
     };
@@ -1361,14 +1376,13 @@ pub fn translate_annotation_contexts(
     let mut changed = false;
     for (_, scale) in leaves {
         let mut placed = entity_for_annotation_context(doc, &base_entity, Some(scale)).into_owned();
-        crate::scene::view::dispatch::apply_transform(
-            &mut placed,
-            &crate::command::EntityTransform::Translate(delta),
-        );
+        crate::scene::view::dispatch::apply_transform(&mut placed, t);
 
         // The entity translator keeps the compatibility break list in sync,
         // while the complete per-segment list is a separate persisted field.
-        if let EntityType::MultiLeader(mleader) = &mut placed {
+        if let (EntityType::MultiLeader(mleader), crate::command::EntityTransform::Translate(delta)) =
+            (&mut placed, t)
+        {
             let offset = Vector3::new(delta.x, delta.y, delta.z);
             for root in &mut mleader.context.leader_roots {
                 for line in &mut root.lines {

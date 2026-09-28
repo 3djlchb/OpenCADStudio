@@ -342,7 +342,9 @@ impl Scene {
             }
         }
         for &h in handles {
-            if self.sync_displayed_annotation_context(h) {
+            let others =
+                crate::scene::annotative::transform_annotation_contexts(&mut self.document, h, t);
+            if self.sync_displayed_annotation_context(h) || others {
                 self.poison_undo_recording();
             }
         }
@@ -649,23 +651,6 @@ impl Scene {
     pub fn copy_entities(&mut self, handles: &[Handle], t: &EntityTransform) -> Vec<Handle> {
         let copy_handles = self.handles_expanded_for_leader_annotations(handles);
 
-        // LEADER + attached MTEXT are a logical pair. Their entity clones must not
-        // retain the source extension dictionary, otherwise both copies share the
-        // same annotation-context objects.
-        let leader_pair_handles: Vec<Handle> = copy_handles
-            .iter()
-            .flat_map(|&handle| {
-                let annotation = match self.document.get_entity(handle) {
-                    Some(EntityType::Leader(leader)) if !leader.annotation_handle.is_null() => {
-                        Some(leader.annotation_handle)
-                    }
-                    _ => None,
-                };
-
-                std::iter::once(handle).chain(annotation)
-            })
-            .collect();
-
         // Objects on a locked layer can be selected but not copied.
         let clones: Vec<(Handle, EntityType, Vec<Handle>)> = copy_handles
             .iter()
@@ -673,11 +658,11 @@ impl Scene {
             .filter_map(|&h| {
                 let entity = self.document.get_entity(h)?.clone();
 
-                let annotation_scales = if leader_pair_handles.contains(&h) {
-                    crate::scene::annotative::annotation_scale_handles_for_entity(&self.document, h)
-                } else {
-                    Vec::new()
-                };
+                // Any annotative entity (not only a LEADER/MTEXT pair) needs
+                // its own context tree; a shared one ties the copy to the
+                // source. (#700)
+                let annotation_scales =
+                    crate::scene::annotative::annotation_scale_handles_for_entity(&self.document, h);
 
                 Some((h, entity, annotation_scales))
             })
