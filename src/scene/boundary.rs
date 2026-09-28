@@ -720,6 +720,39 @@ pub(crate) fn boundary_entities_from_sources(
         .collect()
 }
 
+/// A duplicated associative hatch must follow the duplicated boundary, not the
+/// source one — otherwise editing the source regenerates the duplicate onto
+/// the source's outline and it seems to vanish. A path whose boundary was not
+/// duplicated along loses its association. `handle_map` maps source handles
+/// to their duplicates (COPY and paste both build one). (#1370)
+pub(crate) fn remap_hatch_associations(
+    doc: &mut codec::CadDocument,
+    handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+) -> bool {
+    let mut touched = false;
+    for &copy in handle_map.values() {
+        let Some(EntityType::Hatch(hatch)) = doc.get_entity_mut(copy) else {
+            continue;
+        };
+        if !hatch.is_associative {
+            continue;
+        }
+        for path in &mut hatch.paths {
+            if path.boundary_handles.iter().all(|source| handle_map.contains_key(source)) {
+                for source in &mut path.boundary_handles {
+                    *source = handle_map[source];
+                }
+            } else {
+                path.boundary_handles.clear();
+                path.flags.set_external(false);
+            }
+        }
+        hatch.is_associative = hatch.paths.iter().any(|path| !path.boundary_handles.is_empty());
+        touched = true;
+    }
+    touched
+}
+
 impl Scene {
     pub(crate) fn replace_hatch_association(&mut self,handle:Handle,paths:Vec<codec::entities::BoundaryPath>) {
         let Some(EntityType::Hatch(hatch))=self.document.get_entity_mut(handle) else{return;};
@@ -729,37 +762,12 @@ impl Scene {
         self.refresh_fill_model(handle);
     }
 
-    /// A copied associative hatch must follow the copied boundary, not the
-    /// source one — otherwise editing the source regenerates the copy onto the
-    /// source's outline and the copy seems to vanish. A path whose boundary
-    /// was not copied along loses its association. (#1370)
+    /// COPY's half of [`remap_hatch_associations`], plus the cache it feeds.
     pub(crate) fn copy_hatch_associations(
         &mut self,
         handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
     ) {
-        let mut touched = false;
-        for &copy in handle_map.values() {
-            let Some(EntityType::Hatch(hatch)) = self.document.get_entity_mut(copy) else {
-                continue;
-            };
-            if !hatch.is_associative {
-                continue;
-            }
-            for path in &mut hatch.paths {
-                if path.boundary_handles.iter().all(|source| handle_map.contains_key(source)) {
-                    for source in &mut path.boundary_handles {
-                        *source = handle_map[source];
-                    }
-                } else {
-                    path.boundary_handles.clear();
-                    path.flags.set_external(false);
-                }
-            }
-            hatch.is_associative =
-                hatch.paths.iter().any(|path| !path.boundary_handles.is_empty());
-            touched = true;
-        }
-        if touched {
+        if remap_hatch_associations(&mut self.document, handle_map) {
             self.associative_hatch_source_cache.borrow_mut().take();
         }
     }
