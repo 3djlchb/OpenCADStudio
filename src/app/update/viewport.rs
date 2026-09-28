@@ -2124,7 +2124,18 @@ impl OpenCADStudio {
                 .as_ref()
                 .map(|c| c.needs_tangent_pick())
                 .unwrap_or(false);
-            self.tabs[i].snap_result = if needs_entity || is_gathering || needs_structure {
+            // An entity pick that also takes points (constraint point picks)
+            // keeps object snap: the point is only recognised when the pick
+            // lands exactly on it, and the markers show where that is. (#1526)
+            let entity_pick_takes_points = needs_entity
+                && self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.entity_pick_accepts_points());
+            self.tabs[i].snap_result = if (needs_entity && !entity_pick_takes_points)
+                || is_gathering
+                || needs_structure
+            {
                 None
             } else if needs_tan {
                 self.snapper.snap_tangent_only(
@@ -3786,7 +3797,12 @@ impl OpenCADStudio {
                     .as_ref()
                     .map(|c| c.needs_entity_pick())
                     .unwrap_or(false);
-                let mut snap_hit = if needs_entity_click {
+                let entity_click_takes_points = needs_entity_click
+                    && self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|command| command.entity_pick_accepts_points());
+                let mut snap_hit = if needs_entity_click && !entity_click_takes_points {
                     None
                 } else if needs_tan {
                     self.snapper.snap_tangent_only(
@@ -4018,13 +4034,8 @@ impl OpenCADStudio {
                         pt = r;
                     }
                 }
-                if needs_entity_click
-                    && self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|command| command.entity_pick_accepts_points())
-                {
-                    raw
+                if entity_click_takes_points {
+                    snap_hit.map_or(raw, |hit| hit.world)
                 } else {
                     pt
                 }
