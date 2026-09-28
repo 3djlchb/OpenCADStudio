@@ -36,12 +36,6 @@ pub(in crate::app) use overlay::{MTEXT_TEXT_ID, TEXT_INLINE_ID};
 pub(in crate::app) const VIEWPORT_CAPTURE_BOUNDS_ID: &str = "viewport-capture-bounds";
 
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_REGION_PX;
-static MOBILE_SPONSOR_IMAGE: std::sync::LazyLock<iced::widget::image::Handle> =
-    std::sync::LazyLock::new(|| {
-        iced::widget::image::Handle::from_bytes(
-            include_bytes!("../../../assets/sponsors/cad-editor-mobile-dwg-viewer.png").as_slice(),
-        )
-    });
 
 /// Background used by drafting overlays in model or paper space.
 fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
@@ -3578,18 +3572,6 @@ fn start_page_content<'a>(
         )
         .interaction(iced::mouse::Interaction::Pointer)
         .on_press(Message::OpenUrl("https://open-aec.com/".to_string())),
-        mouse_area(
-            container(
-                iced::widget::image(MOBILE_SPONSOR_IMAGE.clone())
-                    .width(Fill)
-                    .content_fit(iced::ContentFit::Contain),
-            )
-            .width(Fill),
-        )
-        .interaction(iced::mouse::Interaction::Pointer)
-        .on_press(Message::OpenUrl(
-            "https://play.google.com/store/apps/details?id=net.cadeditor.app".to_string(),
-        )),
     ]
     .spacing(10)
     .align_x(iced::alignment::Horizontal::Center)
