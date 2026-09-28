@@ -411,6 +411,176 @@ pub fn percent_encode(s: &str) -> String {
 /// (the canvas UI is not), with a one-click Copy button, so a failing user can
 /// paste the exact error into a bug report. Panics land in the same banner via
 /// a chained hook.
+/// Desktop crash log.
+///
+/// A release build hides the console (`windows_subsystem = "windows"`) and is
+/// stripped, so a panic used to end the process with nothing on screen, nothing
+/// on stderr and nothing on disk: the application simply vanished. That is what
+/// every "it just closes" report has had to work from (#635, #845), and why a
+/// crash like the TRIM one (#830) could be reported for months with no detail
+/// beyond the steps.
+///
+/// Every panic now leaves one small file behind naming what failed and where.
+/// The hook chains onto whatever was installed before it, so a debug build
+/// still prints to stderr as well.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crash_log {
+    use std::path::PathBuf;
+
+    /// Newest reports to keep. A crash loop must not fill the user's profile,
+    /// and the first report of a loop is the interesting one, so keep both
+    /// ends by pruning only what is older than this.
+    const KEEP: usize = 20;
+
+    /// Where reports go, beside the recovery logs.
+    pub fn directory() -> Option<PathBuf> {
+        crate::config::config_dir().map(|path| path.join("crash_logs"))
+    }
+
+    /// Chain a report writer onto the current panic hook.
+    ///
+    /// Call once, early: a panic before this runs is still silent.
+    pub fn install() {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            // A panic while reporting a panic must not replace the original
+            // with a recursion, so failures here are dropped on purpose.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| write(info)));
+            previous(info);
+        }));
+    }
+
+    /// The report body. Separated from the IO so a test can read it.
+    pub fn report(info: &std::panic::PanicHookInfo<'_>, when: u64) -> String {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(no message)".to_string());
+        let where_ = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "(unknown location)".to_string());
+        report_from(&payload, &where_, when)
+    }
+
+    /// The report body, with the two pieces a panic carries already pulled
+    /// out. Separate so a test can exercise the layout without installing a
+    /// panic hook: the hook is process-global, and a test that asserts inside
+    /// one fires on every other test's panic and aborts the whole binary.
+    pub fn report_from(payload: &str, where_: &str, when: u64) -> String {
+        // `WGPU_BACKEND` is what the backend resolver settled on, so the
+        // report says which graphics path was live without reaching into the
+        // renderer from a panic handler.
+        let backend = std::env::var("WGPU_BACKEND").unwrap_or_else(|_| "(default)".to_string());
+        // `force_capture`, not `capture`: a report whose backtrace says
+        // "disabled backtrace" because the user never set RUST_BACKTRACE is
+        // exactly the report that helps nobody. Release builds are stripped,
+        // so some frames are addresses, but the frame count and the module
+        // boundaries still place the fault.
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        [
+            format!("Open CAD Studio {} crash report", env!("OCS_APP_VERSION")),
+            format!("when: {when} (unix seconds)"),
+            format!("os: {} {}", std::env::consts::OS, std::env::consts::ARCH),
+            format!("gpu backend: {backend}"),
+            format!("thread: {}", std::thread::current().name().unwrap_or("unnamed")),
+            format!("panic: {payload}"),
+            format!("at: {where_}"),
+            String::new(),
+            "backtrace:".to_string(),
+            backtrace.to_string(),
+            String::new(),
+        ]
+        .join("\n")
+    }
+
+    fn write(info: &std::panic::PanicHookInfo<'_>) {
+        let Some(directory) = directory() else {
+            return;
+        };
+        if std::fs::create_dir_all(&directory).is_err() {
+            return;
+        }
+        let when = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let name = format!("crash-{when}-{}.log", std::process::id());
+        let path = directory.join(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        if let Ok(mut file) = options.open(&path) {
+            use std::io::Write;
+            let _ = file.write_all(report(info, when).as_bytes());
+        }
+        prune(&directory);
+    }
+
+    /// Keep the newest [`KEEP`] reports.
+    fn prune(directory: &std::path::Path) {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "log"))
+            .filter_map(|e| {
+                let modified = e.metadata().ok()?.modified().ok()?;
+                Some((modified, e.path()))
+            })
+            .collect();
+        if files.len() <= KEEP {
+            return;
+        }
+        files.sort_by_key(|(when, _)| *when);
+        for (_, path) in &files[..files.len() - KEEP] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        /// The report has to carry the two things a maintainer cannot guess:
+        /// what the message was and where it came from. It also has to be
+        /// readable — an earlier version built it with `\` continuations and
+        /// pasted the source indentation into every line.
+        #[test]
+        fn a_report_names_the_message_and_the_line() {
+            let text = super::report_from("a deliberate test panic", "src/sys.rs:1:2", 42);
+            assert!(text.starts_with("Open CAD Studio "), "{text}");
+            assert!(text.contains("panic: a deliberate test panic"), "{text}");
+            assert!(text.contains("at: src/sys.rs:1:2"), "{text}");
+            assert!(text.contains("when: 42 (unix seconds)"), "{text}");
+            let (header, trace) = text
+                .split_once("\nbacktrace:\n")
+                .expect("the report carries a backtrace section");
+            assert!(!trace.trim().is_empty(), "the backtrace must not be empty");
+            // Header only: a backtrace indents its own continuation lines,
+            // and that is how a backtrace is meant to read.
+            assert!(
+                header.lines().all(|line| !line.starts_with(' ')),
+                "header lines must not be indented:\n{header}"
+            );
+        }
+
+        /// A panic with no message still has to produce a filed report rather
+        /// than nothing at all.
+        #[test]
+        fn a_report_survives_a_panic_with_nothing_to_say() {
+            let text = super::report_from("(no message)", "(unknown location)", 0);
+            assert!(text.contains("panic: (no message)"), "{text}");
+            assert!(text.contains("at: (unknown location)"), "{text}");
+        }
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 pub mod web_diag {
     use std::sync::Mutex;
