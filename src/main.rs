@@ -203,6 +203,14 @@ fn main() -> iced::Result {
             OpenCADStudio::gpu_backend::arm_sentinel(
                 gpu.backend_value.as_deref().unwrap_or("auto"),
             );
+            // The backend is only a suspect while it is young: a run that
+            // keeps drawing past this mark has proved it works, so a later
+            // end — Task Manager, an OOM kill, a power cut — must not cost
+            // the user that backend at the next launch.
+            std::thread::spawn(|| {
+                std::thread::sleep(OpenCADStudio::gpu_backend::SENTINEL_PROOF_DELAY);
+                OpenCADStudio::gpu_backend::mark_sentinel_survived();
+            });
             let result = app::run();
             OpenCADStudio::gpu_backend::disarm_sentinel();
             result
