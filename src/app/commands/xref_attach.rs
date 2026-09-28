@@ -12,6 +12,26 @@ use crate::modules::insert::xref_cmd::display_path;
 use crate::ui::window::xref_attach::{XrefAttachMsg, XrefAttachState};
 
 impl OpenCADStudio {
+    /// DWFATTACH / DGNATTACH on the command line: with a file, from its
+    /// sheet / model prompt; without one, from the path prompt.
+    pub(super) fn start_underlay_attach(
+        &mut self,
+        i: usize,
+        kind: codec::entities::UnderlayType,
+        file: &str,
+    ) {
+        use crate::command::CadCommand;
+        let insunits = self.tabs[i].scene.document.header.insertion_units;
+        let mut command = crate::modules::insert::pdf_attach::PdfAttachCommand::for_kind(kind, insunits);
+        if !file.trim().is_empty() {
+            if let Some(crate::command::CmdResult::ReportError(message)) = command.on_text_input(file) {
+                self.command_line.push_error(&message);
+            }
+        }
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].active_cmd = Some(Box::new(command));
+    }
+
     /// Commands owned here; `None` defers to the other families.
     pub(super) fn dispatch_xref_attach(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         let upper = cmd.to_ascii_uppercase();
@@ -21,6 +41,22 @@ impl OpenCADStudio {
         };
         match (verb.as_str(), rest.is_empty()) {
             ("ATTACH", true) => Some(Task::done(Message::AttachPick)),
+            ("DWFATTACH", true) => Some(Task::done(Message::UnderlayAttachPick(
+                codec::entities::UnderlayType::Dwf,
+            ))),
+            ("DGNATTACH", true) => Some(Task::done(Message::UnderlayAttachPick(
+                codec::entities::UnderlayType::Dgn,
+            ))),
+            // A file after DWFATTACH / DGNATTACH, or the - forms, go on the
+            // command line.
+            ("DWFATTACH" | "-DWFATTACH", _) => {
+                self.start_underlay_attach(i, codec::entities::UnderlayType::Dwf, rest);
+                Some(Task::none())
+            }
+            ("DGNATTACH" | "-DGNATTACH", _) => {
+                self.start_underlay_attach(i, codec::entities::UnderlayType::Dgn, rest);
+                Some(Task::none())
+            }
             ("XATTACH", true) => Some(Task::done(Message::XAttachPick)),
             // A file named on the command line skips the picker.
             // Handled at once, so the placement it starts belongs to this
@@ -299,6 +335,26 @@ impl OpenCADStudio {
     /// Messages of the ATTACH picker and the dialog.
     pub(in crate::app) fn update_xref_attach(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::UnderlayAttachPick(kind) => Task::perform(
+                async move {
+                    let (title, filter, extensions): (&str, &str, &[&str]) = match kind {
+                        codec::entities::UnderlayType::Dgn => {
+                            ("Select DGN File", "DGN Files", &["dgn"])
+                        }
+                        _ => ("Select DWF File", "DWF Files", &["dwf", "dwfx"]),
+                    };
+                    let handle = crate::sys::file_dialog()
+                        .set_title(crate::t!(title).as_ref())
+                        .add_filter(crate::t!(filter).as_ref(), extensions)
+                        .pick_file()
+                        .await;
+                    match handle {
+                        Some(h) => Ok(crate::sys::handle_path(&h)),
+                        None => Err("Cancelled".to_string()),
+                    }
+                },
+                Message::AttachPickResult,
+            ),
             Message::AttachPick => Task::perform(
                 async {
                     let handle = crate::sys::file_dialog()
@@ -306,11 +362,14 @@ impl OpenCADStudio {
                         .add_filter(
                             crate::t!("All Reference Files").as_ref(),
                             &[
-                                "dwg", "dxf", "pdf", "png", "jpg", "jpeg", "bmp", "tif", "tiff",
+                                "dwg", "dxf", "pdf", "dwf", "dwfx", "dgn", "png", "jpg", "jpeg",
+                                "bmp", "tif", "tiff",
                             ],
                         )
                         .add_filter(crate::t!("Drawing").as_ref(), &["dwg", "dxf"])
                         .add_filter(crate::t!("PDF Files").as_ref(), &["pdf"])
+                        .add_filter(crate::t!("DWF Files").as_ref(), &["dwf", "dwfx"])
+                        .add_filter(crate::t!("DGN Files").as_ref(), &["dgn"])
                         .add_filter(
                             crate::t!("Images").as_ref(),
                             &["png", "jpg", "jpeg", "bmp", "tif", "tiff"],
@@ -337,6 +396,16 @@ impl OpenCADStudio {
                         )))),
                         Err(e) => self.update(Message::PdfAttachPickResult(Err(e.to_string()))),
                     },
+                    "dwf" | "dwfx" | "dgn" => {
+                        let kind = if ext == "dgn" {
+                            codec::entities::UnderlayType::Dgn
+                        } else {
+                            codec::entities::UnderlayType::Dwf
+                        };
+                        let i = self.active_tab;
+                        self.start_underlay_attach(i, kind, &path.to_string_lossy());
+                        Task::none()
+                    }
                     "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" => {
                         let result = image::image_dimensions(&path)
                             .map(|(w, h)| (path.clone(), w, h))

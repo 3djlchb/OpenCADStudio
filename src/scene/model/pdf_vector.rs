@@ -600,15 +600,40 @@ pub fn circle_of(sp: &SubPath) -> Option<([f64; 2], f64)> {
 
 // ── Snapping ────────────────────────────────────────────────────────────────
 
-static PDF_OSNAP: AtomicBool = AtomicBool::new(true);
+/// PDFOSNAP, DWFOSNAP and DGNOSNAP: whether object snaps find the geometry
+/// inside underlays of each kind.
+static UNDERLAY_OSNAP: [AtomicBool; 3] = [AtomicBool::new(true), AtomicBool::new(true), AtomicBool::new(true)];
 
-/// PDFOSNAP: whether object snaps find the geometry inside PDF underlays.
-pub fn pdf_osnap() -> bool {
-    PDF_OSNAP.load(Ordering::Relaxed)
+fn osnap_slot(kind: codec::entities::UnderlayType) -> &'static AtomicBool {
+    match kind {
+        codec::entities::UnderlayType::Pdf => &UNDERLAY_OSNAP[0],
+        codec::entities::UnderlayType::Dwf => &UNDERLAY_OSNAP[1],
+        codec::entities::UnderlayType::Dgn => &UNDERLAY_OSNAP[2],
+    }
 }
 
-pub fn set_pdf_osnap(on: bool) {
-    PDF_OSNAP.store(on, Ordering::Relaxed);
+pub fn underlay_osnap(kind: codec::entities::UnderlayType) -> bool {
+    osnap_slot(kind).load(Ordering::Relaxed)
+}
+
+pub fn set_underlay_osnap(kind: codec::entities::UnderlayType, on: bool) {
+    osnap_slot(kind).store(on, Ordering::Relaxed);
+}
+
+/// UOSNAP: 1 when snaps find every kind of underlay geometry, 0 when none,
+/// 2 when the kinds differ.
+pub fn uosnap() -> i16 {
+    match UNDERLAY_OSNAP.iter().filter(|s| s.load(Ordering::Relaxed)).count() {
+        0 => 0,
+        n if n == UNDERLAY_OSNAP.len() => 1,
+        _ => 2,
+    }
+}
+
+pub fn set_uosnap(on: bool) {
+    for slot in &UNDERLAY_OSNAP {
+        slot.store(on, Ordering::Relaxed);
+    }
 }
 
 /// Most snap points one underlay contributes.
@@ -623,14 +648,13 @@ pub fn underlay_snap_points(
     document: &codec::CadDocument,
 ) -> Vec<(glam::DVec3, crate::scene::model::wire_model::SnapHint)> {
     use crate::scene::model::wire_model::SnapHint;
-    if !pdf_osnap() || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON) {
+    if !underlay_osnap(u.underlay_type) || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON) {
         return Vec::new();
     }
     let Some(def) = crate::entities::underlay::definition(u, document) else {
         return Vec::new();
     };
-    let source = super::pdf_layers::underlay_source(u, &def.file_path);
-    let Some(vectors) = page_vectors(&source, crate::entities::underlay::page_of(def)) else {
+    let Some(vectors) = underlay_vectors(u, def) else {
         return Vec::new();
     };
     let world = |p: [f64; 2]| {
@@ -665,6 +689,21 @@ pub fn underlay_snap_points(
     out
 }
 
+/// The page's vectors in page units: PDF through its layer overrides, DWF
+/// and DGN from their sheet.
+fn underlay_vectors(
+    u: &codec::entities::Underlay,
+    def: &codec::entities::UnderlayDefinition,
+) -> Option<Arc<PageVectors>> {
+    let page = crate::entities::underlay::page_of(def);
+    match def.underlay_type {
+        codec::entities::UnderlayType::Pdf => {
+            page_vectors(&super::pdf_layers::underlay_source(u, &def.file_path), page)
+        }
+        kind => super::underlay_vector::page_vectors(kind, &def.file_path, page, &super::pdf_layers::hidden_layers(u)),
+    }
+}
+
 /// Most points of the snap-only geometry wire of one underlay.
 // ponytail: flat cap; a spatial index over page segments for huge drawings.
 const MAX_GEOMETRY_POINTS: usize = 200_000;
@@ -684,7 +723,7 @@ pub fn underlay_snap_geometry(
     u: &codec::entities::Underlay,
     document: &codec::CadDocument,
 ) -> Vec<SnapPiece> {
-    if !pdf_osnap() || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON) {
+    if !underlay_osnap(u.underlay_type) || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON) {
         return Vec::new();
     }
     let Some(def) = crate::entities::underlay::definition(u, document) else {
@@ -693,8 +732,7 @@ pub fn underlay_snap_geometry(
     if def.unloaded {
         return Vec::new();
     }
-    let source = super::pdf_layers::underlay_source(u, &def.file_path);
-    let Some(vectors) = page_vectors(&source, crate::entities::underlay::page_of(def)) else {
+    let Some(vectors) = underlay_vectors(u, def) else {
         return Vec::new();
     };
     let world = |p: [f64; 2]| crate::entities::underlay::local_to_world(u, p);

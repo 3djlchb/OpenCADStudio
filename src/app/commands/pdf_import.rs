@@ -218,14 +218,16 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         label: String,
+        kind: codec::entities::UnderlayType,
         path: &str,
         pages: Vec<(String, codec::EntityType)>,
     ) {
         let pending = self.begin_undo(i, label, pages.len(), false);
 
         for (page, mut entity) in pages {
-            let definition = crate::modules::insert::pdf_attach::ensure_pdf_definition(
+            let definition = crate::modules::insert::pdf_attach::ensure_underlay_definition(
                 &mut self.tabs[i].scene.document,
+                kind,
                 path,
                 &page,
             );

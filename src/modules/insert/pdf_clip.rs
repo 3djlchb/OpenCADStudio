@@ -1,7 +1,7 @@
-// PDFCLIP / IMAGECLIP — clip a PDF underlay or a raster image to a boundary
-// (CLIP continues here for either).
+// PDFCLIP / DWFCLIP / DGNCLIP / IMAGECLIP — clip an underlay or a raster
+// image to a boundary (CLIP continues here for either).
 //
-//   Select PDF to clip:                      (Select image to clip:)
+//   Select PDF to clip:                      (DWF / DGN; Select image to clip:)
 //   Enter PDF clipping option [ON/OFF/Delete/New boundary] <New boundary>:
 //   (Enter image clipping option [ON/OFF/Delete/New boundary] <New>:)
 //   Delete old boundary? [Yes/No] <Yes>:     (when one exists; [No/Yes] for
@@ -38,6 +38,8 @@ enum Step {
 }
 
 pub struct PdfClipCommand {
+    /// The underlay kind PDFCLIP / DWFCLIP / DGNCLIP clips.
+    kind: UnderlayType,
     step: Step,
     handle: Handle,
     underlay: Option<Underlay>,
@@ -55,7 +57,13 @@ const BOUNDARY: &str = "Specify clipping boundary or select invert option:";
 
 impl PdfClipCommand {
     pub fn new() -> Self {
+        Self::for_kind(UnderlayType::Pdf)
+    }
+
+    /// DWFCLIP / DGNCLIP (or PDFCLIP): asks for an underlay of the kind.
+    pub fn for_kind(kind: UnderlayType) -> Self {
         Self {
+            kind,
             step: Step::Select,
             handle: Handle::NULL,
             underlay: None,
@@ -147,7 +155,7 @@ impl PdfClipCommand {
     /// Create Clipping Boundary): the New boundary branch at once. Returns the
     /// command and the result of its first step.
     pub fn new_boundary(handle: Handle, underlay: Underlay) -> (Self, CmdResult) {
-        let mut command = Self::new();
+        let mut command = Self::for_kind(underlay.underlay_type);
         command.handle = handle;
         command.underlay = Some(underlay);
         command.step = Step::Option;
@@ -157,7 +165,7 @@ impl PdfClipCommand {
 
     /// An underlay CLIP picked: straight to the clipping option.
     pub fn for_underlay(handle: Handle, underlay: Underlay) -> Self {
-        let mut command = Self::new();
+        let mut command = Self::for_kind(underlay.underlay_type);
         command.handle = handle;
         command.underlay = Some(underlay);
         command.step = Step::Option;
@@ -255,6 +263,14 @@ impl PdfClipCommand {
         }
     }
 
+    fn kind_name(&self) -> &'static str {
+        match self.kind {
+            UnderlayType::Pdf => "PDF",
+            UnderlayType::Dwf => "DWF",
+            UnderlayType::Dgn => "DGN",
+        }
+    }
+
     fn rectangle(a: DVec3, b: DVec3) -> Vec<DVec3> {
         vec![
             a,
@@ -267,19 +283,25 @@ impl PdfClipCommand {
 
 impl CadCommand for PdfClipCommand {
     fn name(&self) -> &'static str {
-        if self.image_mode { "IMAGECLIP" } else { "PDFCLIP" }
+        match (self.image_mode, self.kind) {
+            (true, _) => "IMAGECLIP",
+            (false, UnderlayType::Pdf) => "PDFCLIP",
+            (false, UnderlayType::Dwf) => "DWFCLIP",
+            (false, UnderlayType::Dgn) => "DGNCLIP",
+        }
     }
 
     fn prompt(&self) -> String {
         match self.step {
             Step::Select if self.image_mode => "Select image to clip:".to_string(),
-            Step::Select => "Select PDF to clip:".to_string(),
+            Step::Select => format!("Select {} to clip:", self.kind_name()),
             Step::Option if self.image_mode => {
                 "Enter image clipping option [ON/OFF/Delete/New boundary] <New>:".to_string()
             }
-            Step::Option => {
-                "Enter PDF clipping option [ON/OFF/Delete/New boundary] <New boundary>:".to_string()
-            }
+            Step::Option => format!(
+                "Enter {} clipping option [ON/OFF/Delete/New boundary] <New boundary>:",
+                self.kind_name()
+            ),
             Step::DeleteOld if self.image_mode => "Delete old boundary? [No/Yes] <Yes>:".to_string(),
             Step::DeleteOld => "Delete old boundary? [Yes/No] <Yes>:".to_string(),
             Step::Mode => {
@@ -359,13 +381,16 @@ impl CadCommand for PdfClipCommand {
                 _ => CmdResult::NeedPoint,
             },
             Step::Select => match picked {
-                Some(EntityType::Underlay(u)) if u.underlay_type == UnderlayType::Pdf => {
+                Some(EntityType::Underlay(u)) if u.underlay_type == self.kind => {
                     self.handle = handle;
                     self.underlay = Some(u);
                     self.step = Step::Option;
                     CmdResult::NeedPoint
                 }
-                _ => CmdResult::ReportError("Object selected was not a PDF underlay.".to_string()),
+                _ => CmdResult::ReportError(format!(
+                    "Object selected was not a {} underlay.",
+                    self.kind_name()
+                )),
             },
             Step::Polyline => match picked {
                 Some(EntityType::LwPolyline(pl)) if pl.vertices.len() >= 3 => {
@@ -440,6 +465,8 @@ impl CadCommand for PdfClipCommand {
                 self.apply_boundary(&points, false)
             }
             Step::PolyPoints => CmdResult::NeedPoint,
+            // A corner is asked again, as the reference does.
+            Step::RectFirst | Step::RectSecond => CmdResult::NeedPoint,
             _ => CmdResult::Cancel,
         }
     }
@@ -461,5 +488,5 @@ impl CadCommand for PdfClipCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PDFCLIP", "IMAGECLIP"]
+    names: &["PDFCLIP", "DWFCLIP", "DGNCLIP", "IMAGECLIP"]
 });

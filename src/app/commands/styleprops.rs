@@ -1022,6 +1022,8 @@ impl OpenCADStudio {
                     | "DWFFRAME"
                     | "DGNFRAME"
                     | "PDFOSNAP"
+                    | "DWFOSNAP"
+                    | "DGNOSNAP"
                     | "UOSNAP"
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
@@ -1181,14 +1183,27 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if matches!(name.as_str(), "PDFOSNAP" | "UOSNAP") {
-                        let current = i16::from(crate::scene::model::pdf_vector::pdf_osnap());
+                    if matches!(name.as_str(), "PDFOSNAP" | "DWFOSNAP" | "DGNOSNAP" | "UOSNAP") {
+                        use crate::scene::model::pdf_vector as pv;
+                        use codec::entities::UnderlayType;
+                        // UOSNAP sets every kind and reads 2 while they differ.
+                        let kind = match name.as_str() {
+                            "PDFOSNAP" => Some(UnderlayType::Pdf),
+                            "DWFOSNAP" => Some(UnderlayType::Dwf),
+                            "DGNOSNAP" => Some(UnderlayType::Dgn),
+                            _ => None,
+                        };
+                        let current = kind.map_or_else(pv::uosnap, |kind| i16::from(pv::underlay_osnap(kind)));
                         if let Some(value) = &value {
                             match value.parse::<i16>().ok().filter(|value| (0..=1).contains(value)) {
                                 Some(mode) => {
                                     if current != mode {
-                                        crate::scene::model::pdf_vector::set_pdf_osnap(mode == 1);
+                                        match kind {
+                                            Some(kind) => pv::set_underlay_osnap(kind, mode == 1),
+                                            None => pv::set_uosnap(mode == 1),
+                                        }
                                         self.tabs[i].scene.reseed_underlays();
+                                        self.sync_underlay_tab();
                                     }
                                 }
                                 None => self.command_line.push_error("Requires 0 or 1 only"),

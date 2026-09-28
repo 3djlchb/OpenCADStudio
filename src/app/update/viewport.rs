@@ -850,6 +850,8 @@ impl OpenCADStudio {
         self.tabs[i].scene.update(t - self.start);
         // Dynamic dimensions keep their screen size across zoom bands.
         self.tabs[i].scene.refresh_dynamic_dimension_scales(false);
+        // Underlays are rasterised again for the zoom once it settles.
+        self.tabs[i].scene.refresh_underlay_resolution(t);
 
         // If the camera moved since we last synced, write it back to
         // the document and mark the file dirty.

@@ -1121,7 +1121,6 @@ pub fn collect_entries_with_prev(
     unloaded: &std::collections::HashSet<crate::io::xref_model::UnloadKey>,
     prev: &std::collections::HashMap<u64, std::time::SystemTime>,
 ) -> Vec<crate::io::xref_model::ReferenceEntry> {
-    use codec::entities::UnderlayType;
     use codec::objects::ObjectType;
     use crate::io::xref_model::{
         child_key, decide_status, normalize_lexical, RefKind, RefStatus, RefType,
@@ -1252,16 +1251,13 @@ pub fn collect_entries_with_prev(
         let ObjectType::UnderlayDefinition(def) = obj else {
             continue;
         };
-        if def.underlay_type != UnderlayType::Pdf {
-            continue;
-        }
         let key = handle.value();
         let name = if def.name.trim().is_empty() {
             file_name_only(&def.file_path).to_owned()
         } else {
             def.name.clone()
         };
-        let mut entry = ReferenceEntry::new(key, name, RefKind::Pdf);
+        let mut entry = ReferenceEntry::new(key, name, RefKind::Underlay);
         entry.saved_path = def.file_path.clone();
         if def.unloaded || unloaded.contains(&UnloadKey::Direct(key)) {
             entry.status = RefStatus::Unloaded;

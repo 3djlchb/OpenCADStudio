@@ -709,9 +709,14 @@ impl OpenCADStudio {
                     Err(_) => self.command_line.push_error(&format!("{path} not found.")),
                 }
             }
-            "PDFCLIP" => {
+            "PDFCLIP" | "DWFCLIP" | "DGNCLIP" => {
                 use crate::command::CadCommand;
-                let command = crate::modules::insert::pdf_clip::PdfClipCommand::new();
+                let kind = match cmd {
+                    "DWFCLIP" => codec::entities::UnderlayType::Dwf,
+                    "DGNCLIP" => codec::entities::UnderlayType::Dgn,
+                    _ => codec::entities::UnderlayType::Pdf,
+                };
+                let command = crate::modules::insert::pdf_clip::PdfClipCommand::for_kind(kind);
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }

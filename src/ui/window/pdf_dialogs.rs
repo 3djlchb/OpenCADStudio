@@ -679,7 +679,7 @@ pub fn view_layers<'a>(
                 .height(Fill)
                 .into()
         }
-        _ => container(text(t!("This file does not contain any layers.")).size(11).style(muted_style))
+        _ => container(text(t!("This file does not contain any layers")).size(11).style(muted_style))
             .width(Fill)
             .height(Fill)
             .align_x(iced::Center)

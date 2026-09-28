@@ -1613,7 +1613,7 @@ bg={bg_ms:.1}ms n={view_count}"
             } else if let Some(ctx) = self.ribbon.underlay_context() {
                 let ctx = ctx.clone();
                 crate::ui::side_toolbar::view_with_active(
-                    &crate::ui::ribbon::pdf_underlay_tools(),
+                    &crate::ui::ribbon::pdf_underlay_tools(ctx.kind),
                     &move |id| match id {
                         "_PDFULMONO" => ctx.monochrome,
                         "_PDFULSHOW" => ctx.shown,
@@ -2544,7 +2544,10 @@ impl OpenCADStudio {
         // driven by input events, but once the cursor stops no event would fire
         // the one full-quality frame that re-renders hatches — this tick does,
         // then the scene-render cache holds it and the subscription auto-stops.
-        let nav_settle = if self.tabs[self.active_tab].scene.is_settling() {
+        // Underlay rasters follow the zoom once it settles; tick until then.
+        let nav_settle = if self.tabs[self.active_tab].scene.is_settling()
+            || self.tabs[self.active_tab].scene.underlay_resolution_stale()
+        {
             window::frames().map(Message::Tick)
         } else {
             Subscription::none()

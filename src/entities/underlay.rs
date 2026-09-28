@@ -47,23 +47,33 @@ pub(crate) fn definition<'a>(
     }
 }
 
-/// Page number of a definition ("1" when unset).
+/// Page number of a PDF definition ("1" when unset), or the sheet (DWF) or
+/// model (DGN) name (empty: the file's first).
 pub(crate) fn page_of(def: &codec::entities::UnderlayDefinition) -> &str {
-    if def.page_name.trim().is_empty() {
+    if def.page_name.trim().is_empty() && matches!(def.underlay_type, codec::entities::UnderlayType::Pdf) {
         "1"
     } else {
         def.page_name.trim()
     }
 }
 
-/// Size of the referenced page in underlay units (page inches), when the
-/// definition resolves and its PDF page can be read.
-pub(crate) fn page_size(u: &Underlay, document: &codec::CadDocument) -> Option<(f64, f64)> {
-    let def = definition(u, document)?;
-    if !matches!(def.underlay_type, codec::entities::UnderlayType::Pdf) {
-        return None;
+/// The referenced page (PDF, page inches from its lower-left corner) or
+/// sheet / model (DWF, DGN, in its own units about its origin) as min x,
+/// min y, max x, max y in underlay units, when it can be read.
+pub(crate) fn definition_rect(def: &codec::entities::UnderlayDefinition) -> Option<[f64; 4]> {
+    match def.underlay_type {
+        codec::entities::UnderlayType::Pdf => {
+            crate::scene::model::pdf_raster::page_size_inches(&def.file_path, page_of(def))
+                .map(|(w, h)| [0.0, 0.0, w, h])
+        }
+        kind => crate::scene::model::underlay_vector::sheet(kind, &def.file_path, page_of(def))
+            .map(|sheet| sheet.rect),
     }
-    crate::scene::model::pdf_raster::page_size_inches(&def.file_path, page_of(def))
+}
+
+/// The underlay's page rectangle (see [`definition_rect`]).
+pub(crate) fn page_rect(u: &Underlay, document: &codec::CadDocument) -> Option<[f64; 4]> {
+    definition_rect(definition(u, document)?)
 }
 
 /// The name a definition shows: its own name, or "<file> - <page>" as the
@@ -115,12 +125,12 @@ pub(crate) fn is_clipped(u: &Underlay) -> bool {
 
 /// Page frame in world space (CCW from the insertion).
 fn page_quad(u: &Underlay, document: &codec::CadDocument) -> Option<[[f64; 3]; 4]> {
-    let (w, h) = page_size(u, document)?;
+    let [x0, y0, x1, y1] = page_rect(u, document)?;
     Some([
-        local_to_world(u, [0.0, 0.0]),
-        local_to_world(u, [w, 0.0]),
-        local_to_world(u, [w, h]),
-        local_to_world(u, [0.0, h]),
+        local_to_world(u, [x0, y0]),
+        local_to_world(u, [x1, y0]),
+        local_to_world(u, [x1, y1]),
+        local_to_world(u, [x0, y1]),
     ])
 }
 
@@ -136,7 +146,7 @@ fn shown_local_extent(u: &Underlay, document: &codec::CadDocument) -> Option<(f6
         }
         return Some((hi[0] - lo[0], hi[1] - lo[1]));
     }
-    page_size(u, document)
+    page_rect(u, document).map(|r| (r[2] - r[0], r[3] - r[1]))
 }
 
 /// Width and height the Properties panel shows: the shown extent times the

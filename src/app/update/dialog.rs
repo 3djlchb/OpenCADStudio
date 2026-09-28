@@ -867,8 +867,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                     Some(entity.common().handle)
                 }
                 codec::EntityType::Underlay(underlay)
-                    if matches!(underlay.underlay_type, codec::entities::UnderlayType::Pdf)
-                        && self.tabs[i].xref_unloaded.is_unloaded(underlay.definition_handle.value()) =>
+                    if self.tabs[i].xref_unloaded.is_unloaded(underlay.definition_handle.value()) =>
                 {
                     Some(entity.common().handle)
                 }
@@ -1021,8 +1020,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             "XREF: cannot reload nested reference '{}'. Reload it in its host drawing.",
                             name
                         ).as_ref());
-                    } else if *kind == crate::io::xref_model::RefKind::Pdf {
-                        // A PDF reloads by clearing its definition's unloaded state.
+                    } else if *kind == crate::io::xref_model::RefKind::Underlay {
+                        // An underlay reloads by clearing its definition's unloaded state.
                         for (key, row_name, row_kind, _) in &picked {
                             if row_kind != kind || row_name != name {
                                 continue;

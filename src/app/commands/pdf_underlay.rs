@@ -1,17 +1,20 @@
-//! The right-edge PDF underlay and xref tools: their state comes from the
+//! The right-edge underlay and xref tools: their state comes from the
 //! selection, their buttons edit it.
 
 use super::*;
-use codec::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
+use codec::entities::{Underlay, UnderlayDisplayFlags};
 use crate::ui::ribbon::UnderlayContext;
 
 impl OpenCADStudio {
-    /// The selected PDF underlays, or nothing when anything else is selected.
+    /// The selected underlays when they are all of one kind, or nothing
+    /// when anything else (or another kind) is selected.
     fn selected_pdf_underlays(&self, i: usize) -> Vec<(codec::Handle, Underlay)> {
-        let mut out = Vec::new();
+        let mut out: Vec<(codec::Handle, Underlay)> = Vec::new();
         for (handle, entity) in self.tabs[i].scene.selected_entities() {
             match entity {
-                codec::EntityType::Underlay(u) if u.underlay_type == UnderlayType::Pdf => {
+                codec::EntityType::Underlay(u)
+                    if out.first().is_none_or(|(_, first)| first.underlay_type == u.underlay_type) =>
+                {
                     out.push((handle, u.clone()));
                 }
                 _ => return Vec::new(),
@@ -51,9 +54,10 @@ impl OpenCADStudio {
         } else {
             self.selected_pdf_underlays(i).first().map(|(_, u)| {
                 UnderlayContext {
+                    kind: u.underlay_type,
                     monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
                     shown: u.flags.contains(UnderlayDisplayFlags::ON),
-                    snap: crate::scene::model::pdf_vector::pdf_osnap(),
+                    snap: crate::scene::model::pdf_vector::underlay_osnap(u.underlay_type),
                 }
             })
         };
@@ -106,9 +110,14 @@ impl OpenCADStudio {
                     .is_some_and(|(_, u)| u.flags.contains(UnderlayDisplayFlags::ON));
                 self.edit_selected_underlays(i, "PDFUNDERLAY", |u| u.set_on(on));
             }
+            // Enable Snap switches PDFOSNAP, DWFOSNAP or DGNOSNAP.
             "_PDFULSNAP" => {
-                let on = !crate::scene::model::pdf_vector::pdf_osnap();
-                crate::scene::model::pdf_vector::set_pdf_osnap(on);
+                let Some((_, underlay)) = self.selected_pdf_underlays(i).into_iter().next() else {
+                    return Some(Task::none());
+                };
+                let kind = underlay.underlay_type;
+                let on = !crate::scene::model::pdf_vector::underlay_osnap(kind);
+                crate::scene::model::pdf_vector::set_underlay_osnap(kind, on);
                 self.tabs[i].scene.reseed_underlays();
                 self.sync_underlay_tab();
             }
