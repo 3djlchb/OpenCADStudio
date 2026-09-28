@@ -358,6 +358,13 @@ impl Scene {
                 view::dispatch::apply_transform(entity, t);
             }
         }
+        // The moved `*D` contents are a block definition the block cache holds;
+        // without a fresh block epoch a reopened drawing's dimensions stay
+        // drawn where they were until REGEN. (#1342)
+        if !dim_block_subs.is_empty() {
+            self.block_epoch =
+                super::GEOMETRY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         // Only the transformed entities changed (a top-level move/rotate/scale/
         // mirror never edits a block definition) — report just those so the
         // resident set re-tessellates only them and every derived cache patches
