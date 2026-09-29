@@ -125,11 +125,33 @@ fn serve_stdio(app: &mut OpenCADStudio) {
     }
 }
 
+/// Idle timeout for one `--serve` socket client — the same 15 s every other
+/// transport in the codebase uses (`rest.rs`, `http_bridge.rs`,
+/// `control::transport`), and the only one this path was missing.
+#[cfg(not(target_arch = "wasm32"))]
+const SERVE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Serve one socket client at a time on `127.0.0.1:port`. An idle client is
+/// disconnected after [`SERVE_IDLE_TIMEOUT`] — the accept loop is
+/// single-threaded, so a read that never completes would wedge the port for
+/// every later client. The document session survives reconnects.
 #[cfg(not(target_arch = "wasm32"))]
 fn serve_socket(
     app: &mut OpenCADStudio,
     port: u16,
     bound_port: &std::sync::Arc<std::sync::atomic::AtomicU16>,
+) {
+    serve_socket_with_idle(app, port, bound_port, SERVE_IDLE_TIMEOUT)
+}
+
+/// [`serve_socket`] with an explicit per-client idle timeout (a test seam;
+/// production traffic uses [`SERVE_IDLE_TIMEOUT`]).
+#[cfg(not(target_arch = "wasm32"))]
+fn serve_socket_with_idle(
+    app: &mut OpenCADStudio,
+    port: u16,
+    bound_port: &std::sync::Arc<std::sync::atomic::AtomicU16>,
+    idle: std::time::Duration,
 ) {
     let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
@@ -142,6 +164,7 @@ fn serve_socket(
     bound_port.store(bound, std::sync::atomic::Ordering::SeqCst);
     eprintln!("OpenCADStudio --serve listening on 127.0.0.1:{bound}");
     for stream in listener.incoming().flatten() {
+        let _ = stream.set_read_timeout(Some(idle));
         let Ok(read_half) = stream.try_clone() else {
             continue;
         };
@@ -3358,5 +3381,70 @@ mod tests {
             "oversize line must be dropped, not processed — got: {response:?}"
         );
         payload.join().unwrap();
+    }
+
+    /// A client that connects and says nothing must not hold the automation
+    /// port forever: `serve_socket` serves one client at a time, so a read
+    /// that never completes (no timeout was ever set on this path, unlike
+    /// `rest.rs`, `http_bridge.rs` and `control::transport`) wedges the
+    /// accept loop and every later client hangs waiting for the `ready`
+    /// banner. The server drops an idle connection at its timeout and goes
+    /// back to accepting.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn serve_socket_drops_an_idle_client_and_keeps_serving() {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpStream;
+        use std::sync::atomic::{AtomicU16, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let bound = Arc::new(AtomicU16::new(0));
+        let listen_bound = bound.clone();
+        std::thread::spawn(move || {
+            let mut app = super::OpenCADStudio::new_for_test();
+            super::serve_socket_with_idle(
+                &mut app,
+                0,
+                &listen_bound,
+                Duration::from_millis(300),
+            );
+        });
+        let mut port = 0;
+        for _ in 0..50 {
+            port = bound.load(Ordering::SeqCst);
+            if port != 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_ne!(port, 0, "listener never bound a port");
+
+        let first = TcpStream::connect(("127.0.0.1", port)).expect("connect first client");
+        first
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let mut reader = BufReader::new(first.try_clone().expect("clone"));
+        let mut banner = String::new();
+        reader.read_line(&mut banner).expect("ready banner");
+        assert!(banner.contains("ready"), "{banner}");
+
+        // Say nothing: the server must drop the idle connection at its read
+        // timeout instead of holding the accept loop hostage.
+        let mut tail = String::new();
+        let read = reader.read_line(&mut tail).unwrap_or_else(|error| {
+            panic!("idle connection must be closed by the server, blocked instead: {error}")
+        });
+        assert_eq!(read, 0, "idle connection must see EOF, got {tail:?}");
+
+        // And the port must still serve the next client.
+        let second = TcpStream::connect(("127.0.0.1", port)).expect("connect second client");
+        second
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let mut reader2 = BufReader::new(second.try_clone().expect("clone"));
+        let mut banner2 = String::new();
+        reader2.read_line(&mut banner2).expect("second ready banner");
+        assert!(banner2.contains("ready"), "{banner2}");
     }
 }
