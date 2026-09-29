@@ -393,6 +393,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
     let n_queries = if runner.quick_mode { 200 } else { 1_000 };
     let mut click_samples = Vec::with_capacity(5);
 
+    let draw_depth = rustc_hash::FxHashMap::default();
     for _ in 0..5 {
         let t0 = Instant::now();
         for q in 0..n_queries {
@@ -406,6 +407,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
                 bounds,
                 false,
                 8.0,
+                &draw_depth,
             );
             black_box(hit);
         }
