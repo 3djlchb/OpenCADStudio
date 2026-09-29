@@ -1439,13 +1439,14 @@ impl OpenCADStudio {
                 construction_ray,
             );
 
-            // The frozen pre-drag geometry gets a SECOND, reference-only snap pass.
-            //
-            // Its result is never used to place/move the grip. It exists only so the
-            // user can hover an endpoint/midpoint/etc. of the original geometry and
-            // acquire it for OTRACK exactly like ordinary drawing geometry.
+            // The frozen pre-drag geometry gets a SECOND snap pass, limited to
+            // its discrete points: a corner can be dropped on the old midpoint
+            // of its own edge, or acquired for OTRACK, while nearest/tangent-
+            // style snaps can never pull the point back onto the old shape.
+            // The grip's own starting point is skipped so it does not stick
+            // where the drag began.
             let reference_snap_hit =
-                if self.snapper.tracking_active() && !self.grip_reference_wires.is_empty() {
+                if !self.grip_reference_wires.is_empty() {
                     self.snapper
                         .snap(
                             raw,
@@ -1469,21 +1470,21 @@ impl OpenCADStudio {
                                     | crate::snap::SnapType::Intersection
                                     | crate::snap::SnapType::Insertion
                                     | crate::snap::SnapType::ApparentIntersection
-                            )
+                            ) && hit.world.distance(grip.origin_world) > 1e-9
                         })
                 } else {
                     None
                 };
 
-            // The visible marker should normally describe the real snap that is driving
-            // the cursor. However, when there is no real object snap (or only Grid), show
-            // the reference snap marker so the user can see what point is being acquired.
-            let display_snap_hit = match snap_hit {
+            // A real object snap on the rest of the drawing wins; otherwise the
+            // reference point both shows and places the grip, so the marker is
+            // always the point the grip lands on.
+            let snap_hit = match snap_hit {
                 Some(hit) if hit.snap_type != crate::snap::SnapType::Grid => Some(hit),
                 _ => reference_snap_hit.or(snap_hit),
             };
 
-            self.tabs[i].snap_result = display_snap_hit;
+            self.tabs[i].snap_result = snap_hit;
 
             // OTRACK acquisition needs access to the original wire geometry so, once a
             // reference point has dwelt long enough, it can capture the segment directions
