@@ -334,9 +334,24 @@ impl OpenCADStudio {
         req: &Value,
     ) -> Result<Task<Message>, Value> {
         let handles = hex_handles(req, "handles")?;
-        let action = req["action"].as_str().unwrap_or("move").to_ascii_lowercase();
+        let action = req["action"]
+            .as_str()
+            .unwrap_or("move")
+            .trim()
+            .to_ascii_lowercase();
         let i = self.active_tab;
         require_existing(&self.tabs[i].scene.document, &handles)?;
+        if !matches!(
+            action.as_str(),
+            "move" | "copy" | "rotate" | "scale" | "mirror" | "array"
+        ) {
+            return Err(failure(
+                "invalid_action",
+                format!(
+                    "Unknown transform action '{action}'. Use move, copy, rotate, scale, mirror or array"
+                ),
+            ));
+        }
 
         let transform = |req: &Value| -> Parsed<EntityTransform> {
             Ok(match action.as_str() {
@@ -473,7 +488,14 @@ impl OpenCADStudio {
                 }
                 affected = handles.len();
             }
-            _ => unreachable!("validated by transform()"),
+            other => {
+                return Err(failure(
+                    "invalid_action",
+                    format!(
+                        "Unknown transform action '{other}'. Use move, copy, rotate, scale, mirror or array"
+                    ),
+                ))
+            }
         }
         self.post_ref_op(i);
         self.set_control_result(json!({

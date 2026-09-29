@@ -2271,4 +2271,44 @@ mod tests {
         let _ = std::fs::remove_file(&pdf);
         let _ = std::fs::remove_file(&plain);
     }
+
+    /// An unknown `entities_transform` action must come back as a clean
+    /// validation error. Pre-fix it reached
+    /// `unreachable!("validated by transform()")` (entities.rs:476) and
+    /// killed the whole process — over REST, MCP and `--serve` alike —
+    /// because validation lived inside the `transform` closure, which the
+    /// dispatch match only invokes from some of its arms.
+    #[test]
+    fn entities_transform_rejects_unknown_actions_without_panicking() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
+        let lines = app.control_request(json!({"op":"query","type":"Line"})).0;
+        let handle = lines["entities"][0]["handle"].as_str().unwrap().to_string();
+
+        // Not one of the six whitelisted actions.
+        let rejected = request(&mut app, json!({
+            "op":"entities_transform",
+            "handles":[handle],
+            "action":"explode"
+        }));
+        assert_eq!(rejected["code"], "invalid_action", "{rejected}");
+
+        // Whitespace-only is unknown too — not a panic.
+        let blank = request(&mut app, json!({
+            "op":"entities_transform",
+            "handles":[handle],
+            "action":"   "
+        }));
+        assert_eq!(blank["code"], "invalid_action", "{blank}");
+
+        // A valid action is matched case- and whitespace-insensitively.
+        let moved = request(&mut app, json!({
+            "op":"entities_transform",
+            "handles":[handle],
+            "action":" move ",
+            "vector":[5,0,0]
+        }));
+        assert_eq!(moved["ok"], true, "{moved}");
+    }
 }
