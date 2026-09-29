@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 /// The result names the file the way the chooser shows it.
 fn read_page_setups_task(path: PathBuf) -> Task<Message> {
     super::file::background_task(
+        crate::t!("Page setup import"),
         move || {
             let file = path
                 .file_name()

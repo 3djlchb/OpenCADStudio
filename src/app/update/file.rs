@@ -34,7 +34,13 @@ fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
-pub(super) fn background_task<T, F, M>(work: F, map: M) -> Task<Message>
+/// Run `work` on a worker thread and map its result into a `Message`.
+///
+/// `context` names the operation for error reporting. A worker panic never
+/// reaches the UI thread: it is caught on the worker and re-surfaced as
+/// [`Message::BackgroundTaskFailed`] so a crashing export or import reports
+/// on the command line instead of killing the application.
+pub(super) fn background_task<T, F, M>(context: impl Into<String>, work: F, map: M) -> Task<Message>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
@@ -42,18 +48,46 @@ where
 {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let context = context.into();
         let (tx, rx) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(work());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+            let _ = tx.send(result);
         });
         Task::perform(
-            async move { rx.await.expect("background export worker dropped") },
-            map,
+            async move {
+                match rx.await {
+                    Ok(Ok(value)) => map(value),
+                    Ok(Err(payload)) => Message::BackgroundTaskFailed {
+                        context,
+                        detail: panic_detail(payload),
+                    },
+                    Err(_) => Message::BackgroundTaskFailed {
+                        context,
+                        detail: "worker stopped without reporting a result".to_string(),
+                    },
+                }
+            },
+            |message| message,
         )
     }
     #[cfg(target_arch = "wasm32")]
     {
+        let _ = context;
         Task::perform(async move { work() }, map)
+    }
+}
+
+/// Render a panic payload the way `std` reports it: `&'static str` messages,
+/// `String` messages, or a fallback for foreign payloads.
+#[cfg(not(target_arch = "wasm32"))]
+fn panic_detail(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(text) = payload.downcast_ref::<&'static str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "worker panicked".to_string()
     }
 }
 
@@ -1990,6 +2024,7 @@ impl OpenCADStudio {
         let worker_name = block_name.clone();
         let worker_path = path.clone();
         background_task(
+            crate::t!("WBLOCK save"),
             move || {
                 let document = if worker_name == "*" {
                     crate::modules::insert::wblock::extract_entities_to_doc(&document, &handles)
@@ -2017,6 +2052,7 @@ impl OpenCADStudio {
             .collect();
         let worker_path = path.clone();
         background_task(
+            crate::t!("STL export"),
             move || {
                 let mesh_refs: Vec<_> = meshes.iter().collect();
                 let bytes = crate::io::stl::build_stl(&mesh_refs)
@@ -2038,6 +2074,7 @@ impl OpenCADStudio {
             .collect();
         let worker_path = path.clone();
         background_task(
+            crate::t!("STEP export"),
             move || {
                 let mesh_refs: Vec<_> = meshes.iter().collect();
                 let text = crate::io::step::build_step(&mesh_refs)
@@ -2052,6 +2089,7 @@ impl OpenCADStudio {
         let tab_id = self.tabs[self.active_tab].id;
         let worker_path = path.clone();
         background_task(
+            crate::t!("OBJ import"),
             move || {
                 let src = std::fs::read_to_string(&worker_path).map_err(|e| e.to_string())?;
                 crate::io::obj::parse_obj(&src, [0.7, 0.7, 0.85, 1.0])
@@ -3882,7 +3920,7 @@ impl OpenCADStudio {
         F: FnOnce() -> Result<String, String> + Send + 'static,
     {
         if background {
-            background_task(work, Message::PrintAllFinished)
+            background_task(crate::t!("Print all"), work, Message::PrintAllFinished)
         } else {
             Task::done(Message::PrintAllFinished(work()))
         }
@@ -3893,7 +3931,7 @@ impl OpenCADStudio {
         F: FnOnce() -> Result<String, String> + Send + 'static,
     {
         if background {
-            background_task(work, move |result| {
+            background_task(crate::t!("Plot"), work, move |result| {
                 Message::BackgroundIoFinished(result, reopen_plot)
             })
         } else {
@@ -4103,6 +4141,7 @@ impl OpenCADStudio {
         self.command_line
             .push_info(crate::t!("Sending to system printer…").as_ref());
         background_task(
+            crate::t!("Print to printer"),
             move || {
                 iced::futures::executor::block_on(
                     crate::io::print_to_printer::print_wires_with(page, options),
@@ -4358,6 +4397,7 @@ impl OpenCADStudio {
         d.printer_media = None;
         let name = printer.clone();
         background_task(
+            crate::t!("Printer capabilities"),
             move || crate::io::plot_device::printer_capabilities(&printer),
             move |caps| Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::PrinterMedia(name, caps)),
         )
@@ -4483,6 +4523,7 @@ impl OpenCADStudio {
             });
             let name = printer.clone();
             background_task(
+                crate::t!("Printer options"),
                 move || crate::io::print_to_printer::printer_options(&printer),
                 move |result| {
                     Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::PrinterOptionsLoaded(
@@ -6581,5 +6622,56 @@ mod plot_device_persistence_tests {
         app.load_plotsettings_into_dialog(&ps);
         assert!(app.plot_dialog.to_file);
         assert!(app.plot_dialog.printer.is_none());
+    }
+}
+
+#[cfg(test)]
+mod background_task_tests {
+    use super::background_task;
+    use crate::app::{Message, OpenCADStudio};
+    use iced::futures::StreamExt;
+    use iced::Task;
+
+    /// Pull the single message a finished background task produces, the same
+    /// way the headless automation driver consumes task streams.
+    fn next_message(task: Task<Message>) -> Message {
+        let mut stream =
+            iced_runtime::task::into_stream(task).expect("background_task yields a stream");
+        match iced::futures::executor::block_on(stream.next()) {
+            Some(iced_runtime::Action::Output(message)) => message,
+            other => panic!("expected task output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn worker_panic_becomes_a_failure_message() {
+        let task =
+            background_task("STL export", || panic!("worker exploded"), |()| Message::Noop);
+        match next_message(task) {
+            Message::BackgroundTaskFailed { context, detail } => {
+                assert_eq!(context, "STL export");
+                assert!(
+                    detail.contains("worker exploded"),
+                    "detail should carry the panic message, got: {detail}"
+                );
+            }
+            other => panic!("expected BackgroundTaskFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn worker_panic_is_reported_on_the_command_line() {
+        let mut app = OpenCADStudio::new_for_test();
+        let task =
+            background_task("STL export", || panic!("worker exploded"), |()| Message::Noop);
+        app.drive_headless_task(task)
+            .expect("failed worker task drives headlessly");
+        let error = app
+            .command_line
+            .last_error
+            .as_deref()
+            .expect("worker panic reported as an error");
+        assert!(error.contains("STL export"), "error = {error}");
+        assert!(error.contains("worker exploded"), "error = {error}");
     }
 }

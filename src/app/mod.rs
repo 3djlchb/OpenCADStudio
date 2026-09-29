@@ -3573,6 +3573,15 @@ pub enum Message {
     /// Completion of a PDF/preview/print job performed outside the UI thread.
     /// The boolean restores the Plot dialog after a preview.
     BackgroundIoFinished(Result<String, String>, bool),
+    /// A background worker thread panicked or stopped without reporting a
+    /// result. Surfaced on the command line instead of taking the whole
+    /// process down with it.
+    BackgroundTaskFailed {
+        /// Which operation the worker was running (e.g. "STL export").
+        context: String,
+        /// Panic message (or channel-failure description) from the worker.
+        detail: String,
+    },
     /// Send current layout to the system printer (via lp / lpr).
     PrintToPrinter,
     /// Callback from the async printer job.

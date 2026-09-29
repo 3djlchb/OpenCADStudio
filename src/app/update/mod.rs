@@ -5288,6 +5288,7 @@ impl OpenCADStudio {
                 let worker_display = display_name.clone();
 
                 file::background_task(
+                    crate::t!("WBLOCK save"),
                     move || {
                         let out_doc = match source_mode {
                             WblockSourceMode::Block => {
@@ -9714,6 +9715,12 @@ impl OpenCADStudio {
                 if reopen_plot {
                     self.active_modal = Some(crate::app::ModalKind::Plot);
                 }
+                Task::none()
+            }
+
+            Message::BackgroundTaskFailed { context, detail } => {
+                self.command_line
+                    .push_error(crate::tf!("{context} failed: {detail}").as_ref());
                 Task::none()
             }
 
