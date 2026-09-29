@@ -2613,8 +2613,11 @@ fn emit_wire(
     // composed rank the text sits at the bare insert level, an exact tie with
     // every sibling fill, and the later wipeout pass erases it (unselected
     // block text vanished under its wipeout; selecting won only because the
-    // xray pass ignores depth).
-    let local_depth = (lw.world_width > 0.0 || !lw.text_verts.is_empty())
+    // xray pass ignores depth). Fill-only wires take the rank as well: an
+    // MTEXT background (a dimension's DIMTFILL box) left at the bare insert
+    // level sat in front of its own text whenever that text's rank was
+    // below zero.
+    let local_depth = (lw.world_width > 0.0 || lw.is_fill_only || !lw.text_verts.is_empty())
         .then(|| d_range.0 + lw.local_rank * d_range.1);
     let plot_visible = ctx.plot_visible
         && lw.plot_visible
