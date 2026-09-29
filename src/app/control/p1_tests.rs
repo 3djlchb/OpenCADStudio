@@ -566,3 +566,92 @@ fn state_reports_the_hand_seed() {
     let after = u64::from_str_radix(state["hand_seed"].as_str().unwrap(), 16).unwrap();
     assert!(after > before, "issuing a handle advances the seed");
 }
+
+#[test]
+fn text_search_op_queries_text_and_attributes() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"ts_c1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"CIRTUITS 28-09-2026","layer":"0"},
+            {"type":"MText","position":[10,0,0],"value":"{\\fCentury Gothic;POMPE A EAU}","layer":"0"},
+            {"type":"Text","position":[20,0,0],"value":"BAROMETRE","layer":"0"},
+            {"type":"Text","position":[30,0,0],"value":"10 BAR","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Case-insensitive search finds CIRTUITS
+    let res = app.automation_op(r#"{"op":"text_search","find":"cirtuits"}"#);
+    assert_eq!(res["ok"], true);
+    assert_eq!(res["count"], 1);
+    assert_eq!(res["matches"][0]["match_text"], "cirtuits");
+    assert_eq!(res["matches"][0]["plain_text"], "CIRTUITS 28-09-2026");
+
+    // Case-sensitive search with wrong case finds nothing
+    let res_cs = app.automation_op(r#"{"op":"text_search","find":"cirtuits","match_case":true}"#);
+    assert_eq!(res_cs["ok"], true);
+    assert_eq!(res_cs["count"], 0);
+
+    // Whole-word search: "bar" matches "10 BAR" but not "BAROMETRE"
+    let res_ww = app.automation_op(r#"{"op":"text_search","find":"bar","whole_word":true}"#);
+    assert_eq!(res_ww["ok"], true);
+    assert_eq!(res_ww["count"], 1);
+    assert_eq!(res_ww["matches"][0]["plain_text"], "10 BAR");
+
+    // Non-whole-word search finds both "BAROMETRE" and "10 BAR"
+    let res_all = app.automation_op(r#"{"op":"text_search","find":"bar","whole_word":false}"#);
+    assert_eq!(res_all["ok"], true);
+    assert_eq!(res_all["count"], 2);
+}
+
+#[test]
+fn text_replace_op_batch_replaces_preserves_formatting_and_undoes() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"tr_c1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"VANNE A ARRET","layer":"0"},
+            {"type":"MText","position":[10,0,0],"value":"{\\fCentury Gothic|b0|i0;V15-CUVE EAU NON TRAITE}","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Execute batch replace with 2 pairs in one atomic step
+    let rep = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"text_replace","request_id":"tr_r1","document_id":{doc},"pairs":[
+            {"find":"NON TRAITE","replace":"NON TRAITÉE"},
+            {"find":"VANNE A ARRET","replace":"VANNE D'ARRÊT"}
+        ]}"#,
+    );
+    assert_eq!(rep["ok"], true, "{}", rep["error"]);
+    assert_eq!(rep["result"]["replaced"], 2);
+    assert_eq!(rep["result"]["entities_changed"], 2);
+
+    // Verify MText formatting codes were preserved
+    let q = app.automation_op(r#"{"op":"text_search","find":"NON TRAITÉE"}"#);
+    assert_eq!(q["ok"], true);
+    assert_eq!(q["count"], 1);
+    let raw = q["matches"][0]["raw_value"].as_str().unwrap();
+    assert!(raw.contains("Century Gothic"), "raw MText should keep font format code: {raw}");
+    assert!(raw.contains("NON TRAITÉE"), "raw MText should contain replaced text: {raw}");
+
+    // Verify Text was replaced
+    let q2 = app.automation_op(r#"{"op":"text_search","find":"VANNE D'ARRÊT"}"#);
+    assert_eq!(q2["ok"], true);
+    assert_eq!(q2["count"], 1);
+
+    // Undo restores the original text in one step
+    app.automation_op(r#"{"op":"undo"}"#);
+    let q_orig = app.automation_op(r#"{"op":"text_search","find":"NON TRAITE"}"#);
+    assert_eq!(q_orig["ok"], true);
+    assert_eq!(q_orig["count"], 1);
+
+    let q_orig2 = app.automation_op(r#"{"op":"text_search","find":"VANNE A ARRET"}"#);
+    assert_eq!(q_orig2["ok"], true);
+    assert_eq!(q_orig2["count"], 1);
+}
+
