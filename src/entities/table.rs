@@ -13,6 +13,13 @@ use crate::scene::view::transform;
 use crate::scene::model::wire_model::SnapHint;
 use crate::t;
 
+/// Largest cell grid (rows × columns) the property editor may grow a
+/// table to. Row/column counts are iteration counts for
+/// `apply_geom_prop`'s grow loops, but `parse_f64` accepts anything up
+/// to `MAX_TYPED_MAGNITUDE` (1e15) — an unclamped request kept pushing
+/// rows/columns until the allocator failed.
+const MAX_TABLE_CELLS: usize = 1_000_000;
+
 thread_local! {
     static PROPERTY_CELL: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static PROPERTY_CELL_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -3157,7 +3164,14 @@ impl PropertyEditable for Table {
             }
             "tbl_rows" => {
                 let requested = number.round().max(1.0) as usize;
-                while self.rows.len() < requested {
+                // Grow only up to the cell budget (`requested` may be
+                // 1e15): the grow loop is an iteration count, not
+                // geometry, and used to push rows until the allocator
+                // failed. Shrinking to a smaller requested count stays
+                // exact — `grow_to` is never above `requested`, so the
+                // two loops cannot fight.
+                let grow_to = requested.min(MAX_TABLE_CELLS / self.columns.len().max(1));
+                while self.rows.len() < grow_to {
                     self.add_row();
                 }
                 while self.rows.len() > requested {
@@ -3167,8 +3181,9 @@ impl PropertyEditable for Table {
             }
             "tbl_cols" => {
                 let requested = number.round().max(1.0) as usize;
+                let grow_to = requested.min(MAX_TABLE_CELLS / self.rows.len().max(1));
                 let width = self.columns.last().map(|column| column.width).unwrap_or(2.0);
-                while self.columns.len() < requested {
+                while self.columns.len() < grow_to {
                     self.add_column(width);
                 }
                 while self.columns.len() > requested {
@@ -3415,5 +3430,52 @@ mod tests {
         );
         assert_eq!(evaluate_table_formula(&table, "=A1"), Some("10".to_string()));
         assert_eq!(evaluate_table_formula(&table, "not a formula"), None);
+    }
+
+    /// A column count driven to `MAX_TYPED_MAGNITUDE` (1e15) grows one
+    /// column per loop iteration until the allocator fails: the magnitude
+    /// check bounds geometry, not iteration counts. Bound the cell grid
+    /// instead — column growth is limited by the rows already present.
+    #[test]
+    fn tbl_column_count_stays_within_budget() {
+        let mut table = Table::new(codec::types::Vector3::new(0.0, 0.0, 0.0), 1, 1);
+        let cap = MAX_TABLE_CELLS / table.rows.len().max(1);
+        table.apply_geom_prop("tbl_cols", &(cap + 10).to_string());
+        assert!(
+            table.columns.len() <= cap,
+            "tbl_cols grew to {} columns (budget {} cells over {} rows)",
+            table.columns.len(),
+            MAX_TABLE_CELLS,
+            table.rows.len()
+        );
+        table.apply_geom_prop("tbl_cols", "1000000000000000");
+        assert!(
+            table.columns.len() <= cap,
+            "tbl_cols grew to {} columns from a hostile value",
+            table.columns.len()
+        );
+    }
+
+    /// Same budget applied to row growth: with 10 columns the table may
+    /// hold `MAX_TABLE_CELLS / 10` rows, never the requested 1e15.
+    #[test]
+    fn tbl_row_count_stays_within_budget() {
+        let mut table = Table::new(codec::types::Vector3::new(0.0, 0.0, 0.0), 1, 1);
+        table.apply_geom_prop("tbl_cols", "10");
+        let cap = MAX_TABLE_CELLS / table.columns.len().max(1);
+        table.apply_geom_prop("tbl_rows", &(cap + 10).to_string());
+        assert!(
+            table.rows.len() <= cap,
+            "tbl_rows grew to {} rows (budget {} cells over {} columns)",
+            table.rows.len(),
+            MAX_TABLE_CELLS,
+            table.columns.len()
+        );
+        table.apply_geom_prop("tbl_rows", "1000000000000000");
+        assert!(
+            table.rows.len() <= cap,
+            "tbl_rows grew to {} rows from a hostile value",
+            table.rows.len()
+        );
     }
 }
