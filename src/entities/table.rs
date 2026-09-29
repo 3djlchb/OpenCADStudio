@@ -505,7 +505,10 @@ fn evaluate_table_formula(table: &Table, expression: &str) -> Option<String> {
     let open = body.find('(')?;
     let close = body.rfind(')')?;
     let function = body[..open].trim().to_ascii_uppercase();
-    let range = &body[open + 1..close];
+    // `find('(')` scans forward while `rfind(')')` scans backward, so a
+    // malformed body like `)(` orders them reversed; the safe `get` yields
+    // None (fall back to the literal text) instead of a slice panic.
+    let range = body.get(open + 1..close)?;
     let (first, last) = range.split_once(':').unwrap_or((range, range));
     let (r1, c1) = table_cell_reference(first)?;
     let (r2, c2) = table_cell_reference(last)?;
@@ -3365,5 +3368,52 @@ pub(crate) fn normalize_scripted_table(old: Option<&Table>, new: &mut Table) {
             cell.merge_width = range.col_count() as i32;
             cell.merge_height = range.row_count() as i32;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_table() -> Table {
+        let mut table = Table::new(codec::types::Vector3::new(0.0, 0.0, 0.0), 2, 2);
+        table.set_cell_text(0, 0, "10");
+        table.set_cell_text(0, 1, "20");
+        table.set_cell_text(1, 0, "30");
+        table.set_cell_text(1, 1, "40");
+        table
+    }
+
+    /// Delimiters located independently (`find('(')` forward, `rfind(')')`
+    /// backward) must not produce a reversed slice: `=)(` used to build
+    /// `&body[2..0]` — `slice index starts at 2 but ends at 0` — killing the
+    /// render pass from a single pasted cell value.
+    #[test]
+    fn malformed_formula_is_ignored_instead_of_panicking() {
+        let table = sample_table();
+        for expression in ["=)(", "=a)b(c", "=)"] {
+            assert_eq!(
+                evaluate_table_formula(&table, expression),
+                None,
+                "{expression} should not evaluate"
+            );
+        }
+    }
+
+    /// Well-formed formulas keep evaluating across the whole file — the
+    /// guard must only reject malformed delimiters.
+    #[test]
+    fn well_formed_formulas_still_evaluate() {
+        let table = sample_table();
+        assert_eq!(
+            evaluate_table_formula(&table, "=SUM(A1:B2)"),
+            Some("100".to_string())
+        );
+        assert_eq!(
+            evaluate_table_formula(&table, "=AVERAGE(A1:B2)"),
+            Some("25".to_string())
+        );
+        assert_eq!(evaluate_table_formula(&table, "=A1"), Some("10".to_string()));
+        assert_eq!(evaluate_table_formula(&table, "not a formula"), None);
     }
 }
