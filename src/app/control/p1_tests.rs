@@ -763,4 +763,87 @@ fn text_replace_op_supports_dry_run_without_mutating_or_undo() {
     assert_eq!(q_undone["count"], 1);
 }
 
+#[test]
+fn text_audit_system_spellcheck_flags_misspelled_words() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"sp_c1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"The cirtuit breaker is conected","layer":"0"},
+            {"type":"Text","position":[10,0,0],"value":"correct english text here","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Run text_audit with system_spellcheck enabled, English language,
+    // and an agent dictionary that whitelists "breaker"
+    let audit = app.automation_op(
+        r#"{
+            "op":"text_audit",
+            "system_spellcheck": true,
+            "language": "en-US",
+            "suggest": true,
+            "dictionary": ["breaker", "the"]
+        }"#,
+    );
+    assert_eq!(audit["ok"], true, "{}", audit["error"]);
+
+    // system_speller metadata should be present regardless of availability
+    let sp = &audit["system_speller"];
+    assert_eq!(sp["enabled"], true);
+
+    if sp["available"].as_bool() == Some(true) {
+        // Backend should be reported (e.g. "windows" on Windows)
+        assert!(sp["backend"].as_str().unwrap().len() > 0);
+        assert!(sp["language"].as_str().is_some());
+
+        // "cirtuit" and "conected" should be flagged as unrecognized
+        let words = audit["unrecognized_words"].as_array().unwrap();
+        let flagged: Vec<&str> = words.iter().filter_map(|w| w["word"].as_str()).collect();
+        assert!(
+            flagged.iter().any(|w| w.eq_ignore_ascii_case("cirtuit")),
+            "expected 'cirtuit' to be flagged, got: {:?}",
+            flagged
+        );
+        assert!(
+            flagged.iter().any(|w| w.eq_ignore_ascii_case("conected")),
+            "expected 'conected' to be flagged, got: {:?}",
+            flagged
+        );
+
+        // "breaker" should NOT be flagged (it's in the agent dictionary)
+        assert!(
+            !flagged.iter().any(|w| w.eq_ignore_ascii_case("breaker")),
+            "expected 'breaker' to be whitelisted by agent dict, got: {:?}",
+            flagged
+        );
+
+        // At least one flagged word should have suggestions
+        let has_suggestions = words.iter().any(|w| {
+            w["suggestions"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false)
+        });
+        assert!(
+            has_suggestions,
+            "expected at least one word to have suggestions"
+        );
+
+        // Summary should reflect unrecognized words
+        assert!(
+            audit["summary"]["unrecognized_words_count"].as_u64().unwrap() >= 2,
+            "expected at least 2 unrecognized words in summary"
+        );
+    } else {
+        // System speller not available (e.g. CI without spell-check service)
+        // Just verify the response structure is well-formed
+        assert!(audit["unrecognized_words"].is_array());
+        eprintln!(
+            "System spellcheck not available (backend: {}), skipping content assertions",
+            sp["backend"]
+        );
+    }
+}
 

@@ -955,6 +955,20 @@ impl OpenCADStudio {
             .map(|w| TextMatcher::new(w.clone(), false, true, true))
             .collect();
 
+        let use_system_speller = req["system_spellcheck"]
+            .as_bool()
+            .or_else(|| req["use_system_speller"].as_bool())
+            .or_else(|| req["system_speller"].as_bool())
+            .unwrap_or(false);
+        let language_param = req["language"].as_str();
+        let want_suggestions = req["suggest"].as_bool().unwrap_or(true);
+
+        let system_speller = if use_system_speller {
+            Some(super::spellcheck::SystemSpeller::new(language_param))
+        } else {
+            None
+        };
+
         let mut pair_hit_counts = vec![0usize; pair_matchers.len()];
         let mut check_hit_counts = vec![0usize; check_matchers.len()];
 
@@ -1090,21 +1104,39 @@ impl OpenCADStudio {
                 }
             }
 
-            // 3. Dictionary check
-            if !dict_matchers.is_empty() {
+            // 3. Dictionary & System Spell-check
+            if !dict_matchers.is_empty() || system_speller.is_some() {
                 for word in plain_text.split(|c: char| !c.is_alphabetic()) {
                     let w = word.trim();
-                    if w.len() >= 3 && !dict_matchers.iter().any(|dm| dm.matches(w)) {
-                        if unrecognized_words.len() < limit
-                            && !unrecognized_words
-                                .iter()
-                                .any(|item: &Value| item["word"].as_str() == Some(w))
-                        {
-                            unrecognized_words.push(json!({
-                                "word": w,
-                                "handle": format!("{:X}", handle.value()),
-                                "position": pos,
-                            }));
+                    if w.len() >= 3 {
+                        let in_agent_dict = dict_matchers.iter().any(|dm| dm.matches(w));
+                        if in_agent_dict {
+                            continue;
+                        }
+
+                        let (is_system_valid, suggestions) = if let Some(ref speller) = system_speller {
+                            speller.check_word(w, want_suggestions)
+                        } else {
+                            (false, Vec::new())
+                        };
+
+                        if !is_system_valid {
+                            entity_had_match = true;
+                            if unrecognized_words.len() < limit
+                                && !unrecognized_words
+                                    .iter()
+                                    .any(|item: &Value| item["word"].as_str() == Some(w))
+                            {
+                                let mut item = json!({
+                                    "word": w,
+                                    "handle": format!("{:X}", handle.value()),
+                                    "position": pos,
+                                });
+                                if !suggestions.is_empty() {
+                                    item["suggestions"] = json!(suggestions);
+                                }
+                                unrecognized_words.push(item);
+                            }
                         }
                     }
                 }
@@ -1157,6 +1189,44 @@ impl OpenCADStudio {
                             }
                         }
                     }
+
+                    if !dict_matchers.is_empty() || system_speller.is_some() {
+                        for word in plain.split(|c: char| !c.is_alphabetic()) {
+                            let w = word.trim();
+                            if w.len() >= 3 {
+                                let in_agent_dict = dict_matchers.iter().any(|dm| dm.matches(w));
+                                if in_agent_dict {
+                                    continue;
+                                }
+
+                                let (is_system_valid, suggestions) = if let Some(ref speller) = system_speller {
+                                    speller.check_word(w, want_suggestions)
+                                } else {
+                                    (false, Vec::new())
+                                };
+
+                                if !is_system_valid {
+                                    entity_had_match = true;
+                                    if unrecognized_words.len() < limit
+                                        && !unrecognized_words
+                                            .iter()
+                                            .any(|item: &Value| item["word"].as_str() == Some(w))
+                                    {
+                                        let mut item = json!({
+                                            "word": w,
+                                            "handle": format!("{:X}", handle.value()),
+                                            "attribute_tag": attr.tag,
+                                            "position": [insert.insert_point.x, insert.insert_point.y, insert.insert_point.z],
+                                        });
+                                        if !suggestions.is_empty() {
+                                            item["suggestions"] = json!(suggestions);
+                                        }
+                                        unrecognized_words.push(item);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1180,6 +1250,22 @@ impl OpenCADStudio {
             .map(|(idx, _)| check_terms[idx].clone())
             .collect();
 
+        let speller_info = if let Some(ref speller) = system_speller {
+            json!({
+                "enabled": true,
+                "available": speller.is_available(),
+                "backend": speller.backend_name(),
+                "language": speller.language(),
+            })
+        } else {
+            json!({
+                "enabled": false,
+                "available": false,
+                "backend": "none",
+                "language": null,
+            })
+        };
+
         Ok(json!({
             "ok": true,
             "summary": {
@@ -1190,7 +1276,9 @@ impl OpenCADStudio {
                 "pairs_unmatched": unmatched_pairs.len(),
                 "check_terms_total": check_terms.len(),
                 "check_terms_found": check_terms.len() - unmatched_check_terms.len(),
+                "unrecognized_words_count": unrecognized_words.len(),
             },
+            "system_speller": speller_info,
             "unmatched_pairs": unmatched_pairs,
             "unmatched_check_terms": unmatched_check_terms,
             "simulated_changes": simulated_changes,

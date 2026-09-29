@@ -1346,6 +1346,7 @@ mod interactive;
 mod sheets;
 pub(crate) use sheets::new_guid_v4;
 pub(crate) mod text_ops;
+pub(crate) mod spellcheck;
 
 #[cfg(test)]
 mod p1_tests;
