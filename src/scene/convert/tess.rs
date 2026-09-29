@@ -794,10 +794,14 @@ fn tessellate_entity_inner(
                             a,
                         ),
                         ProxyColor::Rgb(r, g, b) => (
-                            view::render::adapt_to_bg(
-                                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0],
-                                bg_color,
-                            ),
+                            {
+                                let [r, g, b] = convert::tess_util::authored_rgb([
+                                    r as f32 / 255.0,
+                                    g as f32 / 255.0,
+                                    b as f32 / 255.0,
+                                ]);
+                                [r, g, b, 1.0]
+                            },
                             0,
                         ),
                         ProxyColor::Inherit => (entity_color, aci),

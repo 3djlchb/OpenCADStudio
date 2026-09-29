@@ -3136,19 +3136,22 @@ mod bg_resolution_tests {
         assert_eq!(colors(&once), colors(&twice));
     }
 
-    /// Why the raw colour is stored instead of re-adapting the resolved one.
-    /// If this ever starts passing, `raw_color` could be dropped — and if it
-    /// is removed while this still fails, near-white geometry loses its tint
-    /// on the first layout switch.
+    /// Only colour 7's exact white / black swap with the background; a colour
+    /// drawn as authored — near-white, or a true-colour white mask — keeps its
+    /// value on any background. (#1500)
     #[test]
-    fn adapt_to_bg_cannot_be_reapplied() {
-        let once = adapt_to_bg(NEAR_WHITE, LIGHT);
-        assert_eq!(once, [0.0, 0.0, 0.0, 1.0], "near-white snaps to pure black");
-        assert_ne!(
-            adapt_to_bg(once, DARK),
-            adapt_to_bg(NEAR_WHITE, DARK),
-            "re-adapting the resolved colour must not equal adapting the raw one",
-        );
+    fn only_colour_seven_swaps_with_the_background() {
+        assert_eq!(adapt_to_bg([1.0, 1.0, 1.0, 1.0], LIGHT), [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(adapt_to_bg([0.0, 0.0, 0.0, 1.0], DARK), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(adapt_to_bg(NEAR_WHITE, LIGHT), NEAR_WHITE);
+        let mask = crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        });
+        assert_eq!(adapt_to_bg(mask, LIGHT), mask);
+        let seven = crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::Index(7));
+        assert_eq!(adapt_to_bg(seven, LIGHT), [0.0, 0.0, 0.0, 1.0]);
     }
 }
 

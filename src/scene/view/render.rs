@@ -3774,8 +3774,11 @@ pub(crate) fn render_style_for_block_sub_viewport(
 /// backgrounds become white. All other colors pass through unchanged.
 pub(crate) fn adapt_to_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
     let lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
-    let is_white = color[0] > 0.95 && color[1] > 0.95 && color[2] > 0.95;
-    let is_black = color[0] < 0.05 && color[1] < 0.05 && color[2] < 0.05;
+    // Only exact white / black swap: that is colour 7 (and interface colours).
+    // Authored colours reach here nudged off both, so they stay as drawn —
+    // a true-colour white mask on a light sheet remains white. (#1500)
+    let is_white = color[..3] == [1.0; 3];
+    let is_black = color[..3] == [0.0; 3];
     if is_white && lum > 0.5 {
         [0.0, 0.0, 0.0, color[3]]
     } else if is_black && lum <= 0.5 {

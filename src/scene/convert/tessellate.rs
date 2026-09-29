@@ -2868,12 +2868,10 @@ impl DimGeom {
 /// `ByLayer` / `ByBlock` (assumes those are already resolved upstream).
 pub(crate) fn color_or_inherit(c: &AcadColor, inherited: [f32; 4]) -> [f32; 4] {
     match c.rgb() {
-        Some((r, g, b)) => [
-            r as f32 / 255.0,
-            g as f32 / 255.0,
-            b as f32 / 255.0,
-            inherited[3],
-        ],
+        Some(_) => {
+            let [r, g, b, _] = crate::scene::convert::tess_util::aci_to_rgba(c);
+            [r, g, b, inherited[3]]
+        }
         None => inherited,
     }
 }

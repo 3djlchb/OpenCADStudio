@@ -719,7 +719,11 @@ fn append_pdf_page(
         // Near-white and near-yellow (viewport active border) → dark grey for print
         // (only when no CTB override was applied).
         if !color_overridden {
-            let is_light = r > 0.80 && g > 0.80 && b > 0.80;
+            // An authored white (not colour 7) plots as drawn, like on screen.
+            let is_light = r > 0.80
+                && g > 0.80
+                && b > 0.80
+                && !crate::scene::convert::tess_util::is_authored_white([r, g, b]);
             let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
             let is_cyan = r < 0.30 && g > 0.70 && b > 0.70;
             if is_light || is_yellow {
@@ -1301,7 +1305,11 @@ fn emit_hatch(
         && hatch.aci != 0
         && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
     {
-        let is_light = r > 0.80 && g > 0.80 && b > 0.80;
+        // An authored white (not colour 7) plots as drawn, like on screen.
+        let is_light = r > 0.80
+            && g > 0.80
+            && b > 0.80
+            && !crate::scene::convert::tess_util::is_authored_white([r, g, b]);
         let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
         let is_cyan = r < 0.30 && g > 0.70 && b > 0.70;
         if is_light || is_yellow {
@@ -1482,7 +1490,11 @@ fn glyph_world_xy(v: &crate::scene::pipeline::text_gpu::TextVertex) -> [f64; 2] 
 /// near-white / near-yellow (colour-7-on-white) → black, near-cyan → dark blue.
 #[cfg(not(target_arch = "wasm32"))]
 fn adapt_text_color([r, g, b]: [f32; 3]) -> [f32; 3] {
-    let is_light = r > 0.80 && g > 0.80 && b > 0.80;
+    // An authored white (not colour 7) plots as drawn, like on screen.
+    let is_light = r > 0.80
+        && g > 0.80
+        && b > 0.80
+        && !crate::scene::convert::tess_util::is_authored_white([r, g, b]);
     let is_yellow = r > 0.80 && g > 0.70 && b < 0.30;
     let is_cyan = r < 0.30 && g > 0.70 && b > 0.70;
     if is_light || is_yellow {

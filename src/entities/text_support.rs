@@ -1126,9 +1126,14 @@ pub fn line_total_width(
 pub fn resolve_inline_color(c: &InlineColor) -> Option<[f32; 3]> {
     match c {
         InlineColor::Aci(idx) => aci_to_rgb(*idx).map(|(r, g, b)| {
-            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
+            let rgb = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+            if *idx == 7 {
+                rgb
+            } else {
+                crate::scene::convert::tess_util::authored_rgb(rgb)
+            }
         }),
-        InlineColor::True(rgb) => Some(*rgb),
+        InlineColor::True(rgb) => Some(crate::scene::convert::tess_util::authored_rgb(*rgb)),
     }
 }
 
