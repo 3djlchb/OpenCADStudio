@@ -785,11 +785,19 @@ fn parse_plot_style_text(text: &str, name: String, is_stb: bool) -> Result<PlotS
                 _ => {}
             },
             Section::Lineweights => {
+                // The key is file-controlled: `18446744073709551615` made
+                // `index + 1` overflow (debug panic, release wrap to
+                // `resize(0)` then OOB), and `500000000` resized a 2 GB
+                // table. Entries past 255 are unreachable — the consumer
+                // indexes with `PlotStyleEntry.lineweight: u8` — so
+                // oversized keys are ignored like other malformed lines.
                 if let (Ok(index), Ok(weight)) = (key.parse::<usize>(), value.parse::<f32>()) {
-                    if lineweights.len() <= index {
-                        lineweights.resize(index + 1, 0.0);
+                    if index <= u8::MAX as usize {
+                        if lineweights.len() <= index {
+                            lineweights.resize(index + 1, 0.0);
+                        }
+                        lineweights[index] = weight;
                     }
-                    lineweights[index] = weight;
                 }
             }
             _ => {}
@@ -1086,5 +1094,36 @@ mod inflate_limit_tests {
         data.extend(payload);
         let error = decompress_ctb(&data).expect_err("deflate bomb must be refused");
         assert!(error.contains("limit"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod lineweight_table_tests {
+    use super::{parse_plot_style_text, LW_TABLE};
+
+    fn parse(text: &str) -> super::PlotStyleTable {
+        parse_plot_style_text(text, "crafted.ctb".into(), false).expect("parses")
+    }
+
+    /// The table key is file-controlled: `18446744073709551615` made
+    /// `index + 1` overflow — debug builds panic, release wraps to
+    /// `resize(0)` and then panics OOB at `lineweights[usize::MAX]` — and
+    /// `500000000` resized a 2 GB table (allocation abort). Entries past
+    /// 255 are unreachable anyway: `PlotStyleEntry.lineweight` is a `u8`.
+    #[test]
+    fn oversized_lineweight_table_keys_are_ignored() {
+        let table = parse("custom_lineweight_table{\n18446744073709551615=0.5\n}\n");
+        assert_eq!(table.lineweights, LW_TABLE.to_vec());
+    }
+
+    /// In-range keys still extend the table; 256 (beyond `u8`) is ignored.
+    #[test]
+    fn in_range_lineweight_table_keys_are_kept() {
+        let table = parse("custom_lineweight_table{\n30=0.7\n}\n");
+        assert_eq!(table.lineweights.len(), 31);
+        assert_eq!(table.lineweights[30], 0.7);
+
+        let table = parse("custom_lineweight_table{\n256=0.7\n}\n");
+        assert_eq!(table.lineweights, LW_TABLE.to_vec());
     }
 }
