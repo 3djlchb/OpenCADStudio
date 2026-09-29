@@ -238,6 +238,39 @@ fn adjusted_cache() -> &'static Mutex<HashMap<AdjustKey, Arc<Vec<u8>>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// One colour (0..=1 channels) with the underlay's contrast / monochrome /
+/// background adjustments applied.
+pub fn adjust_rgb(rgb: [f32; 3], adjust: &PageAdjust) -> [f32; 3] {
+    let mut rgb = rgb;
+    if adjust.monochrome {
+        let l = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+        rgb = [l; 3];
+    }
+    if adjust.adjust_for_background && adjust.dark_background {
+        // On a dark background every colour's lightness is turned over
+        // (plus 20/255, capped at full), hue and saturation kept: black
+        // becomes white, dark red light pink. On a light background the
+        // colours stay as drawn.
+        let (h, s, l) = rgb_to_hsl(rgb);
+        rgb = hsl_to_rgb(h, s, (1.0 - l + 20.0 / 255.0).min(1.0));
+    }
+    if let Some((bg, fade)) = adjust.fade_before_contrast {
+        let f = fade.min(100) as f32 / 100.0;
+        for (c, b) in rgb.iter_mut().zip(bg) {
+            *c += (b as f32 / 255.0 - *c) * f;
+        }
+    }
+    if adjust.contrast < 100 {
+        // Lightness is pulled towards the pivot, hue and saturation kept:
+        // contrast 0 leaves every colour at the pivot's lightness.
+        let (h, s, l) = rgb_to_hsl(rgb);
+        let k = adjust.contrast as f32 / 100.0;
+        let pivot = adjust.contrast_pivot as f32 / 1000.0;
+        rgb = hsl_to_rgb(h, s, pivot + (l - pivot) * k);
+    }
+    rgb
+}
+
 /// The display raster with the underlay's contrast / monochrome / background
 /// adjustments applied, memoised per source, page and adjustment.
 pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdjust) -> Arc<Vec<u8>> {
@@ -260,34 +293,7 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
         if px[3] == 0 {
             continue;
         }
-        let mut rgb = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
-        if adjust.monochrome {
-            let l = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
-            rgb = [l; 3];
-        }
-        if adjust.adjust_for_background && adjust.dark_background {
-            // On a dark background every colour's lightness is turned over
-            // (plus 20/255, capped at full), hue and saturation kept: black
-            // becomes white, dark red light pink. On a light background the
-            // colours stay as drawn.
-            let (h, s, l) = rgb_to_hsl(rgb);
-            rgb = hsl_to_rgb(h, s, (1.0 - l + 20.0 / 255.0).min(1.0));
-        }
-        if let Some((bg, fade)) = adjust.fade_before_contrast {
-            let f = fade.min(100) as f32 / 100.0;
-            for (c, b) in rgb.iter_mut().zip(bg) {
-                *c += (b as f32 / 255.0 - *c) * f;
-            }
-        }
-        if adjust.contrast < 100 {
-            // Lightness is pulled towards the pivot, hue and saturation kept:
-            // contrast 0 leaves every colour at the pivot's lightness.
-            let (h, s, l) = rgb_to_hsl(rgb);
-            let k = adjust.contrast as f32 / 100.0;
-            let pivot = adjust.contrast_pivot as f32 / 1000.0;
-            rgb = hsl_to_rgb(h, s, pivot + (l - pivot) * k);
-        }
-
+        let rgb = adjust_rgb([px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0], &adjust);
         for (dst, c) in px[..3].iter_mut().zip(rgb) {
             *dst = (c.clamp(0.0, 1.0) * 255.0).round() as u8;
         }

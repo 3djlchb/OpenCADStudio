@@ -11,6 +11,9 @@ mod dgn7;
 mod dgn8;
 mod dwf;
 mod model;
+mod wires;
+
+pub(crate) use wires::display_wires;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
