@@ -151,6 +151,12 @@ fn crop_range(rows: Vec<Vec<String>>, range: &str) -> Result<Vec<Vec<String>>, S
     };
     let (r0, r1) = (r0.min(r1), r0.max(r1));
     let (c0, c1) = (c0.min(c1), c0.max(c1));
+    // The row axis is bounded by the file (skip/take over real rows); the
+    // column axis was not — `A1:ZZZZZZ1` parses fine and then collected one
+    // String per column (~308 M slots per row, OOM). Columns past the widest
+    // row are empty in every row, so clamp the window to the data width.
+    let widest = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let c1 = c1.min(widest.saturating_sub(1));
     Ok(rows.into_iter()
         .skip(r0)
         .take(r1 - r0 + 1)
@@ -1449,6 +1455,27 @@ mod tests {
                 vec!["b".to_string(), "c".to_string()],
                 vec!["e".to_string(), "f".to_string()],
             ]
+        );
+    }
+
+    /// `column_index` only checks `checked_mul(26)`, so a range like
+    /// `A1:ZZZZZZ1` parses fine — and `(c0..=c1)` then collects one `String`
+    /// per column: ~308 M slots (~7 GB) for 6 Z's, and a `capacity overflow`
+    /// panic at 13 Z's. Columns past the widest row are empty in *every*
+    /// row, so the window must be clamped to the data width.
+    #[test]
+    fn crop_range_bounds_oversized_column_spans() {
+        let rows = vec![vec!["x".to_string()]];
+        // 13 Z's: pre-fix, size_hint × size_of::<String>() exceeds isize::MAX
+        // and Vec's capacity check panics before a single cell is read.
+        assert_eq!(
+            crop_range(rows.clone(), "A1:ZZZZZZZZZZZZZ1").unwrap(),
+            vec![vec!["x".to_string()]]
+        );
+        // 6 Z's — the bug-hunt report's repro — stays bounded too.
+        assert_eq!(
+            crop_range(rows, "A1:ZZZZZZ1").unwrap(),
+            vec![vec!["x".to_string()]]
         );
     }
 }
