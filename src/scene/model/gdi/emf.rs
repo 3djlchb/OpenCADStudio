@@ -570,6 +570,13 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
                     }
                     // POLYPOLYLINE(7)/POLYPOLYGON(8)
                     7 | 8 => {
+                        // The shared arm guard only promises 28 bytes, but
+                        // this sub-arm reads `total` at 28 and starts the
+                        // counts array at 32: `nSize = 28` records used to
+                        // panic `range end index 32 out of len 28`.
+                        if rec.len() < 32 {
+                            continue;
+                        }
                         let n_polys = u32_at(rec, 24) as usize;
                         let total = u32_at(rec, 28) as usize;
                         if n_polys == 0 || n_polys > 100_000 || total > 400_000 {
@@ -623,4 +630,70 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
 
     let (px, w, h) = canvas.downsample(super::SS);
     Some((px, w, h))
+}
+
+#[cfg(test)]
+mod polypoly_size_tests {
+    use super::render;
+
+    /// 88-byte EMR_HEADER (`iType=1`, `nSize=88`, bounds 0..100, `" EMF"`
+    /// signature at 40) + raw records + EMR_EOF.
+    fn emf_with(records: &[Vec<u8>]) -> Vec<u8> {
+        let mut emf = Vec::new();
+        emf.extend_from_slice(&1u32.to_le_bytes());
+        emf.extend_from_slice(&88u32.to_le_bytes());
+        emf.extend_from_slice(&0i32.to_le_bytes()); // rclBounds
+        emf.extend_from_slice(&0i32.to_le_bytes());
+        emf.extend_from_slice(&100i32.to_le_bytes());
+        emf.extend_from_slice(&100i32.to_le_bytes());
+        emf.extend_from_slice(&[0u8; 16]); // rclFrame
+        emf.extend_from_slice(b" EMF"); // dSignature @40
+        emf.extend_from_slice(&[0u8; 44]);
+        assert_eq!(emf.len(), 88);
+        for rec in records {
+            emf.extend_from_slice(rec);
+        }
+        emf.extend_from_slice(&14u32.to_le_bytes()); // EMR_EOF
+        emf.extend_from_slice(&8u32.to_le_bytes());
+        emf
+    }
+
+    /// Record with `iType`/`nSize` header + body (body length %4).
+    fn record(ty: u32, body: &[u8]) -> Vec<u8> {
+        let mut rec = Vec::with_capacity(8 + body.len());
+        rec.extend_from_slice(&ty.to_le_bytes());
+        rec.extend_from_slice(&((8 + body.len()) as u32).to_le_bytes());
+        rec.extend_from_slice(body);
+        rec
+    }
+
+    /// `nSize = 28` (bounds + nPolys only): the arm guard accepts 28 but
+    /// `7 | 8` reads `u32_at(rec, 28)` — `range end index 32 out of len 28`.
+    #[test]
+    fn a_28_byte_polypolyline_record_is_skipped_not_oob() {
+        let rec = record(7, &[0u8; 20]);
+        assert_eq!(rec.len(), 28);
+        assert!(render(&emf_with(&[rec])).is_some());
+    }
+
+    /// `iType = 91` maps to kind 8 the same way (`ty - 83`).
+    #[test]
+    fn a_28_byte_polypolygon_record_is_skipped_not_oob() {
+        let rec = record(91, &[0u8; 20]);
+        assert_eq!(rec.len(), 28);
+        assert!(render(&emf_with(&[rec])).is_some());
+    }
+
+    /// A well-formed record (nPolys + total + counts fit in 36 bytes) still
+    /// goes through the reads at 24/28 — the fix must not skip it.
+    #[test]
+    fn a_full_size_polypolyline_record_still_renders() {
+        let mut body = vec![0u8; 16]; // bounds
+        body.extend_from_slice(&1u32.to_le_bytes()); // nPolys @24
+        body.extend_from_slice(&1u32.to_le_bytes()); // total  @28
+        body.extend_from_slice(&0u32.to_le_bytes()); // counts[0] @32 (empty ring)
+        let rec = record(7, &body);
+        assert_eq!(rec.len(), 36);
+        assert!(render(&emf_with(&[rec])).is_some());
+    }
 }
