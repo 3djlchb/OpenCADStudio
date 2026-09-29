@@ -490,6 +490,47 @@ impl OpenCADStudio {
         StepInput::SelectionComplete(kept)
     }
 
+    /// Drops locked point clouds from a completed selection when the active
+    /// command would move them, saying which were locked and how many went.
+    fn filter_locked_point_cloud_selection(&mut self, input: StepInput) -> StepInput {
+        let StepInput::SelectionComplete(handles) = input else {
+            return input;
+        };
+        let i = self.active_tab;
+        if !self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.selection_drops_locked_point_clouds())
+        {
+            return StepInput::SelectionComplete(handles);
+        }
+        let (dropped, kept): (Vec<Handle>, Vec<Handle>) = handles.into_iter().partition(|h| {
+            self.tabs[i]
+                .scene
+                .document
+                .get_entity(*h)
+                .is_some_and(crate::scene::is_locked_point_cloud)
+        });
+        for handle in &dropped {
+            self.tabs[i].scene.deselect_entity(*handle);
+        }
+        if !dropped.is_empty() {
+            let count = dropped.len();
+            self.command_line.push_info(&if count == 1 {
+                crate::t!("1 point cloud is locked.").into_owned()
+            } else {
+                crate::tf!("{count} point clouds are locked.").into_owned()
+            });
+            self.command_line.push_info(&if count == 1 {
+                crate::t!("1 was filtered out.").into_owned()
+            } else {
+                crate::tf!("{count} were filtered out.").into_owned()
+            });
+            self.refresh_properties();
+        }
+        StepInput::SelectionComplete(kept)
+    }
+
     /// `feed_command`, also reporting whether the step actually took the input.
     /// Only a `Text` token can come back unclaimed (`on_text_input` returning
     /// `None`), which is what lets the caller read it as something else — a
@@ -500,6 +541,7 @@ impl OpenCADStudio {
         // as the reference does while gathering.
         let input = self.filter_associative_dimension_selection(input);
         let input = self.filter_block_reference_selection(input);
+        let input = self.filter_locked_point_cloud_selection(input);
         // XCLIP / CLIP learn which chosen references carry a clip already.
         {
             let i = self.active_tab;

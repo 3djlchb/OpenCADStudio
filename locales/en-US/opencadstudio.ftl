@@ -5027,6 +5027,15 @@ properties =
 
     .model-text-height = Model text height
     .insert-unit-scale-is-outside-the-supported-range = INSERT unit scale is outside the supported range.
+    .stylization = Stylization
+    .color-scheme = Color scheme
+    .scan-colors = Scan Colors
+    .object-color = Object Color
+    .classification = Classification
+    .show-cropped = Show cropped
+    .geolocate = Geolocate
+    .segmentation = Segmentation
+    .saved-path-lower = Saved path
 
 styles =
     .blocks =   Blocks: __ocs_fmt_0__

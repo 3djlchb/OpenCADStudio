@@ -615,6 +615,15 @@ impl OpenCADStudio {
                     crate::app::commands::pdf_import::PdfImportSource::File(import),
                 );
             }
+            CmdResult::AttachPointCloud { placement, message } => {
+                let label = self.history_label_from_active_cmd(i, "POINTCLOUDATTACH");
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.command_line.push_output(&message);
+                self.attach_point_cloud(i, label, placement);
+                self.restore_pre_cmd_tangent();
+            }
             CmdResult::AttachPdfPages { kind, path, pages } => {
                 let label = self.history_label_from_active_cmd(i, "PDFATTACH");
                 self.tabs[i].scene.clear_preview_wire();
@@ -1094,7 +1103,9 @@ impl OpenCADStudio {
     }
 
     fn handle_cancel_with_message(&mut self, message: String) -> Task<Message> {
-        self.command_line.push_error(&message);
+        for line in message.lines() {
+            self.command_line.push_error(line);
+        }
         self.apply_cmd_result(CmdResult::Cancel)
     }
 

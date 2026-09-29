@@ -5026,6 +5026,15 @@ properties =
 
     .model-text-height = { common.model-uppercase } · { common.text-height-sentence-case }
     .insert-unit-scale-is-outside-the-supported-range = Η κλίμακα μονάδας INSERT είναι εκτός του υποστηριζόμενου εύρους.
+    .stylization = Stylization
+    .color-scheme = Color scheme
+    .scan-colors = Scan Colors
+    .object-color = Object Color
+    .classification = Classification
+    .show-cropped = Show cropped
+    .geolocate = Geolocate
+    .segmentation = Segmentation
+    .saved-path-lower = Saved path
 
 styles =
     .blocks = Μπλοκ: __ocs_fmt_0__

@@ -57,6 +57,19 @@ impl OpenCADStudio {
                 self.start_underlay_attach(i, codec::entities::UnderlayType::Dgn, rest);
                 Some(Task::none())
             }
+            // POINTCLOUDATTACH picks the file; with a file, or as
+            // -POINTCLOUDATTACH, it asks on the command line.
+            ("POINTCLOUDATTACH", true) => Some(Task::done(Message::PointCloudAttachPick)),
+            ("POINTCLOUDATTACH" | "-POINTCLOUDATTACH", _) => {
+                use crate::command::CadCommand;
+                let command = crate::modules::insert::pc_attach::PointCloudAttachCommand::new();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                if !rest.is_empty() {
+                    return Some(self.feed_command(crate::command::StepInput::Text(rest.to_string())));
+                }
+                Some(Task::none())
+            }
             ("XATTACH", true) => Some(Task::done(Message::XAttachPick)),
             // A file named on the command line skips the picker.
             // Handled at once, so the placement it starts belongs to this
@@ -355,6 +368,21 @@ impl OpenCADStudio {
                 },
                 Message::AttachPickResult,
             ),
+            Message::PointCloudAttachPick => Task::perform(
+                async {
+                    let handle = crate::sys::file_dialog()
+                        .set_title(crate::t!("Select Point Cloud File").as_ref())
+                        .add_filter(crate::t!("Point Cloud Project").as_ref(), &["rcp"])
+                        .add_filter(crate::t!("Point Cloud Scan").as_ref(), &["rcs"])
+                        .pick_file()
+                        .await;
+                    match handle {
+                        Some(h) => Ok(crate::sys::handle_path(&h)),
+                        None => Err("Cancelled".to_string()),
+                    }
+                },
+                Message::AttachPickResult,
+            ),
             Message::AttachPick => Task::perform(
                 async {
                     let handle = crate::sys::file_dialog()
@@ -363,7 +391,7 @@ impl OpenCADStudio {
                             crate::t!("All Reference Files").as_ref(),
                             &[
                                 "dwg", "dxf", "pdf", "dwf", "dwfx", "dgn", "png", "jpg", "jpeg",
-                                "bmp", "tif", "tiff",
+                                "bmp", "tif", "tiff", "rcp", "rcs",
                             ],
                         )
                         .add_filter(crate::t!("Drawing").as_ref(), &["dwg", "dxf"])
@@ -374,6 +402,7 @@ impl OpenCADStudio {
                             crate::t!("Images").as_ref(),
                             &["png", "jpg", "jpeg", "bmp", "tif", "tiff"],
                         )
+                        .add_filter(crate::t!("Point Clouds").as_ref(), &["rcp", "rcs"])
                         .pick_file()
                         .await;
                     match handle {
@@ -421,6 +450,21 @@ impl OpenCADStudio {
                                 crate::entities::underlay::display_path(&path)
                             )),
                         }
+                        Task::none()
+                    }
+                    // A point cloud goes on to its placement prompts.
+                    "rcp" | "rcs" => {
+                        use crate::command::CadCommand;
+                        let i = self.active_tab;
+                        if crate::scene::model::point_cloud::load(&path).is_none() {
+                            self.command_line.push_error("All scans are not found or invalid.");
+                            self.command_line.push_error("Attach point cloud failed");
+                            return Task::none();
+                        }
+                        let command =
+                            crate::modules::insert::pc_attach::PointCloudAttachCommand::with_file(path);
+                        self.command_line.push_info(&command.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(command));
                         Task::none()
                     }
                     "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" => {

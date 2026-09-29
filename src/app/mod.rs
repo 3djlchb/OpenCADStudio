@@ -3854,6 +3854,9 @@ pub enum Message {
     AttachPick,
     /// DWFATTACH / DGNATTACH: pick the file (the result goes the ATTACH way).
     UnderlayAttachPick(codec::entities::UnderlayType),
+    /// POINTCLOUDATTACH: pick the scan or project (the result goes the
+    /// ATTACH way).
+    PointCloudAttachPick,
     /// The Reference slide-out's xref fading: amount dragged, drag done,
     /// switch.
     XrefFadeSlide(u8),

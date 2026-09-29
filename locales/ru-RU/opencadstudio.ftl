@@ -5027,6 +5027,15 @@ properties =
     .show-history = { properties.show } · { model.history }
     .solid-history = { properties.solid } · { model.history }
     .solid-type = { properties.solid } · { common.type }
+    .stylization = Stylization
+    .color-scheme = Color scheme
+    .scan-colors = Scan Colors
+    .object-color = Object Color
+    .classification = Classification
+    .show-cropped = Show cropped
+    .geolocate = Geolocate
+    .segmentation = Segmentation
+    .saved-path-lower = Saved path
 
 styles =
     .blocks = Блоки: __ocs_fmt_0__

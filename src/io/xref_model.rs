@@ -131,7 +131,7 @@ fn root_key(normalized: &str) -> String {
     String::new()
 }
 
-fn is_relative_path(normalized: &str) -> bool {
+pub fn is_relative_path(normalized: &str) -> bool {
     let b = normalized.as_bytes();
     if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
         return false;

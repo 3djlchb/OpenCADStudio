@@ -14,6 +14,7 @@ mod inquiry;
 mod layerprops;
 mod layers;
 pub(crate) mod pdf_import;
+mod point_cloud;
 mod pdf_underlay;
 mod pdf_dialogs;
 mod xclip;
@@ -636,6 +637,21 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFIMPORTIMAGEPATH",
         "XDWGFADECTL",
         "POINTCLOUDCLIPFRAME",
+        "POINTCLOUDDENSITY",
+        "POINTCLOUDPOINTSIZE",
+        "POINTCLOUDLOCK",
+        "POINTCLOUDAUTOUPDATE",
+        "POINTCLOUDBOUNDARY",
+        "POINTCLOUDRTDENSITY",
+        "POINTCLOUDLOD",
+        "POINTCLOUDPOINTMAX",
+        "POINTCLOUDVISRETAIN",
+        "POINTCLOUDSHADING",
+        "POINTCLOUDCACHESIZE",
+        "POINTCLOUD2DVSDISPLAY",
+        "POINTCLOUDLIGHTING",
+        "POINTCLOUDLIGHTSOURCE",
+        "POINTCLOUDPOINTMAXLEGACY",
         "XCLIPFRAME",
         "WIPEOUTFRAME",
         "FRAMES0",

@@ -1031,6 +1031,21 @@ impl OpenCADStudio {
                     | "PDFIMPORTIMAGEPATH"
                     | "XDWGFADECTL"
                     | "POINTCLOUDCLIPFRAME"
+                    | "POINTCLOUDDENSITY"
+                    | "POINTCLOUDPOINTSIZE"
+                    | "POINTCLOUDLOCK"
+                    | "POINTCLOUDAUTOUPDATE"
+                    | "POINTCLOUDBOUNDARY"
+                    | "POINTCLOUDRTDENSITY"
+                    | "POINTCLOUDLOD"
+                    | "POINTCLOUDPOINTMAX"
+                    | "POINTCLOUDVISRETAIN"
+                    | "POINTCLOUDSHADING"
+                    | "POINTCLOUDCACHESIZE"
+                    | "POINTCLOUD2DVSDISPLAY"
+                    | "POINTCLOUDLIGHTING"
+                    | "POINTCLOUDLIGHTSOURCE"
+                    | "POINTCLOUDPOINTMAXLEGACY"
                     | "XCLIPFRAME"
                     | "WIPEOUTFRAME"
                     | "HALOGAP"
@@ -1096,6 +1111,39 @@ impl OpenCADStudio {
                         crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
+                    // Point cloud settings, kept with the drawing.
+                    if let Some(setting) = crate::scene::model::point_cloud::setting(&name) {
+                        let document = &self.tabs[i].scene.document;
+                        let current = crate::scene::model::point_cloud::setting_value(document, setting);
+                        match value.as_deref().map(|value| setting.check(value)) {
+                            Some(Ok(new)) => {
+                                if new != current {
+                                    crate::io::set_drawing_variable(
+                                        &mut self.tabs[i].scene.document,
+                                        setting.name,
+                                        &new.to_string(),
+                                    );
+                                    self.tabs[i].scene.bump_geometry();
+                                    self.tabs[i].dirty = true;
+                                }
+                            }
+                            // Refused: say why, and ask again unless the value ends it.
+                            Some(Err(refusal)) => {
+                                for line in &refusal.lines {
+                                    self.command_line.push_error(line);
+                                }
+                                if refusal.ask_again {
+                                    self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                                    self.pending_setvar = Some(name.clone());
+                                }
+                            }
+                            None => {
+                                self.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
                     if name == "XDWGFADECTL" {
                         let current = crate::scene::cache::block_cache::xref_fade_ctl();
                         if let Some(value) = &value {

@@ -2419,6 +2419,12 @@ impl OpenCADStudio {
                 }
             }
         }
+        if path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("dwg"))
+        {
+            crate::io::xref::relative_point_cloud_paths(&mut snapshot, &path);
+        }
         let clone_ms = clone_started.elapsed().as_secs_f64() * 1000.0;
         if crate::perf::enabled() {
             crate::perf_record!(

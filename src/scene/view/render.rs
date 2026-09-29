@@ -165,6 +165,8 @@ pub struct ViewportData {
     /// Wipeout fills — rendered in a separate pass AFTER wires.
     pub(in crate::scene) wipeout_hatches: Arc<Vec<HatchModel>>,
     pub(in crate::scene) images: Arc<Vec<ImageModel>>,
+    /// Point cloud sprites; empty on the paper sheet.
+    pub(in crate::scene) point_clouds: Arc<crate::scene::model::point_cloud::PointCloudSet>,
     pub(in crate::scene) meshes: Arc<Vec<MeshLodSet>>,
     pub(in crate::scene) background_image:
         Option<crate::scene::model::image_model::DecodedImage>,
@@ -553,6 +555,14 @@ impl shader::Primitive for Primitive {
             {
                 inner.upload_images(device, queue, &vp.images[..]);
                 inner.cached_image_source = Some(Arc::clone(&vp.images));
+            }
+            if inner
+                .cached_point_cloud_source
+                .as_ref()
+                .map_or(true, |source| !Arc::ptr_eq(source, &vp.point_clouds))
+            {
+                inner.upload_point_clouds(device, queue, &vp.point_clouds);
+                inner.cached_point_cloud_source = Some(Arc::clone(&vp.point_clouds));
             }
             if inner
                 .cached_text_source
@@ -1409,6 +1419,12 @@ fn render_signature(vp: &ViewportData, placement: &PhysicalViewport) -> u64 {
         0usize
     } else {
         std::sync::Arc::as_ptr(&vp.meshes) as usize
+    }
+    .hash(&mut h);
+    if vp.point_clouds.clouds.is_empty() {
+        std::ptr::null()
+    } else {
+        std::sync::Arc::as_ptr(&vp.point_clouds)
     }
     .hash(&mut h);
     vp.geometry_epoch.hash(&mut h);
@@ -4720,6 +4736,7 @@ impl Scene {
         } else {
             self.meshes_for_viewport(inst.handle, &vp_frozen)
         };
+        let point_clouds = self.point_clouds_for_viewport(&vp_frozen, inst.paper_sheet);
 
         // SDF text quads (behind OCS_TEXT_SDF). The glyph quads ride on each
         // entity's own wire (produced by the tessellator, transformed for
@@ -4819,6 +4836,7 @@ impl Scene {
             hatches,
             wipeout_hatches,
             images,
+            point_clouds,
             meshes,
             background_image: display.background.image.clone(),
             environment_image: display.background.environment.clone(),

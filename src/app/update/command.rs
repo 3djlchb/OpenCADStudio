@@ -2368,6 +2368,18 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
             return self.on_dynamic_dimension_choice(field, &value);
         }
         let i = self.active_tab;
+        if field == "ext_pcx_locked" {
+            let handles = self.point_cloud_lock_targets(i);
+            self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                if let Some(codec::EntityType::Extended(extended)) =
+                    app.tabs[i].scene.document.get_entity_mut(handle)
+                {
+                    crate::entities::traits::PropertyEditable::apply_geom_prop(extended, field, &value);
+                }
+            });
+            self.tabs[i].properties.edit_choice_open = false;
+            return Task::none();
+        }
         let handles = self.property_target_handles(i);
         // The Annotative Yes/No list drives the per-object annotative toggle
         // (MTEXT's own flag, the annotation context for the rest).
@@ -3606,6 +3618,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         };
                         // Underlay rows: reject what the reference rejects, and
                         // write a Width / Height as the scale that produces it.
+                        if field.starts_with("ext_pcx_") {
+                            if let Err(message) =
+                                crate::entities::extended::validate_point_cloud_property(field, &val)
+                            {
+                                self.command_line.push_error(message);
+                                return Task::none();
+                            }
+                        }
                         if field.starts_with("ul_") {
                             if let Err(message) =
                                 crate::entities::underlay::validate_property(field, &val)

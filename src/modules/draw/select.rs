@@ -196,6 +196,13 @@ impl CadCommand for SelectObjectsCommand {
         self.associative_dimensions_only
     }
 
+    fn selection_drops_locked_point_clouds(&self) -> bool {
+        matches!(
+            self.pending_cmd.as_str(),
+            "MOVE" | "3DMOVE" | "ROTATE" | "3DROTATE" | "SCALE" | "MIRROR" | "MIRROR3D" | "STRETCH"
+        )
+    }
+
     // Clickable selection keywords (#426, #596). Window and Crossing fix the
     // sense of the next box, which dragging would otherwise take from the
     // direction the corner travels; All takes the whole space; Add and Remove

@@ -26,6 +26,7 @@ pub mod gpu_upload;
 pub mod hatch_gpu;
 pub mod wipeout_gpu;
 pub mod image_gpu;
+pub mod point_cloud_gpu;
 pub mod mesh_gpu;
 pub mod text_gpu;
 pub mod uniforms;
@@ -136,6 +137,7 @@ pub struct Pipeline {
     /// private backends behind one upload/LOD/draw lifecycle.
     hatch_gpu: hatch_gpu::HatchGpu,
     image_pipeline: wgpu::RenderPipeline,
+    point_cloud_pipeline: wgpu::RenderPipeline,
     /// SDF text-quad pipeline (Phase 2b): draws per-glyph quads sampling the
     /// shared glyph atlas. Fed only when `OCS_TEXT_SDF` is set (else no verts).
     text_pipeline: wgpu::RenderPipeline,
@@ -313,6 +315,7 @@ pub struct Pipeline {
     /// viewport rect. Recomputed by `compute_wipeout_lod`.
     wipeout_skip_flags: Vec<bool>,
     gpu_images: Vec<ImageGpu>,
+    gpu_point_clouds: point_cloud_gpu::PointCloudGpu,
     /// Batched mesh geometry — every solid's LOD0 concatenated into a few large
     /// buffers so the whole set draws in a handful of calls instead of one per
     /// solid. Hover / selection never re-pack it.
@@ -344,6 +347,8 @@ pub struct Pipeline {
     pub cached_preview_hatch_source: Option<std::sync::Arc<Vec<HatchModel>>>,
     pub cached_wipeout_source: Option<std::sync::Arc<Vec<HatchModel>>>,
     pub cached_image_source: Option<std::sync::Arc<Vec<ImageModel>>>,
+    pub cached_point_cloud_source:
+        Option<std::sync::Arc<crate::scene::model::point_cloud::PointCloudSet>>,
     pub cached_text_source: Option<std::sync::Arc<Vec<text_gpu::TextVertex>>>,
     pub cached_annotation_highlight_source: Option<std::sync::Arc<Vec<WireModel>>>,
     pub cached_mesh_source: Option<std::sync::Arc<Vec<MeshLodSet>>>,
@@ -2109,6 +2114,61 @@ impl Pipeline {
             cache: None,
         });
 
+        // ── Point cloud sprites ────────────────────────────────────────────
+        let point_cloud_bgl1 = point_cloud_gpu::params_layout(device);
+        let point_cloud_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("point_cloud.pipeline_layout"),
+            bind_group_layouts: &[&frame_bgl, &point_cloud_bgl1].map(Some),
+            immediate_size: 0,
+        });
+        let point_cloud_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("point_cloud.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/shaders/point_cloud.wgsl"
+            )))),
+        });
+        let point_cloud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("point_cloud.pipeline"),
+            layout: Some(&point_cloud_layout),
+            vertex: wgpu::VertexState {
+                module: &point_cloud_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[point_cloud_gpu::instance_layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: content_stencil.clone(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: MSAA_SAMPLES,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &point_cloud_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let gpu_point_clouds = point_cloud_gpu::PointCloudGpu::new(device, &point_cloud_bgl1);
+
         // ── Text (SDF glyph quads) ─────────────────────────────────────────
         let text_atlas_bgl = text_gpu::TextAtlasGpu::bind_group_layout(device);
         let (
@@ -2294,6 +2354,7 @@ impl Pipeline {
             wipeout_pipeline,
             hatch_gpu,
             image_pipeline,
+            point_cloud_pipeline,
             text_pipeline,
             block_text_pipeline,
             text_highlight_pipeline,
@@ -2385,6 +2446,7 @@ impl Pipeline {
             gpu_wipeouts: vec![],
             wipeout_skip_flags: vec![],
             gpu_images: vec![],
+            gpu_point_clouds,
             gpu_mesh_batch: vec![],
             gpu_mesh_dynamic: vec![],
             mesh_disabled_chunks: rustc_hash::FxHashSet::default(),
@@ -2400,6 +2462,7 @@ impl Pipeline {
             cached_preview_hatch_source: None,
             cached_wipeout_source: None,
             cached_image_source: None,
+            cached_point_cloud_source: None,
             cached_text_source: None,
             cached_annotation_highlight_source: None,
             cached_mesh_source: None,
@@ -3776,6 +3839,15 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.gpu_images = ImageGpu::from_models(device, queue, images, &self.image_bgl1);
     }
 
+    pub fn upload_point_clouds(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        set: &crate::scene::model::point_cloud::PointCloudSet,
+    ) {
+        self.gpu_point_clouds.upload(device, queue, set);
+    }
+
     /// Upload the frame's SDF text-quad vertices, and (re)build the GPU glyph
     /// atlas from the shared CPU atlas when it grew (new glyphs baked by the
     /// text collector). `verts` empty (flag off) leaves nothing to draw.
@@ -4187,6 +4259,38 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 pass.set_vertex_buffer(1, img.instance_buffer.slice(..));
                 pass.draw(0..img.vertex_count, 0..img.instance_count);
             }
+        }
+
+        // ── Pass 3: point clouds ──────────────────────────────────────────
+        if !self.gpu_point_clouds.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("point_cloud.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_viewport(raster.x, raster.y, raster.width, raster.height, 0.0, 1.0);
+            pass.set_pipeline(&self.point_cloud_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_stencil_reference(stencil_ref);
+            self.gpu_point_clouds.draw(&mut pass);
         }
 
         // ── Pass 4: solid meshes (batched) ────────────────────────────────
@@ -5043,6 +5147,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.cached_preview_hatch_source = None;
         self.cached_wipeout_source = None;
         self.cached_image_source = None;
+        self.cached_point_cloud_source = None;
         self.cached_text_source = None;
         self.cached_mesh_source = None;
         self.cached_face3d_source = None;

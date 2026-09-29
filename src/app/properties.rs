@@ -1011,6 +1011,18 @@ impl OpenCADStudio {
                     );
                 }
             }
+            // Point cloud: the saved path from its definition; the scan's
+            // metres against the drawing's units.
+            codec::EntityType::Extended(extended) => {
+                if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data {
+                    if let Some(definition) = crate::scene::model::point_cloud::definition(doc, data) {
+                        set_row(&mut sections, "ext_pcx_path", definition.source_filename.clone());
+                    }
+                    set_row(&mut sections, "ext_pcx_unit", t!("Meters").into_owned());
+                    let factor = insert_unit_scale(doc.header.insertion_units, 6).unwrap_or(1.0);
+                    set_row(&mut sections, "ext_pcx_unit_factor", format_unit_factor(factor));
+                }
+            }
             // Leader: text style / vertical text placement / overall
             // scale come from its dimension style.
             codec::EntityType::Leader(ld) => {
@@ -2632,7 +2644,15 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                     .iter()
                     .all(|handle| self.tabs[i].scene.is_layer_locked(*handle));
             if locked_only {
-                make_sections_read_only(&mut panel.sections);
+                // A point cloud locked on its own (not by its layer) still
+                // takes its Locked row, the way it is unlocked.
+                let cloud_lock_only = property_handles
+                    .iter()
+                    .all(|handle| self.tabs[i].scene.locked_layer_name(*handle).is_none());
+                make_sections_read_only(
+                    &mut panel.sections,
+                    if cloud_lock_only { &["ext_pcx_locked"] } else { &[] },
+                );
                 // Rows demoted to read-only no longer back an editable field;
                 // drop them from the id→key map so focus can't map onto them.
                 panel.field_key_by_id = crate::ui::properties::build_field_key_map(&panel.sections);
@@ -2978,6 +2998,20 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             handles.extend(self.tabs[i].selected_handle);
         }
         handles.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
+        handles
+    }
+
+    /// The point clouds the Locked row applies to: locked ones too, unless
+    /// their layer is locked.
+    pub(super) fn point_cloud_lock_targets(&self, i: usize) -> Vec<Handle> {
+        let mut handles = self.tabs[i].properties.selected_handles();
+        if handles.is_empty() {
+            handles = self.tabs[i].properties.source_handles.clone();
+        }
+        if handles.is_empty() {
+            handles.extend(self.tabs[i].selected_handle);
+        }
+        handles.retain(|handle| self.tabs[i].scene.locked_layer_name(*handle).is_none());
         handles
     }
 
@@ -3438,12 +3472,16 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
     }
 }
 
-fn make_sections_read_only(sections: &mut [crate::scene::model::object::PropSection]) {
+fn make_sections_read_only(
+    sections: &mut [crate::scene::model::object::PropSection],
+    keep: &[&str],
+) {
     use crate::scene::model::object::PropValue;
 
     for property in sections
         .iter_mut()
         .flat_map(|section| section.props.iter_mut())
+        .filter(|property| !keep.contains(&property.field))
     {
         let text = match &property.value {
             PropValue::ReadOnly(value)

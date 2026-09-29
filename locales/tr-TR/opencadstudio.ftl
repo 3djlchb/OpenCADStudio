@@ -4966,6 +4966,15 @@ properties =
 
     .model-text-height = { common.model-uppercase } · { common.text-height-sentence-case }
     .insert-unit-scale-is-outside-the-supported-range = INSERT birim ölçeği desteklenen aralığın dışında.
+    .stylization = Stilize etme
+    .color-scheme = Renk şeması
+    .scan-colors = Tarama renkleri
+    .object-color = Nesne rengi
+    .classification = Sınıflandırma
+    .show-cropped = Kırpılanı göster
+    .geolocate = Coğrafi konumlandır
+    .segmentation = Segmentasyon
+    .saved-path-lower = Kayıtlı yol
 
 styles =
     .blocks = Bloklar: __ocs_fmt_0__

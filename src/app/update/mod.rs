@@ -1429,6 +1429,7 @@ impl OpenCADStudio {
             }
             message @ (Message::AttachPick
             | Message::UnderlayAttachPick(_)
+            | Message::PointCloudAttachPick
             | Message::AttachPickResult(_)
             | Message::XrefAttach(_)
             | Message::XrefAttachBrowseResult(_)) => self.update_xref_attach(message),

@@ -322,6 +322,21 @@ pub fn register_underlay_sources(doc: &CadDocument, base_dir: &Path) {
             crate::scene::model::pdf_raster::register_source(stored, std::sync::Arc::new(bytes));
         }
     }
+    // Point cloud scans are large and read lazily: register where they are.
+    for object in doc.objects.values() {
+        let codec::objects::ObjectType::ClassObject(object) = object else {
+            continue;
+        };
+        let (codec::objects::ClassObjectData::PointCloudDefinitionEx(def)
+        | codec::objects::ClassObjectData::PointCloudDefinition(def)) = &object.data
+        else {
+            continue;
+        };
+        let stored = def.source_filename.trim();
+        if let Some(found) = (!stored.is_empty()).then(|| resolve_path(stored, base_dir)).flatten() {
+            crate::scene::model::point_cloud::register_source(stored, found);
+        }
+    }
 }
 
 /// Layer properties an override can change, as compared for the
@@ -3103,6 +3118,27 @@ mod tests {
             )
             .unwrap_err();
             assert_eq!(err, "XREF: no loaded reference with that key.");
+        }
+    }
+}
+
+/// Point cloud definitions keep the full path while the drawing is open; a
+/// DWG stores it relative to the drawing (".\rcs\scan.rcs"), as the
+/// reference writes it. Paths on another drive stay full.
+pub fn relative_point_cloud_paths(doc: &mut CadDocument, host: &Path) {
+    use crate::io::xref_model::{is_relative_path, normalize_lexical, to_pathtype_result, Pathtype};
+    for object in doc.objects.values_mut() {
+        let codec::objects::ObjectType::ClassObject(object) = object else {
+            continue;
+        };
+        let codec::objects::ClassObjectData::PointCloudDefinitionEx(def) = &mut object.data else {
+            continue;
+        };
+        if def.source_filename.is_empty() || is_relative_path(&normalize_lexical(&def.source_filename)) {
+            continue;
+        }
+        if let Ok(relative) = to_pathtype_result(&def.source_filename, host, Pathtype::Relative) {
+            def.source_filename = relative.replace('/', "\\");
         }
     }
 }

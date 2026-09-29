@@ -720,6 +720,12 @@ impl OpenCADStudio {
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
+            "POINTCLOUDCROP" => {
+                use crate::command::CadCommand;
+                let command = crate::modules::insert::pc_crop::PointCloudCropCommand::new();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
             "IMAGECLIP" => {
                 use crate::command::CadCommand;
                 let command = crate::modules::insert::pdf_clip::PdfClipCommand::image();

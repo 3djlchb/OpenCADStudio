@@ -1,0 +1,116 @@
+// Indexed scan (.rcs, "ADOCT" version 3) point reader.
+//
+// Layout (little-endian):
+//   0x10  3 × f64  scan translation T
+//   0x28  3 × f64  scan rotation
+//   0x40  3 × f64  scan scale
+//   0xE0  3 × u8   has RGB, has normals, has intensity
+//   0x129 u32      section count, then 24-byte entries at 0x12D:
+//                  u64 type, u64 offset, u64 size
+// Section 2 is the node directory: u64 node count, then 368-byte records
+// (cube min at +0, levels +96, point count +100, block size +104, per-level
+// cell counts +108 and point counts +236). Section 1 holds the node blocks
+// back to back: the node's octree index (u32 entries), then 16-byte point
+// records — a u64 with three 18-bit millimetre offsets from the node cube's
+// min corner, the intensity byte, then blue, green, red.
+// The octree index is only needed for spatial queries: every record carries
+// its own position.
+
+/// One scan, in its own (untransformed) frame.
+pub struct Scan {
+    /// Point positions before the scan transform.
+    pub local: Vec<[f64; 3]>,
+    pub colors: Vec<[u8; 3]>,
+    pub intensity: Vec<u8>,
+    pub has_rgb: bool,
+    pub has_intensity: bool,
+    pub translation: [f64; 3],
+    pub rotation: [f64; 3],
+    pub scale: [f64; 3],
+}
+
+const NODE_RECORD: usize = 368;
+
+fn u32_at(b: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(b.get(at..at.checked_add(4)?)?.try_into().ok()?))
+}
+
+fn u64_at(b: &[u8], at: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(b.get(at..at.checked_add(8)?)?.try_into().ok()?))
+}
+
+fn f64_at(b: &[u8], at: usize) -> Option<f64> {
+    u64_at(b, at).map(f64::from_bits).filter(|v| v.is_finite())
+}
+
+fn vec3_at(b: &[u8], at: usize) -> Option<[f64; 3]> {
+    Some([f64_at(b, at)?, f64_at(b, at + 8)?, f64_at(b, at + 16)?])
+}
+
+pub fn decode(b: &[u8]) -> Option<Scan> {
+    if b.get(0..5)? != b"ADOCT" {
+        return None;
+    }
+    let translation = vec3_at(b, 0x10)?;
+    let rotation = vec3_at(b, 0x28)?;
+    let scale = vec3_at(b, 0x40)?;
+    let has_rgb = *b.get(0xE0)? != 0;
+    let has_intensity = *b.get(0xE2)? != 0;
+
+    let sections = u32_at(b, 0x129)? as usize;
+    let (mut directory, mut data) = (None, None);
+    for k in 0..sections.min(64) {
+        let at = 0x12D + k * 24;
+        let offset = usize::try_from(u64_at(b, at + 8)?).ok()?;
+        match u64_at(b, at)? {
+            1 => data = Some(offset),
+            2 => directory = Some(offset),
+            _ => {}
+        }
+    }
+    let (directory, mut block) = (directory?, data?);
+    let nodes = usize::try_from(u64_at(b, directory)?).ok()?;
+    // Every node needs its directory record; a count past the file is corrupt.
+    if nodes.checked_mul(NODE_RECORD)? > b.len() {
+        return None;
+    }
+
+    let mut scan = Scan {
+        local: Vec::new(),
+        colors: Vec::new(),
+        intensity: Vec::new(),
+        has_rgb,
+        has_intensity,
+        translation,
+        rotation,
+        scale,
+    };
+    for node in 0..nodes {
+        let record = directory + 8 + node * NODE_RECORD;
+        let cube_min = vec3_at(b, record)?;
+        let points = u32_at(b, record + 100)? as usize;
+        let size = u32_at(b, record + 104)? as usize;
+        let mut entries = points;
+        for level in 0..32 {
+            entries = entries.checked_add(u32_at(b, record + 108 + level * 4)? as usize)?;
+        }
+        if entries.checked_mul(4)?.checked_add(points.checked_mul(16)?)? != size {
+            return None;
+        }
+        let records = block + entries * 4;
+        let end = block.checked_add(size)?;
+        let bytes = b.get(records..end)?;
+        scan.local.reserve(points);
+        scan.colors.reserve(points);
+        scan.intensity.reserve(points);
+        for rec in bytes.chunks_exact(16) {
+            let v = u64::from_le_bytes(rec[0..8].try_into().ok()?);
+            let q = |shift: u32| ((v >> shift) & 0x3FFFF) as f64 * 1e-3;
+            scan.local.push([cube_min[0] + q(0), cube_min[1] + q(18), cube_min[2] + q(36)]);
+            scan.intensity.push(rec[8]);
+            scan.colors.push([rec[11], rec[10], rec[9]]);
+        }
+        block = end;
+    }
+    Some(scan)
+}

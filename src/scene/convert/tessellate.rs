@@ -564,6 +564,20 @@ fn point_cloud_wires(
     let RenderObject::Lines(body_points) = rendered.object else {
         return None;
     };
+    // A cloud whose scan file is found draws its points instead of its
+    // extents box; the box stays behind, unseen, to pick the cloud, with its
+    // faces so a click among the points selects it too.
+    let mut shown = true;
+    let (mut pick_tris, mut pick_tris_low) = (Vec::new(), Vec::new());
+    if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data {
+        shown = crate::scene::model::point_cloud::resolve_source(document, data).is_none();
+        let c = codec::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
+        let mut tris = Vec::with_capacity(36);
+        for [a, b, d, e] in [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 4, 5], [2, 3, 6, 7], [0, 2, 4, 6], [1, 3, 5, 7]] {
+            tris.extend([c[a], c[b], c[e], c[a], c[e], c[d]]);
+        }
+        (pick_tris, pick_tris_low) = points_to_ds(tris);
+    }
     let (points, points_low) = points_to_ds(body_points);
     let mut wires = vec![WireModel {
         bg_adapt: None,
@@ -572,14 +586,14 @@ fn point_cloud_wires(
         pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
-        display_visible: true,
+        display_visible: shown,
         snap_only: false,
-        plot_visible: true,
+        plot_visible: shown,
         fill_is_3d: false,
         fill_is_2d_solid: false,
         render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
+        pick_tris,
+        pick_tris_low,
         dash_from_start: false,
         dash_align_end: None,
         text_verts: Vec::new(),

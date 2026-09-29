@@ -1572,6 +1572,13 @@ pub enum CmdResult {
     OpenPdfImportSettings,
     /// Import a page of a file (PDFIMPORT File); ends the command.
     PdfImportFile(crate::modules::insert::pdf_import::PdfFileImport),
+    /// Attach a point cloud: the host creates or reuses its definition,
+    /// commits the cloud in one undo step, then ends the command. The
+    /// message is the last prompt's echo.
+    AttachPointCloud {
+        placement: crate::modules::insert::pc_attach::PointCloudPlacement,
+        message: String,
+    },
     /// Attach PDF pages: each page's underlay with its file (as stored) and
     /// page; the host creates or reuses the definitions and commits them all
     /// in one undo step, then ends the command.
@@ -2840,6 +2847,12 @@ pub trait CadCommand: Send {
     /// The command takes block references only (XCLIP): the host drops the
     /// rest and says how many were ineligible.
     fn selection_keeps_block_references(&self) -> bool {
+        false
+    }
+
+    /// The command moves, turns or resizes what it gathers: the host drops
+    /// locked point clouds from each completed selection and says so.
+    fn selection_drops_locked_point_clouds(&self) -> bool {
         false
     }
 
