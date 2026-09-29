@@ -319,17 +319,46 @@ pub fn crashed_backends() -> Vec<String> {
         return Vec::new();
     };
     let text = std::fs::read_to_string(p).unwrap_or_default();
+    let named = || -> Vec<String> {
+        text.lines()
+            .find_map(|l| l.strip_prefix("backend="))
+            .unwrap_or("")
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
     if text.lines().any(|l| l.trim() == SURVIVED_MARKER) {
-        return Vec::new();
+        // Surviving the proof delay is good evidence, not proof. A backend
+        // can carry the interface for minutes and still be unable to hold a
+        // large drawing: D3D12 on an integrated GPU runs out of room only
+        // once the whole scene uploads, well past the mark, and a run killed
+        // then used to be excused. The crash report says what actually
+        // happened, so ask it before excusing anything.
+        return match crash_report_blames_the_device(&text) {
+            true => named(),
+            false => Vec::new(),
+        };
     }
-    text.lines()
-        .find_map(|l| l.strip_prefix("backend="))
-        .unwrap_or("")
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
+    named()
+}
+
+/// Whether the run this sentinel belongs to died inside the graphics device.
+///
+/// The sentinel records the process id it armed for, and crash reports are
+/// named for the process that wrote them, so the two join exactly: this asks
+/// about that run and not whichever report happens to be newest.
+fn crash_report_blames_the_device(sentinel: &str) -> bool {
+    let Some(pid) = sentinel
+        .lines()
+        .find_map(|line| line.strip_prefix("pid="))
+        .and_then(|value| value.trim().parse::<u32>().ok())
+    else {
+        return false;
+    };
+    crate::sys::crash_log::report_for_pid(pid)
+        .is_some_and(|report| crate::sys::crash_log::is_device_failure(&report))
 }
 
 /// Record that the armed backend has kept the app alive long enough to be
@@ -1081,6 +1110,67 @@ mod tests {
         mark_sentinel_survived();
         assert!(crashed_backends().is_empty());
 
+        disarm_sentinel();
+        unsafe { std::env::remove_var(SENTINEL_DIR_ENV) };
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Surviving the proof delay excuses a kill, but not a crash the
+    /// graphics device itself caused. D3D12 on an integrated GPU carries the
+    /// interface for minutes and only fails once a large drawing uploads, so
+    /// a run that died then has to keep costing the backend.
+    #[test]
+    fn a_device_crash_still_blames_the_backend_however_late_it_came() {
+        let _guard = SENTINEL_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("ocs-gpu-late-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        // SAFETY: single-threaded test mutating a process-local test hook.
+        unsafe { std::env::set_var(SENTINEL_DIR_ENV, &dir) };
+
+        let reports = crate::sys::crash_log::directory().expect("a config directory");
+        let _ = std::fs::create_dir_all(&reports);
+        let report = reports.join(format!("crash-1-{}.log", std::process::id()));
+
+        arm_sentinel("dx12");
+        mark_sentinel_survived();
+        let _ = std::fs::remove_file(&report);
+        assert!(
+            crashed_backends().is_empty(),
+            "with no crash report, a survived run blames nobody"
+        );
+
+        // The run left a report, and it is the device's own failure.
+        std::fs::write(
+            &report,
+            crate::sys::crash_log::report_from(
+                "Error in Buffer::get_mapped_range: Validation Error",
+                "wgpu-29.0.4/src/backend/wgpu_core.rs:2253:18",
+                1,
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            crashed_backends(),
+            vec!["dx12".to_string()],
+            "a device failure must cost the backend even past the proof delay"
+        );
+
+        // A crash that has nothing to do with graphics still costs nothing.
+        std::fs::write(
+            &report,
+            crate::sys::crash_log::report_from(
+                "index out of bounds: the len is 3 but the index is 7",
+                "src/app/commands/draw.rs:120:5",
+                1,
+            ),
+        )
+        .unwrap();
+        assert!(
+            crashed_backends().is_empty(),
+            "an unrelated panic must not cost the user a working backend"
+        );
+
+        let _ = std::fs::remove_file(&report);
         disarm_sentinel();
         unsafe { std::env::remove_var(SENTINEL_DIR_ENV) };
         let _ = std::fs::remove_dir_all(&dir);
