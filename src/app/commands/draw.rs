@@ -391,6 +391,7 @@ impl OpenCADStudio {
                 });
                 match seed {
                     Some((s, tangent)) => {
+                        self.last_point = Some(s);
                         let new_cmd = ArcContCommand::new(s, tangent);
                         self.command_line.push_info(&new_cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(new_cmd));
