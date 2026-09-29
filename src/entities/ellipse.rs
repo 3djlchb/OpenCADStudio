@@ -354,58 +354,14 @@ fn apply_grip(ell: &mut Ellipse, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
-    use codec::types::{Transform, Vector3};
-    let transform = match t {
-        EntityTransform::Translate(d) => {
-            ell.center = ell.center + Vector3::new(d.x, d.y, d.z);
-            return;
-        }
-        EntityTransform::Rotate { center, axis, angle_rad } => {
-            let axis_norm = Vector3::new(axis.x, axis.y, axis.z);
-            let axis_len = axis_norm.length();
-            let axis_v = if axis_len > 1e-12 { axis_norm / axis_len } else { Vector3::UNIT_Z };
-            Transform::from_translation(Vector3::new(-center.x, -center.y, -center.z))
-                .then(&Transform::from_rotation(axis_v, *angle_rad))
-                .then(&Transform::from_translation(Vector3::new(center.x, center.y, center.z)))
-        }
-        EntityTransform::Scale { center, factor } => {
-            let s = *factor;
-            Transform::from_scaling_with_origin(
-                Vector3::new(s, s, s),
-                Vector3::new(center.x, center.y, center.z),
-            )
-        }
-        EntityTransform::Mirror { p1, p2, working_normal } => {
-            crate::scene::view::transform::reflection_about_working_line(
-                *p1,
-                *p2,
-                *working_normal,
-            )
-        }
-        EntityTransform::Affine(tr) => tr.clone(),
-    };
-
-    if let Some((c, m, n, ratio, s, e)) = crate::scene::view::transform::transform_ellipse_geometry(
-        ell.center,
-        ell.major_axis,
-        ell.normal,
-        ell.minor_axis_ratio,
-        ell.start_parameter,
-        ell.end_parameter,
-        &transform,
-    ) {
-        ell.center = c;
-        ell.major_axis = m;
-        ell.normal = n;
-        ell.minor_axis_ratio = ratio;
-        ell.start_parameter = s;
-        let is_full = (e - s - std::f64::consts::TAU).abs() < 1e-9;
-        ell.end_parameter = if is_full {
-            std::f64::consts::TAU
-        } else {
-            e.rem_euclid(std::f64::consts::TAU)
-        };
-    }
+    // The codec maps the whole ellipse — ratio, principal axes and arc
+    // parameters — under rotate, scale, affine and mirror alike.
+    crate::scene::view::transform::apply_standard_entity_transform(ell, t, |entity, p1, p2| {
+        codec::Entity::apply_mirror(
+            entity,
+            &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
+        );
+    });
 }
 
 impl RenderConvertible for Ellipse {
@@ -581,9 +537,12 @@ mod grip_tests {
         };
         apply_transform(&mut e, &mirror);
 
-        // Major axis should be reflected to (-10, 0, 0)
+        // Major axis reflected to (-10, 0, 0); MIRROR keeps the normal facing
+        // the mirrored plane and negates the parameters instead.
         assert!((e.major_axis.x - (-10.0)).abs() < 1e-9);
-        // Normal should flip to -Z to preserve counter-clockwise traversal
-        assert!(e.normal.z < 0.0);
+        assert!((e.normal.z - 1.0).abs() < 1e-9);
+        let (s, end) = (e.start_parameter, e.end_parameter);
+        assert!((s - (std::f64::consts::TAU - 1.5)).abs() < 1e-9, "{s}");
+        assert!((end - s - 1.4).abs() < 1e-9, "{end}");
     }
 }

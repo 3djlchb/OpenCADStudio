@@ -120,12 +120,13 @@ pub fn reflect_xy_point(x: &mut f64, y: &mut f64, p1: DVec3, p2: DVec3) {
     *y = p1.y as f64 + my;
 }
 
-/// Fully transforms ellipse / elliptical arc geometry under any 3D affine transform
-/// (including negative scales, reflections, negative rotations, non-uniform scales, and translation).
+/// An ellipse / elliptical arc's image under any affine transform, through the
+/// codec's `transform_ellipse` so the block-cache fast path and the entity
+/// agree with every other path (explode, insert) by construction.
 ///
-/// Returns `(new_center, new_major_axis, new_normal, new_minor_axis_ratio, new_start_param, new_end_param)`
-/// where `new_major_axis` is guaranteed to be orthogonal to `new_normal`, its length is >= semi-minor axis length,
-/// and `new_minor_axis_ratio <= 1.0`.
+/// Returns `(center, major_axis, normal, minor_axis_ratio, start_param,
+/// end_param)`; the major axis is the longer one and a reflection flips the
+/// normal.
 pub fn transform_ellipse_geometry(
     center: Vector3,
     major_axis: Vector3,
@@ -135,76 +136,32 @@ pub fn transform_ellipse_geometry(
     end_param: f64,
     transform: &Transform,
 ) -> Option<(Vector3, Vector3, Vector3, f64, f64, f64)> {
-    let norm_len = normal.length();
-    if norm_len <= 1e-12 || !norm_len.is_finite() {
+    use codec::Entity;
+    if normal.length() <= 1e-12 || major_axis.length() <= 1e-12 {
         return None;
     }
-    let norm = normal / norm_len;
-    let m = major_axis;
-    let m_len = m.length();
-    if m_len <= 1e-12 || !m_len.is_finite() {
-        return None;
-    }
-    let ratio = minor_axis_ratio.clamp(1e-12, 1.0);
-    // V = (N x M) * ratio
-    let v = norm.cross(&m) * ratio;
-
-    let c_prime = transform.apply(center);
-    let m0 = transform.apply_rotation(m);
-    let v0 = transform.apply_rotation(v);
-
-    let m0_len_sq = m0.length_squared();
-    let v0_len_sq = v0.length_squared();
-    if m0_len_sq <= 1e-24 || v0_len_sq <= 1e-24 || !m0_len_sq.is_finite() || !v0_len_sq.is_finite() {
-        return None;
-    }
-
-    // Extremum angle theta to find the principal axes of the transformed ellipse
-    let dot = m0.dot(&v0);
-    let diff = m0_len_sq - v0_len_sq;
-    let theta = 0.5 * (2.0 * dot).atan2(diff);
-
-    let (sin_t, cos_t) = theta.sin_cos();
-    let m_new = m0 * cos_t + v0 * sin_t;
-    let v_new = m0 * (-sin_t) + v0 * cos_t;
-
-    let a = m_new.length();
-    let b = v_new.length();
-    if a <= 1e-12 || !a.is_finite() {
-        return None;
-    }
-
-    let cross = m_new.cross(&v_new);
-    let cross_len = cross.length();
-    if cross_len <= 1e-12 || !cross_len.is_finite() {
-        return None;
-    }
-    let n_new = cross / cross_len;
-    let new_ratio = (b / a).clamp(1e-12, 1.0);
-
-    // Sweep and parameters
-    use std::f64::consts::TAU;
-    let raw = end_param - start_param;
-    let is_full = (raw - TAU).abs() < 1e-9
-        || (raw.abs() >= TAU - 1e-9)
-        || (raw.rem_euclid(TAU).abs() < 1e-9 && raw.abs() > 1e-9);
-
-    let (new_start, new_end) = if is_full {
-        (0.0, TAU)
-    } else {
-        let sweep = if raw <= 0.0 {
-            let s = raw.rem_euclid(TAU);
-            if s <= 1e-9 { TAU } else { s }
-        } else if raw > TAU {
-            TAU
-        } else {
-            raw
-        };
-        let s = (start_param - theta).rem_euclid(TAU);
-        (s, s + sweep)
+    let mut ellipse = codec::entities::Ellipse {
+        center,
+        major_axis,
+        normal,
+        minor_axis_ratio,
+        start_parameter: start_param,
+        end_parameter: end_param,
+        ..Default::default()
     };
-
-    Some((c_prime, m_new, n_new, new_ratio, new_start, new_end))
+    ellipse.apply_transform(transform);
+    let values = [ellipse.center, ellipse.major_axis, ellipse.normal];
+    if values.iter().any(|v| !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite())) {
+        return None;
+    }
+    Some((
+        ellipse.center,
+        ellipse.major_axis,
+        ellipse.normal,
+        ellipse.minor_axis_ratio,
+        ellipse.start_parameter,
+        ellipse.end_parameter,
+    ))
 }
 
 /// DXF arbitrary-axis algorithm — returns the OCS X and Y basis vectors in WCS
