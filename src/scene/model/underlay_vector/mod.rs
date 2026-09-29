@@ -311,16 +311,31 @@ fn rasterize(sheet: &Sheet, side: f64, backdrop: Backdrop) -> Option<PdfPage> {
             paint.set_color_rgba8(c[0], c[1], c[2], 255);
             // A negative width is in pixels (DGN line weights).
             let px = if width < 0.0 { (-width) as f32 } else { ((width * scale) as f32).max(1.0) };
-            // Hairlines are drawn solid, one pixel wide, as the reference
-            // draws them; anti-aliasing would spread them to half intensity.
-            paint.anti_alias = px > 1.5;
             let stroke = tiny_skia::Stroke {
                 width: px,
                 line_cap: tiny_skia::LineCap::Round,
                 line_join: tiny_skia::LineJoin::Round,
                 ..Default::default()
             };
-            pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            if px > 1.5 {
+                paint.anti_alias = true;
+                pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            } else {
+                // Hairlines: horizontal and vertical pieces solid, one pixel
+                // wide, as the reference draws them (anti-aliasing would
+                // spread them to half intensity); slanted pieces and curves
+                // anti-aliased, since their pixel steps break up once the
+                // raster is scaled to the screen.
+                let (straight, curved) = hairline_parts(path, &to_px);
+                paint.anti_alias = false;
+                if let Some(p) = straight {
+                    pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                }
+                paint.anti_alias = true;
+                if let Some(p) = curved {
+                    pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                }
+            }
         }
     }
     let mut pixels = pixmap.take();
@@ -333,6 +348,57 @@ fn rasterize(sheet: &Sheet, side: f64, backdrop: Backdrop) -> Option<PdfPage> {
         }
     }
     Some(PdfPage { pixels: Arc::new(pixels), width: pw, height: ph, dpi: 0.0 })
+}
+
+/// A path's horizontal and vertical segments, and its slanted and curved
+/// ones, each as a pixel path.
+fn hairline_parts(
+    path: &Path,
+    to_px: &dyn Fn([f64; 2]) -> (f32, f32),
+) -> (Option<tiny_skia::Path>, Option<tiny_skia::Path>) {
+    let (mut straight, mut curved) = (tiny_skia::PathBuilder::new(), tiny_skia::PathBuilder::new());
+    // Consecutive segments of one kind stay one run, so their joins are
+    // drawn once.
+    let (mut straight_at, mut curved_at) = (None, None);
+    for sp in &path.subpaths {
+        for seg in &sp.segments {
+            let a = to_px(seg.start());
+            match seg {
+                Segment::Line(_, b) if along_axis(a, to_px(*b)) => {
+                    let b = to_px(*b);
+                    if straight_at != Some(a) {
+                        straight.move_to(a.0, a.1);
+                    }
+                    straight.line_to(b.0, b.1);
+                    straight_at = Some(b);
+                }
+                Segment::Line(_, b) => {
+                    let b = to_px(*b);
+                    if curved_at != Some(a) {
+                        curved.move_to(a.0, a.1);
+                    }
+                    curved.line_to(b.0, b.1);
+                    curved_at = Some(b);
+                }
+                Segment::Cubic(_, c1, c2, b) => {
+                    let (c1, c2, b) = (to_px(*c1), to_px(*c2), to_px(*b));
+                    if curved_at != Some(a) {
+                        curved.move_to(a.0, a.1);
+                    }
+                    curved.cubic_to(c1.0, c1.1, c2.0, c2.1, b.0, b.1);
+                    curved_at = Some(b);
+                }
+            }
+        }
+        straight_at = None;
+        curved_at = None;
+    }
+    (straight.finish(), curved.finish())
+}
+
+/// A pixel segment that runs horizontally or vertically.
+fn along_axis(a: (f32, f32), b: (f32, f32)) -> bool {
+    (b.0 - a.0).abs() < 0.01 || (b.1 - a.1).abs() < 0.01
 }
 
 fn vector_cache() -> &'static Mutex<HashMap<Key, Option<Arc<super::pdf_vector::PageVectors>>>> {
