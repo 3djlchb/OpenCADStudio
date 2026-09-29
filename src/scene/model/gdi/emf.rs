@@ -127,7 +127,13 @@ impl Player {
 
     /// Points of a 16-bit poly record at `off`, `n` entries.
     fn pts16(rec: &[u8], off: usize, n: usize) -> Vec<[f32; 2]> {
-        let mut v = Vec::with_capacity(n);
+        // `n` is a raw u32 out of the record — for POLYPOLYLINE it is the
+        // per-ring count, which the `total > 400_000` check never bounds:
+        // `u32::MAX` used to request a ~17 GB capacity up front and abort
+        // on allocation failure. Only bytes present can be read (loop
+        // below), so the capacity is sized from the record.
+        let avail = rec.len().saturating_sub(off) / 4;
+        let mut v = Vec::with_capacity(n.min(avail));
         for i in 0..n {
             let o = off + i * 4;
             if o + 4 > rec.len() {
@@ -139,7 +145,8 @@ impl Player {
     }
 
     fn pts32(rec: &[u8], off: usize, n: usize) -> Vec<[f32; 2]> {
-        let mut v = Vec::with_capacity(n);
+        let avail = rec.len().saturating_sub(off) / 8;
+        let mut v = Vec::with_capacity(n.min(avail));
         for i in 0..n {
             let o = off + i * 8;
             if o + 8 > rec.len() {
@@ -694,6 +701,64 @@ mod polypoly_size_tests {
         body.extend_from_slice(&0u32.to_le_bytes()); // counts[0] @32 (empty ring)
         let rec = record(7, &body);
         assert_eq!(rec.len(), 36);
+        assert!(render(&emf_with(&[rec])).is_some());
+    }
+
+    /// A per-ring point count is a raw u32 (`counts[0] @32`). `pts32` sized
+    /// its vector straight from that field: `u32::MAX` requests a ~34 GB
+    /// capacity and the allocator aborts the process. The `total > 400_000`
+    /// check never bounds individual ring counts. Capacity must come from
+    /// the bytes actually present.
+    #[test]
+    fn a_hostile_ring_point_count_is_sized_from_the_record_32bit() {
+        let mut body = vec![0u8; 16]; // bounds
+        body.extend_from_slice(&1u32.to_le_bytes()); // nPolys @24
+        body.extend_from_slice(&1u32.to_le_bytes()); // total @28 (claimed, unused)
+        body.extend_from_slice(&u32::MAX.to_le_bytes()); // counts[0] @32 ← defect
+        body.extend_from_slice(&1i32.to_le_bytes()); // the one real point
+        body.extend_from_slice(&2i32.to_le_bytes());
+        let rec = record(7, &body);
+        let pts = super::Player::pts32(&rec, 36, u32::MAX as usize);
+        assert!(
+            pts.capacity() <= rec.len() / 8 + 1,
+            "pre-allocated {} slots",
+            pts.capacity()
+        );
+        assert_eq!(pts, vec![[1.0, 2.0]]);
+    }
+
+    /// Same defect through `pts16` (non-wide records, iType 90 → kind 7).
+    #[test]
+    fn a_hostile_ring_point_count_is_sized_from_the_record_16bit() {
+        let mut body = vec![0u8; 16]; // bounds
+        body.extend_from_slice(&1u32.to_le_bytes()); // nPolys @24
+        body.extend_from_slice(&1u32.to_le_bytes()); // total @28
+        body.extend_from_slice(&u32::MAX.to_le_bytes()); // counts[0] @32 ← defect
+        body.extend_from_slice(&3i16.to_le_bytes()); // the one real point
+        body.extend_from_slice(&4i16.to_le_bytes());
+        let rec = record(90, &body);
+        let pts = super::Player::pts16(&rec, 36, u32::MAX as usize);
+        assert!(
+            pts.capacity() <= rec.len() / 4 + 1,
+            "pre-allocated {} slots",
+            pts.capacity()
+        );
+        assert_eq!(pts, vec![[3.0, 4.0]]);
+    }
+
+    /// End-to-end: the hostile count reaches `render` via EMR_POLYPOLYLINE
+    /// and must still render the points that exist, without dying.
+    #[test]
+    fn a_hostile_ring_count_still_renders_the_points_that_exist() {
+        let mut body = vec![0u8; 16]; // bounds
+        body.extend_from_slice(&1u32.to_le_bytes()); // nPolys @24
+        body.extend_from_slice(&1u32.to_le_bytes()); // total @28 (≤ cap, claimed)
+        body.extend_from_slice(&u32::MAX.to_le_bytes()); // counts[0] @32 ← defect
+        body.extend_from_slice(&0i32.to_le_bytes()); // point (0,0)
+        body.extend_from_slice(&0i32.to_le_bytes());
+        body.extend_from_slice(&50i32.to_le_bytes()); // point (50,0)
+        body.extend_from_slice(&0i32.to_le_bytes());
+        let rec = record(7, &body);
         assert!(render(&emf_with(&[rec])).is_some());
     }
 }
