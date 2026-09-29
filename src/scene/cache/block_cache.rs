@@ -350,7 +350,12 @@ impl BlockCache {
         block_name: &str,
         visited: &mut Vec<String>,
     ) -> Option<usize> {
-        if visited.iter().any(|name| name == block_name) {
+        // `visited` is the current path, so it bounds cycles but not depth:
+        // a legal acyclic chain B1 → … → Bn recursed n frames deep and
+        // overflowed rayon's 2 MiB worker stacks (hard abort). Expansion
+        // already truncates at `MAX_NESTING_DEPTH` (`depth > 32`); stopping
+        // at the same boundary keeps cost/bounds in sync with what renders.
+        if visited.len() > MAX_NESTING_DEPTH || visited.iter().any(|name| name == block_name) {
             return None;
         }
         let defn = self.defns.get(block_name)?;
@@ -384,7 +389,9 @@ impl BlockCache {
         block_name: &str,
         visited: &mut Vec<String>,
     ) -> BlockMetrics {
-        if visited.iter().any(|name| name == block_name) {
+        // Same depth guard as `defn_inline_point_cost_recursive`: cycle-only
+        // guarding let acyclic chains recurse until the stack overflowed.
+        if visited.len() > MAX_NESTING_DEPTH || visited.iter().any(|name| name == block_name) {
             return BlockMetrics::default();
         }
         let Some(defn) = self.defns.get(block_name) else {
@@ -3325,5 +3332,111 @@ mod compact_nested_tests {
             (actual_start_pt - expected_start_pt).length() < 1e-9,
             "Start point mismatch: expected {expected_start_pt:?}, got {actual_start_pt:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod metrics_depth_tests {
+    use super::*;
+    use codec::entities::{Insert, Line};
+    use codec::tables::BlockRecord;
+
+    fn add_block(document: &mut CadDocument, name: &str) -> Handle {
+        let mut block = BlockRecord::new(name);
+        block.handle = document.allocate_handle();
+        let handle = block.handle;
+        document.block_records.add(block).unwrap();
+        handle
+    }
+
+    fn add_owned(document: &mut CadDocument, owner: Handle, mut entity: EntityType) {
+        entity.common_mut().owner_handle = owner;
+        document.add_entity(entity).unwrap();
+    }
+
+    /// Chain B0 → B1 → … → Bn (each block holds one INSERT of the next, the
+    /// last a line). Both metrics recursions guard *cycles* only, so depth n
+    /// reaches rayon's default 2 MiB stacks: `thread has overflowed its
+    /// stack` — a hard abort, not a panic. Expansion already stops at
+    /// `MAX_NESTING_DEPTH`; metrics must too.
+    #[test]
+    fn a_deep_insert_chain_computes_metrics_without_overflowing_the_stack() {
+        const DEPTH: usize = 20_000;
+        let mut document = CadDocument::new();
+        let mut prev = add_block(&mut document, "B0");
+        for i in 1..=DEPTH {
+            let cur = add_block(&mut document, &format!("B{i}"));
+            add_owned(
+                &mut document,
+                prev,
+                EntityType::Insert(Insert::new(&format!("B{i}"), Vector3::ZERO)),
+            );
+            prev = cur;
+        }
+        add_owned(
+            &mut document,
+            prev,
+            EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0))),
+        );
+        document
+            .add_entity(EntityType::Insert(Insert::new("B0", Vector3::ZERO)))
+            .unwrap();
+
+        let cache = BlockCache::build(
+            &document,
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &HashMap::default(),
+        );
+        assert_eq!(cache.defns.len(), DEPTH + 1);
+        // The tail still carries the line's bounds through the depth cap.
+        let tail = cache
+            .defns
+            .get(&format!("B{}", DEPTH - 1))
+            .expect("tail block built");
+        assert_ne!(tail.metrics.aabb_local, [0.0; 4]);
+    }
+
+    /// A chain well below the depth cap is aggregated end to end: the root
+    /// block's bounds include the deepest line, identical to the tail's.
+    #[test]
+    fn metrics_below_the_depth_cap_are_still_fully_aggregated() {
+        const DEPTH: usize = 10;
+        let mut document = CadDocument::new();
+        let mut prev = add_block(&mut document, "B0");
+        for i in 1..=DEPTH {
+            let cur = add_block(&mut document, &format!("B{i}"));
+            add_owned(
+                &mut document,
+                prev,
+                EntityType::Insert(Insert::new(&format!("B{i}"), Vector3::ZERO)),
+            );
+            prev = cur;
+        }
+        add_owned(
+            &mut document,
+            prev,
+            EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0))),
+        );
+        document
+            .add_entity(EntityType::Insert(Insert::new("B0", Vector3::ZERO)))
+            .unwrap();
+
+        let cache = BlockCache::build(
+            &document,
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &HashMap::default(),
+        );
+        let root = cache.defns.get("B0").expect("root block built");
+        let tail = cache.defns.get(&format!("B{DEPTH}")).expect("tail block built");
+        assert_ne!(root.metrics.aabb_local, [0.0; 4]);
+        assert_eq!(root.metrics.aabb_local, tail.metrics.aabb_local);
     }
 }
