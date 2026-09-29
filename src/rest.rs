@@ -23,8 +23,9 @@
 //! so both `--http` modes serve the identical surface.
 
 use crate::app::OpenCADStudio;
+use crate::io::line_read::{is_line_too_long, read_line_capped};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -204,46 +205,6 @@ fn serve_connection(mut stream: TcpStream, jobs: std::sync::mpsc::Sender<Job>) {
         }
         let _ = write_response(&mut stream, status, &body);
     }
-}
-
-/// Marker for a line that exceeded its size cap. Kept as a distinct error
-/// payload so the parse path can answer `431` for it while transport errors
-/// (reset, timeout) and invalid UTF-8 keep their existing silent-close path.
-#[derive(Debug)]
-struct LineTooLong;
-
-impl std::fmt::Display for LineTooLong {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("line exceeds the size limit")
-    }
-}
-
-impl std::error::Error for LineTooLong {}
-
-fn is_line_too_long(error: &std::io::Error) -> bool {
-    error
-        .get_ref()
-        .map_or(false, |inner| inner.is::<LineTooLong>())
-}
-
-/// `BufRead::read_line` capped at `cap` bytes — the whole line including its
-/// newline. The underlying read stops at `cap + 1` bytes, so memory stays
-/// bounded no matter how much the peer streams; an over-cap line fails with
-/// [`LineTooLong`] instead of growing `buf` forever.
-fn read_line_capped(
-    reader: &mut impl BufRead,
-    buf: &mut String,
-    cap: usize,
-) -> std::io::Result<usize> {
-    buf.clear();
-    let read = reader.by_ref().take(cap as u64 + 1).read_line(buf)?;
-    if read > cap {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            LineTooLong,
-        ));
-    }
-    Ok(read)
 }
 
 /// Answer a peer whose request line or header block blew a size cap — RFC
@@ -764,6 +725,7 @@ pub(crate) fn map_status(response: Value, created: bool) -> u16 {
 mod tests {
     use super::*;
     use crate::app::OpenCADStudio;
+    use std::io::BufRead;
 
     fn request(method: &str, path: &str, body: &str) -> HttpRequest {
         HttpRequest {

@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use std::{
     collections::{HashMap, VecDeque},
     fs::{File, OpenOptions},
-    io::{self, BufRead, BufReader, Read, Write},
+    io::{self, BufReader, Read, Write},
     net::TcpStream,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -1171,7 +1171,10 @@ pub fn run() {
     let mut output = stdout.lock();
     let mut clients = HashMap::new();
     let mut tasks = TaskStore::default();
-    for line in stdin.lock().lines() {
+    for line in crate::io::line_read::lines_capped(
+        stdin.lock(),
+        crate::io::line_read::MAX_LINE_BYTES,
+    ) {
         let response = match line {
             Ok(line) if !line.trim().is_empty() => match serde_json::from_str::<Value>(&line) {
                 Ok(message) => handle_message(message, &mut clients, &mut tasks),

@@ -15,7 +15,9 @@
 //!                                             once opened/saved)
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::io::{BufRead, Write};
+use crate::io::line_read::{lines_capped, MAX_LINE_BYTES};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Write;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
@@ -32,7 +34,11 @@ use super::OpenCADStudio;
 pub fn serve() {
     let mut app = OpenCADStudio::new();
     match port_arg() {
-        Some(port) => serve_socket(&mut app, port),
+        Some(port) => serve_socket(
+            &mut app,
+            port,
+            &std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
+        ),
         None => serve_stdio(&mut app),
     }
 }
@@ -106,7 +112,7 @@ fn serve_stdio(app: &mut OpenCADStudio) {
         let _ = writeln!(o, "{}", ready());
         let _ = o.flush();
     }
-    for line in stdin.lock().lines() {
+    for line in lines_capped(stdin.lock(), MAX_LINE_BYTES) {
         let Ok(line) = line else { break };
         let line = line.trim();
         if line.is_empty() {
@@ -120,7 +126,11 @@ fn serve_stdio(app: &mut OpenCADStudio) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn serve_socket(app: &mut OpenCADStudio, port: u16) {
+fn serve_socket(
+    app: &mut OpenCADStudio,
+    port: u16,
+    bound_port: &std::sync::Arc<std::sync::atomic::AtomicU16>,
+) {
     let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(e) => {
@@ -128,7 +138,9 @@ fn serve_socket(app: &mut OpenCADStudio, port: u16) {
             return;
         }
     };
-    eprintln!("OpenCADStudio --serve listening on 127.0.0.1:{port}");
+    let bound = listener.local_addr().map(|a| a.port()).unwrap_or(port);
+    bound_port.store(bound, std::sync::atomic::Ordering::SeqCst);
+    eprintln!("OpenCADStudio --serve listening on 127.0.0.1:{bound}");
     for stream in listener.incoming().flatten() {
         let Ok(read_half) = stream.try_clone() else {
             continue;
@@ -137,7 +149,7 @@ fn serve_socket(app: &mut OpenCADStudio, port: u16) {
         let mut writer = stream;
         let _ = writeln!(writer, "{}", ready());
         let _ = writer.flush();
-        for line in reader.lines() {
+        for line in lines_capped(reader, MAX_LINE_BYTES) {
             let Ok(line) = line else { break };
             let line = line.trim();
             if line.is_empty() {
@@ -3282,5 +3294,69 @@ mod tests {
         let _ = app.view(wid);
         let _ = app.update(Message::ToggleRibbonDropdown("PROP_COLOR".to_string()));
         let _ = app.view(wid);
+    }
+
+    /// A JSON-lines client streaming one endless line must not be buffered
+    /// (or processed) without bound: `BufRead::lines` grows its `String` by
+    /// doubling until the allocation aborts the process — an abort nobody
+    /// upstream can catch. The connection is dropped at the cap instead.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn serve_socket_drops_a_client_streaming_an_oversize_line() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpStream;
+        use std::sync::atomic::{AtomicU16, Ordering};
+        use std::sync::Arc;
+
+        let bound = Arc::new(AtomicU16::new(0));
+        let listen_bound = bound.clone();
+        std::thread::spawn(move || {
+            let mut app = super::OpenCADStudio::new_for_test();
+            super::serve_socket(&mut app, 0, &listen_bound);
+        });
+        let mut port = 0;
+        for _ in 0..50 {
+            port = bound.load(Ordering::SeqCst);
+            if port != 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_ne!(port, 0, "listener never bound a port");
+
+        let client = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .expect("read timeout");
+        let mut reader = BufReader::new(client.try_clone().expect("clone"));
+        let mut banner = String::new();
+        reader.read_line(&mut banner).expect("ready banner");
+        assert!(banner.contains("ready"), "{banner}");
+
+        // Stream >64 MiB without a newline from its own thread: the payload
+        // dwarfs any socket buffer, so one thread would deadlock writing
+        // before the server reads.
+        let mut writer = client.try_clone().expect("clone");
+        let payload = std::thread::spawn(move || {
+            let chunk = vec![b'A'; 1024 * 1024];
+            for _ in 0..65 {
+                if writer.write_all(&chunk).is_err() {
+                    return;
+                }
+            }
+            let _ = writer.write_all(b"\n");
+            let _ = writer.flush();
+        });
+
+        // The server must drop the connection WITHOUT answering: a response
+        // means the oversize line was read whole and handed to the dispatcher.
+        let mut response = String::new();
+        let read = reader.read_line(&mut response);
+        assert_eq!(
+            read.unwrap_or(0),
+            0,
+            "oversize line must be dropped, not processed — got: {response:?}"
+        );
+        payload.join().unwrap();
     }
 }
