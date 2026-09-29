@@ -32,6 +32,18 @@ use std::time::Duration;
 
 const MAX_BODY: usize = 16 * 1024 * 1024;
 
+/// Per-line cap for the request line and each header line. `BufRead::read_line`
+/// grows its `String` by doubling, so a client streaming `X: AAAA…` with no
+/// CRLF could otherwise push a single line to gigabytes until the allocation
+/// aborts the process — which is not a catchable panic. 8 KiB matches the
+/// usual reverse-proxy header-line allowance.
+const MAX_LINE: usize = 8 * 1024;
+
+/// Cap on the whole header block: every individual line may sit under
+/// [`MAX_LINE`] while their count is infinite. 64 KiB matches common
+/// reverse-proxy header-buffer budgets.
+const MAX_HEADER_BYTES: usize = 64 * 1024;
+
 /// Serial for request ids stamped onto `POST /api/v1/{op}` passthroughs that
 /// arrive without one — the protocol-1 envelope requires a unique id, and
 /// the caller's own id always wins when present.
@@ -194,12 +206,71 @@ fn serve_connection(mut stream: TcpStream, jobs: std::sync::mpsc::Sender<Job>) {
     }
 }
 
-/// Parse one HTTP/1.1 request. `Ok(None)` = the peer hung up cleanly.
+/// Marker for a line that exceeded its size cap. Kept as a distinct error
+/// payload so the parse path can answer `431` for it while transport errors
+/// (reset, timeout) and invalid UTF-8 keep their existing silent-close path.
+#[derive(Debug)]
+struct LineTooLong;
+
+impl std::fmt::Display for LineTooLong {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("line exceeds the size limit")
+    }
+}
+
+impl std::error::Error for LineTooLong {}
+
+fn is_line_too_long(error: &std::io::Error) -> bool {
+    error
+        .get_ref()
+        .map_or(false, |inner| inner.is::<LineTooLong>())
+}
+
+/// `BufRead::read_line` capped at `cap` bytes — the whole line including its
+/// newline. The underlying read stops at `cap + 1` bytes, so memory stays
+/// bounded no matter how much the peer streams; an over-cap line fails with
+/// [`LineTooLong`] instead of growing `buf` forever.
+fn read_line_capped(
+    reader: &mut impl BufRead,
+    buf: &mut String,
+    cap: usize,
+) -> std::io::Result<usize> {
+    buf.clear();
+    let read = reader.by_ref().take(cap as u64 + 1).read_line(buf)?;
+    if read > cap {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            LineTooLong,
+        ));
+    }
+    Ok(read)
+}
+
+/// Answer a peer whose request line or header block blew a size cap — RFC
+/// 9110's `431` — then hand the caller `Ok(None)` so it closes without
+/// dispatching. Writing the refusal from here keeps the headless `--http`
+/// server and the GUI-hosted bridge (`app::control::http_bridge`), which both
+/// call `read_request`, answering identically.
+fn refuse_oversized(stream: &mut TcpStream) -> std::io::Result<Option<HttpRequest>> {
+    let body = json!({
+        "ok": false,
+        "code": "header_too_large",
+        "error": "Request line or headers exceed the size limit.",
+    });
+    let _ = write_response(stream, 431, &body);
+    Ok(None)
+}
+
+/// Parse one HTTP/1.1 request. `Ok(None)` = the peer hung up cleanly, or the
+/// request blew a size cap (a `431` has already been written in that case).
 pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<HttpRequest>> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
-    if reader.read_line(&mut line)? == 0 {
-        return Ok(None);
+    match read_line_capped(&mut reader, &mut line, MAX_LINE) {
+        Ok(0) => return Ok(None),
+        Ok(_) => {}
+        Err(error) if is_line_too_long(&error) => return refuse_oversized(stream),
+        Err(error) => return Err(error),
     }
     let mut parts = line.split_whitespace();
     let method = parts.next().unwrap_or("").to_ascii_uppercase();
@@ -210,10 +281,18 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
     };
 
     let mut content_length = 0usize;
+    let mut header_bytes = 0usize;
     loop {
         let mut header = String::new();
-        if reader.read_line(&mut header)? == 0 {
-            return Ok(None);
+        match read_line_capped(&mut reader, &mut header, MAX_LINE) {
+            Ok(0) => return Ok(None),
+            Ok(_) => {}
+            Err(error) if is_line_too_long(&error) => return refuse_oversized(stream),
+            Err(error) => return Err(error),
+        }
+        header_bytes += header.len();
+        if header_bytes > MAX_HEADER_BYTES {
+            return refuse_oversized(stream);
         }
         let header = header.trim();
         if header.is_empty() {
@@ -292,6 +371,7 @@ pub(crate) fn write_response(stream: &mut TcpStream, status: u16, body: &Value) 
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        431 => "Request Header Fields Too Large",
         503 => "Service Unavailable",
         _ => "OK",
     };
@@ -1154,5 +1234,89 @@ mod tests {
         let (status, body) = route(&mut app, &delete, &mut document_id, &mut counter);
         assert_eq!(status, 200, "{body}");
         assert_eq!(body["result"]["closed"], true);
+    }
+
+    /// A connected pair: the test writes the request from `client`,
+    /// `read_request` parses it from `server`.
+    fn loopback_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        (client, server)
+    }
+
+    /// Stream `payload` from a clone of `client` on its own thread: the
+    /// bytes exceed any socket buffer, so a single thread would deadlock
+    /// writing before `read_request` drains the other end. Write failures
+    /// after a refusal are expected and ignored.
+    fn spawn_writer(client: &TcpStream, payload: Vec<u8>) -> std::thread::JoinHandle<()> {
+        let mut writer = client.try_clone().unwrap();
+        std::thread::spawn(move || {
+            let _ = writer.write_all(&payload);
+            let _ = writer.shutdown(std::net::Shutdown::Write);
+        })
+    }
+
+    /// Read the status line of the answer the server just wrote.
+    fn read_status(client: TcpStream) -> String {
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(client);
+        let mut status = String::new();
+        reader.read_line(&mut status).expect("server answers");
+        status
+    }
+
+    /// A request line streamed without CRLF must be refused at the cap
+    /// instead of growing one `String` to gigabytes — an allocation failure
+    /// aborts the process and is not catchable.
+    #[test]
+    fn oversize_request_line_is_refused_with_431() {
+        let (client, mut server) = loopback_pair();
+        let mut payload = b"GET /".to_vec();
+        payload.extend(std::iter::repeat(b'A').take(1024 * 1024));
+        payload.extend_from_slice(b" HTTP/1.1\r\n\r\n");
+        let writer = spawn_writer(&client, payload);
+
+        let parsed = read_request(&mut server)
+            .expect("an over-cap line is a refusal, not an I/O error");
+        assert!(
+            parsed.is_none(),
+            "over-cap request line must be refused, got a parsed request"
+        );
+
+        let status = read_status(client);
+        assert!(status.contains("431"), "expected 431, got: {status:?}");
+        drop(server);
+        writer.join().unwrap();
+    }
+
+    /// Individually-fine headers must not add up to an unbounded header
+    /// block: a client can send an unlimited number of small lines.
+    #[test]
+    fn oversize_header_block_is_refused_with_431() {
+        let (client, mut server) = loopback_pair();
+        let mut payload = b"GET /api/v1/state HTTP/1.1\r\n".to_vec();
+        for _ in 0..80 {
+            payload.extend_from_slice(b"X-Pad: ");
+            payload.extend(std::iter::repeat(b'a').take(1024));
+            payload.extend_from_slice(b"\r\n");
+        }
+        payload.extend_from_slice(b"\r\n");
+        let writer = spawn_writer(&client, payload);
+
+        let parsed = read_request(&mut server)
+            .expect("an over-cap header block is a refusal, not an I/O error");
+        assert!(
+            parsed.is_none(),
+            "over-cap header block must be refused, got a parsed request"
+        );
+
+        let status = read_status(client);
+        assert!(status.contains("431"), "expected 431, got: {status:?}");
+        drop(server);
+        writer.join().unwrap();
     }
 }
