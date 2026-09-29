@@ -39,6 +39,47 @@ pub struct Sheet {
     pub texts: Vec<Text>,
     /// DGN: sub units per master unit (the scale a Sub conversion offers).
     pub sub_per_master: f64,
+    /// DGN: the colours come from the file's own colour table, which the
+    /// reference shows adapted to the background ([`dgn_table_color`]).
+    pub table_colors: bool,
+    /// The colour of each path and text the sheet draws, one per element.
+    pub element_colors: Vec<[u8; 3]>,
+}
+
+/// How a colour from a DGN file's colour table shows over a background
+/// (its largest channel and whether it is light), as the reference draws
+/// it: a near-white colour (61 or less from white, channels summed) is white,
+/// or black on a light background; over a background with a channel of 32 or
+/// more, colours whose largest channel is 76, 127, 153 or 204 drop a shade
+/// (to 38, 76, 127 or 165, hue kept) and the greys 91, 132, 173 and 214 drop
+/// to 45, 91, 137 and 183 — grey 51 to black from a channel of 30.
+pub fn dgn_table_color(rgb: [u8; 3], bg_max: u8, light: bool) -> [u8; 3] {
+    if rgb.iter().map(|&c| 255 - c as u32).sum::<u32>() <= 61 {
+        return if light { [0; 3] } else { [255; 3] };
+    }
+    if rgb[0] == rgb[1] && rgb[1] == rgb[2] {
+        let v = match rgb[0] {
+            51 if bg_max >= 30 => 0,
+            91 if bg_max >= 32 => 45,
+            132 if bg_max >= 32 => 91,
+            173 if bg_max >= 32 => 137,
+            214 if bg_max >= 32 => 183,
+            v => v,
+        };
+        return [v; 3];
+    }
+    let top = rgb.into_iter().max().unwrap_or(0);
+    let to = match top {
+        76 => 38,
+        127 => 76,
+        153 => 127,
+        204 => 165,
+        _ => return rgb,
+    };
+    if bg_max < 32 {
+        return rgb;
+    }
+    rgb.map(|c| ((c as u32 * to + top as u32 / 2) / top as u32) as u8)
 }
 
 /// Builds paths from pen moves.
@@ -131,7 +172,8 @@ pub fn arc_cubics(
     out
 }
 
-/// Bounds of the paths, when there are any.
+/// Tight bounds of the paths (curves by their extreme points, not their
+/// control points), when there are any.
 pub fn paths_bounds(paths: &[Path]) -> Option<[f64; 4]> {
     let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
     let mut add = |p: [f64; 2]| {
@@ -147,15 +189,95 @@ pub fn paths_bounds(paths: &[Path]) -> Option<[f64; 4]> {
                     }
                     Segment::Cubic(a, c1, c2, c) => {
                         add(*a);
-                        add(*c1);
-                        add(*c2);
                         add(*c);
+                        for t in cubic_extrema(*a, *c1, *c2, *c) {
+                            add(cubic_at(*a, *c1, *c2, *c, t));
+                        }
                     }
                 }
             }
         }
     }
     (b[0] <= b[2]).then_some(b)
+}
+
+fn cubic_at(p0: [f64; 2], p1: [f64; 2], p2: [f64; 2], p3: [f64; 2], t: f64) -> [f64; 2] {
+    let u = 1.0 - t;
+    let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+    [a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]]
+}
+
+/// Parameters in (0, 1) where a cubic turns in x or in y.
+fn cubic_extrema(p0: [f64; 2], p1: [f64; 2], p2: [f64; 2], p3: [f64; 2]) -> Vec<f64> {
+    let mut out = Vec::new();
+    for i in 0..2 {
+        // The derivative's quadratic a·t² + b·t + c.
+        let a = 3.0 * (-p0[i] + 3.0 * p1[i] - 3.0 * p2[i] + p3[i]);
+        let b = 6.0 * (p0[i] - 2.0 * p1[i] + p2[i]);
+        let c = 3.0 * (p1[i] - p0[i]);
+        if a.abs() < 1e-12 {
+            if b.abs() > 1e-12 {
+                out.push(-c / b);
+            }
+            continue;
+        }
+        let disc = b * b - 4.0 * a * c;
+        if disc >= 0.0 {
+            let r = disc.sqrt();
+            out.push((-b + r) / (2.0 * a));
+            out.push((-b - r) / (2.0 * a));
+        }
+    }
+    out.retain(|t| *t > 0.0 && *t < 1.0);
+    out
+}
+
+/// The colour table a DGN file without one is drawn with (index 255, the
+/// background entry, black).
+pub const DGN_DEFAULT_COLORS: [[u8; 3]; 256] = [
+    [255, 255, 255], [0, 0, 255], [0, 255, 0], [255, 0, 0], [255, 255, 0], [255, 0, 255], [255, 127, 0], [0, 255, 255],
+    [64, 64, 64], [192, 192, 192], [254, 0, 96], [160, 224, 0], [0, 254, 160], [128, 0, 160], [176, 176, 176], [0, 240, 240],
+    [240, 240, 240], [0, 0, 240], [0, 240, 0], [240, 0, 0], [240, 240, 0], [240, 0, 240], [240, 122, 0], [0, 240, 240],
+    [240, 240, 240], [0, 0, 240], [0, 240, 0], [240, 0, 0], [240, 240, 0], [240, 0, 240], [240, 122, 0], [0, 225, 225],
+    [225, 225, 225], [0, 0, 225], [0, 225, 0], [225, 0, 0], [225, 225, 0], [225, 0, 225], [225, 117, 0], [0, 225, 225],
+    [225, 225, 225], [0, 0, 225], [0, 225, 0], [225, 0, 0], [225, 225, 0], [225, 0, 225], [225, 117, 0], [0, 210, 210],
+    [210, 210, 210], [0, 0, 210], [0, 210, 0], [210, 0, 0], [210, 210, 0], [210, 0, 210], [210, 112, 0], [0, 210, 210],
+    [210, 210, 210], [0, 0, 210], [0, 210, 0], [210, 0, 0], [210, 210, 0], [210, 0, 210], [210, 112, 0], [0, 195, 195],
+    [195, 195, 195], [0, 0, 195], [0, 195, 0], [195, 0, 0], [195, 195, 0], [195, 0, 195], [195, 107, 0], [0, 195, 195],
+    [195, 195, 195], [0, 0, 195], [0, 195, 0], [195, 0, 0], [195, 195, 0], [195, 0, 195], [195, 107, 0], [0, 180, 180],
+    [180, 180, 180], [0, 0, 180], [0, 180, 0], [180, 0, 0], [180, 180, 0], [180, 0, 180], [180, 102, 0], [0, 180, 180],
+    [180, 180, 180], [0, 0, 180], [0, 180, 0], [180, 0, 0], [180, 180, 0], [180, 0, 180], [180, 102, 0], [0, 165, 165],
+    [165, 165, 165], [0, 0, 165], [0, 165, 0], [165, 0, 0], [165, 165, 0], [165, 0, 165], [165, 97, 0], [0, 165, 165],
+    [165, 165, 165], [0, 0, 165], [0, 165, 0], [165, 0, 0], [165, 165, 0], [165, 0, 165], [165, 97, 0], [0, 150, 150],
+    [150, 150, 150], [0, 0, 150], [0, 150, 0], [150, 0, 0], [150, 150, 0], [150, 0, 150], [150, 92, 0], [0, 150, 150],
+    [150, 150, 150], [0, 0, 150], [0, 150, 0], [150, 0, 0], [150, 150, 0], [150, 0, 150], [150, 92, 0], [0, 135, 135],
+    [135, 135, 135], [0, 0, 135], [0, 135, 0], [135, 0, 0], [135, 135, 0], [135, 0, 135], [135, 87, 0], [0, 135, 135],
+    [135, 135, 135], [0, 0, 135], [0, 135, 0], [135, 0, 0], [135, 135, 0], [135, 0, 135], [135, 87, 0], [0, 120, 120],
+    [120, 120, 120], [0, 0, 120], [0, 120, 0], [120, 0, 0], [120, 120, 0], [120, 0, 120], [120, 82, 0], [0, 120, 120],
+    [120, 120, 120], [0, 0, 120], [0, 120, 0], [120, 0, 0], [120, 120, 0], [120, 0, 120], [120, 82, 0], [0, 105, 105],
+    [105, 105, 105], [0, 0, 105], [0, 105, 0], [105, 0, 0], [105, 105, 0], [105, 0, 105], [105, 77, 0], [0, 105, 105],
+    [105, 105, 105], [0, 0, 105], [0, 105, 0], [105, 0, 0], [105, 105, 0], [105, 0, 105], [105, 77, 0], [0, 90, 90],
+    [90, 90, 90], [0, 0, 90], [0, 90, 0], [90, 0, 0], [90, 90, 0], [90, 0, 90], [90, 72, 0], [0, 90, 90],
+    [90, 90, 90], [0, 0, 90], [0, 90, 0], [90, 0, 0], [90, 90, 0], [90, 0, 90], [90, 72, 0], [0, 75, 75],
+    [75, 75, 75], [0, 0, 75], [0, 75, 0], [75, 0, 0], [75, 75, 0], [75, 0, 75], [75, 67, 0], [0, 75, 75],
+    [75, 75, 75], [0, 0, 75], [0, 75, 0], [75, 0, 0], [75, 75, 0], [75, 0, 75], [75, 67, 0], [0, 60, 60],
+    [60, 60, 60], [0, 0, 60], [0, 60, 0], [60, 0, 0], [60, 60, 0], [60, 0, 60], [60, 62, 0], [0, 60, 60],
+    [60, 60, 60], [0, 0, 60], [0, 60, 0], [60, 0, 0], [60, 60, 0], [60, 0, 60], [60, 62, 0], [0, 45, 45],
+    [45, 45, 45], [0, 0, 45], [0, 45, 0], [45, 0, 0], [45, 45, 0], [45, 0, 45], [45, 57, 0], [0, 45, 45],
+    [45, 45, 45], [0, 0, 45], [0, 45, 0], [45, 0, 0], [45, 45, 0], [45, 0, 45], [45, 57, 0], [0, 30, 30],
+    [30, 30, 30], [0, 0, 30], [0, 30, 0], [30, 0, 0], [30, 30, 0], [30, 0, 30], [30, 52, 0], [0, 30, 30],
+    [30, 30, 30], [0, 0, 30], [0, 30, 0], [30, 0, 0], [30, 30, 0], [30, 0, 30], [192, 192, 192], [0, 0, 0],
+];
+
+/// A colour table element's 256 colours: entries 0-254 from `first`, and
+/// entry 255 (the background) from the three bytes that open the table at
+/// `first - 3`.
+pub fn dgn_color_table(e: &[u8], first: usize) -> Option<Vec<[u8; 3]>> {
+    let bg = e.get(first - 3..first)?;
+    let body = e.get(first..first + 255 * 3)?;
+    let mut out: Vec<[u8; 3]> = body.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+    out.push([bg[0], bg[1], bg[2]]);
+    Some(out)
 }
 
 /// A line of text the host draws with its own font.

@@ -217,13 +217,18 @@ pub struct PageAdjust {
     /// towards `contrast_pivot` (hue and saturation kept).
     pub contrast: u8,
     /// The lightness contrast 0 leaves every colour at, in thousandths:
-    /// measured 500 for PDF, 243 for DWF and 650 for DGN underlays.
+    /// measured 500 for PDF and 243 for DWF; a DGN model's follows its
+    /// colours.
     pub contrast_pivot: u16,
     pub monochrome: bool,
     /// Lighten dark, unsaturated content on a dark background (black lines
     /// and text become white), keeping coloured content.
     pub adjust_for_background: bool,
     pub dark_background: bool,
+    /// A fade blended into the colours before the contrast (a DGN
+    /// model's): the background and the share, 0..=100, of the way each
+    /// colour is taken to it.
+    pub fade_before_contrast: Option<([u8; 3], u8)>,
 }
 
 type AdjustKey = (String, String, PageAdjust);
@@ -236,7 +241,7 @@ fn adjusted_cache() -> &'static Mutex<HashMap<AdjustKey, Arc<Vec<u8>>>> {
 /// The display raster with the underlay's contrast / monochrome / background
 /// adjustments applied, memoised per source, page and adjustment.
 pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdjust) -> Arc<Vec<u8>> {
-    let identity = adjust.contrast >= 100 && !adjust.monochrome && !adjust.adjust_for_background;
+    let identity = adjust.contrast >= 100 && !adjust.monochrome && !adjust.adjust_for_background && adjust.fade_before_contrast.is_none();
     if identity {
         return raster.pixels.clone();
     }
@@ -268,6 +273,12 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
             let (h, s, l) = rgb_to_hsl(rgb);
             rgb = hsl_to_rgb(h, s, (1.0 - l + 20.0 / 255.0).min(1.0));
         }
+        if let Some((bg, fade)) = adjust.fade_before_contrast {
+            let f = fade.min(100) as f32 / 100.0;
+            for (c, b) in rgb.iter_mut().zip(bg) {
+                *c += (b as f32 / 255.0 - *c) * f;
+            }
+        }
         if adjust.contrast < 100 {
             // Lightness is pulled towards the pivot, hue and saturation kept:
             // contrast 0 leaves every colour at the pivot's lightness.
@@ -276,6 +287,7 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
             let pivot = adjust.contrast_pivot as f32 / 1000.0;
             rgb = hsl_to_rgb(h, s, pivot + (l - pivot) * k);
         }
+
         for (dst, c) in px[..3].iter_mut().zip(rgb) {
             *dst = (c.clamp(0.0, 1.0) * 255.0).round() as u8;
         }

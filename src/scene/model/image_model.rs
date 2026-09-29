@@ -231,19 +231,23 @@ impl ImageModel {
             }
             kind => {
                 let hidden = super::pdf_layers::hidden_layers(u);
+                let backdrop = super::underlay_vector::Backdrop::of([background[0], background[1], background[2]]);
                 // The adjusted-pixel memo keys on the source: one per set of
-                // hidden layers.
-                let source = if hidden.is_empty() {
-                    def.file_path.clone()
-                } else {
-                    format!("{}#{}", def.file_path, hidden.join("|"))
-                };
+                // hidden layers and backdrop.
+                let source = format!(
+                    "{}#{}~{}{}",
+                    def.file_path,
+                    hidden.join("|"),
+                    backdrop.max_channel,
+                    backdrop.light
+                );
                 let raster = super::underlay_vector::display_raster(
                     kind,
                     &def.file_path,
                     page,
                     &hidden,
                     screen_side.unwrap_or(super::underlay_vector::RASTER_SIDE),
+                    backdrop,
                 )?;
                 (source, raster)
             }
@@ -253,6 +257,11 @@ impl ImageModel {
         let bg_max = background[0].max(background[1]).max(background[2]);
         let bg_min = background[0].min(background[1]).min(background[2]);
         let bg_lum = (bg_max + bg_min) / 2.0;
+        let dgn = def.underlay_type == UnderlayType::Dgn;
+        // A DGN model is faded into the background before its contrast is
+        // applied (the reference's order), so it is drawn opaque.
+        let bg_rgb = [0, 1, 2].map(|i| (background[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+        let fade_before_contrast = (dgn && u.fade > 0).then_some((bg_rgb, u.fade.min(100)));
         let pixels = pdf_raster::adjusted_pixels(
             &source,
             page,
@@ -260,7 +269,8 @@ impl ImageModel {
             PageAdjust {
                 contrast: u.contrast.min(100),
                 // Measured: PDF 0.5; DWF 0.243, or 0.73 once its colours are
-                // turned over for a dark background; DGN 0.65.
+                // turned over for a dark background; a DGN model's from its
+                // own colours, over any background.
                 contrast_pivot: match def.underlay_type {
                     UnderlayType::Pdf => 500,
                     UnderlayType::Dwf
@@ -269,14 +279,22 @@ impl ImageModel {
                         730
                     }
                     UnderlayType::Dwf => 243,
-                    UnderlayType::Dgn => 650,
+                    UnderlayType::Dgn => super::underlay_vector::dgn_contrast_pivot(
+                        &def.file_path,
+                        page,
+                        &super::pdf_layers::hidden_layers(u),
+                        super::underlay_vector::Backdrop::of([background[0], background[1], background[2]]),
+                        fade_before_contrast,
+                    )
+                    .unwrap_or(404),
                 },
                 monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
-                adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND),
-                // A DGN model is drawn for a black background, so its
-                // colours turn over on a light one instead (white text stays
-                // light on a dark background, as the reference shows it).
-                dark_background: (bg_lum < 0.5) != (def.underlay_type == UnderlayType::Dgn),
+                // A DGN model's colours follow the background through its
+                // colour table (the raster above), whatever this setting.
+                adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND)
+                    && !dgn,
+                dark_background: bg_lum < 0.5,
+                fade_before_contrast,
             },
         );
 
@@ -329,7 +347,7 @@ impl ImageModel {
             pixels,
             width: raster.width,
             height: raster.height,
-            opacity: 1.0 - u.fade.min(100) as f32 / 100.0,
+            opacity: if dgn { 1.0 } else { 1.0 - u.fade.min(100) as f32 / 100.0 },
             corners,
             corners_low,
             draw_depth: 0.0,
