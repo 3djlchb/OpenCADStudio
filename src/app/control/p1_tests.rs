@@ -819,7 +819,9 @@ fn text_audit_system_spellcheck_flags_misspelled_words() {
             flagged
         );
 
-        // At least one flagged word should have suggestions
+        // At least one flagged word should have suggestions — except from a
+        // bare Linux wordlist, which can tell a word is unknown but has no
+        // way to suggest one without the hunspell CLI.
         let has_suggestions = words.iter().any(|w| {
             w["suggestions"]
                 .as_array()
@@ -827,7 +829,7 @@ fn text_audit_system_spellcheck_flags_misspelled_words() {
                 .unwrap_or(false)
         });
         assert!(
-            has_suggestions,
+            has_suggestions || sp["backend"] == "linux_system",
             "expected at least one word to have suggestions"
         );
 

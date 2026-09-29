@@ -595,7 +595,7 @@ pub(crate) mod linux_impl {
     use std::collections::HashSet;
     use std::fs::File;
     use std::io::{BufRead, BufReader};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     const LINUX_DICT_DIRS: &[&str] = &[
         "/usr/share/hunspell",
@@ -645,7 +645,8 @@ pub(crate) mod linux_impl {
                 }
             }
 
-            let has_cli = is_command_in_path("hunspell") || is_command_in_path("aspell");
+            // Only hunspell is ever invoked (`check_via_cli`), so only it counts.
+            let has_cli = is_command_in_path("hunspell");
 
             if !found_any && !has_cli {
                 return None;
@@ -683,7 +684,9 @@ pub(crate) mod linux_impl {
                 }
             }
 
-            (!self.words.is_empty() && !self.words.contains(&clean), Vec::new())
+            // Not in the wordlist and no CLI answer: misspelled when there is
+            // a wordlist to judge by, unjudged (accepted) when there is none.
+            (self.words.is_empty(), Vec::new())
         }
     }
 
