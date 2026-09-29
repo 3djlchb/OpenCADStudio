@@ -520,8 +520,15 @@ fn evaluate_table_formula(table: &Table, expression: &str) -> Option<String> {
     let (r1, c1) = table_cell_reference(first)?;
     let (r2, c2) = table_cell_reference(last)?;
     let mut values = Vec::new();
-    for row in r1.min(r2)..=r1.max(r2) {
-        for column in c1.min(c2)..=c1.max(c2) {
+    // A range can name any `usize` (`A1:A18446744073709551615`): `cell()`
+    // returns None outside the table, so clamping the walk to the table's
+    // own rows/columns collects exactly the same values — every skipped
+    // cell would have been None — while keeping an unbounded walk off the
+    // render path (1.8e19 iterations of `..=`).
+    let row_end = r1.max(r2).min(table.rows.len().saturating_sub(1));
+    let col_end = c1.max(c2).min(table.columns.len().saturating_sub(1));
+    for row in r1.min(r2)..=row_end {
+        for column in c1.min(c2)..=col_end {
             if let Some(value) = table
                 .cell(row, column)
                 .and_then(|cell| cell.text_value().trim().parse::<f64>().ok())
@@ -3430,6 +3437,42 @@ mod tests {
         );
         assert_eq!(evaluate_table_formula(&table, "=A1"), Some("10".to_string()));
         assert_eq!(evaluate_table_formula(&table, "not a formula"), None);
+    }
+
+    /// A cell range can name any `usize` — `A1:A18446744073709551615`
+    /// parses to row ≈ 1.8e19. `cell()` returns None for out-of-bounds
+    /// indices, but the range loop still *walked* every index on the
+    /// render path. Clamping the walk to the table's own rows/columns
+    /// must collect exactly the same values (each skipped cell would
+    /// have been None) and stay instant; the elapsed guard keeps a
+    /// future un-clamped loop from creeping back in.
+    #[test]
+    fn formula_range_evaluation_is_bounded_by_the_table() {
+        let table = sample_table();
+        let start = std::time::Instant::now();
+        assert_eq!(
+            evaluate_table_formula(&table, "=SUM(A1:A18446744073709551615)"),
+            Some("40".to_string()),
+            "A1:A… is column A only: 10 + 30"
+        );
+        assert_eq!(
+            evaluate_table_formula(&table, "=COUNT(A1:A1000000000)"),
+            Some("2".to_string()),
+            "column A holds two numeric cells"
+        );
+        assert_eq!(
+            evaluate_table_formula(&table, "=SUM(A1:Z999999999)"),
+            Some("100".to_string())
+        );
+        assert_eq!(
+            evaluate_table_formula(&table, "=AVERAGE(A1:ZZ18446744073709551615)"),
+            Some("25".to_string())
+        );
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "formula evaluation took {elapsed:?} — the range walk is unbounded again"
+        );
     }
 
     /// A column count driven to `MAX_TYPED_MAGNITUDE` (1e15) grows one
