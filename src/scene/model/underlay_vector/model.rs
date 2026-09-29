@@ -152,6 +152,18 @@ pub fn arc_cubics(
     start: f64,
     sweep: f64,
 ) -> Vec<[[f64; 2]; 4]> {
+    // The sweep can be a raw f64 out of file bytes (DGN `f64_at(e, 112)`):
+    // 1e300 or inf saturates the `as usize` cast to `usize::MAX` and
+    // `Vec::with_capacity` panics `capacity overflow`; ~1e17 would ask
+    // for 2 EB and abort. Legitimate callers top out near 104 rad (DGN
+    // V7, ±5965°), so the sweep is clamped at 4096 pieces' worth; NaN
+    // keeps its old single-degenerate-piece behaviour.
+    const MAX_SWEEP_MAGNITUDE: f64 = 4096.0 * std::f64::consts::FRAC_PI_2;
+    let sweep = if sweep.is_nan() || sweep.abs() <= MAX_SWEEP_MAGNITUDE {
+        sweep
+    } else {
+        sweep.signum() * MAX_SWEEP_MAGNITUDE
+    };
     let n = ((sweep.abs() / (std::f64::consts::FRAC_PI_2)).ceil() as usize).max(1);
     let step = sweep / n as f64;
     let k = 4.0 / 3.0 * (step / 4.0).tan();
@@ -330,4 +342,50 @@ pub fn bspline_points(order: usize, poles: &[[f64; 2]], knots: &[f64], samples: 
         out.push(d[order - 1]);
     }
     out
+}
+
+#[cfg(test)]
+mod arc_cubics_sweep_tests {
+    use super::arc_cubics;
+
+    /// The sweep is a raw f64 out of DGN element bytes (`f64_at(e, 112)`):
+    /// 1e300 / inf saturate the `as usize` cast to `usize::MAX` and
+    /// `Vec::with_capacity` panics `capacity overflow`; ~1e17 would ask
+    /// for 2 EB and abort. Legitimate callers top out near 104 rad.
+    #[test]
+    fn an_enormous_sweep_is_clamped_instead_of_panicking() {
+        for sweep in [1e300, f64::INFINITY, -1e300, f64::NEG_INFINITY] {
+            let pieces = arc_cubics([0.0; 2], 1.0, 1.0, 0.0, 0.0, sweep);
+            assert_eq!(pieces.len(), 4096, "sweep {sweep}");
+            assert!(pieces
+                .iter()
+                .flatten()
+                .all(|p| p[0].is_finite() && p[1].is_finite()));
+        }
+    }
+
+    /// NaN behaves as before: one degenerate piece, no panic.
+    #[test]
+    fn a_nan_sweep_still_yields_a_single_piece() {
+        assert_eq!(arc_cubics([0.0; 2], 1.0, 1.0, 0.0, 0.0, f64::NAN).len(), 1);
+    }
+
+    /// Ordinary arcs keep their exact piece count, ceil(|sweep| / 90°).
+    #[test]
+    fn ordinary_sweeps_keep_their_piece_counts() {
+        let expect = |sweep: f64| {
+            ((sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize).max(1)
+        };
+        for sweep in [
+            0.0,
+            1.0,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::TAU,
+            104.1,
+            -2.5,
+        ] {
+            let pieces = arc_cubics([0.0; 2], 3.0, 2.0, 0.3, 0.5, sweep);
+            assert_eq!(pieces.len(), expect(sweep), "sweep {sweep}");
+        }
+    }
 }
