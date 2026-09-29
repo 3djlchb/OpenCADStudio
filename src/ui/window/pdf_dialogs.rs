@@ -146,7 +146,8 @@ pub fn item_thumbs(kind: codec::entities::UnderlayType, path: &str) -> Vec<PageT
         .unwrap_or_default()
         .into_iter()
         .map(|label| {
-            let image = underlay_vector::display_raster(kind, path, &label, &[], 220.0)
+            let backdrop = underlay_vector::Backdrop { max_channel: 0, light: false };
+            let image = underlay_vector::display_raster(kind, path, &label, &[], 220.0, backdrop)
                 .map(|page| image::Handle::from_rgba(page.width, page.height, page.pixels.to_vec()));
             PageThumb { label, image }
         })

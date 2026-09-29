@@ -180,7 +180,7 @@ pub fn sheet(bytes: &[u8], name: &str) -> Option<Sheet> {
         xps::read(data, w2x.map(|v| v.as_slice()), entry, &family)?
     };
     let rect = view.or_else(|| paths_bounds(&paths))?;
-    Some(Sheet { rect, paths, texts, sub_per_master: 1.0 })
+    Some(Sheet { rect, paths, texts, sub_per_master: 1.0, table_colors: false, element_colors: Vec::new() })
 }
 
 /// An XPS obfuscated font (.odttf): its first 32 bytes are XORed with the
