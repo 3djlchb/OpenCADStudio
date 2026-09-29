@@ -3349,12 +3349,19 @@ impl Scene {
             retained_originals,
             &[],
             true,
+            false,
         );
     }
 
     /// Refresh display and associations after a solved grip or exact history restore.
     pub(crate) fn bump_entities_after_parametric_solve(&mut self, changes: &[(Handle, ChangeKind)]) {
-        self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false);
+        self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, false);
+    }
+
+    /// Refresh display after a restyle that moved no geometry: nothing
+    /// associated to these entities is re-resolved or re-solved.
+    pub(crate) fn bump_entities_restyled(&mut self, changes: &[(Handle, ChangeKind)]) {
+        self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, true);
     }
 
     /// Apply a newly-created ordered relation while temporarily anchoring
@@ -3373,6 +3380,7 @@ impl Scene {
             &[],
             fixed_refs,
             true,
+            false,
         );
     }
 
@@ -3390,6 +3398,7 @@ impl Scene {
             retained_originals,
             transformed_refs,
             true,
+            false,
         );
     }
 
@@ -3401,6 +3410,7 @@ impl Scene {
         retained_originals: &[(Handle, EntityType)],
         fixed_refs: &[parametric_constraints::ParametricRef],
         solve_parametric: bool,
+        appearance_only: bool,
     ) {
         if changes.iter().any(|(handle, kind)| {
             matches!(kind, ChangeKind::Removed)
@@ -3412,38 +3422,44 @@ impl Scene {
             self.associative_hatch_source_cache.borrow_mut().take();
         }
         let mut changes = changes.to_vec();
-        if self.associative_centers_possible(&changes) {
-            for change in self.refresh_associative_centerlines(&changes) {
+        // A restyle (layer on/off, colour, text or dimension style) moves no
+        // geometry, so nothing measured from it is re-resolved: an
+        // association that disagrees with its dimension would otherwise
+        // re-place the dimension on a layer toggle.
+        if !appearance_only {
+            if self.associative_centers_possible(&changes) {
+                for change in self.refresh_associative_centerlines(&changes) {
+                    if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                        changes.push(change);
+                    }
+                }
+                for change in self.refresh_associative_center_marks(&changes) {
+                    if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                        changes.push(change);
+                    }
+                }
+            }
+            for change in self.refresh_associative_dimensions(&changes) {
                 if !changes.iter().any(|(handle, _)| *handle == change.0) {
                     changes.push(change);
                 }
             }
-            for change in self.refresh_associative_center_marks(&changes) {
+            for change in self.refresh_associative_hatches(&changes) {
                 if !changes.iter().any(|(handle, _)| *handle == change.0) {
                     changes.push(change);
                 }
             }
-        }
-        for change in self.refresh_associative_dimensions(&changes) {
-            if !changes.iter().any(|(handle, _)| *handle == change.0) {
-                changes.push(change);
-            }
-        }
-        for change in self.refresh_associative_hatches(&changes) {
-            if !changes.iter().any(|(handle, _)| *handle == change.0) {
-                changes.push(change);
-            }
-        }
-        if solve_parametric && !self.parametric_constraints.is_empty() {
-            for change in self.refresh_parametric_constraints_with_initial_policy(
-                &changes,
-                driven_refs,
-                retain_size,
-                retained_originals,
-                fixed_refs,
-            ) {
-                if !changes.iter().any(|(handle, _)| *handle == change.0) {
-                    changes.push(change);
+            if solve_parametric && !self.parametric_constraints.is_empty() {
+                for change in self.refresh_parametric_constraints_with_initial_policy(
+                    &changes,
+                    driven_refs,
+                    retain_size,
+                    retained_originals,
+                    fixed_refs,
+                ) {
+                    if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                        changes.push(change);
+                    }
                 }
             }
         }
@@ -11380,7 +11396,7 @@ vis_index={:.1} visible_probe={:.1}",
             .into_iter()
             .map(|handle| (handle, ChangeKind::Modified))
             .collect();
-        self.bump_entities(&changes);
+        self.bump_entities_restyled(&changes);
     }
 
     pub fn invalidate_layer_dependencies(&mut self, names: &[String]) {
