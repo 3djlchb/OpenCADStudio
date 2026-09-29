@@ -874,11 +874,17 @@ fn parse_legacy_plot_style_text(
             "screen" => entry.screening = value.parse::<u8>().unwrap_or(100).min(100),
             "lineweight" => entry.lineweight = value.parse().unwrap_or(0),
             "color1" if value.starts_with('#') && value.len() == 7 => {
-                entry.color = Some([
-                    u8::from_str_radix(&value[1..3], 16).unwrap_or(0),
-                    u8::from_str_radix(&value[3..5], 16).unwrap_or(0),
-                    u8::from_str_radix(&value[5..7], 16).unwrap_or(0),
-                ]);
+                // The guard is a BYTE length, so `#aébé` (also 7 bytes)
+                // reaches fixed-offset slices that split a character.
+                // `str::get` is None off a char boundary; the `unwrap_or(0)`
+                // path is the same one unparseable pairs always took.
+                let pair = |range: std::ops::Range<usize>| {
+                    value
+                        .get(range)
+                        .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                        .unwrap_or(0)
+                };
+                entry.color = Some([pair(1..3), pair(3..5), pair(5..7)]);
             }
             "color1" => entry.color = value.parse::<i32>().ok().and_then(unpack_plot_color),
             _ => {}
@@ -1125,5 +1131,30 @@ mod lineweight_table_tests {
 
         let table = parse("custom_lineweight_table{\n256=0.7\n}\n");
         assert_eq!(table.lineweights, LW_TABLE.to_vec());
+    }
+}
+
+#[cfg(test)]
+mod legacy_color_tests {
+    use super::parse_legacy_plot_style_text;
+
+    /// `color1` guards on `starts_with('#') && len() == 7` — a BYTE length —
+    /// then slices fixed byte offsets. `#aébé` is also 7 bytes, and byte 3
+    /// splits the second `é`: loading a crafted legacy CTB panicked with
+    /// `byte index 3 is not a char boundary`.
+    #[test]
+    fn a_multibyte_color1_value_does_not_panic() {
+        let text = "begin_plot_style\ncolor1 = #aébé\nend_plot_style\n";
+        let table = parse_legacy_plot_style_text(text, "evil.ctb".into(), false).expect("parses");
+        // Non-hex pairs stay `unwrap_or(0)` — [0, 0, 0], never a panic.
+        assert_eq!(table.aci_entries[1].color, Some([0, 0, 0]));
+    }
+
+    /// Well-formed ASCII `#RRGGBB` keeps parsing byte-for-byte.
+    #[test]
+    fn a_hex_color1_value_still_parses() {
+        let text = "begin_plot_style\ncolor1 = #A1B2C3\nend_plot_style\n";
+        let table = parse_legacy_plot_style_text(text, "ok.ctb".into(), false).expect("parses");
+        assert_eq!(table.aci_entries[1].color, Some([0xa1, 0xb2, 0xc3]));
     }
 }
