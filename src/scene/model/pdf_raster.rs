@@ -18,6 +18,13 @@ pub struct PdfPage {
 
 const RASTER_DPI: f32 = 150.0;
 
+/// Ceiling on the print raster's pixel count (RGBA ⇒ ×4 bytes): an ANSI E
+/// sheet at 300 DPI is ~135 M px and stays under it, while a crafted
+/// MediaBox cannot ask hayro for a multi-gigabyte pixmap — its `u16`
+/// dimensions saturate at 65 535, i.e. a 17 GB allocation (abort or a
+/// multi-minute freeze).
+const MAX_PRINT_RASTER_PIXELS: f64 = 268_435_456.0;
+
 /// Source path, page, DPI bits and whether the page background is transparent.
 type PageKey = (String, String, u32, bool);
 
@@ -115,7 +122,33 @@ fn rasterize_uncached(path: &str, page: &str, dpi: f32, transparent: bool) -> Op
     let pdf = Pdf::new(bytes).ok()?;
     let page_no = page.trim().parse::<usize>().unwrap_or(1).max(1);
     let page = pdf.pages().get(page_no - 1)?;
-    let scale = dpi / 72.0;
+    let mut scale = dpi / 72.0;
+    let mut effective_dpi = dpi;
+    // Page size in points, straight from the file's MediaBox/CropBox.
+    let (page_w, page_h) = page.render_dimensions();
+    let longest = (page_w as f64).max(page_h as f64);
+    if longest.is_finite() && longest > 0.0 {
+        if dpi <= DISPLAY_DPI {
+            // Screen rasters get the same longest-side clamp the DWF/DGN
+            // underlays receive (`underlay_vector::RASTER_SIDE`); the page
+            // maps onto the same world rect regardless of pixel count.
+            if longest * f64::from(dpi) / 72.0 > super::underlay_vector::RASTER_SIDE {
+                let clamped = super::underlay_vector::RASTER_SIDE / longest;
+                scale = clamped as f32;
+                effective_dpi = (clamped * 72.0) as f32;
+            }
+        } else {
+            // Print keeps the exact DPI — the sheet size in millimetres is
+            // derived from it (`page.width / dpi`) — so an oversized page
+            // is refused instead of rescaled (a rescale would print the
+            // wrong physical size).
+            let pw = page_w as f64 * f64::from(dpi) / 72.0;
+            let ph = page_h as f64 * f64::from(dpi) / 72.0;
+            if !(pw.is_finite() && ph.is_finite()) || pw * ph > MAX_PRINT_RASTER_PIXELS {
+                return None;
+            }
+        }
+    }
     let pixmap = hayro::render(
         page,
         &RenderCache::new(),
@@ -137,7 +170,7 @@ fn rasterize_uncached(path: &str, page: &str, dpi: f32, transparent: bool) -> Op
         pixels: Arc::new(pixels),
         width,
         height,
-        dpi,
+        dpi: effective_dpi,
     }))
 }
 
@@ -346,5 +379,31 @@ mod tests {
 
         assert_eq!((page.width, page.height), (150, 150));
         assert_eq!(page.pixels.len(), 150 * 150 * 4);
+    }
+
+    /// A 15 m square MediaBox at 150 DPI would be 88 583 px a side: hayro
+    /// saturates its `u16` dimensions to 65 535 and `Pixmap::new` asks for
+    /// 65 535² × 4 = **17 GB** — the report's allocation-failure abort.
+    /// The display raster must clamp to `RASTER_SIDE` instead, and the
+    /// print raster (exact DPI, physical size derived from it) must be
+    /// refused rather than rescaled.
+    #[test]
+    fn an_enormous_page_is_clamped_or_refused_never_a_17gb_pixmap() {
+        let mut document = PdfDocument::new("PDF underlay huge-page test");
+        document
+            .pages
+            .push(OutputPage::new(Mm(15_000.0), Mm(15_000.0), Vec::new()));
+        let bytes = document.save(&PdfSaveOptions::default(), &mut Vec::new());
+        let path = "memory://pdf-underlay-huge-page.pdf";
+
+        register_source(path, Arc::new(bytes));
+        let page = rasterize_page_display(path, "1").expect("display raster is clamped");
+        assert_eq!((page.width, page.height), (3072, 3072));
+        assert!(page.dpi < DISPLAY_DPI, "clamped raster reports its effective DPI");
+
+        assert!(
+            rasterize_page_at_dpi(path, "1", 300.0).is_none(),
+            "a print raster over the pixel budget is refused, not rescaled"
+        );
     }
 }
