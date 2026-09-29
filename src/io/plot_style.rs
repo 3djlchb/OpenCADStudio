@@ -454,7 +454,7 @@ impl PlotStyleTable {
 fn decompress_ctb(data: &[u8]) -> Result<(String, Vec<String>), String> {
     const PREFIX: &[u8] = b"PIAFILEVERSION_2.0,CTBVER1,compress\r\npmzlibcodec";
     let mut warnings = Vec::new();
-    let mut decoded = Vec::new();
+    let mut decoded;
     if data.starts_with(PREFIX) {
         if data.len() < 60 {
             return Err("CTB header is truncated".into());
@@ -504,9 +504,10 @@ fn decompress_ctb(data: &[u8]) -> Result<(String, Vec<String>), String> {
             decoded = inflate_lenient(payload, &mut warnings)?;
         } else {
             use flate2::read::DeflateDecoder;
-            DeflateDecoder::new(payload)
-                .read_to_end(&mut decoded)
-                .map_err(|e| format!("legacy CTB deflate decompress: {e}"))?;
+            decoded = inflate_capped(
+                DeflateDecoder::new(payload),
+                "legacy CTB deflate decompress",
+            )?;
         }
     }
     while decoded.last() == Some(&0) {
@@ -519,22 +520,46 @@ fn decompress_ctb(data: &[u8]) -> Result<(String, Vec<String>), String> {
     Ok((text, warnings))
 }
 
+/// Far above any real plot-style table (a CTB is a text config file), so a
+/// crafted few-hundred-KB payload cannot inflate until memory runs out —
+/// flate2's readers have no output budget of their own. Same idea as the
+/// `STREAM_LIMIT` in `dgn8.rs`.
+const MAX_INFLATED_BYTES: u64 = 64 * 1024 * 1024;
+
+/// One decompression with a hard output budget: `read_to_end` grows its
+/// `Vec` without bound, so the reader is capped and a payload that reaches
+/// past the cap is refused — an allocation failure is an *abort*, not a
+/// catchable panic. The reader is allowed one byte past the cap:
+/// `take(cap)` stops *at* the cap, which cannot distinguish "exactly cap"
+/// (within the contract — "exceeds means exceeds") from "at least cap",
+/// so `cap + 1` makes the boundary unambiguous.
+fn inflate_capped(reader: impl Read, what: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let read = reader
+        .take(MAX_INFLATED_BYTES + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| format!("{what}: {e}"))?;
+    if read as u64 > MAX_INFLATED_BYTES {
+        return Err(format!(
+            "{what}: inflated data exceeds the {MAX_INFLATED_BYTES}-byte limit"
+        ));
+    }
+    Ok(out)
+}
+
 /// Inflate a zlib stream, falling back to the raw deflate data behind its
 /// two-byte header when the stream's own trailer is wrong.
 fn inflate_lenient(payload: &[u8], warnings: &mut Vec<String>) -> Result<Vec<u8>, String> {
     use flate2::read::{DeflateDecoder, ZlibDecoder};
-    let mut decoded = Vec::new();
-    match ZlibDecoder::new(payload).read_to_end(&mut decoded) {
-        Ok(_) => Ok(decoded),
+    match inflate_capped(ZlibDecoder::new(payload), "CTB zlib decompress") {
+        Ok(decoded) => Ok(decoded),
         Err(zlib_error) if payload.len() > 2 => {
-            let mut raw = Vec::new();
-            DeflateDecoder::new(&payload[2..])
-                .read_to_end(&mut raw)
-                .map_err(|_| format!("CTB zlib decompress: {zlib_error}"))?;
+            let raw = inflate_capped(DeflateDecoder::new(&payload[2..]), "CTB zlib decompress")
+                .map_err(|_| zlib_error)?;
             warnings.push("the zlib stream is damaged; its deflate data was read directly".into());
             Ok(raw)
         }
-        Err(zlib_error) => Err(format!("CTB zlib decompress: {zlib_error}")),
+        Err(zlib_error) => Err(zlib_error),
     }
 }
 
@@ -982,5 +1007,84 @@ mod lenient_loading_tests {
         let error = PlotStyleTable::load_named("nowhere-to-be-found.ctb").unwrap_err();
         assert!(error.contains("nowhere-to-be-found.ctb"), "{error}");
         assert!(PlotStyleTable::load_named("../escape.ctb").is_err());
+    }
+}
+
+#[cfg(test)]
+mod inflate_limit_tests {
+    use super::{decompress_ctb, MAX_INFLATED_BYTES};
+    use std::io::Write;
+
+    /// A payload that lands exactly on the cap is within the contract
+    /// ("exceeds means exceeds"): it must load, not be refused. `take(cap)`
+    /// alone can't tell "exactly cap" from "at least cap" — the reader has
+    /// to be allowed one byte past the limit.
+    #[test]
+    fn an_inflate_of_exactly_the_cap_is_accepted() {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(&vec![b' '; MAX_INFLATED_BYTES as usize])
+            .expect("compress");
+        let payload = encoder.finish().expect("finish");
+        let mut data = vec![b'\n'];
+        data.extend(payload);
+        let out = decompress_ctb(&data).expect("exactly the cap must be accepted");
+        assert_eq!(out.0.len() as u64, MAX_INFLATED_BYTES);
+    }
+
+    /// One byte over the cap is refused with the same limit error the
+    /// oversized bombs produce.
+    #[test]
+    fn an_inflate_one_byte_over_the_cap_is_refused() {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(&vec![b' '; (MAX_INFLATED_BYTES + 1) as usize])
+            .expect("compress");
+        let payload = encoder.finish().expect("finish");
+        let mut data = vec![b'\n'];
+        data.extend(payload);
+        let error = decompress_ctb(&data).expect_err("one byte over must be refused");
+        assert!(error.contains("limit"), "{error}");
+    }
+
+    /// Twice the 64 MiB inflate cap the fix introduces — a payload that is
+    /// tiny compressed (spaces) but must not be inflated whole.
+    fn bomb_plaintext() -> Vec<u8> {
+        vec![b' '; 128 * 1024 * 1024]
+    }
+
+    /// A crafted CTB is a few hundred KB of zlib that expands to hundreds of
+    /// MB; `read_to_end` has no output budget, so the `Vec` grows until the
+    /// allocator fails and the process **aborts** (an abort is not a
+    /// catchable panic). Both the zlib path and the legacy raw-deflate path
+    /// must stop at the cap instead.
+    #[test]
+    fn a_zlib_bomb_is_refused_at_the_inflate_limit() {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bomb_plaintext()).expect("compress");
+        let payload = encoder.finish().expect("finish");
+        assert_eq!(payload[0], 0x78, "zlib header for the inflate_lenient path");
+
+        let mut data = vec![b'\n'];
+        data.extend(payload);
+        let error = decompress_ctb(&data).expect_err("zlib bomb must be refused");
+        assert!(error.contains("limit"), "{error}");
+    }
+
+    #[test]
+    fn a_legacy_deflate_bomb_is_refused_at_the_inflate_limit() {
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bomb_plaintext()).expect("compress");
+        let payload = encoder.finish().expect("finish");
+        assert_ne!(payload[0], 0x78, "raw deflate takes the legacy DeflateDecoder path");
+
+        let mut data = vec![b'\n'];
+        data.extend(payload);
+        let error = decompress_ctb(&data).expect_err("deflate bomb must be refused");
+        assert!(error.contains("limit"), "{error}");
     }
 }
