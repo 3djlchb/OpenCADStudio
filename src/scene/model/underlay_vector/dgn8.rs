@@ -98,9 +98,19 @@ impl<'a> Cfb<'a> {
     }
 
     fn chain(&self, mut s: u32, size: Option<usize>) -> Vec<u8> {
+        // A FAT entry can point at itself (`fat[s] = s`): the old fixed
+        // 1_000_000-iteration guard still let every call accumulate
+        // `1e6 × sector` bytes (4.1 GB at sector_shift = 12) — directory,
+        // mini stream and miniFAT chains are alive at once (~12 GB peak →
+        // allocation-failure abort). A chain can only read in-file sectors,
+        // and after that many steps it must have repeated one; the walk is
+        // deterministic, so a repeat means a cycle that yields nothing new.
+        // Bounding by the file's own sector count never truncates a
+        // legitimate chain (each sector read at most once).
+        let max_sectors = self.b.len() / self.sector;
         let mut out = Vec::new();
         let mut guard = 0;
-        while s < END && guard < 1_000_000 {
+        while s < END && guard < max_sectors {
             let at = (s as usize + 1) * self.sector;
             let Some(block) = self.b.get(at..at + self.sector) else { break };
             out.extend_from_slice(block);
@@ -120,7 +130,11 @@ impl<'a> Cfb<'a> {
         let mut out = Vec::new();
         let mut s = e.start;
         let mut guard = 0;
-        while s < END && guard < 1_000_000 {
+        // Same cycle argument as `chain`, over the mini sectors: a loop in
+        // the miniFAT used to spin the full 1_000_000-iteration budget
+        // (64 MB per call) before `truncate` shortened the length.
+        let max_sectors = self.mini.len() / 64;
+        while s < END && guard < max_sectors {
             let at = s as usize * 64;
             let Some(block) = self.mini.get(at..at + 64) else { break };
             out.extend_from_slice(block);
@@ -602,15 +616,29 @@ fn models(cfb: &Cfb) -> Vec<(String, Vec<u8>, Vec<u8>)> {
         .filter_map(|(p, _)| p.strip_suffix("/Dgn^G/$1").map(|d| d.to_string()))
         .collect();
     dirs.sort();
-    dirs.into_iter()
-        .map(|dir| {
-            let get = |suffix: &str| streams.iter().find(|(p, _)| *p == format!("{dir}/{suffix}")).map(|(_, e)| inflate(&cfb.stream(e))).unwrap_or_default();
-            let graphics = get("Dgn^G/$1");
-            let header = get("Dgn~Mh");
-            let name = marked_string(&header, 0).unwrap_or_else(|| "Default".to_string());
-            (name, graphics, header)
-        })
-        .collect()
+    // Each stream may inflate to `STREAM_LIMIT` (512 MB) and every model
+    // dir inflates its own — entries can all point at the same payload, so
+    // N dirs × 512 MB was reachable from one small stream. The budget
+    // scales with the file (×64 covers any real compression ratio, so
+    // legitimate files never trip it) with a 256 MiB floor for small ones;
+    // models past the budget are dropped, the earlier ones still load.
+    let total_limit = cfb.b.len().saturating_mul(64).max(256 << 20);
+    let mut total = 0usize;
+    let mut out = Vec::new();
+    for dir in dirs {
+        if total >= total_limit {
+            break;
+        }
+        let get = |suffix: &str| streams.iter().find(|(p, _)| *p == format!("{dir}/{suffix}")).map(|(_, e)| inflate(&cfb.stream(e))).unwrap_or_default();
+        let graphics = get("Dgn^G/$1");
+        let header = get("Dgn~Mh");
+        total = total
+            .saturating_add(graphics.len())
+            .saturating_add(header.len());
+        let name = marked_string(&header, 0).unwrap_or_else(|| "Default".to_string());
+        out.push((name, graphics, header));
+    }
+    out
 }
 
 pub fn model_names(bytes: &[u8]) -> Option<Vec<String>> {
@@ -723,4 +751,227 @@ fn stored_range(graphics: &[&[u8]]) -> Option<[f64; 4]> {
         r = [r[0].min(x), r[1].min(y), r[2].max(x + w), r[3].max(y + h)];
     }
     (r[0] <= r[2]).then_some(r)
+}
+
+#[cfg(test)]
+mod cfb_memory_tests {
+    use super::*;
+
+    const ENDOFCHAIN: u32 = 0xFFFF_FFFE;
+    const NONE: u32 = 0xFFFF_FFFF;
+
+    /// Directory entries start at the first sector — `(0 + 1) * sector`,
+    /// so the header occupies a full sector, not just its first 512 bytes.
+    fn put_entry(
+        b: &mut [u8],
+        base: usize,
+        idx: usize,
+        name: &str,
+        kind: u8,
+        left: u32,
+        right: u32,
+        child: u32,
+        start: u32,
+        size: u32,
+    ) {
+        let e = base + idx * 128;
+        let utf16: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        for (i, ch) in utf16.iter().enumerate() {
+            b[e + i * 2..e + i * 2 + 2].copy_from_slice(&ch.to_le_bytes());
+        }
+        b[e + 64..e + 66].copy_from_slice(&((utf16.len() * 2) as u16).to_le_bytes());
+        b[e + 66] = kind;
+        b[e + 68..e + 72].copy_from_slice(&left.to_le_bytes());
+        b[e + 72..e + 76].copy_from_slice(&right.to_le_bytes());
+        b[e + 76..e + 80].copy_from_slice(&child.to_le_bytes());
+        b[e + 116..e + 120].copy_from_slice(&start.to_le_bytes());
+        b[e + 120..e + 124].copy_from_slice(&size.to_le_bytes());
+    }
+
+    fn header(b: &mut [u8], sector_shift: u16, dir_start: u32, minifat_start: u32, difat0: u32) {
+        b[0..8].copy_from_slice(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+        b[30..32].copy_from_slice(&sector_shift.to_le_bytes());
+        b[32..34].copy_from_slice(&6u16.to_le_bytes()); // mini sector shift
+        b[48..52].copy_from_slice(&dir_start.to_le_bytes());
+        b[56..60].copy_from_slice(&4096u32.to_le_bytes()); // mini cutoff
+        b[60..64].copy_from_slice(&minifat_start.to_le_bytes());
+        b[68..72].copy_from_slice(&ENDOFCHAIN.to_le_bytes()); // DIFAT chain: none
+        b[72..76].copy_from_slice(&0u32.to_le_bytes()); // DIFAT chain count: 0
+        b[76..80].copy_from_slice(&difat0.to_le_bytes()); // header DIFAT slot 0
+        for slot in 1..109 {
+            b[76 + slot * 4..80 + slot * 4].copy_from_slice(&NONE.to_le_bytes());
+        }
+    }
+
+    /// ~1.5 KB CFB (sector_shift = 9): directory and miniFAT both start at
+    /// sector 0, whose FAT entry (sector 1, all zeros) points at itself —
+    /// `chain()` loops its full 1_000_000-iteration budget → 512 MB per
+    /// call, three calls alive at once.
+    fn hostile_self_fat_cfb() -> Vec<u8> {
+        let mut b = vec![0u8; 3 * 512];
+        header(&mut b, 9, 0, 0, 1);
+        // Sector 0 = directory: entry 0 is the root; its start field also
+        // points at sector 0 (self-loop), size = u32::MAX so the mini chain
+        // is never truncated down to a small length.
+        put_entry(&mut b, 512, 0, "Root", 1, NONE, NONE, NONE, 0, u32::MAX);
+        // Sector 1 = FAT, already zero: fat[0] = 0 (self-referential).
+        b
+    }
+
+    /// Write the model storages' left/right sibling links as a balanced
+    /// binary tree over entry indices `2, 4, …, 2·n` (walk depth O(log n)).
+    fn link_models(b: &mut [u8], base: usize, model_count: usize) {
+        fn build(b: &mut [u8], base: usize, lo: usize, hi: usize) -> u32 {
+            if lo > hi {
+                return NONE;
+            }
+            let mid = (lo + hi) / 2;
+            let left = if mid > lo { build(b, base, lo, mid - 1) } else { NONE };
+            let right = if mid < hi { build(b, base, mid + 1, hi) } else { NONE };
+            let e = base + (2 + mid * 2) * 128;
+            b[e + 68..e + 72].copy_from_slice(&left.to_le_bytes());
+            b[e + 72..e + 76].copy_from_slice(&right.to_le_bytes());
+            (2 + mid * 2) as u32
+        }
+        build(b, base, 0, model_count - 1);
+    }
+
+    /// 300 model directories all sharing one 4 MB stream: `models()`
+    /// retains every model simultaneously with no total budget → 1.2 GB
+    /// from a 4 MB file (inflate() falls back to a raw copy of the zeros).
+    fn multi_model_cfb() -> Vec<u8> {
+        let sector = 4096usize;
+        let model_count = 300usize;
+        let entry_count = 2 + model_count * 2;
+        let dir_sectors = (entry_count * 128 + sector - 1) / sector;
+        let payload_len = 4 << 20;
+        let payload_sectors = payload_len / sector;
+        // Sectors: 0..dir_sectors directory; then 2 FAT; then payload.
+        let fat_start = dir_sectors;
+        let payload_start = fat_start + 2;
+        let mut b = vec![0u8; (payload_start + payload_sectors + 1) * sector];
+        header(&mut b, 12, 0, ENDOFCHAIN, fat_start as u32);
+        b[80..84].copy_from_slice(&((fat_start + 1) as u32).to_le_bytes()); // DIFAT slot 1
+        // Directory: root → storage → model storages, sibling links as a
+        // balanced tree (real CFB directories are red-black; a linear chain
+        // would hit streams()' existing depth-64 guard). Each storage has
+        // one "Dgn^G/$1" stream pointing at the shared payload.
+        let root_model = (model_count - 1) / 2;
+        put_entry(&mut b, sector, 0, "Root", 1, NONE, NONE, 1, ENDOFCHAIN, 0);
+        put_entry(
+            &mut b,
+            sector,
+            1,
+            "Dgn-Md",
+            1,
+            NONE,
+            NONE,
+            (2 + root_model * 2) as u32,
+            ENDOFCHAIN,
+            0,
+        );
+        for i in 0..model_count {
+            let model = 2 + i * 2;
+            let stream = model + 1;
+            put_entry(
+                &mut b,
+                sector,
+                model,
+                &format!("Model{i}"),
+                1,
+                NONE,
+                NONE,
+                stream as u32,
+                ENDOFCHAIN,
+                0,
+            );
+            put_entry(
+                &mut b,
+                sector,
+                stream,
+                "Dgn^G/$1",
+                2,
+                NONE,
+                NONE,
+                NONE,
+                payload_start as u32,
+                payload_len as u32,
+            );
+        }
+        link_models(&mut b, sector, model_count);
+        // Directory chain across its sectors.
+        let fat_at = (fat_start + 1) * sector;
+        for i in 0..dir_sectors {
+            let at = fat_at + i * 4;
+            let next = if i + 1 < dir_sectors {
+                (i + 1) as u32
+            } else {
+                ENDOFCHAIN
+            };
+            b[at..at + 4].copy_from_slice(&next.to_le_bytes());
+        }
+        // Both FAT sectors are not part of any chain; payload chain follows.
+        for i in 0..2 {
+            let at = fat_at + (fat_start + i) * 4;
+            b[at..at + 4].copy_from_slice(&ENDOFCHAIN.to_le_bytes());
+        }
+        for i in 0..payload_sectors {
+            let at = fat_at + (payload_start + i) * 4;
+            let next = if i + 1 < payload_sectors {
+                (payload_start + i + 1) as u32
+            } else {
+                ENDOFCHAIN
+            };
+            b[at..at + 4].copy_from_slice(&next.to_le_bytes());
+        }
+        b
+    }
+
+    /// A self-referential FAT must not let `chain()` (directory, mini
+    /// stream, miniFAT) grow past the file it was read from: the old fixed
+    /// 1_000_000-iteration guard built 512 MB per call from 1.5 KB.
+    #[test]
+    fn a_self_referential_fat_builds_no_more_bytes_than_the_file() {
+        let bytes = hostile_self_fat_cfb();
+        let cfb = Cfb::open(&bytes).expect("hostile CFB parses");
+        assert!(
+            cfb.entries.len() * 128 <= bytes.len(),
+            "directory grew to {} entries from a {} byte file",
+            cfb.entries.len(),
+            bytes.len()
+        );
+        assert!(
+            cfb.mini.len() <= bytes.len(),
+            "mini stream grew to {} bytes from a {} byte file",
+            cfb.mini.len(),
+            bytes.len()
+        );
+        assert!(
+            cfb.mini_fat.len() * 4 <= bytes.len(),
+            "miniFAT grew to {} bytes from a {} byte file",
+            cfb.mini_fat.len() * 4,
+            bytes.len()
+        );
+    }
+
+    /// Hundreds of model dirs sharing one stream: `models()` inflates all
+    /// of them at once. The total must stay within the file-scaled budget,
+    /// while the first models still load.
+    #[test]
+    fn models_keep_their_total_inflated_size_within_budget() {
+        let bytes = multi_model_cfb();
+        let cfb = Cfb::open(&bytes).expect("multi-model CFB parses");
+        let out = models(&cfb);
+        let total: usize = out.iter().map(|(_, g, h)| g.len() + h.len()).sum();
+        let budget = (bytes.len() * 64).max(256 << 20);
+        assert!(
+            total <= budget + (512 << 20),
+            "models inflated to {} bytes from a {} byte file (budget {budget})",
+            total,
+            bytes.len()
+        );
+        assert!(!out.is_empty(), "the first models still load");
+        assert!(out.len() < 300, "models past the budget are dropped");
+        assert!(model_names(&bytes).is_some());
+    }
 }
