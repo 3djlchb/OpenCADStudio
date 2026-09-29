@@ -640,6 +640,41 @@ mod tests {
         assert_eq!(display([2, 2], false), boundaries);
     }
 
+    /// A file-sourced header `$ISOLINES` bypasses `SETVAR` entirely, so the
+    /// consumption side must clamp too: `prepare_solid_model_display` hands
+    /// the header count to the kernel for every curved face, and 32767
+    /// isolines on a cylinder is a ~100k-vertex preview rebuilt per cursor
+    /// event.
+    #[test]
+    fn header_isolines_are_clamped_before_display_tessellation() {
+        let measure = |value: i16| {
+            let mut scene = crate::scene::Scene::new();
+            scene.document.header.isolines = value;
+            let body = cylinder_solid([0.0; 3], 5.0, 12.0).unwrap();
+            scene
+                .prepare_solid_model_display(codec::Handle::new(0xDEAD), &body)
+                .expect("cylinder display")
+                .0
+                .edge_verts
+                .len()
+        };
+
+        // A hostile file-sourced header must render exactly like the
+        // largest value the Options slider can request — and a negative
+        // one exactly like zero.
+        let hostile = measure(i16::MAX);
+        assert_eq!(
+            hostile,
+            measure(crate::entities::solid3d::MAX_HEADER_ISOLINES),
+            "header.isolines must be clamped before tessellation"
+        );
+        assert_eq!(measure(-5), measure(0));
+        assert!(
+            hostile < 20_000,
+            "even the ceiling must stay a bounded preview: {hostile} vertices"
+        );
+    }
+
     #[test]
     fn box_face_centers_are_six() {
         let body = box_solid([0.0, 0.0, 0.0], 10.0, 10.0, 10.0).unwrap();

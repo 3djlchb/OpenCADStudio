@@ -782,7 +782,7 @@ impl OpenCADStudio {
                 use crate::modules::insert::solid3d_cmds::PresspullCommand;
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
                 let mut command = PresspullCommand::new(color);
-                command.set_isolines(self.tabs[i].scene.document.header.isolines.max(0) as usize);
+                command.set_isolines(crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines));
                 command.set_preselection(self.presspull_preselection());
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
@@ -793,7 +793,7 @@ impl OpenCADStudio {
                 use crate::modules::insert::solid3d_cmds::RevolveCommand;
                 let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
-                let isolines = self.tabs[i].scene.document.header.isolines.max(0) as usize;
+                let isolines = crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines);
                 let mut cmd = RevolveCommand::new(color, isolines);
                 if !selected.is_empty() {
                     cmd.set_preselection(
@@ -811,7 +811,7 @@ impl OpenCADStudio {
             "SWEEP" => {
                 use crate::modules::insert::solid3d_cmds::SweepCommand;
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
-                let isolines = self.tabs[i].scene.document.header.isolines.max(0) as usize;
+                let isolines = crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines);
                 let mut cmd = SweepCommand::new(color, isolines);
                 let selected = self.tabs[i].scene.selected_handles_in_order()
                     .into_iter()
@@ -829,7 +829,7 @@ impl OpenCADStudio {
             "LOFT" => {
                 use crate::modules::insert::solid3d_cmds::LoftCommand;
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
-                let isolines = self.tabs[i].scene.document.header.isolines.max(0) as usize;
+                let isolines = crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines);
                 let selected = self.tabs[i].scene.selected_handles_in_order().into_iter()
                     .filter_map(|handle| self.tabs[i].scene.document.get_entity(handle)
                         .cloned().map(|entity| (handle, entity))).collect();

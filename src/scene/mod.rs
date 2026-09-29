@@ -1294,7 +1294,7 @@ fn build_derived_caches_impl(
     // definition solids keep block-local coords for per-INSERT instancing. (#123)
     let facet_res = doc.header.facet_resolution;
     let chordal_deflection = crate::entities::solid3d::display_deflection(&doc.header, facet_res);
-    let isolines = doc.header.isolines.max(0) as usize;
+    let isolines = crate::entities::solid3d::clamp_header_isolines(doc.header.isolines);
     // Real layout blocks come from the Layout objects' block_record handles —
     // `BlockRecord::is_layout()` is unreliable here (it flags ordinary blocks).
     let layout_blocks: std::collections::HashSet<Handle> = doc
@@ -3818,7 +3818,7 @@ impl Scene {
                 crate::entities::solid3d::surface_isoline_counts(surface),
                 crate::entities::solid3d::surface_property_state(surface).isolines,
             ),
-            _ => ([self.document.header.isolines.max(0) as usize; 2], false),
+            _ => ([crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines); 2], false),
         };
         let (mut set, wires, center) = crate::scene::model::solid_model::display_from_solid(
             solid,

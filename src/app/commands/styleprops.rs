@@ -2223,6 +2223,14 @@ impl OpenCADStudio {
                                 Some(v) => v
                                     .parse::<i16>()
                                     .map(|x| {
+                                        // Stored values stay inside the range
+                                        // the Options slider can ask for; the
+                                        // consumption sites clamp again for
+                                        // file-sourced headers.
+                                        let x = x.clamp(
+                                            0,
+                                            crate::entities::solid3d::MAX_HEADER_ISOLINES,
+                                        );
                                         h.isolines = x;
                                         (format!("ISOLINES = {x}"), true)
                                     })
@@ -3414,6 +3422,27 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app
+    }
+
+    /// `SETVAR ISOLINES` stored any parseable `i16` verbatim. The header
+    /// value is the per-face isolate count handed to the tessellation
+    /// kernel (which loops `0..count`), so `ISOLINES 32767` made every
+    /// rebuild and per-cursor preview allocate without bound. The stored
+    /// value must stay inside the range the app's own UI can ask for
+    /// (the Options slider is 0..=64).
+    #[test]
+    fn setvar_isolines_stays_within_the_renderable_range() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("SETVAR ISOLINES 32767");
+        assert_eq!(app.tabs[i].scene.document.header.isolines, 64);
+
+        let _ = app.run_command_line("SETVAR ISOLINES 8");
+        assert_eq!(app.tabs[i].scene.document.header.isolines, 8);
+
+        let _ = app.run_command_line("SETVAR ISOLINES -3");
+        assert_eq!(app.tabs[i].scene.document.header.isolines, 0);
     }
 
     #[test]

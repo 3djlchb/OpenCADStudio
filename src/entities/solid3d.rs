@@ -110,10 +110,25 @@ fn write_surface_property_state(surface: &mut Surface, state: SurfacePropertySta
     surface.common.extended_data.upsert_record(record);
 }
 
+/// Upper bound for the header `$ISOLINES` value handed to tessellation —
+/// the Options slider's own ceiling ("Isolines per surface", 0..=64).
+pub(crate) const MAX_HEADER_ISOLINES: i16 = 64;
+
+/// Upper bound for per-surface `u/v_isolines` — the plugin editor's
+/// writable range for those fields (0..=200).
+pub(crate) const MAX_SURFACE_ISOLINES: i16 = 200;
+
+/// Header `$ISOLINES` (file- or command-controlled `i16`) → the bounded
+/// per-face isolate count handed to the kernel, which draws `0..count`
+/// isolines per face with no ceiling of its own.
+pub(crate) fn clamp_header_isolines(raw: i16) -> usize {
+    raw.clamp(0, MAX_HEADER_ISOLINES) as usize
+}
+
 pub(crate) fn surface_isoline_counts(surface: &Surface) -> [usize; 2] {
     [
-        surface.u_isolines.max(0) as usize,
-        surface.v_isolines.max(0) as usize,
+        surface.u_isolines.clamp(0, MAX_SURFACE_ISOLINES) as usize,
+        surface.v_isolines.clamp(0, MAX_SURFACE_ISOLINES) as usize,
     ]
 }
 
@@ -938,5 +953,28 @@ mod tests {
         let (min, max) = crate::scene::convert::tess::entity_bounds(&EntityType::Region(region));
         assert_eq!(min, [0.0, 0.0, 0.0]);
         assert_eq!(max, [10.0, 10.0, 0.0]);
+    }
+
+    /// `Surface.u/v_isolines` are raw `i16` — a file can carry 32767 and the
+    /// native property editor only floors at 0 — and the counts go straight
+    /// into the kernel, which draws `0..count` isolines per face. The
+    /// bounded answer the rest of the product agrees on is the plugin
+    /// editor's writable range, 0..=200.
+    #[test]
+    fn surface_isolate_counts_stay_within_the_plugin_editor_range() {
+        use codec::entities::{Surface, SurfaceKind};
+
+        let mut surface = Surface::new(SurfaceKind::Extruded);
+        surface.u_isolines = i16::MAX;
+        surface.v_isolines = -1;
+        assert_eq!(
+            surface_isoline_counts(&surface),
+            [200, 0],
+            "a hostile surface must not hand the kernel 32767 isolines"
+        );
+
+        surface.u_isolines = 8;
+        surface.v_isolines = 6;
+        assert_eq!(surface_isoline_counts(&surface), [8, 6]);
     }
 }

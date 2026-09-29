@@ -319,7 +319,7 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         let mesh_seed = if matches!(
             &entity,
             EntityType::Solid3D(_)
@@ -603,7 +603,7 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         let mesh_seed = if matches!(
             &entity,
             EntityType::Solid3D(_)
@@ -832,7 +832,7 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         use crate::par::prelude::*;
         let built: Vec<(Handle, MeshLodSet, bool)> = entries
             .into_par_iter()
@@ -2578,7 +2578,7 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = self.document.header.isolines.max(0) as usize;
+        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         // Top-level solids: offset into the render frame, drawn flat.
         // Block-definition solids: keep block-local coords for per-INSERT
         // instancing (no offset applied here).

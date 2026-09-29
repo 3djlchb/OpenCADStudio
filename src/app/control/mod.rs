@@ -1240,7 +1240,7 @@ impl OpenCADStudio {
                         [1.; 4],
                         h.facet_resolution,
                         crate::entities::solid3d::display_deflection(h, h.facet_resolution),
-                        h.isolines.max(0) as usize,
+                        crate::entities::solid3d::clamp_header_isolines(h.isolines),
                     )
                 });
             let curve = crate::entities::curve::entity_curve(entity).map(|planar| {
