@@ -472,6 +472,7 @@ impl OpenCADStudio {
                 | "get_selection"
                 | "audit"
                 | "text_search"
+                | "text_audit"
         );
         if !query && !self.control.enabled {
             return (
@@ -731,6 +732,7 @@ impl OpenCADStudio {
                 "xdata_get" => self.xdata_read(&req),
                 "get_selection" => self.control_get_selection(),
                 "text_search" => self.control_text_search(&req).unwrap_or_else(|e| e),
+                "text_audit" => self.control_text_audit(&req).unwrap_or_else(|e| e),
                 "history" => {
                     json!({"ok":true,"entries":self.command_line.history.iter().map(|e|json!({"kind":format!("{:?}",e.kind),"text":e.text})).collect::<Vec<_>>()})
                 }

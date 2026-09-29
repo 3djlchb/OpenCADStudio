@@ -758,7 +758,14 @@ impl OpenCADStudio {
         let limit = req["limit"].as_u64().unwrap_or(500).min(5000) as usize;
 
         let matcher = TextMatcher::new(find.to_string(), match_case, whole_word, ignore_accents);
-        let i = self.active_tab;
+        let i = if let Some(doc_id) = req.get("document_id").and_then(|v| v.as_u64()) {
+            self.tabs
+                .iter()
+                .position(|t| t.id == doc_id)
+                .ok_or_else(|| failure("document_not_found", "Specified document_id not found"))?
+        } else {
+            self.active_tab
+        };
         let scene = &self.tabs[i].scene;
         let doc = &scene.document;
 
@@ -870,13 +877,342 @@ impl OpenCADStudio {
         }))
     }
 
+    /// `text_audit` — comprehensive text quality check, spell-check, and replacement dry-run.
+    pub(crate) fn control_text_audit(&self, req: &Value) -> Result<Value, Value> {
+        let i = if let Some(doc_id) = req.get("document_id").and_then(|v| v.as_u64()) {
+            self.tabs
+                .iter()
+                .position(|t| t.id == doc_id)
+                .ok_or_else(|| failure("document_not_found", "Specified document_id not found"))?
+        } else {
+            self.active_tab
+        };
+
+        let match_case = req["match_case"].as_bool().unwrap_or(false);
+        let whole_word = req["whole_word"].as_bool().unwrap_or(false);
+        let ignore_accents = req["ignore_accents"].as_bool().unwrap_or(!match_case);
+        let scope = req["scope"].as_str().unwrap_or("all");
+        let layer_filter = req["layer"].as_str();
+        let handles_filter = parse_handles_filter(req);
+        let types_filter = parse_types_filter(req);
+        let bounds_filter = parse_bounds_filter(req)?;
+        let limit = req["limit"].as_u64().unwrap_or(1000).min(10000) as usize;
+
+        // Parse dry-run replacement pairs if supplied
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        let pairs_val = req.get("pairs").or_else(|| req.get("dry_run_pairs"));
+        if let Some(pair_array) = pairs_val.and_then(|v| v.as_array()) {
+            for item in pair_array {
+                let find = item["find"].as_str().unwrap_or("");
+                let replace = item["replace"].as_str().unwrap_or("");
+                if !find.is_empty() {
+                    pairs.push((find.to_string(), replace.to_string()));
+                }
+            }
+        }
+
+        // Parse check terms if supplied
+        let mut check_terms: Vec<String> = Vec::new();
+        if let Some(terms_array) = req.get("check_terms").and_then(|v| v.as_array()) {
+            for item in terms_array {
+                if let Some(t) = item.as_str() {
+                    if !t.is_empty() {
+                        check_terms.push(t.to_string());
+                    }
+                }
+            }
+        }
+
+        // Parse dictionary if supplied
+        let mut dictionary: Vec<String> = Vec::new();
+        if let Some(dict_array) = req.get("dictionary").and_then(|v| v.as_array()) {
+            for item in dict_array {
+                if let Some(w) = item.as_str() {
+                    if !w.is_empty() {
+                        dictionary.push(w.to_string());
+                    }
+                }
+            }
+        }
+
+        let pair_matchers: Vec<(TextMatcher, String)> = pairs
+            .iter()
+            .map(|(f, r)| {
+                (
+                    TextMatcher::new(f.clone(), match_case, whole_word, ignore_accents),
+                    r.clone(),
+                )
+            })
+            .collect();
+
+        let check_matchers: Vec<TextMatcher> = check_terms
+            .iter()
+            .map(|t| TextMatcher::new(t.clone(), match_case, whole_word, ignore_accents))
+            .collect();
+
+        let dict_matchers: Vec<TextMatcher> = dictionary
+            .iter()
+            .map(|w| TextMatcher::new(w.clone(), false, true, true))
+            .collect();
+
+        let mut pair_hit_counts = vec![0usize; pair_matchers.len()];
+        let mut check_hit_counts = vec![0usize; check_matchers.len()];
+
+        let scene = &self.tabs[i].scene;
+        let doc = &scene.document;
+
+        let mut entities_scanned = 0usize;
+        let mut entities_matched = 0usize;
+        let mut total_occurrences = 0usize;
+        let mut simulated_changes = Vec::new();
+        let mut suspect_matches = Vec::new();
+        let mut unrecognized_words = Vec::new();
+
+        for entity in doc.entities() {
+            let common = entity.common();
+            let handle = common.handle;
+
+            let in_active = scene.entity_belongs_to_active_space(handle);
+            match scope {
+                "active_space" | "model_space" if !in_active => continue,
+                "blocks" if in_active => continue,
+                _ => {}
+            }
+
+            if let Some(l) = layer_filter {
+                if !common.layer.eq_ignore_ascii_case(l) {
+                    continue;
+                }
+            }
+
+            if let Some(ref h_list) = handles_filter {
+                if !h_list.contains(&handle) {
+                    continue;
+                }
+            }
+
+            if let Some(ref t_list) = types_filter {
+                if !t_list
+                    .iter()
+                    .any(|t| crate::app::automation::entity_type_matches(entity, t))
+                {
+                    continue;
+                }
+            }
+
+            if let Some(b) = bounds_filter {
+                let (min, max) = crate::scene::convert::tess::entity_bounds_in(doc, entity);
+                if max[0] < b[0] || max[1] < b[1] || min[0] > b[2] || min[1] > b[3] {
+                    continue;
+                }
+            }
+
+            let Some((raw_val, plain_text, pos)) = entity_text_info(entity, doc) else {
+                continue;
+            };
+
+            entities_scanned += 1;
+            let mut entity_had_match = false;
+
+            // 1. Dry run pairs simulation
+            if !pair_matchers.is_empty() {
+                match entity {
+                    EntityType::MText(_) => {
+                        let mut cur_raw = raw_val.clone();
+                        for (idx, (matcher, replacement)) in pair_matchers.iter().enumerate() {
+                            let (new_raw, count) =
+                                replace_mtext_safe(&cur_raw, matcher, replacement, true);
+                            if count > 0 {
+                                pair_hit_counts[idx] += count;
+                                total_occurrences += count;
+                                entity_had_match = true;
+                                if simulated_changes.len() < limit {
+                                    simulated_changes.push(json!({
+                                        "handle": format!("{:X}", handle.value()),
+                                        "type": "MText",
+                                        "layer": common.layer,
+                                        "position": pos,
+                                        "find": pairs[idx].0,
+                                        "replace": pairs[idx].1,
+                                        "before": cur_raw,
+                                        "after": new_raw.clone(),
+                                        "replaced": count,
+                                    }));
+                                }
+                                cur_raw = new_raw;
+                            }
+                        }
+                    }
+                    _ => {
+                        let mut cur_text = plain_text.clone();
+                        for (idx, (matcher, replacement)) in pair_matchers.iter().enumerate() {
+                            let (new_text, count) =
+                                matcher.replace_all_in(&cur_text, replacement, true);
+                            if count > 0 {
+                                pair_hit_counts[idx] += count;
+                                total_occurrences += count;
+                                entity_had_match = true;
+                                if simulated_changes.len() < limit {
+                                    simulated_changes.push(json!({
+                                        "handle": format!("{:X}", handle.value()),
+                                        "type": crate::entities::names::ui_name(entity),
+                                        "layer": common.layer,
+                                        "position": pos,
+                                        "find": pairs[idx].0,
+                                        "replace": pairs[idx].1,
+                                        "before": cur_text,
+                                        "after": new_text.clone(),
+                                        "replaced": count,
+                                    }));
+                                }
+                                cur_text = new_text;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Check terms
+            for (idx, matcher) in check_matchers.iter().enumerate() {
+                if matcher.matches_text_or_raw(&plain_text, &raw_val) {
+                    check_hit_counts[idx] += 1;
+                    entity_had_match = true;
+                    if suspect_matches.len() < limit {
+                        suspect_matches.push(json!({
+                            "handle": format!("{:X}", handle.value()),
+                            "type": crate::entities::names::ui_name(entity),
+                            "layer": common.layer,
+                            "position": pos,
+                            "term": check_terms[idx],
+                            "plain_text": plain_text,
+                        }));
+                    }
+                }
+            }
+
+            // 3. Dictionary check
+            if !dict_matchers.is_empty() {
+                for word in plain_text.split(|c: char| !c.is_alphabetic()) {
+                    let w = word.trim();
+                    if w.len() >= 3 && !dict_matchers.iter().any(|dm| dm.matches(w)) {
+                        if unrecognized_words.len() < limit
+                            && !unrecognized_words
+                                .iter()
+                                .any(|item: &Value| item["word"].as_str() == Some(w))
+                        {
+                            unrecognized_words.push(json!({
+                                "word": w,
+                                "handle": format!("{:X}", handle.value()),
+                                "position": pos,
+                            }));
+                        }
+                    }
+                }
+            }
+
+            // Check Insert attributes
+            if let EntityType::Insert(insert) = entity {
+                for attr in &insert.attributes {
+                    let raw = attr.get_value();
+                    let plain = decode_dxf_escapes(raw);
+
+                    for (idx, (matcher, replacement)) in pair_matchers.iter().enumerate() {
+                        let (new_text, count) =
+                            matcher.replace_all_in(&plain, replacement, true);
+                        if count > 0 {
+                            pair_hit_counts[idx] += count;
+                            total_occurrences += count;
+                            entity_had_match = true;
+                            if simulated_changes.len() < limit {
+                                simulated_changes.push(json!({
+                                    "handle": format!("{:X}", handle.value()),
+                                    "type": "Insert",
+                                    "attribute_tag": attr.tag,
+                                    "layer": common.layer,
+                                    "position": [insert.insert_point.x, insert.insert_point.y, insert.insert_point.z],
+                                    "find": pairs[idx].0,
+                                    "replace": pairs[idx].1,
+                                    "before": plain.clone(),
+                                    "after": new_text,
+                                    "replaced": count,
+                                }));
+                            }
+                        }
+                    }
+
+                    for (idx, matcher) in check_matchers.iter().enumerate() {
+                        if matcher.matches_text_or_raw(&plain, raw) {
+                            check_hit_counts[idx] += 1;
+                            entity_had_match = true;
+                            if suspect_matches.len() < limit {
+                                suspect_matches.push(json!({
+                                    "handle": format!("{:X}", handle.value()),
+                                    "type": "Insert",
+                                    "attribute_tag": attr.tag,
+                                    "layer": common.layer,
+                                    "position": [insert.insert_point.x, insert.insert_point.y, insert.insert_point.z],
+                                    "term": check_terms[idx],
+                                    "plain_text": plain,
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if entity_had_match {
+                entities_matched += 1;
+            }
+        }
+
+        // Unmatched pairs / queries
+        let unmatched_pairs: Vec<String> = pair_hit_counts
+            .iter()
+            .enumerate()
+            .filter(|(_, &count)| count == 0)
+            .map(|(idx, _)| pairs[idx].0.clone())
+            .collect();
+
+        let unmatched_check_terms: Vec<String> = check_hit_counts
+            .iter()
+            .enumerate()
+            .filter(|(_, &count)| count == 0)
+            .map(|(idx, _)| check_terms[idx].clone())
+            .collect();
+
+        Ok(json!({
+            "ok": true,
+            "summary": {
+                "entities_scanned": entities_scanned,
+                "entities_matched": entities_matched,
+                "occurrences_matched": total_occurrences,
+                "pairs_total": pairs.len(),
+                "pairs_unmatched": unmatched_pairs.len(),
+                "check_terms_total": check_terms.len(),
+                "check_terms_found": check_terms.len() - unmatched_check_terms.len(),
+            },
+            "unmatched_pairs": unmatched_pairs,
+            "unmatched_check_terms": unmatched_check_terms,
+            "simulated_changes": simulated_changes,
+            "suspect_matches": suspect_matches,
+            "unrecognized_words": unrecognized_words,
+        }))
+    }
+
     /// Execute text replace across candidates with single-transaction undo support.
     pub(crate) fn execute_text_replace(
         &mut self,
         req: &Value,
         push_undo: bool,
     ) -> Result<Value, Value> {
-        let i = self.active_tab;
+        let i = if let Some(doc_id) = req.get("document_id").and_then(|v| v.as_u64()) {
+            self.tabs
+                .iter()
+                .position(|t| t.id == doc_id)
+                .ok_or_else(|| failure("document_not_found", "Specified document_id not found"))?
+        } else {
+            self.active_tab
+        };
 
         // Parse search/replace pairs
         let mut pairs: Vec<(String, String)> = Vec::new();
@@ -905,6 +1241,7 @@ impl OpenCADStudio {
         let match_case = req["match_case"].as_bool().unwrap_or(false);
         let whole_word = req["whole_word"].as_bool().unwrap_or(false);
         let ignore_accents = req["ignore_accents"].as_bool().unwrap_or(!match_case);
+        let dry_run = req["dry_run"].as_bool().unwrap_or(false);
         let replace_all = req["replace_all"].as_bool().unwrap_or(true);
         let scope = req["scope"].as_str().unwrap_or("all");
         let layer_filter = req["layer"].as_str();
@@ -917,7 +1254,7 @@ impl OpenCADStudio {
             .map(|(f, r)| (TextMatcher::new(f, match_case, whole_word, ignore_accents), r))
             .collect();
 
-        if push_undo {
+        if push_undo && !dry_run {
             self.push_undo_snapshot(i, "TEXT REPLACE");
         }
 
@@ -998,9 +1335,11 @@ impl OpenCADStudio {
                             if before_val.is_none() {
                                 before_val = Some(text.value.clone());
                             }
-                            text.value = new_val;
+                            if !dry_run {
+                                text.value = new_val.clone();
+                            }
                             entity_replaced += count;
-                            after_val = Some(text.value.clone());
+                            after_val = Some(new_val);
                         } else {
                             // Check if matching decoded DXF escapes
                             let decoded = decode_dxf_escapes(&text.value);
@@ -1011,9 +1350,11 @@ impl OpenCADStudio {
                                     if before_val.is_none() {
                                         before_val = Some(text.value.clone());
                                     }
-                                    text.value = new_val;
+                                    if !dry_run {
+                                        text.value = new_val.clone();
+                                    }
                                     entity_replaced += c;
-                                    after_val = Some(text.value.clone());
+                                    after_val = Some(new_val);
                                 }
                             }
                         }
@@ -1027,9 +1368,11 @@ impl OpenCADStudio {
                             if before_val.is_none() {
                                 before_val = Some(mtext.value.clone());
                             }
-                            mtext.value = new_val;
+                            if !dry_run {
+                                mtext.value = new_val.clone();
+                            }
                             entity_replaced += count;
-                            after_val = Some(mtext.value.clone());
+                            after_val = Some(new_val);
                         }
                     }
                 }
@@ -1041,9 +1384,11 @@ impl OpenCADStudio {
                             if before_val.is_none() {
                                 before_val = Some(ad.default_value.clone());
                             }
-                            ad.default_value = new_val;
+                            if !dry_run {
+                                ad.default_value = new_val.clone();
+                            }
                             entity_replaced += count;
-                            after_val = Some(ad.default_value.clone());
+                            after_val = Some(new_val);
                         }
                     }
                 }
@@ -1055,9 +1400,11 @@ impl OpenCADStudio {
                             if before_val.is_none() {
                                 before_val = Some(ae.get_value().to_string());
                             }
-                            ae.set_value(new_val);
+                            if !dry_run {
+                                ae.set_value(new_val.clone());
+                            }
                             entity_replaced += count;
-                            after_val = Some(ae.get_value().to_string());
+                            after_val = Some(new_val);
                         }
                     }
                 }
@@ -1071,9 +1418,11 @@ impl OpenCADStudio {
                                 if before_val.is_none() {
                                     before_val = Some(base.text.clone());
                                 }
-                                base.text = new_val;
+                                if !dry_run {
+                                    base.text = new_val.clone();
+                                }
                                 entity_replaced += count;
-                                after_val = Some(base.text.clone());
+                                after_val = Some(new_val);
                             }
                         }
                     }
@@ -1085,7 +1434,9 @@ impl OpenCADStudio {
                                 matcher.replace_all_in(attr.get_value(), replacement, replace_all);
                             if count > 0 {
                                 let old_val = attr.get_value().to_string();
-                                attr.set_value(new_val.clone());
+                                if !dry_run {
+                                    attr.set_value(new_val.clone());
+                                }
                                 total_replaced += count;
                                 changes_log.push(json!({
                                     "handle": format!("{:X}", handle.value()),
@@ -1121,33 +1472,37 @@ impl OpenCADStudio {
         }
 
         if total_replaced == 0 {
-            if push_undo {
+            if push_undo && !dry_run {
                 self.discard_last_undo_entry(i);
             }
             return Ok(json!({
                 "ok": true,
+                "dry_run": dry_run,
                 "replaced": 0,
                 "entities_changed": 0,
                 "changes": [],
             }));
         }
 
-        // Refresh scene caches and dirty flags
-        self.invalidate_property_targets(i, &changed_handles);
-        self.tabs[i].scene.bump_geometry();
-        self.tabs[i].dirty = true;
-        self.refresh_properties();
+        if !dry_run {
+            // Refresh scene caches and dirty flags
+            self.invalidate_property_targets(i, &changed_handles);
+            self.tabs[i].scene.bump_geometry();
+            self.tabs[i].dirty = true;
+            self.refresh_properties();
 
-        self.command_line.push_output(
-            format!(
-                "TEXT REPLACE: replaced {total_replaced} occurrence(s) in {} object(s).",
-                changed_handles.len()
-            )
-            .as_str(),
-        );
+            self.command_line.push_output(
+                format!(
+                    "TEXT REPLACE: replaced {total_replaced} occurrence(s) in {} object(s).",
+                    changed_handles.len()
+                )
+                .as_str(),
+            );
+        }
 
         Ok(json!({
             "ok": true,
+            "dry_run": dry_run,
             "replaced": total_replaced,
             "entities_changed": changed_handles.len(),
             "changes": changes_log,
@@ -1164,6 +1519,11 @@ impl OpenCADStudio {
     /// Headless automation text search.
     pub(crate) fn automation_text_search(&self, req: &Value) -> Value {
         self.control_text_search(req).unwrap_or_else(|e| e)
+    }
+
+    /// Headless automation text audit.
+    pub(crate) fn automation_text_audit(&self, req: &Value) -> Value {
+        self.control_text_audit(req).unwrap_or_else(|e| e)
     }
 
     /// Headless automation text replace.

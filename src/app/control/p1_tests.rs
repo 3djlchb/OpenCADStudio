@@ -655,3 +655,112 @@ fn text_replace_op_batch_replaces_preserves_formatting_and_undoes() {
     assert_eq!(q_orig2["count"], 1);
 }
 
+#[test]
+fn text_audit_op_simulates_dry_run_checks_terms_and_dictionary() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"ta_c1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"CIRTUITS 28-09-2026","layer":"0"},
+            {"type":"MText","position":[10,0,0],"value":"{\\fCentury Gothic;CUVE EAU NON TRAITE}","layer":"0"},
+            {"type":"Text","position":[20,0,0],"value":"POMPE A EAU","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Test text_audit with pairs, check_terms, and dictionary
+    let audit_res = app.automation_op(
+        r#"{
+            "op":"text_audit",
+            "pairs":[
+                {"find":"CIRTUITS","replace":"CIRCUITS"},
+                {"find":"NON TRAITE","replace":"NON TRAITÉE"},
+                {"find":"INEXISTANT_PAIR","replace":"REPLACEMENT"}
+            ],
+            "check_terms":["CIRTUITS", "NON TRAITE", "INEXISTANT_TERM"],
+            "dictionary":["EAU", "POMPE", "28-09-2026"]
+        }"#,
+    );
+    assert_eq!(audit_res["ok"], true, "{}", audit_res["error"]);
+
+    // Check summary
+    assert_eq!(audit_res["summary"]["pairs_total"], 3);
+    assert_eq!(audit_res["summary"]["pairs_unmatched"], 1);
+    assert_eq!(audit_res["summary"]["check_terms_total"], 3);
+    assert_eq!(audit_res["summary"]["check_terms_found"], 2);
+
+    // Unmatched reporting
+    assert_eq!(audit_res["unmatched_pairs"], json!(["INEXISTANT_PAIR"]));
+    assert_eq!(audit_res["unmatched_check_terms"], json!(["INEXISTANT_TERM"]));
+
+    // Simulated changes has 2 entries (Text and MText)
+    let changes = audit_res["simulated_changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0]["find"], "CIRTUITS");
+    assert_eq!(changes[0]["replace"], "CIRCUITS");
+    assert_eq!(changes[0]["replaced"], 1);
+    assert!(changes[1]["after"].as_str().unwrap().contains("NON TRAITÉE"));
+
+    // Suspect matches
+    let suspects = audit_res["suspect_matches"].as_array().unwrap();
+    assert_eq!(suspects.len(), 2);
+
+    // Verify document was NOT mutated (pure read op)
+    let q = app.automation_op(r#"{"op":"text_search","find":"CIRTUITS"}"#);
+    assert_eq!(q["ok"], true);
+    assert_eq!(q["count"], 1);
+}
+
+#[test]
+fn text_replace_op_supports_dry_run_without_mutating_or_undo() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let r = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"entities_create","request_id":"tr_dry1","document_id":{doc},"entities":[
+            {"type":"Text","position":[0,0,0],"value":"TEST BEFORE REPLACE","layer":"0"}
+        ]}"#,
+    );
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    // Run text_replace with dry_run = true
+    let dry_res = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"text_replace","request_id":"tr_sim1","document_id":{doc},"find":"BEFORE","replace":"AFTER","dry_run":true}"#,
+    );
+    assert_eq!(dry_res["ok"], true, "{}", dry_res["error"]);
+    assert_eq!(dry_res["result"]["dry_run"], true);
+    assert_eq!(dry_res["result"]["replaced"], 1);
+    assert_eq!(dry_res["result"]["entities_changed"], 1);
+
+    // Verify the document was NOT modified
+    let q_before = app.automation_op(r#"{"op":"text_search","find":"TEST BEFORE REPLACE"}"#);
+    assert_eq!(q_before["ok"], true);
+    assert_eq!(q_before["count"], 1);
+
+    let q_after = app.automation_op(r#"{"op":"text_search","find":"TEST AFTER REPLACE"}"#);
+    assert_eq!(q_after["ok"], true);
+    assert_eq!(q_after["count"], 0);
+
+    // Now run with dry_run = false
+    let real_res = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"text_replace","request_id":"tr_real1","document_id":{doc},"find":"BEFORE","replace":"AFTER","dry_run":false}"#,
+    );
+    assert_eq!(real_res["ok"], true, "{}", real_res["error"]);
+    assert_eq!(real_res["result"]["replaced"], 1);
+
+    // Now it was modified
+    let q_after2 = app.automation_op(r#"{"op":"text_search","find":"TEST AFTER REPLACE"}"#);
+    assert_eq!(q_after2["ok"], true);
+    assert_eq!(q_after2["count"], 1);
+
+    // Undo restores it
+    app.automation_op(r#"{"op":"undo"}"#);
+    let q_undone = app.automation_op(r#"{"op":"text_search","find":"TEST BEFORE REPLACE"}"#);
+    assert_eq!(q_undone["ok"], true);
+    assert_eq!(q_undone["count"], 1);
+}
+
+

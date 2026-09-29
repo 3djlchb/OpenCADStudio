@@ -680,6 +680,7 @@ impl OpenCADStudio {
             "audit" => self.document_audit(&req),
             "query" => self.entity_query(&req),
             "text_search" => self.automation_text_search(&req),
+            "text_audit" => self.automation_text_audit(&req),
             "text_replace" => self.automation_text_replace(&req),
             "records" => self.record_query(&req),
             "record_schema" => self.record_schema(&req),
