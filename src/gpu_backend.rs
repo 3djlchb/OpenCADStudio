@@ -357,7 +357,12 @@ fn crash_report_blames_the_device(sentinel: &str) -> bool {
     else {
         return false;
     };
-    crate::sys::crash_log::report_for_pid(pid)
+    let armed = sentinel
+        .lines()
+        .find_map(|line| line.strip_prefix("t="))
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    crate::sys::crash_log::report_for_pid(pid, armed)
         .is_some_and(|report| crate::sys::crash_log::is_device_failure(&report))
 }
 
@@ -1129,7 +1134,14 @@ mod tests {
 
         let reports = crate::sys::crash_log::directory().expect("a config directory");
         let _ = std::fs::create_dir_all(&reports);
-        let report = reports.join(format!("crash-1-{}.log", std::process::id()));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        // A report older than the run, left by another process that once
+        // had this id, blames nobody.
+        let stale = reports.join(format!("crash-1-{}.log", std::process::id()));
+        let report = reports.join(format!("crash-{}-{}.log", now + 1, std::process::id()));
 
         arm_sentinel("dx12");
         mark_sentinel_survived();
@@ -1138,6 +1150,16 @@ mod tests {
             crashed_backends().is_empty(),
             "with no crash report, a survived run blames nobody"
         );
+        std::fs::write(
+            &stale,
+            crate::sys::crash_log::report_from("Out of Memory", "wgpu-29.0.4/src/lib.rs:1:1", 1),
+        )
+        .unwrap();
+        assert!(
+            crashed_backends().is_empty(),
+            "a report from before the run belongs to another process"
+        );
+        let _ = std::fs::remove_file(&stale);
 
         // The run left a report, and it is the device's own failure.
         std::fs::write(

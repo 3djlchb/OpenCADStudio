@@ -435,17 +435,22 @@ pub mod crash_log {
     /// a process id from somewhere else — the GPU crash sentinel does — can
     /// ask what killed that exact run instead of guessing from the newest
     /// file, which on a busy machine may belong to a different one.
-    pub fn report_for_pid(pid: u32) -> Option<String> {
+    ///
+    /// Process ids are reused, so only a report written at or after
+    /// `not_before` (Unix seconds — when that run started) counts: an old
+    /// report from an unrelated run that once had the same id does not.
+    pub fn report_for_pid(pid: u32, not_before: u64) -> Option<String> {
         let directory = directory()?;
         let suffix = format!("-{pid}.log");
         let entry = std::fs::read_dir(directory)
             .ok()?
             .flatten()
             .find(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .ends_with(suffix.as_str())
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.strip_prefix("crash-")
+                    .and_then(|rest| rest.strip_suffix(suffix.as_str()))
+                    .and_then(|when| when.parse::<u64>().ok())
+                    .is_some_and(|when| when >= not_before)
             })?;
         std::fs::read_to_string(entry.path()).ok()
     }
@@ -468,9 +473,11 @@ pub mod crash_log {
         }
         // The message wgpu panics with names the call, and the location names
         // wgpu itself; either alone is enough, since a stripped build can
-        // leave the message terse.
+        // leave the message terse. Plain words like "buffer" or "surface"
+        // are not: drawing code and the modelling kernel panic with those
+        // too, and that is no reason to give up a working backend.
         let haystack = format!("{panic_line} {at_line}").to_ascii_lowercase();
-        ["wgpu", "out of memory", "buffer", "surface", "device lost"]
+        ["wgpu", "out of memory", "device lost", "validation error"]
             .iter()
             .any(|needle| haystack.contains(needle))
     }
