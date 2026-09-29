@@ -3127,7 +3127,7 @@ pub(super) fn doc_tab_bar<'a>(
             row![title_btn].spacing(0).align_y(iced::Center)
         } else {
             let close_btn = button(text("×").size(12))
-                .on_press(Message::TabClose(idx))
+                .on_press(Message::TabClose(tab.id))
                 .height(Fill)
                 .padding([5, 9])
                 .style(move |theme: &Theme, status| {

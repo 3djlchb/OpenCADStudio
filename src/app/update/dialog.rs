@@ -200,8 +200,14 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
 
     pub(super) fn on_unsaved_dialog_discard(&mut self) -> Task<Message> {
                 match self.pending_close.take() {
-                    Some(crate::app::PendingClose::Tab(idx)) => {
+                    Some(crate::app::PendingClose::Tab(tab_id)) => {
                         let close_win = self.close_unsaved_dialog_window();
+                        // Resolve the id now: the tab may have closed while
+                        // the dialog was open (batched close, automation),
+                        // in which case there is nothing left to discard.
+                        let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else {
+                            return Task::batch([close_win, self.continue_tab_close_queue()]);
+                        };
                         // Discarded — drop this tab's autosave recovery copy.
                         #[cfg(not(target_arch = "wasm32"))]
                         let _ = std::fs::remove_file(self.autosave_target(idx));
@@ -249,7 +255,17 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 return Task::none();
             };
             let (idx, continuation) = match pending {
-                crate::app::PendingClose::Tab(idx) => {
+                crate::app::PendingClose::Tab(tab_id) => {
+                    // The pending target is an id; resolve it against the
+                    // current tab list so a tab closed in the meantime can
+                    // neither panic the save path nor save the wrong file.
+                    let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else {
+                        self.pending_close = None;
+                        return Task::batch([
+                            self.close_unsaved_dialog_window(),
+                            self.continue_tab_close_queue(),
+                        ]);
+                    };
                     (idx, crate::app::SaveContinuation::CloseTab)
                 }
                 crate::app::PendingClose::Quit => {
@@ -298,8 +314,14 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         #[cfg(target_arch = "wasm32")]
         {
             match self.pending_close.take() {
-                Some(crate::app::PendingClose::Tab(idx)) => {
-                    self.pending_close = Some(crate::app::PendingClose::Tab(idx));
+                Some(crate::app::PendingClose::Tab(tab_id)) => {
+                    let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else {
+                        return Task::batch([
+                            self.close_unsaved_dialog_window(),
+                            self.continue_tab_close_queue(),
+                        ]);
+                    };
+                    self.pending_close = Some(crate::app::PendingClose::Tab(tab_id));
                     self.save_dialog_for_unsaved = true;
                     let close = self.close_unsaved_dialog_window();
                     let save = self.save_with_default_format(idx);

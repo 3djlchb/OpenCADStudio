@@ -1954,13 +1954,23 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::TabClose(idx) => {
+            Message::TabClose(tab_id) => {
                 self.hovered_doc_tab = None;
-                self.on_tab_close(idx)
+                // Resolve the stable id when the message is handled, not when
+                // it was built: an earlier close in the same batch may have
+                // shifted or removed the tab a captured index referred to.
+                match self.tabs.iter().position(|tab| tab.id == tab_id) {
+                    Some(idx) => self.on_tab_close(idx),
+                    // Already closed by an earlier message — nothing to do.
+                    None => Task::none(),
+                }
             }
 
             Message::DocTabSaveAll => self.dispatch_command("SAVEALL"),
 
+            // Both close-* variants resolve ids against the live tab list at
+            // handling time (like `TabClose` above), so a batch that closed
+            // tabs earlier cannot leave them stale.
             Message::DocTabCloseAll => {
                 let ids = self
                     .tabs

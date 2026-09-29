@@ -1632,9 +1632,10 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::Unsaved => {
                 let tab_name = match &self.pending_close {
-                    Some(super::super::PendingClose::Tab(idx)) => self
+                    Some(super::super::PendingClose::Tab(tab_id)) => self
                         .tabs
-                        .get(*idx)
+                        .iter()
+                        .find(|t| t.id == *tab_id)
                         .map(|t| t.tab_display_name())
                         .unwrap_or_default(),
                     Some(super::super::PendingClose::Quit) => self

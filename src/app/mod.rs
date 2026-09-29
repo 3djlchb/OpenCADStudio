@@ -1438,8 +1438,10 @@ pub(super) struct OpenCADStudio {
 /// What triggered the "unsaved changes" dialog.
 #[derive(Debug, Clone)]
 pub(super) enum PendingClose {
-    /// User tried to close the tab at this index.
-    Tab(usize),
+    /// User tried to close the tab with this document id. Ids stay valid
+    /// while the dialog is open; a vector index would go stale the moment
+    /// another tab closes and Discard would remove the wrong tab.
+    Tab(u64),
     /// User tried to quit the application.
     Quit,
 }
@@ -2417,8 +2419,12 @@ pub enum Message {
         to: usize,
         after: bool,
     },
-    /// Close the given tab index.
-    TabClose(usize),
+    /// Close the tab with this document id. Carries the stable id, not a
+    /// vector index: iced dispatches every message built from one view
+    /// snapshot before rebuilding it, so an index captured alongside other
+    /// messages can already be stale (and point at a different tab) by the
+    /// time it is handled.
+    TabClose(u64),
     /// Save every drawing that already has a file path.
     DocTabSaveAll,
     /// Close every non-Start drawing tab.

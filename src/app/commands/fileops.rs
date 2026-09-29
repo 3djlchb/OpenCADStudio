@@ -141,7 +141,10 @@ impl OpenCADStudio {
             // CLOSE — close the active drawing tab (with the unsaved-changes
             // prompt the tab-close handler already runs).
             "CLOSE" => {
-                return Some(Task::done(Message::TabClose(self.active_tab)));
+                return Some(match self.tabs.get(self.active_tab) {
+                    Some(tab) => Task::done(Message::TabClose(tab.id)),
+                    None => Task::none(),
+                });
             }
 
             // ARCHIVE / ETRANSMIT — package the drawing and its referenced files

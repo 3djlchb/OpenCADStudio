@@ -727,7 +727,7 @@ impl OpenCADStudio {
                 Some(crate::app::ModalKind::BlockDefinition) => Message::BlockDefApply,
                 _ => return Err(failure("no_dialog", "No dialog with an OK button is open")),
             },
-            "close_document" => Message::TabClose(self.active_tab),
+            "close_document" => Message::TabClose(self.tabs[self.active_tab].id),
             "toggle_properties" => Message::ToggleProperties,
             "toggle_layers" => Message::ToggleLayers,
             "toggle_grid" => Message::ToggleGrid,

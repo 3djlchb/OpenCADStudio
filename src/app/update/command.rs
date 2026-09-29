@@ -149,7 +149,7 @@ pub(super) fn begin_tab_close_queue(&mut self, tab_ids: Vec<u64>) -> Task<Messag
                 continue;
             }
             if self.tabs[idx].dirty {
-                self.pending_close = Some(crate::app::PendingClose::Tab(idx));
+                self.pending_close = Some(crate::app::PendingClose::Tab(tab_id));
                 tasks.push(self.open_unsaved_dialog_window());
                 break;
             }
@@ -168,7 +168,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 // now rather than risk it applying to a different tab's document.
                 self.cancel_attr_editor();
                 if self.tabs.get(idx).map_or(false, |t| t.dirty) {
-                    self.pending_close = Some(crate::app::PendingClose::Tab(idx));
+                    self.pending_close =
+                        Some(crate::app::PendingClose::Tab(self.tabs[idx].id));
                     return self.open_unsaved_dialog_window();
                 }
                 // Pending client interactive requests pinned to this drawing
@@ -4557,5 +4558,108 @@ mod plot_style_ctb_guard_tests {
             before,
             "CTB-mode plot_style choice must not add an undo entry"
         );
+    }
+}
+
+/// Reproductions for the stale-tab-index crashes: iced dispatches every
+/// message produced from one view snapshot before rebuilding it, so a second
+/// `TabClose` (or a `PendingClose::Tab` stashed while the unsaved dialog is
+/// open) can carry an index the first removal already invalidated.
+#[cfg(test)]
+mod tab_close_tests {
+    use crate::app::{Message, OpenCADStudio};
+
+    /// `[Start, Drawing A, Drawing B]` — three clean tabs.
+    fn three_tabs() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.push_test_document();
+        app.push_test_document();
+        assert_eq!(app.tabs.len(), 3, "start page plus two drawings");
+        assert!(!app.tabs[1].is_start && !app.tabs[2].is_start);
+        app
+    }
+
+    /// Two close messages built from the same view snapshot: the first one
+    /// removes the tab, the second carries the now-outdated reference. The
+    /// close request must degrade to a no-op, not panic.
+    #[test]
+    fn stale_tab_close_is_a_no_op() {
+        let mut app = three_tabs();
+        let id = app.tabs[app.tabs.len() - 1].id;
+
+        let _ = app.update(Message::TabClose(id));
+        assert_eq!(app.tabs.len(), 2, "first close removed the tab");
+
+        // Same target again, as the batched second message from one snapshot.
+        let _ = app.update(Message::TabClose(id));
+        assert_eq!(
+            app.tabs.len(),
+            2,
+            "stale close must not remove another tab or panic"
+        );
+    }
+
+    /// Double-clicking one tab's × in a single batch must close that tab
+    /// exactly once; the second message must not slide onto the tab that
+    /// shifted into its place.
+    #[test]
+    fn double_close_from_one_snapshot_closes_only_the_clicked_tab() {
+        let mut app = three_tabs();
+        let first_id = app.tabs[1].id;
+        let other_id = app.tabs[2].id;
+
+        let _ = app.update(Message::TabClose(first_id));
+        let _ = app.update(Message::TabClose(first_id));
+
+        assert!(
+            app.tabs.iter().all(|t| t.id != first_id),
+            "the clicked tab must be closed"
+        );
+        assert!(
+            app.tabs.iter().any(|t| t.id == other_id),
+            "the tab that shifted into index 1 must survive"
+        );
+    }
+
+    /// The unsaved dialog stashes a close target while it is open. Another
+    /// close landing before the user answers shifts the vector, so Discard
+    /// must still discard the tab the dialog was opened for.
+    #[test]
+    fn unsaved_dialog_discard_closes_the_tab_it_was_opened_for() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.push_test_document(); // A
+        app.push_test_document(); // B
+        app.push_test_document(); // C
+        assert_eq!(app.tabs.len(), 4);
+        let a_id = app.tabs[1].id;
+        let b_id = app.tabs[2].id;
+        let c_id = app.tabs[3].id;
+        app.tabs[2].dirty = true;
+
+        // Close dirty B: opens the dialog and stashes the pending target.
+        let _ = app.update(Message::TabClose(b_id));
+        assert!(
+            app.pending_close.is_some(),
+            "dirty close opens the unsaved dialog"
+        );
+
+        // A second close lands while the dialog is pending (batched message /
+        // automation `close` / save continuation) and shifts indices.
+        let _ = app.update(Message::TabClose(a_id));
+        assert!(app.tabs.iter().all(|t| t.id != a_id));
+
+        // User picks Discard.
+        let _ = app.update(Message::UnsavedDialogDiscard);
+
+        assert!(
+            app.tabs.iter().all(|t| t.id != b_id),
+            "the dirty tab the dialog was opened for must be discarded"
+        );
+        assert!(
+            app.tabs.iter().any(|t| t.id == c_id),
+            "C must survive the stale pending index"
+        );
+        assert!(app.pending_close.is_none(), "pending target consumed");
+        assert!(app.active_tab < app.tabs.len(), "active tab stays valid");
     }
 }

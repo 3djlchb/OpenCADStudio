@@ -2226,8 +2226,8 @@ impl OpenCADStudio {
         };
         if self.save_dialog_for_unsaved {
             if saved {
-                if let Some(crate::app::PendingClose::Tab(index)) = self.pending_close.take() {
-                    let continuation = self.update(Message::TabClose(index));
+                if let Some(crate::app::PendingClose::Tab(tab_id)) = self.pending_close.take() {
+                    let continuation = self.update(Message::TabClose(tab_id));
                     let rest = self.continue_tab_close_queue();
                     return Task::batch([recent_task, continuation, rest]);
                 }
@@ -2649,7 +2649,8 @@ impl OpenCADStudio {
                 });
                 match outcome.continuation {
                     crate::app::SaveContinuation::CloseTab => {
-                        self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                        self.pending_close =
+                            Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                     }
                     crate::app::SaveContinuation::Quit => {
                         self.pending_close = Some(crate::app::PendingClose::Quit);
@@ -2663,7 +2664,7 @@ impl OpenCADStudio {
                 .push_error(crate::tf!("Save failed: {error}").as_ref());
             return match outcome.continuation {
                 crate::app::SaveContinuation::CloseTab => {
-                    self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                    self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                     self.open_unsaved_dialog_window()
                 }
                 crate::app::SaveContinuation::Quit => {
@@ -2754,7 +2755,7 @@ impl OpenCADStudio {
             crate::app::SaveContinuation::CloseTab if snapshot_is_current => {
                 self.pending_close = None;
                 tasks.push(self.close_unsaved_dialog_window());
-                tasks.push(self.update(Message::TabClose(i)));
+                tasks.push(self.update(Message::TabClose(self.tabs[i].id)));
                 tasks.push(self.continue_tab_close_queue());
             }
             crate::app::SaveContinuation::Quit if snapshot_is_current => {
@@ -2768,7 +2769,7 @@ impl OpenCADStudio {
                 }
             }
             crate::app::SaveContinuation::CloseTab => {
-                self.pending_close = Some(crate::app::PendingClose::Tab(i));
+                self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                 tasks.push(self.open_unsaved_dialog_window());
             }
             crate::app::SaveContinuation::Quit => {
@@ -2787,7 +2788,10 @@ impl OpenCADStudio {
     ) {
         self.pending_close = match continuation {
             crate::app::SaveContinuation::None => None,
-            crate::app::SaveContinuation::CloseTab => Some(crate::app::PendingClose::Tab(tab_idx)),
+            crate::app::SaveContinuation::CloseTab => self
+                .tabs
+                .get(tab_idx)
+                .map(|tab| crate::app::PendingClose::Tab(tab.id)),
             crate::app::SaveContinuation::Quit => Some(crate::app::PendingClose::Quit),
         };
     }
