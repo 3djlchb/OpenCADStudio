@@ -477,7 +477,7 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                     (|| Some((f64_at(e, 112)?, f64_at(e, 120)?, quat_axes(e, 144)?, p3(176)?, marked_string(e, 200)?)))()
                 } else {
                     (|| {
-                        let count = u16::from_le_bytes([e[110], e[111]]) as usize;
+                        let count = u16::from_le_bytes(e.get(110..112)?.try_into().ok()?) as usize;
                         let chars = e.get(174..170 + count.max(4))?;
                         let text = String::from_utf8_lossy(chars).trim_end_matches(char::from(0)).to_string();
                         Some((f64_at(e, 112)?, f64_at(e, 120)?, turned_axes(f64_at(e, 144)?), p3(152)?, text))
