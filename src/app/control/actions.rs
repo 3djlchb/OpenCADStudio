@@ -72,6 +72,7 @@ pub(super) const NAMES: &[&str] = &[
     "pdf_dialog_ok",
     "pdf_layer_toggle",
     "pdf_page_select",
+    "pc_colormap",
     "ribbon_tab",
     "ribbon_dropdown",
     "dialog_ok",
@@ -688,6 +689,36 @@ impl OpenCADStudio {
             "pdf_layer_toggle" => Message::PdfDialog(
                 crate::ui::window::pdf_dialogs::PdfDialogMsg::LayersToggle(string(req, "value")?.into()),
             ),
+            // Point Cloud Color Map: one edit, "tab=elevation", "count=3",
+            // "even", "reverse", "scheme=Earth", "gradient=0", "max=90",
+            // "min=10", "interval=0.1", "extents=0", "range=2", "current=0".
+            "pc_colormap" => {
+                use crate::ui::window::pdf_dialogs::{OutOfRange, PdfDialogMsg as M};
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                let on = arg != "0";
+                Message::PdfDialog(match key {
+                    "tab" => M::MapTab(arg == "elevation"),
+                    "scheme" => M::MapScheme(arg.into()),
+                    "count" => M::MapCount(arg.parse().map_err(|_| failure("invalid_value", "count"))?),
+                    "even" => M::MapEven,
+                    "reverse" => M::MapReverse,
+                    "gradient" => M::MapGradient(on),
+                    "max" => M::MapMax(arg.into()),
+                    "min" => M::MapMin(arg.into()),
+                    "interval" => M::MapInterval(arg.into()),
+                    "extents" => M::MapExtents(on),
+                    "range" => M::MapOutOfRange(OutOfRange(arg.parse().unwrap_or(1))),
+                    "current" => M::MapCurrent(on),
+                    "new" => M::MapNew,
+                    "rename" => M::MapRename,
+                    "name" => M::MapNameInput(arg.into()),
+                    "name_ok" => M::MapNameOk,
+                    "delete" => M::MapDelete,
+                    "apply" => M::MapApply,
+                    _ => return Err(failure("invalid_value", "Unknown color map edit")),
+                })
+            }
             // Attach dialog: choose pages by index ("0,2").
             "pdf_page_select" => {
                 let pages: Vec<usize> = string(req, "value")?
@@ -714,6 +745,7 @@ impl OpenCADStudio {
                 Message::PdfDialog(match self.active_modal {
                     Some(crate::app::ModalKind::PdfAttach) => PdfDialogMsg::AttachOk,
                     Some(crate::app::ModalKind::PointCloudAttach) => PdfDialogMsg::CloudOk,
+                    Some(crate::app::ModalKind::PointCloudColorMap) => PdfDialogMsg::MapOk,
                     Some(crate::app::ModalKind::UnderlayLayers) => PdfDialogMsg::LayersOk,
                     Some(crate::app::ModalKind::PdfImportSettings) => PdfDialogMsg::SettingsOk,
                     Some(crate::app::ModalKind::PdfImportFile) => PdfDialogMsg::ImportOk,

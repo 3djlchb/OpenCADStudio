@@ -15,6 +15,7 @@ mod layerprops;
 mod layers;
 pub(crate) mod pdf_import;
 mod point_cloud;
+mod pc_colormap;
 mod pc_extract;
 mod pdf_underlay;
 mod pdf_dialogs;
@@ -269,6 +270,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_pdf_underlay(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_pc_colormap(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_pc_extract(cmd, i) {

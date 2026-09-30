@@ -378,6 +378,9 @@ impl OpenCADStudio {
                     }
                     "attach" => crate::t!("Attaches a PDF file as an underlay."),
                     "pointcloud" => crate::t!("Attaches a point cloud scan or project."),
+                    "pointcloudcolormap" => {
+                        crate::t!("Sets the color schemes and ranges a point cloud is colored by intensity or elevation.")
+                    }
                     "layers" => crate::t!("Turns the layers of a PDF underlay on or off."),
                     _ => crate::t!("Imports the geometry, fills, raster images and text of a PDF file as drawing objects."),
                 };
@@ -480,6 +483,26 @@ impl OpenCADStudio {
             // ── Attach Point Cloud ────────────────────────────────────────
             PdfDialogMsg::CloudBrowse => return Task::done(Message::PointCloudAttachPick),
             PdfDialogMsg::CloudOk => return self.point_cloud_attach_ok(i),
+            message @ (PdfDialogMsg::MapTab(_)
+            | PdfDialogMsg::MapScheme(_)
+            | PdfDialogMsg::MapCount(_)
+            | PdfDialogMsg::MapEven
+            | PdfDialogMsg::MapReverse
+            | PdfDialogMsg::MapGradient(_)
+            | PdfDialogMsg::MapNew
+            | PdfDialogMsg::MapDelete
+            | PdfDialogMsg::MapRename
+            | PdfDialogMsg::MapNameInput(_)
+            | PdfDialogMsg::MapNameOk
+            | PdfDialogMsg::MapNameCancel
+            | PdfDialogMsg::MapMax(_)
+            | PdfDialogMsg::MapMin(_)
+            | PdfDialogMsg::MapInterval(_)
+            | PdfDialogMsg::MapExtents(_)
+            | PdfDialogMsg::MapOutOfRange(_)
+            | PdfDialogMsg::MapCurrent(_)
+            | PdfDialogMsg::MapApply
+            | PdfDialogMsg::MapOk) => return self.update_point_cloud_color_map(message),
             PdfDialogMsg::CloudPathType(choice) => {
                 let stored = self.point_cloud_attach.as_ref().map(|s| self.pdf_stored_path(&s.path, choice.0));
                 if let (Some(s), Some(stored)) = (self.point_cloud_attach.as_mut(), stored) {

@@ -1,6 +1,7 @@
 //! PDF dialogs: Attach PDF Underlay (pages, path type, insertion, scale,
 //! rotation), Underlay Layers, PDF Import Settings and Import PDF, built
-//! from cards, segmented choices and toggle chips.
+//! from cards, segmented choices and toggle chips; the point cloud Attach
+//! and Color Map dialogs share them.
 
 use std::fmt;
 
@@ -47,6 +48,28 @@ pub enum PdfDialogMsg {
     CloudLock(bool),
     CloudZoom(bool),
     CloudOk,
+    // Point Cloud Color Map
+    /// Elevation tab (else intensity).
+    MapTab(bool),
+    MapScheme(String),
+    MapCount(usize),
+    MapEven,
+    MapReverse,
+    MapGradient(bool),
+    MapNew,
+    MapDelete,
+    MapRename,
+    MapNameInput(String),
+    MapNameOk,
+    MapNameCancel,
+    MapMax(String),
+    MapMin(String),
+    MapInterval(String),
+    MapExtents(bool),
+    MapOutOfRange(OutOfRange),
+    MapCurrent(bool),
+    MapApply,
+    MapOk,
     // Underlay Layers
     LayersUnderlay(String),
     LayersSearch(String),
@@ -1107,4 +1130,359 @@ pub fn view_import_file<'a>(
         .padding([10, 12])
         .width(sizing.width)
         .into()
+}
+
+// ── Point Cloud Color Map ──────────────────────────────────────────────────
+
+/// A colour scheme as the dialog edits it: identifier, name and colours
+/// (high end first).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapRamp {
+    pub id: String,
+    pub name: String,
+    pub colors: Vec<[u8; 3]>,
+}
+
+/// What a scheme does with values outside its range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutOfRange(pub i16);
+
+impl OutOfRange {
+    pub const ALL: [OutOfRange; 3] = [OutOfRange(0), OutOfRange(1), OutOfRange(2)];
+}
+
+impl fmt::Display for OutOfRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self.0 {
+            0 => t!("Use min/max colors"),
+            2 => t!("Hide points"),
+            _ => t!("Use RGB scan colors"),
+        };
+        f.write_str(label.as_ref())
+    }
+}
+
+/// One tab's settings: its scheme and range.
+#[derive(Debug, Clone)]
+pub struct MapSlot {
+    pub scheme: String,
+    pub gradient: bool,
+    pub max: String,
+    pub min: String,
+    pub out_of_range: OutOfRange,
+}
+
+/// The Point Cloud Color Map dialog: the drawing's colour schemes and, for
+/// a chosen cloud, its intensity and elevation colouring.
+pub struct PointCloudColorMapState {
+    /// The cloud edited; `None` edits the drawing's default schemes.
+    pub cloud: Option<codec::Handle>,
+    /// Elevation tab (else intensity).
+    pub elevation_tab: bool,
+    pub ramps: Vec<MapRamp>,
+    pub intensity: MapSlot,
+    pub elevation: MapSlot,
+    /// Elevation over the cloud's own height (else the fixed range).
+    pub extents: bool,
+    /// The cloud's height range.
+    pub height: (f64, f64),
+    pub make_current: bool,
+    /// The height of one band (elevation), as shown and typed.
+    pub interval: String,
+    /// A name being typed for a new scheme (`true`) or a rename.
+    pub naming: Option<(bool, String)>,
+}
+
+impl PointCloudColorMapState {
+    pub fn slot(&self) -> &MapSlot {
+        if self.elevation_tab { &self.elevation } else { &self.intensity }
+    }
+
+    pub fn slot_mut(&mut self) -> &mut MapSlot {
+        if self.elevation_tab { &mut self.elevation } else { &mut self.intensity }
+    }
+
+    pub fn ramp(&self) -> Option<&MapRamp> {
+        let id = &self.slot().scheme;
+        self.ramps.iter().find(|r| r.id.eq_ignore_ascii_case(id)).or(self.ramps.first())
+    }
+
+    pub fn ramp_mut(&mut self) -> Option<&mut MapRamp> {
+        let id = self.slot().scheme.clone();
+        let at = self.ramps.iter().position(|r| r.id.eq_ignore_ascii_case(&id)).unwrap_or(0);
+        self.ramps.get_mut(at)
+    }
+
+    /// The range the ramp spans on the current tab.
+    pub fn range(&self) -> Option<(f64, f64)> {
+        if self.elevation_tab && self.extents {
+            return Some(self.height);
+        }
+        let slot = self.slot();
+        Some((slot.min.trim().parse().ok()?, slot.max.trim().parse().ok()?))
+    }
+}
+
+/// `t` (0 at the high end) along colours, blended; channels are cut to
+/// whole values, as the reference stores resampled schemes.
+pub fn blend(colors: &[[u8; 3]], t: f64) -> [u8; 3] {
+    if colors.len() < 2 {
+        return colors.first().copied().unwrap_or([255; 3]);
+    }
+    let x = t.clamp(0.0, 1.0) * (colors.len() - 1) as f64;
+    let k = (x as usize).min(colors.len() - 2);
+    let f = x - k as f64;
+    let (a, b) = (colors[k], colors[k + 1]);
+    [0, 1, 2].map(|c| (f64::from(a[c]) + (f64::from(b[c]) - f64::from(a[c])) * f) as u8)
+}
+
+/// A number as the dialog labels it: at most two decimals.
+pub fn short(value: f64) -> String {
+    let value = if value.abs() < 0.005 { 0.0 } else { value };
+    let text = format!("{:.2}", value);
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn swatch<'a>(color: [u8; 3], width: f32, height: f32) -> Element<'a, Message> {
+    let color = iced::Color::from_rgb8(color[0], color[1], color[2]);
+    container(Space::new().width(width).height(height))
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(color)),
+            border: Border { width: 1.0, radius: 3.0.into(), color: iced::Color::from_rgb8(0x77, 0x77, 0x77) },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// The ramp as a bar, high end on top, blended or in bands, with the values
+/// where the bands meet (blended: the ends and the inner band centres).
+fn ramp_bar<'a>(colors: &[[u8; 3]], gradient: bool, range: Option<(f64, f64)>, percent: bool) -> Element<'a, Message> {
+    const HEIGHT: f32 = 360.0;
+    let n = colors.len().max(1);
+    let strips: Vec<Element<'a, Message>> = if gradient {
+        (0..72).map(|k| {
+            let c = blend(colors, (k as f64 + 0.5) / 72.0);
+            let color = iced::Color::from_rgb8(c[0], c[1], c[2]);
+            container(Space::new().width(Fill).height(Fill))
+                .height(Length::FillPortion(1))
+                .style(move |_: &Theme| container::Style {
+                    background: Some(Background::Color(color)),
+                    ..Default::default()
+                })
+                .into()
+        }).collect()
+    } else {
+        colors.iter().map(|c| {
+            let color = iced::Color::from_rgb8(c[0], c[1], c[2]);
+            container(Space::new().width(Fill).height(Fill))
+                .height(Length::FillPortion(1))
+                .style(move |_: &Theme| container::Style {
+                    background: Some(Background::Color(color)),
+                    ..Default::default()
+                })
+                .into()
+        }).collect()
+    };
+    let bar = container(iced::widget::Column::with_children(strips))
+        .width(Length::Fixed(56.0))
+        .height(Length::Fixed(HEIGHT));
+    // Label positions from the top (0) to the bottom (1).
+    let marks: Vec<f64> = if gradient {
+        let mut marks = vec![0.0];
+        marks.extend((1..n.saturating_sub(1)).map(|k| (k as f64 + 0.5) / n as f64));
+        marks.push(1.0);
+        marks
+    } else {
+        (0..=n).map(|k| k as f64 / n as f64).collect()
+    };
+    let mut labels = column![];
+    if let Some((low, high)) = range {
+        // Each label is centred on its mark, kept inside the bar.
+        let mut used = 0.0;
+        for mark in marks {
+            let value = high - (high - low) * mark;
+            let label = if percent { format!("{}%", value.round()) } else { short(value) };
+            let top = (mark * f64::from(HEIGHT) - 7.0).clamp(0.0, f64::from(HEIGHT) - 14.0);
+            labels = labels.push(Space::new().height((top - used).max(0.0) as f32)).push(text(label).size(10).height(14.0));
+            used = top.max(used) + 14.0;
+        }
+    }
+    row![bar, labels.width(Length::Fixed(44.0))].spacing(4).into()
+}
+
+pub fn view_point_cloud_color_map<'a>(
+    state: &'a PointCloudColorMapState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let tab = |label: std::borrow::Cow<'static, str>, on: bool, message: Option<Message>| -> Element<'a, Message> {
+        let mut b = button(text(label).size(11).width(Fill).align_x(iced::Center))
+            .style(button_style(on))
+            .padding([5, 6])
+            .width(Length::Fixed(118.0));
+        if let Some(message) = message {
+            b = b.on_press(message);
+        }
+        b.into()
+    };
+    let tabs = container(
+        row![
+            tab(t!("Intensity"), !state.elevation_tab, Some(msg(PdfDialogMsg::MapTab(false)))),
+            tab(t!("Elevation"), state.elevation_tab, Some(msg(PdfDialogMsg::MapTab(true)))),
+            tab(t!("Classification"), false, None),
+        ]
+        .spacing(2),
+    )
+    .padding(2)
+    .style(well_style);
+
+    let slot = state.slot();
+    let ramp = state.ramp();
+    let colors: Vec<[u8; 3]> = ramp.map(|r| r.colors.clone()).unwrap_or_default();
+    let ramp_card = card(
+        t!("Color ramp").into_owned(),
+        ramp_bar(&colors, slot.gradient, state.cloud.and(state.range()), !state.elevation_tab),
+    );
+
+    let names: Vec<String> = state.ramps.iter().map(|r| r.name.clone()).collect();
+    let scheme = pick_list(ramp.map(|r| r.name.clone()), names, |n: &String| n.clone())
+        .on_select(|n| msg(PdfDialogMsg::MapScheme(n)))
+        .text_size(12)
+        .padding([5, 8])
+        .width(Fill);
+    let small = |label: std::borrow::Cow<'static, str>, message: PdfDialogMsg| {
+        button(text(label).size(11).width(Fill).align_x(iced::Center))
+            .on_press(msg(message))
+            .style(button_style(false))
+            .padding([5, 8])
+            .width(Length::Fixed(118.0))
+    };
+    let counts: Vec<usize> = (2..=25).collect();
+    let count = pick_list(Some(colors.len().max(2)), counts, |n: &usize| n.to_string())
+        .on_select(|n| msg(PdfDialogMsg::MapCount(n)))
+        .text_size(12)
+        .padding([4, 8])
+        .width(Length::Fixed(70.0));
+    // Blend: a strip from the first colour to the last.
+    let ends = [colors.first().copied().unwrap_or([255; 3]), colors.last().copied().unwrap_or([255; 3])];
+    let blend_strip = row((0..6).map(|k| swatch(blend(&ends, k as f64 / 5.0), 3.0, 14.0)));
+    let even = button(blend_strip).on_press(msg(PdfDialogMsg::MapEven)).style(button_style(false)).padding([5, 6]);
+    let reverse = button(
+        iced::widget::svg(crate::ui::icons::themed_handle(include_bytes!("../../../assets/icons/modify_reverse.svg")))
+            .width(16.0)
+            .height(16.0),
+    )
+    .on_press(msg(PdfDialogMsg::MapReverse))
+    .style(button_style(false))
+    .padding([4, 6]);
+    let mut scheme_rows = column![
+        row![scheme, small(t!("New"), PdfDialogMsg::MapNew)].spacing(8).align_y(iced::Center),
+        row![
+            text(t!("Number of colors")).size(11).width(Length::Fixed(110.0)),
+            count,
+            even,
+            reverse,
+            Space::new().width(Fill),
+            small(t!("Delete"), PdfDialogMsg::MapDelete)
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        row![
+            chip(t!("Display as gradient").into_owned(), slot.gradient, msg(PdfDialogMsg::MapGradient(!slot.gradient))),
+            Space::new().width(Fill),
+            small(t!("Rename"), PdfDialogMsg::MapRename)
+        ]
+        .align_y(iced::Center),
+    ]
+    .spacing(8);
+    if let Some((_, name)) = &state.naming {
+        scheme_rows = scheme_rows.push(
+            row![
+                text(t!("Name")).size(11).style(muted_style).width(Length::Fixed(110.0)),
+                text_input("", name)
+                    .on_input(|v| msg(PdfDialogMsg::MapNameInput(v)))
+                    .on_submit(msg(PdfDialogMsg::MapNameOk))
+                    .size(11)
+                    .padding([4, 8])
+                    .width(Fill)
+                    .style(field_style),
+                dialog_button(t!("Cancel"), msg(PdfDialogMsg::MapNameCancel), false),
+                dialog_button(t!("OK"), msg(PdfDialogMsg::MapNameOk), true),
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
+        );
+    }
+    let scheme_card = card(t!("Color scheme").into_owned(), scheme_rows);
+
+    let has_cloud = state.cloud.is_some();
+    let top = colors.first().copied().unwrap_or([255; 3]);
+    let bottom = colors.last().copied().unwrap_or([255; 3]);
+    let editable = has_cloud && !(state.elevation_tab && state.extents);
+    let with_swatch = |field: Element<'a, Message>, color: [u8; 3]| -> Element<'a, Message> {
+        row![field, swatch(color, 22.0, 22.0)].spacing(8).align_y(iced::Center).into()
+    };
+    let out_of_range = {
+        let list = pick_list(Some(slot.out_of_range), OutOfRange::ALL.to_vec(), |o: &OutOfRange| o.to_string())
+            .text_size(12)
+            .padding([4, 8])
+            .width(Fill);
+        let list = if editable { list.on_select(|o| msg(PdfDialogMsg::MapOutOfRange(o))) } else { list };
+        row![text(t!("Out of range points")).size(11).style(muted_style).width(Length::Fixed(150.0)), list]
+            .spacing(6)
+            .align_y(iced::Center)
+    };
+    let range_rows = if state.elevation_tab {
+        let (low, high) = state.height;
+        let interval = state.interval.as_str();
+        column![
+            chip(
+                format!("{} ({} ~ {})", t!("Apply to extents of point cloud"), short(low), short(high)),
+                state.extents,
+                msg(PdfDialogMsg::MapExtents(!state.extents))
+            ),
+            field(t!("Interval height").into_owned(), interval, editable, 150.0, |v| msg(PdfDialogMsg::MapInterval(v))),
+            with_swatch(field(t!("Maximum elevation").into_owned(), &slot.max, editable, 150.0, |v| msg(PdfDialogMsg::MapMax(v))), top),
+            with_swatch(field(t!("Minimum elevation").into_owned(), &slot.min, editable, 150.0, |v| msg(PdfDialogMsg::MapMin(v))), bottom),
+            out_of_range,
+        ]
+        .spacing(8)
+    } else {
+        column![
+            with_swatch(field(t!("Maximum intensity").into_owned(), &slot.max, editable, 150.0, |v| msg(PdfDialogMsg::MapMax(v))), top),
+            with_swatch(field(t!("Minimum intensity").into_owned(), &slot.min, editable, 150.0, |v| msg(PdfDialogMsg::MapMin(v))), bottom),
+            out_of_range,
+        ]
+        .spacing(8)
+    };
+    let range_card = card(t!("Range of colorized points").into_owned(), range_rows);
+
+    let body = row![
+        container(ramp_card).width(Length::Fixed(150.0)),
+        column![scheme_card, range_card].spacing(8).width(Fill),
+    ]
+    .spacing(10);
+
+    let mut left = row![button(text("?").size(12))
+        .on_press(msg(PdfDialogMsg::Help("pointcloudcolormap")))
+        .style(button_style(false))
+        .padding([5, 11])]
+    .spacing(8)
+    .align_y(iced::Center);
+    if has_cloud {
+        left = left.push(chip(
+            t!("Make stylization current").into_owned(),
+            state.make_current,
+            msg(PdfDialogMsg::MapCurrent(!state.make_current)),
+        ));
+    }
+    let footer = row![
+        left,
+        Space::new().width(Fill),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button(t!("Apply"), msg(PdfDialogMsg::MapApply), false),
+        dialog_button(t!("OK"), msg(PdfDialogMsg::MapOk), true),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    column![tabs, body, footer].spacing(10).padding([10, 12]).width(sizing.width).into()
 }

@@ -498,6 +498,7 @@ pub(super) struct OpenCADStudio {
     /// PDF dialogs' working copies; `None` while closed.
     pdf_attach: Option<crate::ui::window::pdf_dialogs::PdfAttachState>,
     point_cloud_attach: Option<crate::ui::window::pdf_dialogs::PointCloudAttachState>,
+    point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
     underlay_layers: Option<crate::ui::window::pdf_dialogs::UnderlayLayersState>,
     pdf_import_settings: Option<crate::modules::insert::pdf_import::PdfImportSettings>,
     pdf_import_file: Option<crate::ui::window::pdf_dialogs::PdfImportFileState>,
@@ -1903,6 +1904,7 @@ pub enum ModalKind {
     BlockDefinition,
     PdfAttach,
     PointCloudAttach,
+    PointCloudColorMap,
     UnderlayLayers,
     PdfImportSettings,
     PdfImportFile,
@@ -4034,6 +4036,7 @@ impl OpenCADStudio {
             block_definition: None,
             pdf_attach: None,
             point_cloud_attach: None,
+            point_cloud_color_map: None,
             underlay_layers: None,
             pdf_import_settings: None,
             pdf_import_file: None,

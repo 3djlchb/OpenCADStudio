@@ -86,3 +86,80 @@ impl CadCommand for PointCloudStylizeCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["POINTCLOUDSTYLIZE"] });
+
+// POINTCLOUDCOLORMAP — the Point Cloud Color Map dialog.
+//
+//   Select point cloud or [None] <None>:
+//
+// A picked cloud opens the dialog for it; None (or Enter) for the
+// drawing's default schemes.
+pub struct PointCloudColorMapCommand {
+    picked: Option<codec::EntityType>,
+}
+
+impl PointCloudColorMapCommand {
+    pub fn new() -> Self {
+        Self { picked: None }
+    }
+}
+
+impl CadCommand for PointCloudColorMapCommand {
+    fn name(&self) -> &'static str {
+        "POINTCLOUDCOLORMAP"
+    }
+
+    fn prompt(&self) -> String {
+        "Select point cloud or [None] <None>:".to_string()
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        vec![CmdOption::new("None", "N")]
+    }
+
+    fn input_kind(&self) -> InputKind {
+        InputKind::Point
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        true
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn inject_before_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn inject_picked_entity(&mut self, entity: codec::EntityType) {
+        self.picked = Some(entity);
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, _pt: glam::DVec3) -> CmdResult {
+        match self.picked.take() {
+            Some(entity) if crate::scene::is_point_cloud(&entity) => {
+                CmdResult::Dispatch(format!("_PCCOLORMAP {:X}", handle.value()))
+            }
+            // Anything else: the prompt again.
+            _ => CmdResult::NeedPoint,
+        }
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        match text.trim().to_ascii_uppercase().as_str() {
+            "" | "N" | "NONE" => Some(CmdResult::Dispatch("_PCCOLORMAP".to_string())),
+            _ => Some(CmdResult::ReportError("Invalid option keyword.".to_string())),
+        }
+    }
+
+    fn on_point(&mut self, _pt: glam::DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Dispatch("_PCCOLORMAP".to_string())
+    }
+}
+
+inventory::submit!(crate::command::CommandRegistration { names: &["POINTCLOUDCOLORMAP"] });

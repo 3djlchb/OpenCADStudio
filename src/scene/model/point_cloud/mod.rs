@@ -318,7 +318,28 @@ pub(crate) fn placed(
             (lo.min(z), hi.max(z))
         })
     };
-    let color = |i: usize, z: f64| -> [u8; 4] {
+    let scan_color = |i: usize| {
+        if cloud.has_rgb {
+            cloud.colors[i]
+        } else if cloud.has_intensity {
+            [cloud.intensity[i]; 3]
+        } else {
+            object_color
+        }
+    };
+    // A value outside a scheme's range takes the end colour, the scan
+    // colour, or is hidden (`None`), as the cloud's out-of-range choice says.
+    let along = |colors: &[[u8; 3]], t: f64, gradient: bool, out_of_range: i16, fixed: bool, i: usize| {
+        if fixed && !(0.0..=1.0).contains(&t) {
+            return match out_of_range {
+                0 => Some(ramp(colors, t, gradient)),
+                2 => None,
+                _ => Some(scan_color(i)),
+            };
+        }
+        Some(ramp(colors, t, gradient))
+    };
+    let color = |i: usize, z: f64| -> Option<[u8; 4]> {
         let [r, g, b] = match &style {
             Stylization::Object(c) => *c,
             Stylization::Normal => match cloud.normals.get(i) {
@@ -329,25 +350,22 @@ pub(crate) fn placed(
                 }
                 None => object_color,
             },
-            Stylization::Ramp { colors, gradient, intensity: true, range } => {
+            Stylization::Ramp { colors, gradient, intensity: true, range, out_of_range } => {
                 let percent = f64::from(cloud.intensity.get(i).copied().unwrap_or(0)) * 100.0 / 255.0;
                 let (from, to) = (range.0 as f64, range.1 as f64);
-                ramp(colors, (percent - from) / (to - from).max(1e-9), *gradient)
+                along(colors, (percent - from) / (to - from).max(1e-9), *gradient, *out_of_range, true, i)?
             }
-            Stylization::Ramp { colors, gradient, .. } => {
-                ramp(colors, (z - low) / (high - low).max(1e-9), *gradient)
-            }
-            Stylization::Scan => {
-                if cloud.has_rgb {
-                    cloud.colors[i]
-                } else if cloud.has_intensity {
-                    [cloud.intensity[i]; 3]
-                } else {
-                    object_color
-                }
-            }
+            Stylization::Ramp { colors, gradient, out_of_range, .. } => along(
+                colors,
+                (z - low) / (high - low).max(1e-9),
+                *gradient,
+                *out_of_range,
+                data.elevation_apply_to_fixed_range,
+                i,
+            )?,
+            Stylization::Scan => scan_color(i),
         };
-        [r, g, b, 255]
+        Some([r, g, b, 255])
     };
     let mut instances = Vec::with_capacity(cloud.positions.len() / step + 1);
     for (i, p) in cloud.positions.iter().enumerate().step_by(step) {
@@ -355,6 +373,9 @@ pub(crate) fn placed(
             continue;
         }
         let w = world(p);
+        let Some(color) = color(i, w.z) else {
+            continue;
+        };
         let pos = [w.x as f32, w.y as f32, w.z as f32];
         instances.push(PointInstance {
             pos,
@@ -363,7 +384,7 @@ pub(crate) fn placed(
                 (w.y - pos[1] as f64) as f32,
                 (w.z - pos[2] as f64) as f32,
             ],
-            color: color(i, w.z),
+            color,
         });
     }
     crate::perf::record(format_args!(
@@ -419,8 +440,9 @@ enum Stylization {
     /// Each point's world normal as a colour, (n + 1) / 2 per component.
     Normal,
     /// A colour scheme over intensity (per cent, in the range given) or
-    /// elevation, blended or in bands.
-    Ramp { colors: Vec<[u8; 3]>, gradient: bool, intensity: bool, range: (i64, i64) },
+    /// elevation, blended or in bands; values out of range per
+    /// `out_of_range` (0 end colours, 1 scan colours, 2 hidden).
+    Ramp { colors: Vec<[u8; 3]>, gradient: bool, intensity: bool, range: (i64, i64), out_of_range: i16 },
 }
 
 impl Stylization {
@@ -439,7 +461,9 @@ impl Stylization {
         } else {
             (0, 100)
         };
-        Self::Ramp { colors, gradient, intensity, range: (range.0, range.1) }
+        let out_of_range =
+            if intensity { data.intensity_out_of_range_behavior } else { data.elevation_out_of_range_behavior };
+        Self::Ramp { colors, gradient, intensity, range: (range.0, range.1), out_of_range }
     }
 }
 
@@ -456,6 +480,58 @@ const BUILTIN_RAMPS: [(&str, &[u32]); 7] = [
 
 fn rgb(color: u32) -> [u8; 3] {
     [(color >> 16) as u8, (color >> 8) as u8, color as u8]
+}
+
+/// The colour schemes the drawing offers (identifier, name, colours high end
+/// first): its colour map's, or the built-in ones.
+pub(crate) fn schemes(document: &CadDocument) -> Vec<(String, String, Vec<[u8; 3]>)> {
+    for object in document.objects.values() {
+        let ObjectType::ClassObject(object) = object else {
+            continue;
+        };
+        let ClassObjectData::PointCloudColorMap(map) = &object.data else {
+            continue;
+        };
+        if !map.color_ramps.is_empty() {
+            return map
+                .color_ramps
+                .iter()
+                .map(|r| {
+                    let colors = r.colors.iter().filter(|c| c.visible).map(|c| rgb(c.color as u32)).collect();
+                    (r.id.clone(), r.name.clone(), colors)
+                })
+                .collect();
+        }
+    }
+    BUILTIN_RAMPS
+        .iter()
+        .map(|(name, colors)| {
+            let id = crate::entities::extended::point_cloud_ramp_id(name).to_string();
+            (id, name.to_string(), colors.iter().map(|c| rgb(*c)).collect())
+        })
+        .collect()
+}
+
+/// The schemes new intensity and elevation colouring starts from: the
+/// colour map's defaults, else Spectrum and Earth.
+pub(crate) fn default_schemes(document: &CadDocument) -> (String, String) {
+    let map = document.objects.values().find_map(|object| match object {
+        ObjectType::ClassObject(object) => match &object.data {
+            ClassObjectData::PointCloudColorMap(map) => Some(map),
+            _ => None,
+        },
+        _ => None,
+    });
+    let pick = |stored: Option<&String>, name: &str| {
+        stored
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .unwrap_or_else(|| crate::entities::extended::point_cloud_ramp_id(name).to_string())
+    };
+    (
+        pick(map.map(|m| &m.default_intensity_scheme), "Spectrum"),
+        pick(map.map(|m| &m.default_elevation_scheme), "Earth"),
+    )
 }
 
 /// A scheme's colours: from the drawing's colour map when it has the scheme,

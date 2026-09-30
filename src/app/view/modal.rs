@@ -30,6 +30,7 @@ impl OpenCADStudio {
                 _ => crate::t!("Attach PDF Underlay").into_owned(),
             },
             Some(K::PointCloudAttach) => crate::t!("Attach Point Cloud").into_owned(),
+            Some(K::PointCloudColorMap) => crate::t!("Point Cloud Color Map").into_owned(),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
             Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
             Some(K::PdfImportFile) => crate::t!("Import PDF").into_owned(),
@@ -527,6 +528,12 @@ impl OpenCADStudio {
                 let state = self.point_cloud_attach.as_ref()?;
                 sized_flow(ex, 880, 560, |flow| {
                     crate::ui::window::pdf_dialogs::view_point_cloud_attach(state, flow)
+                })
+            }
+            super::super::ModalKind::PointCloudColorMap => {
+                let state = self.point_cloud_color_map.as_ref()?;
+                sized_flow(ex, 760, 560, |flow| {
+                    crate::ui::window::pdf_dialogs::view_point_cloud_color_map(state, flow)
                 })
             }
             super::super::ModalKind::UnderlayLayers => {

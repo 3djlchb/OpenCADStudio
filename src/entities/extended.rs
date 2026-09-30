@@ -1130,6 +1130,11 @@ pub(crate) const POINT_CLOUD_RAMPS: [(&str, &str); 7] = [
     ("Spectrum", "C0A3838B-81E3-4506-B908-13ECF523DB68"),
 ];
 
+/// A built-in scheme's identifier by name (Blues when unknown).
+pub(crate) fn point_cloud_ramp_id(name: &str) -> &'static str {
+    POINT_CLOUD_RAMPS.iter().find(|(n, _)| *n == name).unwrap_or(&POINT_CLOUD_RAMPS[0]).1
+}
+
 /// Stylization choices in the order the reference lists them, with the
 /// stored values: scan colours 1, object colour 2, normals 3, intensity 5,
 /// elevation 4.
