@@ -355,6 +355,10 @@ async fn open_path_with_phase_attempt(
                         recoverable: true,
                     });
                 }
+                // Before the geometry is prepared below: completing the
+                // drawing's catalog linetypes (and repairing stripped ones)
+                // after it would leave the first view drawn without them.
+                crate::io::linetypes::populate_document(&mut doc);
                 progress2.set(crate::app::OPEN_PHASE_XREF, 6000, 0, 1);
                 let t_xref = Instant::now();
                 let (xref_infos, xref_dropped) = if let Some(base_dir) = path2.parent() {
