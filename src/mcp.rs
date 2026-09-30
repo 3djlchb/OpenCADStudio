@@ -22,6 +22,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
+const TASK_TTL_MS: u64 = 3_600_000;
 const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
 const READ_OPS: &[&str] = &[
     "state",
@@ -163,18 +164,43 @@ struct McpTask {
     error: Option<Value>,
 }
 
+struct StoredTask {
+    expires_at: Instant,
+    task: McpTask,
+}
+
 #[derive(Default)]
 struct TaskStore {
-    tasks: VecDeque<McpTask>,
+    tasks: VecDeque<StoredTask>,
 }
 
 impl TaskStore {
     fn insert(&mut self, task: McpTask) {
-        self.tasks.push_back(task);
+        self.insert_at(task, Instant::now());
+    }
+
+    fn insert_at(&mut self, task: McpTask, now: Instant) {
+        self.evict_expired_at(now);
+        self.tasks.push_back(StoredTask {
+            expires_at: now + Duration::from_millis(TASK_TTL_MS),
+            task,
+        });
     }
 
     fn get_mut(&mut self, id: &str) -> Option<&mut McpTask> {
-        self.tasks.iter_mut().find(|task| task.id == id)
+        self.get_mut_at(id, Instant::now())
+    }
+
+    fn get_mut_at(&mut self, id: &str, now: Instant) -> Option<&mut McpTask> {
+        self.evict_expired_at(now);
+        self.tasks
+            .iter_mut()
+            .find(|stored| stored.task.id == id)
+            .map(|stored| &mut stored.task)
+    }
+
+    fn evict_expired_at(&mut self, now: Instant) {
+        self.tasks.retain(|stored| stored.expires_at > now);
     }
 }
 
@@ -956,7 +982,7 @@ fn task_value(task: &McpTask, status: &str) -> Value {
         "status":status,
         "createdAt":task.created_at,
         "lastUpdatedAt":task.last_updated_at,
-        "ttlMs":3_600_000,
+        "ttlMs":TASK_TTL_MS,
         "pollIntervalMs":250
     });
     if let Some(result) = &task.result {
@@ -1118,9 +1144,9 @@ fn handle_message(
                                     "taskId":task_id,
                                     "status":"working",
                                     "statusMessage":"OCS operation is running.",
-                                    "createdAt":tasks.tasks.back().unwrap().created_at,
-                                    "lastUpdatedAt":tasks.tasks.back().unwrap().last_updated_at,
-                                    "ttlMs":3_600_000,
+                                    "createdAt":tasks.tasks.back().unwrap().task.created_at,
+                                    "lastUpdatedAt":tasks.tasks.back().unwrap().task.last_updated_at,
+                                    "ttlMs":TASK_TTL_MS,
                                     "pollIntervalMs":250
                                 }),
                                 true,
@@ -1476,6 +1502,33 @@ mod tests {
         assert_eq!(value["resultType"], "complete");
         assert_eq!(value["status"], "working");
         assert_eq!(value["pollIntervalMs"], 250);
+    }
+
+    #[test]
+    fn task_store_evicts_tasks_past_their_advertised_ttl() {
+        let mk = |id: &str| McpTask {
+            id: id.into(),
+            name: "ocs_execute".into(),
+            arguments: json!({}),
+            created_at: iso8601_now(),
+            last_updated_at: iso8601_now(),
+            result: None,
+            error: None,
+        };
+        let t0 = Instant::now();
+        let mut store = TaskStore::default();
+        store.insert_at(mk("first"), t0);
+
+        let within_ttl = t0 + Duration::from_millis(TASK_TTL_MS) - Duration::from_secs(1);
+        assert!(store.get_mut_at("first", within_ttl).is_some());
+
+        let past_ttl = t0 + Duration::from_millis(TASK_TTL_MS) + Duration::from_secs(1);
+        assert!(store.get_mut_at("first", past_ttl).is_none());
+
+        store.insert_at(mk("first"), t0);
+        store.insert_at(mk("second"), past_ttl);
+        assert_eq!(store.tasks.len(), 1);
+        assert!(store.get_mut_at("second", past_ttl).is_some());
     }
 
     #[test]
