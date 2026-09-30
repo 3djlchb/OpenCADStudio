@@ -2630,6 +2630,15 @@ fn emit_wire(
         && lw.plot_visible
         && (!lw.plot_l0 || ctx.l0_plottable);
 
+    // Batched wires share one dash distance, which runs on across the NaN
+    // joins only for plinegen wires. PLINEGEN is about a wire's own breaks;
+    // a member without any (every LINE) must not carry its pattern into the
+    // next member, or each line in a block starts mid-dash where the last
+    // one stopped (#898). A member with stations keeps its own flag.
+    let plinegen = lw.plinegen
+        && (has_stations
+            || transformed_stations.is_some()
+            || lw.points.iter().any(|point| point[0].is_nan()));
     let key = style_key(
         final_color,
         lw.contrast_bg,
@@ -2642,7 +2651,7 @@ fn emit_wire(
         final_world_width,
         point_marker,
         final_aci,
-        lw.plinegen,
+        plinegen,
         lw.is_fill_only,
         lw.fill_is_2d_solid,
         lw.fill_is_3d,
@@ -2679,7 +2688,7 @@ fn emit_wire(
             final_world_width,
             point_marker,
             final_aci,
-            lw.plinegen,
+            plinegen,
             lw.is_fill_only,
             lw.fill_is_2d_solid,
             lw.fill_is_3d,
