@@ -6,7 +6,7 @@ use crate::io::xref_model::Pathtype;
 use crate::modules::insert::pdf_import::{self, PdfFileImport};
 use crate::ui::window::pdf_dialogs::{
     click_page, item_thumbs, page_thumbs, LayerTarget, PdfAttachState, PdfDialogMsg, PdfImportFileState,
-    RotationChoice, UnderlayLayersState,
+    PointCloudAttachState, RotationChoice, UnderlayLayersState,
 };
 
 /// "7.8740 × 3.9369" (inches) for a page.
@@ -100,6 +100,139 @@ impl OpenCADStudio {
         state.sub_units = false;
         state.saved_path =
             crate::entities::underlay::display_path(&self.pdf_stored_path(path, state.path_type.0));
+    }
+
+    /// POINTCLOUDATTACH after the file is chosen: the Attach Point Cloud
+    /// dialog, placed on screen by default.
+    pub(in crate::app) fn open_point_cloud_attach_dialog(&mut self, path: &std::path::Path) {
+        let Some(cloud) = crate::scene::model::point_cloud::load(path) else {
+            return;
+        };
+        let yes_no = |on: bool| if on { crate::t!("Yes") } else { crate::t!("No") }.into_owned();
+        let data = format!(
+            "RGB: {} · {}: {} · {}: {}",
+            yes_no(cloud.has_rgb),
+            crate::t!("Intensity"),
+            yes_no(cloud.has_intensity),
+            crate::t!("Normals"),
+            yes_no(cloud.has_normals),
+        );
+        let data_more = format!(
+            "{}: {} · {}: {}",
+            crate::t!("Classification"),
+            yes_no(false),
+            crate::t!("Segmentation"),
+            yes_no(false),
+        );
+        let factor = crate::app::properties::insert_unit_scale(self.tabs[self.active_tab].scene.document.header.insertion_units, 6)
+            .unwrap_or(1.0);
+        let full = path.to_string_lossy().into_owned();
+        let memory = crate::ui::window::pdf_dialogs::ATTACH_MEMORY.lock().ok().and_then(|m| m.clone()).unwrap_or_default();
+        let mut state = PointCloudAttachState {
+            path: full.clone(),
+            name: file_stem(&full),
+            preview: cloud.preview.clone().map(iced::widget::image::Handle::from_bytes),
+            summary: format!(
+                "{} · {}",
+                crate::tf!("{count} scans", count = cloud.scans),
+                crate::tf!("{count} points", count = cloud.positions.len())
+            ),
+            data,
+            data_more,
+            size: cloud
+                .bounds
+                .map(|[lo, hi]| format!("{:.4} × {:.4} × {:.4}", hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]))
+                .unwrap_or_default(),
+            unit: format!("{} · {} {}", crate::t!("Meters"), crate::t!("Unit factor"), crate::app::properties::format_unit_factor(factor)),
+            found_in: crate::entities::underlay::display_path(&full),
+            saved_path: String::new(),
+            path_type: memory.path_type,
+            insert_on_screen: true,
+            insert: ["0.0000".into(), "0.0000".into(), "0.0000".into()],
+            scale_on_screen: true,
+            scale: "1.0000".into(),
+            rotation_on_screen: true,
+            rotation: "0".into(),
+            lock: false,
+            zoom: true,
+        };
+        state.saved_path = crate::entities::underlay::display_path(&self.pdf_stored_path(&full, state.path_type.0));
+        self.point_cloud_attach = Some(state);
+        self.active_modal = Some(crate::app::ModalKind::PointCloudAttach);
+    }
+
+    /// The dialog's Attach: what it set goes to the command, which asks for
+    /// the rest.
+    fn point_cloud_attach_ok(&mut self, i: usize) -> Task<Message> {
+        use crate::command::CadCommand;
+        let Some(state) = self.point_cloud_attach.as_ref() else {
+            return Task::none();
+        };
+        let number = |s: &str| s.trim().parse::<f64>().ok();
+        let insertion = if state.insert_on_screen {
+            None
+        } else {
+            match (number(&state.insert[0]), number(&state.insert[1]), number(&state.insert[2])) {
+                (Some(x), Some(y), Some(z)) => Some(glam::DVec3::new(x, y, z)),
+                _ => {
+                    self.command_line.push_error("Requires numeric value.");
+                    return Task::none();
+                }
+            }
+        };
+        let scale = if state.scale_on_screen {
+            None
+        } else {
+            match number(&state.scale).filter(|v| *v > 0.0) {
+                Some(v) => Some(v),
+                None => {
+                    self.command_line.push_error("Value must be positive and nonzero.");
+                    return Task::none();
+                }
+            }
+        };
+        let rotation = if state.rotation_on_screen {
+            None
+        } else {
+            match number(&state.rotation) {
+                Some(v) => Some(v),
+                None => {
+                    self.command_line.push_error("Requires numeric value.");
+                    return Task::none();
+                }
+            }
+        };
+        let state = self.point_cloud_attach.take().expect("checked above");
+        self.close_active_modal();
+        let options = crate::modules::insert::pc_attach::AttachOptions {
+            stored: (state.path_type.0 == Pathtype::None).then(|| {
+                std::path::Path::new(&state.path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            }),
+            relative: state.path_type.0 == Pathtype::Relative,
+            locked: Some(state.lock),
+            zoom: state.zoom,
+            scale,
+            rotation,
+        };
+        let mut command = crate::modules::insert::pc_attach::PointCloudAttachCommand::from_dialog(
+            std::path::PathBuf::from(&state.path),
+            options,
+        );
+        match insertion {
+            Some(point) => {
+                let result = command.on_point(point);
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                self.apply_cmd_result(result)
+            }
+            None => {
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                self.focus_cmd_input()
+            }
+        }
     }
 
     /// ULAYERS: every underlay of the drawing, the selected one first shown.
@@ -244,6 +377,7 @@ impl OpenCADStudio {
                         crate::t!("Attaches a DGN file as an underlay.")
                     }
                     "attach" => crate::t!("Attaches a PDF file as an underlay."),
+                    "pointcloud" => crate::t!("Attaches a point cloud scan or project."),
                     "layers" => crate::t!("Turns the layers of a PDF underlay on or off."),
                     _ => crate::t!("Imports the geometry, fills, raster images and text of a PDF file as drawing objects."),
                 };
@@ -342,6 +476,57 @@ impl OpenCADStudio {
                 }
             }
             PdfDialogMsg::AttachOk => return self.pdf_attach_ok(i),
+
+            // ── Attach Point Cloud ────────────────────────────────────────
+            PdfDialogMsg::CloudBrowse => return Task::done(Message::PointCloudAttachPick),
+            PdfDialogMsg::CloudOk => return self.point_cloud_attach_ok(i),
+            PdfDialogMsg::CloudPathType(choice) => {
+                let stored = self.point_cloud_attach.as_ref().map(|s| self.pdf_stored_path(&s.path, choice.0));
+                if let (Some(s), Some(stored)) = (self.point_cloud_attach.as_mut(), stored) {
+                    s.path_type = choice;
+                    s.saved_path = crate::entities::underlay::display_path(&stored);
+                }
+            }
+            PdfDialogMsg::CloudInsertOnScreen(on) => {
+                if let Some(s) = self.point_cloud_attach.as_mut() {
+                    s.insert_on_screen = on;
+                }
+            }
+            PdfDialogMsg::CloudInsert(k, value) => {
+                if let Some(s) = self.point_cloud_attach.as_mut() {
+                    s.insert[k.min(2)] = value;
+                }
+            }
+            PdfDialogMsg::CloudScaleOnScreen(on) => {
+                if let Some(s) = self.point_cloud_attach.as_mut() {
+                    s.scale_on_screen = on;
+                }
+            }
+            PdfDialogMsg::CloudScale(value) => {
+                if let Some(s) = self.point_cloud_attach.as_mut() {
+                    s.scale = value;
+                }
+            }
+            PdfDialogMsg::CloudRotationOnScreen(on) => {
+                if let Some(s) = self.point_cloud_attach.as_mut() {
+                    s.rotation_on_screen = on;
+                }
+            }
+            PdfDialogMsg::CloudRotation(value) => {
+                if let Some(s) = self.point_cloud_attach.as_mut() {
+                    s.rotation = value;
+                }
+            }
+            PdfDialogMsg::CloudLock(on) => {
+                if let Some(s) = self.point_cloud_attach.as_mut() {
+                    s.lock = on;
+                }
+            }
+            PdfDialogMsg::CloudZoom(on) => {
+                if let Some(s) = self.point_cloud_attach.as_mut() {
+                    s.zoom = on;
+                }
+            }
 
             // ── Underlay Layers ───────────────────────────────────────────
             PdfDialogMsg::LayersUnderlay(name) => {

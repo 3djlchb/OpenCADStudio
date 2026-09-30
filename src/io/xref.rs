@@ -1292,6 +1292,55 @@ pub fn collect_entries_with_prev(
         entries.push(entry);
     }
 
+    // ── Point clouds ──
+    // Listed under their definitions' names; a definition no cloud uses is
+    // Unreferenced, as for images and underlays.
+    let mut referenced_clouds: HashSet<Handle> = HashSet::default();
+    for e in doc.entities() {
+        if let EntityType::Extended(extended) = e {
+            if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data {
+                referenced_clouds.insert(data.definition_handle);
+            }
+        }
+    }
+    let cloud_names: HashMap<Handle, String> = doc
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            ObjectType::Dictionary(dictionary) => Some(dictionary),
+            _ => None,
+        })
+        .flat_map(|dictionary| dictionary.entries.iter().map(|(name, handle)| (*handle, name.clone())))
+        .collect();
+    for (handle, obj) in doc.objects.iter() {
+        let ObjectType::ClassObject(object) = obj else {
+            continue;
+        };
+        let codec::objects::ClassObjectData::PointCloudDefinitionEx(def) = &object.data else {
+            continue;
+        };
+        let key = handle.value();
+        let name = cloud_names.get(handle).cloned().unwrap_or_else(|| {
+            Path::new(&def.source_filename.replace('\\', "/"))
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        });
+        let mut entry = ReferenceEntry::new(key, name, RefKind::PointCloud);
+        entry.saved_path = def.source_filename.clone();
+        if !def.is_loaded {
+            entry.status = RefStatus::Unloaded;
+            resolve_only(&mut entry, &def.source_filename, base_dir);
+        } else {
+            stat_into(&mut entry, &def.source_filename, base_dir);
+            entry.status = decide_status(entry.status, entry.modified, prev.get(&key).copied(), false);
+            if !referenced_clouds.contains(handle) {
+                entry.status = RefStatus::Unreferenced;
+            }
+        }
+        entries.push(entry);
+    }
+
     // ── Nested enumeration: full transitive closure, read-only, no merge ──
     // Paths stored in a nested drawing are relative to *that drawing*, not to
     // the host.  The work queue carries each parent's resolved file so every
@@ -1384,6 +1433,7 @@ enum RefTarget {
     DwgXref { handle: Handle, name: String },
     Image { handle: Handle, name: String },
     Pdf { handle: Handle, name: String },
+    PointCloud { handle: Handle, name: String },
 }
 
 fn find_target(doc: &CadDocument, key: u64) -> Option<RefTarget> {
@@ -1403,6 +1453,11 @@ fn find_target(doc: &CadDocument, key: u64) -> Option<RefTarget> {
                     handle: *handle,
                     name: def.file_name.clone(),
                 });
+            }
+            ObjectType::ClassObject(object) if handle.value() == key => {
+                if let codec::objects::ClassObjectData::PointCloudDefinitionEx(def) = &object.data {
+                    return Some(RefTarget::PointCloud { handle: *handle, name: def.source_filename.clone() });
+                }
             }
             ObjectType::UnderlayDefinition(def) if handle.value() == key => {
                 return Some(RefTarget::Pdf {
@@ -1476,6 +1531,20 @@ pub fn unload_reference(doc: &mut CadDocument, key: u64) -> Result<String, Strin
                 def.unloaded = true;
             }
             Ok(name)
+        }
+        // So does a point cloud (its definition's loaded flag).
+        RefTarget::PointCloud { handle, name } => {
+            set_point_cloud_loaded(doc, handle, false);
+            Ok(name)
+        }
+    }
+}
+
+/// A point cloud definition's loaded flag (Unload / Reload).
+pub fn set_point_cloud_loaded(doc: &mut CadDocument, handle: Handle, loaded: bool) {
+    if let Some(codec::objects::ObjectType::ClassObject(object)) = doc.objects.get_mut(&handle) {
+        if let codec::objects::ClassObjectData::PointCloudDefinitionEx(def) = &mut object.data {
+            def.is_loaded = loaded;
         }
     }
 }
@@ -1578,6 +1647,34 @@ pub fn detach_reference(doc: &mut CadDocument, key: u64) -> Result<String, Strin
             doc.objects.remove(&handle);
             Ok(name)
         }
+        // The clouds, their reactors, the definition and its dictionary
+        // entry.
+        RefTarget::PointCloud { handle, name } => {
+            use codec::entities::ExtendedEntityData;
+            let clouds: Vec<(Handle, Handle)> = doc
+                .entities()
+                .filter_map(|e| match e {
+                    EntityType::Extended(extended) => match &extended.data {
+                        ExtendedEntityData::PointCloudEx(data) if data.definition_handle == handle => {
+                            Some((e.common().handle, data.reactor_handle))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect();
+            for (cloud, reactor) in clouds {
+                doc.remove_entity(cloud);
+                doc.objects.remove(&reactor);
+            }
+            for object in doc.objects.values_mut() {
+                if let codec::objects::ObjectType::Dictionary(dictionary) = object {
+                    dictionary.entries.retain(|(_, h)| *h != handle);
+                }
+            }
+            doc.objects.remove(&handle);
+            Ok(name)
+        }
     }
 }
 
@@ -1626,6 +1723,9 @@ pub fn bind_reference(
             "XREF: PDF bind (vector import) is not available in this version."
         )
         .to_string()),
+        RefTarget::PointCloud { .. } => {
+            Err(crate::t!("XREF: bind applies to drawing references only.").to_string())
+        }
     }
 }
 
@@ -1896,6 +1996,10 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// Marks a point cloud definition (by handle) among the references made
+/// relative on the drawing's first save.
+pub const POINT_CLOUD_KEY: &str = "pointcloud:";
+
 /// Make the named references' paths relative to `host` (their drawing's
 /// first save); a reference that cannot be relative keeps its full path.
 pub fn make_relative(
@@ -1904,6 +2008,12 @@ pub fn make_relative(
     host: &Path,
 ) {
     for name in names {
+        if let Some(handle) = name.strip_prefix(POINT_CLOUD_KEY) {
+            if let Ok(handle) = u64::from_str_radix(handle, 16) {
+                relative_point_cloud_path(doc, Handle::new(handle), host);
+            }
+            continue;
+        }
         let Some(key) = doc.block_records.get(name).map(|br| br.handle.value()) else {
             continue;
         };
@@ -2161,6 +2271,19 @@ pub fn set_ref_path(
                 _ => Err(crate::t!("XREF: no loaded reference with that key.").to_string()),
             }
         }
+        RefTarget::PointCloud { handle, name } => {
+            use codec::objects::{ClassObjectData, ObjectType};
+            match doc.objects.get_mut(&handle) {
+                Some(ObjectType::ClassObject(object)) => match &mut object.data {
+                    ClassObjectData::PointCloudDefinitionEx(def) => {
+                        def.source_filename = new_raw.to_string();
+                        Ok(name)
+                    }
+                    _ => Err(crate::t!("XREF: no loaded reference with that key.").to_string()),
+                },
+                _ => Err(crate::t!("XREF: no loaded reference with that key.").to_string()),
+            }
+        }
     }
 }
 
@@ -2192,6 +2315,7 @@ pub fn apply_pathtype(
                 _ => String::new(),
             }
         }
+        Some(RefTarget::PointCloud { name, .. }) => name,
         None => return Err(crate::t!("XREF: no loaded reference with that key.").to_string()),
     };
     // A stored relative path first has to be resolved against its current host
@@ -2320,7 +2444,7 @@ pub fn set_ref_type(
             }
             Err(crate::t!("XREF: no loaded reference with that key.").to_string())
         }
-        RefTarget::Image { .. } | RefTarget::Pdf { .. } => {
+        RefTarget::Image { .. } | RefTarget::Pdf { .. } | RefTarget::PointCloud { .. } => {
             Err(crate::t!("XREF: overlays apply to drawing references only.").to_string())
         }
     }
@@ -3122,23 +3246,22 @@ mod tests {
     }
 }
 
-/// Point cloud definitions keep the full path while the drawing is open; a
-/// DWG stores it relative to the drawing (".\rcs\scan.rcs"), as the
-/// reference writes it. Paths on another drive stay full.
-pub fn relative_point_cloud_paths(doc: &mut CadDocument, host: &Path) {
-    use crate::io::xref_model::{is_relative_path, normalize_lexical, to_pathtype_result, Pathtype};
-    for object in doc.objects.values_mut() {
-        let codec::objects::ObjectType::ClassObject(object) = object else {
-            continue;
-        };
-        let codec::objects::ClassObjectData::PointCloudDefinitionEx(def) = &mut object.data else {
-            continue;
-        };
-        if def.source_filename.is_empty() || is_relative_path(&normalize_lexical(&def.source_filename)) {
-            continue;
+/// A point cloud definition's full path made relative to the drawing
+/// (".\rcs\scan.rcs", as the reference writes it); on another drive it
+/// stays full.
+fn relative_point_cloud_path(doc: &mut CadDocument, handle: Handle, host: &Path) {
+    use crate::io::xref_model::{to_pathtype_result, Pathtype};
+    let Some(codec::objects::ObjectType::ClassObject(object)) = doc.objects.get_mut(&handle) else {
+        return;
+    };
+    let codec::objects::ClassObjectData::PointCloudDefinitionEx(def) = &mut object.data else {
+        return;
+    };
+    if let Ok(relative) = to_pathtype_result(&def.source_filename, host, Pathtype::Relative) {
+        let relative = relative.replace('/', "\\");
+        if let Some(found) = std::path::Path::new(&def.source_filename).is_file().then(|| def.source_filename.clone()) {
+            crate::scene::model::point_cloud::register_source(&relative, found.into());
         }
-        if let Ok(relative) = to_pathtype_result(&def.source_filename, host, Pathtype::Relative) {
-            def.source_filename = relative.replace('/', "\\");
-        }
+        def.source_filename = relative;
     }
 }

@@ -713,6 +713,7 @@ impl OpenCADStudio {
                 use crate::ui::window::pdf_dialogs::PdfDialogMsg;
                 Message::PdfDialog(match self.active_modal {
                     Some(crate::app::ModalKind::PdfAttach) => PdfDialogMsg::AttachOk,
+                    Some(crate::app::ModalKind::PointCloudAttach) => PdfDialogMsg::CloudOk,
                     Some(crate::app::ModalKind::UnderlayLayers) => PdfDialogMsg::LayersOk,
                     Some(crate::app::ModalKind::PdfImportSettings) => PdfDialogMsg::SettingsOk,
                     Some(crate::app::ModalKind::PdfImportFile) => PdfDialogMsg::ImportOk,

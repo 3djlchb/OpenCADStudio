@@ -124,6 +124,13 @@ impl SelectObjectsCommand {
         command
     }
 
+    /// The standard gather with the command's own wording.
+    pub fn with_prompt(prompt_cmd: &str, pending_cmd: &str, prompt_text: &'static str) -> Self {
+        let mut command = Self::plain(prompt_cmd, pending_cmd);
+        command.prompt_text = Some(prompt_text);
+        command
+    }
+
     pub fn auto_constrain(pending_cmd: &str) -> Self {
         let mut command = Self::new(pending_cmd);
         command.auto_constrain_settings = true;

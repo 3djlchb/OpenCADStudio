@@ -18,6 +18,7 @@ mod mview_block;
 mod open_obj;
 pub(crate) mod pc_attach;
 pub(crate) mod pc_crop;
+pub(crate) mod pc_stylize;
 pub(crate) mod pdf_attach;
 pub(crate) mod pdf_clip;
 pub(crate) mod pdf_import;
@@ -54,7 +55,8 @@ impl CadModule for InsertModule {
                     title: "Reference",
                     tools: vec![
                         RibbonItem::LargeTool(xattach::tool()),
-                        // PDF, DWF or DGN; the face runs the last one chosen.
+                        // PDF, DWF, DGN or a point cloud; the face runs the
+                        // last one chosen.
                         RibbonItem::LargeDropdown {
                             id: "UNDERLAY_ATTACH",
                             label: "Attach Underlay",
@@ -63,6 +65,7 @@ impl CadModule for InsertModule {
                                 ("PDFATTACH", "Attach PDF", pdf_attach::ICON),
                                 ("DWFATTACH", "Attach DWF", pdf_attach::ICON),
                                 ("DGNATTACH", "Attach DGN", pdf_attach::ICON),
+                                ("POINTCLOUDATTACH", "Attach Point Cloud", pc_attach::ICON),
                             ],
                             default: "PDFATTACH",
                         },
@@ -95,11 +98,6 @@ impl CadModule for InsertModule {
                             default: "UOSNAP1",
                         },
                     ],
-                },
-                // ── Point Cloud ───────────────────────────────────────────────────
-                RibbonGroup {
-                    title: "Point Cloud",
-                    tools: vec![RibbonItem::LargeTool(pc_attach::tool())],
                 },
                 // ── Block ─────────────────────────────────────────────────────────
                 RibbonGroup {

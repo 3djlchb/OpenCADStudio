@@ -3936,6 +3936,39 @@ insert =
     .block-select-objects = BLOCK  Vyberte objekty:
     .block-specify-insertion-base-point = BLOCK  Zadejte základní bod vložení:
     .wblock-specify-insertion-base-point = WBLOCK  Určete základní bod vložení:
+    .ul-attach-point-cloud = Attach Point Cloud
+    .pc-rect-crop =
+        Rectangular
+        Crop
+    .pc-poly-crop =
+        Polygonal
+        Crop
+    .pc-circ-crop =
+        Circular
+        Crop
+    .pc-show-crop =
+        Show
+        Cropping
+    .pc-invert-crop =
+        Invert
+        Cropping
+    .pc-uncrop =
+        Remove All
+        Cropping
+    .pc-data = Data:
+    .pc-size = Size:
+    .pc-unit = Unit:
+    .pc-options = Options
+    .pc-geo = Use geographic location
+    .pc-lock = Lock point cloud
+    .pc-zoom = Zoom to point cloud
+    .pc-scan-count = __ocs_fmt_0__ scans
+    .pc-point-count = __ocs_fmt_0__ points
+    .pc-select-file = Select Point Cloud File
+    .pc-rcp = Point Cloud Project
+    .pc-rcs = Point Cloud Scan
+    .pc-clouds = Point Clouds
+    .pc-help = Attaches a point cloud scan or project.
 model =
     .create = Vytvořit
     .boolean = Booleovské operace

@@ -13924,6 +13924,14 @@ mod update_entities_batch_tests {
     }
 }
 
+pub(crate) fn is_point_cloud(entity: &EntityType) -> bool {
+    matches!(
+        entity,
+        EntityType::Extended(extended)
+            if matches!(extended.data, codec::entities::ExtendedEntityData::PointCloudEx(_))
+    )
+}
+
 /// A point cloud whose Locked property is set: edits leave it alone.
 pub(crate) fn is_locked_point_cloud(entity: &EntityType) -> bool {
     matches!(

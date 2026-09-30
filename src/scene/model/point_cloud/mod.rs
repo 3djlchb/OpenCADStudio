@@ -26,6 +26,14 @@ pub struct CloudPoints {
     pub intensity: Vec<u8>,
     pub has_rgb: bool,
     pub has_intensity: bool,
+    pub has_normals: bool,
+    /// Scans read (one for a scan file).
+    pub scans: usize,
+    /// A project's preview picture (JPEG).
+    pub preview: Option<Vec<u8>>,
+    /// Bounds from the scans' headers, placed like their points: the
+    /// extents a definition records.
+    pub bounds: Option<[[f64; 3]; 2]>,
 }
 
 /// Scan points by file path and modification time. A file that fails to
@@ -80,14 +88,32 @@ fn decode(path: &Path) -> Option<CloudPoints> {
         intensity: Vec::new(),
         has_rgb: scans.iter().any(|(scan, _)| scan.has_rgb),
         has_intensity: scans.iter().any(|(scan, _)| scan.has_intensity),
+        has_normals: scans.iter().any(|(scan, _)| scan.has_normals),
+        scans: scans.len(),
+        preview: is_project.then(|| rcp::preview(&bytes)).flatten(),
+        bounds: None,
     };
     for (scan, [translation, rotation, scale]) in scans {
         let rotate = euler(rotation);
-        cloud.positions.extend(scan.local.iter().map(|p| {
+        let place = |p: &[f64; 3]| {
             let s = [p[0] * scale[0], p[1] * scale[1], p[2] * scale[2]];
             let r = rotate.map(|row| row[0] * s[0] + row[1] * s[1] + row[2] * s[2]);
             [r[0] + translation[0], r[1] + translation[1], r[2] + translation[2]]
-        }));
+        };
+        cloud.positions.extend(scan.local.iter().map(place));
+        let [lo, hi] = scan.bounds;
+        for corner in 0..8 {
+            let p = place(&[
+                if corner & 1 == 0 { lo[0] } else { hi[0] },
+                if corner & 2 == 0 { lo[1] } else { hi[1] },
+                if corner & 4 == 0 { lo[2] } else { hi[2] },
+            ]);
+            let [min, max] = cloud.bounds.get_or_insert([p, p]);
+            for k in 0..3 {
+                min[k] = min[k].min(p[k]);
+                max[k] = max[k].max(p[k]);
+            }
+        }
         if scan.has_rgb || !cloud.has_rgb {
             cloud.colors.extend_from_slice(&scan.colors);
         } else {
@@ -150,6 +176,10 @@ pub(crate) fn register_source(stored: &str, resolved: PathBuf) {
 /// is, else where it was found next to the drawing, else relative to the
 /// working folder.
 pub(crate) fn resolve_source(document: &CadDocument, data: &PointCloudExData) -> Option<PathBuf> {
+    // An unloaded cloud draws as a missing one: its box and saved path.
+    if definition(document, data).is_some_and(|def| !def.is_loaded) {
+        return None;
+    }
     let stored = definition(document, data)?.source_filename.trim();
     if stored.is_empty() {
         return None;

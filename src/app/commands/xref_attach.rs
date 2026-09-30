@@ -452,19 +452,14 @@ impl OpenCADStudio {
                         }
                         Task::none()
                     }
-                    // A point cloud goes on to its placement prompts.
+                    // A point cloud goes on to the Attach Point Cloud dialog.
                     "rcp" | "rcs" => {
-                        use crate::command::CadCommand;
-                        let i = self.active_tab;
                         if crate::scene::model::point_cloud::load(&path).is_none() {
                             self.command_line.push_error("All scans are not found or invalid.");
                             self.command_line.push_error("Attach point cloud failed");
                             return Task::none();
                         }
-                        let command =
-                            crate::modules::insert::pc_attach::PointCloudAttachCommand::with_file(path);
-                        self.command_line.push_info(&command.prompt());
-                        self.tabs[i].active_cmd = Some(Box::new(command));
+                        self.open_point_cloud_attach_dialog(&path);
                         Task::none()
                     }
                     "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" => {

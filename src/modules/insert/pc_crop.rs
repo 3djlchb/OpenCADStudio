@@ -73,6 +73,19 @@ impl PointCloudCropCommand {
         }
     }
 
+    /// The toolbar's crops: the cloud already chosen, the shape too
+    /// ("P" polygon, "C" circle, "" rectangle).
+    pub fn for_cloud(handle: Handle, cloud: ExtendedEntity, option: &str) -> Self {
+        let mut command = Self::new();
+        command.handle = handle;
+        command.cloud = Some(cloud);
+        command.step = Step::First;
+        if !option.is_empty() {
+            command.option(option);
+        }
+        command
+    }
+
     fn data(&self) -> Option<&PointCloudExData> {
         match &self.cloud.as_ref()?.data {
             ExtendedEntityData::PointCloudEx(data) => Some(data),

@@ -14,6 +14,21 @@ pub struct ScanEntry {
     pub scale: [f64; 3],
 }
 
+/// The project's preview picture (the JPEG it carries), for the attach
+/// dialog.
+pub fn preview(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    for i in 0..archive.len() {
+        let file = archive.by_index(i).ok()?;
+        if file.name().to_ascii_lowercase().ends_with(".jpg") {
+            let mut picture = Vec::new();
+            file.take(32 << 20).read_to_end(&mut picture).ok()?;
+            return Some(picture);
+        }
+    }
+    None
+}
+
 pub fn scans(bytes: &[u8], project: &Path) -> Option<Vec<ScanEntry>> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
     let folder = project.parent().unwrap_or(Path::new(""));

@@ -23,10 +23,13 @@ pub struct Scan {
     pub colors: Vec<[u8; 3]>,
     pub intensity: Vec<u8>,
     pub has_rgb: bool,
+    pub has_normals: bool,
     pub has_intensity: bool,
     pub translation: [f64; 3],
     pub rotation: [f64; 3],
     pub scale: [f64; 3],
+    /// The scan's bounds as its header records them (local frame).
+    pub bounds: [[f64; 3]; 2],
 }
 
 const NODE_RECORD: usize = 368;
@@ -55,6 +58,8 @@ pub fn decode(b: &[u8]) -> Option<Scan> {
     let rotation = vec3_at(b, 0x28)?;
     let scale = vec3_at(b, 0x40)?;
     let has_rgb = *b.get(0xE0)? != 0;
+    let bounds = [vec3_at(b, 0xA0)?, vec3_at(b, 0xB8)?];
+    let has_normals = *b.get(0xE1)? != 0;
     let has_intensity = *b.get(0xE2)? != 0;
 
     let sections = u32_at(b, 0x129)? as usize;
@@ -80,10 +85,12 @@ pub fn decode(b: &[u8]) -> Option<Scan> {
         colors: Vec::new(),
         intensity: Vec::new(),
         has_rgb,
+        has_normals,
         has_intensity,
         translation,
         rotation,
         scale,
+        bounds,
     };
     for node in 0..nodes {
         let record = directory + 8 + node * NODE_RECORD;

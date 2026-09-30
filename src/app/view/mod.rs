@@ -1604,6 +1604,11 @@ bg={bg_ms:.1}ms n={view_count}"
                 None
             } else if self.ribbon.xref_context() {
                 crate::ui::side_toolbar::view(&crate::ui::ribbon::xref_tools())
+            } else if let Some(shown) = self.ribbon.point_cloud_context() {
+                crate::ui::side_toolbar::view_with_active(
+                    &crate::ui::ribbon::point_cloud_tools(),
+                    &move |id| id == "_PCCROPSHOW" && shown,
+                )
             } else if let Some(ctx) = self.ribbon.underlay_context() {
                 let ctx = ctx.clone();
                 crate::ui::side_toolbar::view_with_active(

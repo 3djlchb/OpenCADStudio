@@ -1273,20 +1273,7 @@ fn apply_point_cloud_ex_prop(data: &mut PointCloudExData, field: &str, value: &s
                 .iter()
                 .find(|(name, _)| value == t!(*name).as_ref() || value.eq_ignore_ascii_case(name))
             {
-                data.stylization_type = *stylization;
-                // Intensity and elevation start from their default schemes,
-                // Spectrum and Earth.
-                let default = match stylization {
-                    5 => Some(POINT_CLOUD_RAMPS[6].1),
-                    4 => Some(POINT_CLOUD_RAMPS[1].1),
-                    _ => None,
-                };
-                if let Some(default) = default {
-                    let slot = point_cloud_scheme_slot(data);
-                    if slot.is_empty() {
-                        *slot = default.to_string();
-                    }
-                }
+                set_point_cloud_stylization(data, *stylization);
             }
         }
         "ext_pcx_color_scheme" => {
@@ -1323,6 +1310,23 @@ fn apply_point_cloud_ex_prop(data: &mut PointCloudExData, field: &str, value: &s
             }
         }
         _ => {}
+    }
+}
+
+/// Sets a cloud's stylization (its stored value); intensity and elevation
+/// start from their default schemes, Spectrum and Earth.
+pub(crate) fn set_point_cloud_stylization(data: &mut PointCloudExData, stylization: i16) {
+    data.stylization_type = stylization;
+    let default = match stylization {
+        5 => Some(POINT_CLOUD_RAMPS[6].1),
+        4 => Some(POINT_CLOUD_RAMPS[1].1),
+        _ => None,
+    };
+    if let Some(default) = default {
+        let slot = point_cloud_scheme_slot(data);
+        if slot.is_empty() {
+            *slot = default.to_string();
+        }
     }
 }
 

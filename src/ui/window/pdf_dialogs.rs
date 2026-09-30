@@ -35,6 +35,18 @@ pub enum PdfDialogMsg {
     AttachRotation(String),
     AttachDetails(bool),
     AttachOk,
+    // Attach Point Cloud
+    CloudBrowse,
+    CloudPathType(PathTypeChoice),
+    CloudInsertOnScreen(bool),
+    CloudInsert(usize, String),
+    CloudScaleOnScreen(bool),
+    CloudScale(String),
+    CloudRotationOnScreen(bool),
+    CloudRotation(String),
+    CloudLock(bool),
+    CloudZoom(bool),
+    CloudOk,
     // Underlay Layers
     LayersUnderlay(String),
     LayersSearch(String),
@@ -659,6 +671,140 @@ pub fn view_attach<'a>(
     .spacing(10);
 
     column![file, body, footer("attach", None, t!("Attach"), PdfDialogMsg::AttachOk)]
+        .spacing(10)
+        .padding([10, 12])
+        .width(sizing.width)
+        .into()
+}
+
+// ── Attach Point Cloud ─────────────────────────────────────────────────────
+
+/// The Attach Point Cloud dialog: the scan or project chosen, what it
+/// holds, and how it is placed.
+pub struct PointCloudAttachState {
+    /// The file read (absolute).
+    pub path: String,
+    pub name: String,
+    pub preview: Option<image::Handle>,
+    /// "1 scan · 365281 points".
+    pub summary: String,
+    /// Which data the scans carry (colour, intensity, normals; then
+    /// classification and segmentation).
+    pub data: String,
+    pub data_more: String,
+    /// Width × length × height.
+    pub size: String,
+    pub unit: String,
+    pub found_in: String,
+    pub saved_path: String,
+    pub path_type: PathTypeChoice,
+    pub insert_on_screen: bool,
+    pub insert: [String; 3],
+    pub scale_on_screen: bool,
+    pub scale: String,
+    pub rotation_on_screen: bool,
+    pub rotation: String,
+    pub lock: bool,
+    pub zoom: bool,
+}
+
+/// A switch that cannot be used here: dimmed, not pressable.
+fn off_chip<'a>(label: String) -> Element<'a, Message> {
+    container(text(label).size(11).style(muted_style)).padding([4, 10]).into()
+}
+
+pub fn view_point_cloud_attach<'a>(
+    state: &'a PointCloudAttachState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let file = row![
+        text_input("", &state.name).size(12).padding([5, 8]).width(Fill).style(field_style),
+        container(text(state.summary.clone()).size(11).style(accent_text)).padding([4, 10]).style(well_style),
+        button(text(t!("Browse...")).size(11))
+            .on_press(msg(PdfDialogMsg::CloudBrowse))
+            .style(button_style(false))
+            .padding([5, 12]),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+
+    let picture: Element<'a, Message> = match &state.preview {
+        Some(handle) => image(handle.clone()).width(Fill).height(Fill).into(),
+        None => Space::new().width(Fill).height(Fill).into(),
+    };
+    let preview = card(
+        t!("Preview").into_owned(),
+        container(picture).padding(6).height(Length::Fixed(226.0)).width(Fill).style(well_style),
+    );
+
+    let details = card(
+        t!("File details").into_owned(),
+        column![
+            info_line(t!("Found in:").into_owned(), &state.found_in),
+            info_line(t!("Saved path:").into_owned(), &state.saved_path),
+            info_line(t!("Data:").into_owned(), &state.data),
+            info_line(String::new(), &state.data_more),
+            info_line(t!("Size:").into_owned(), &state.size),
+            info_line(t!("Unit:").into_owned(), &state.unit),
+        ]
+        .spacing(4),
+    );
+
+    let on_screen = t!("On screen").into_owned();
+    let heading = |label: std::borrow::Cow<'static, str>, on: bool, message: Message| {
+        row![text(label).size(11).width(Fill), chip(on_screen.clone(), on, message)].align_y(iced::Center)
+    };
+    let insert_enabled = !state.insert_on_screen;
+    let xyz = row![
+        field("X".into(), &state.insert[0], insert_enabled, 12.0, |v| msg(PdfDialogMsg::CloudInsert(0, v))),
+        field("Y".into(), &state.insert[1], insert_enabled, 12.0, |v| msg(PdfDialogMsg::CloudInsert(1, v))),
+        field("Z".into(), &state.insert[2], insert_enabled, 12.0, |v| msg(PdfDialogMsg::CloudInsert(2, v))),
+    ]
+    .spacing(8);
+    let placement = card(
+        t!("Placement").into_owned(),
+        column![
+            heading(
+                t!("Insertion point"),
+                state.insert_on_screen,
+                msg(PdfDialogMsg::CloudInsertOnScreen(!state.insert_on_screen))
+            ),
+            xyz,
+            heading(t!("Scale"), state.scale_on_screen, msg(PdfDialogMsg::CloudScaleOnScreen(!state.scale_on_screen))),
+            field(String::new(), &state.scale, !state.scale_on_screen, 0.0, |v| msg(PdfDialogMsg::CloudScale(v))),
+            heading(
+                t!("Rotation"),
+                state.rotation_on_screen,
+                msg(PdfDialogMsg::CloudRotationOnScreen(!state.rotation_on_screen))
+            ),
+            field(String::new(), &state.rotation, !state.rotation_on_screen, 0.0, |v| msg(PdfDialogMsg::CloudRotation(v))),
+        ]
+        .spacing(6),
+    );
+    let path = card(
+        t!("Path type").into_owned(),
+        segmented(
+            PathTypeChoice::ALL.iter().map(|c| (*c, c.to_string())).collect(),
+            state.path_type,
+            PdfDialogMsg::CloudPathType,
+        ),
+    );
+    let options = card(
+        t!("Options").into_owned(),
+        column![
+            off_chip(t!("Use geographic location").into_owned()),
+            chip(t!("Lock point cloud").into_owned(), state.lock, msg(PdfDialogMsg::CloudLock(!state.lock))),
+            chip(t!("Zoom to point cloud").into_owned(), state.zoom, msg(PdfDialogMsg::CloudZoom(!state.zoom))),
+        ]
+        .spacing(6),
+    );
+
+    let body = row![
+        column![preview, details].spacing(8).width(Length::FillPortion(3)),
+        column![placement, path, options].spacing(8).width(Length::FillPortion(2)),
+    ]
+    .spacing(10);
+    column![file, body, footer("pointcloud", None, t!("Attach"), PdfDialogMsg::CloudOk)]
         .spacing(10)
         .padding([10, 12])
         .width(sizing.width)

@@ -26,7 +26,7 @@ pub(crate) use draw_panel::tools as panel_tools;
 mod modify_panel;
 mod color_dropdown;
 mod context_tools;
-pub use context_tools::{pdf_underlay_tools, xref_tools, UnderlayContext};
+pub use context_tools::{pdf_underlay_tools, point_cloud_tools, xref_tools, UnderlayContext};
 use widgets::{StyleContext, *};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
@@ -109,6 +109,8 @@ pub struct Ribbon {
     underlay_ctx: Option<UnderlayContext>,
     /// Only xrefs are selected.
     xref_ctx: bool,
+    /// Only point clouds are selected: whether the first shows its crops.
+    point_cloud_ctx: Option<bool>,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
 }
@@ -206,6 +208,7 @@ impl Ribbon {
             collapse_tight: Arc::new(AtomicBool::new(false)),
             underlay_ctx: None,
             xref_ctx: false,
+            point_cloud_ctx: None,
             xref_fade: 50,
         }
     }

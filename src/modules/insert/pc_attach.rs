@@ -16,15 +16,33 @@ use std::path::PathBuf;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
-use crate::modules::{IconKind, ModuleEvent, ToolDef};
+use crate::modules::IconKind;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/pc_attach.svg"));
-pub fn tool() -> ToolDef {
-    ToolDef {
-        id: "POINTCLOUDATTACH",
-        label: "Attach",
-        icon: ICON,
-        event: ModuleEvent::Command("POINTCLOUDATTACH".to_string()),
+
+/// What the Attach Point Cloud dialog settles before the prompts: the
+/// path to store, the switches, and the scale and rotation not left to
+/// the command line.
+#[derive(Clone, Debug)]
+pub struct AttachOptions {
+    /// The path stored as given (no path: the file name); None stores the
+    /// full path.
+    pub stored: Option<String>,
+    /// Stored relative to the drawing (once it has a file).
+    pub relative: bool,
+    /// Locked on attach; None follows POINTCLOUDLOCK.
+    pub locked: Option<bool>,
+    /// Zoom to the cloud once attached.
+    pub zoom: bool,
+    pub scale: Option<f64>,
+    pub rotation: Option<f64>,
+}
+
+impl Default for AttachOptions {
+    fn default() -> Self {
+        // The command line attaches with a relative path, as the dialog
+        // does by default.
+        Self { stored: None, relative: true, locked: None, zoom: false, scale: None, rotation: None }
     }
 }
 
@@ -35,6 +53,7 @@ pub struct PointCloudPlacement {
     pub insertion: DVec3,
     /// The placement's axes in the drawing, each as long as the scale.
     pub axes: [DVec3; 3],
+    pub options: AttachOptions,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -51,6 +70,7 @@ pub struct PointCloudAttachCommand {
     insertion: DVec3,
     scale: f64,
     plane: WorkingPlane,
+    options: AttachOptions,
 }
 
 /// A number as the reference echoes a coordinate or an angle: no trailing
@@ -67,7 +87,15 @@ impl PointCloudAttachCommand {
             insertion: DVec3::ZERO,
             scale: 1.0,
             plane: WorkingPlane::default(),
+            options: AttachOptions::default(),
         }
+    }
+
+    /// From the Attach Point Cloud dialog: the file chosen, what it set.
+    pub fn from_dialog(path: PathBuf, options: AttachOptions) -> Self {
+        let mut command = Self::with_file(path);
+        command.options = options;
+        command
     }
 
     /// Starts at the insertion point, the file already chosen.
@@ -103,12 +131,22 @@ impl PointCloudAttachCommand {
         self.insertion = point;
         self.step = Step::Scale;
         let local = self.plane.to_local(point);
-        CmdResult::ReportMeasurement(format!(
+        let message = format!(
             "Current insertion point: X = {}, Y = {}, Z = {}",
             plain(local.x),
             plain(local.y),
             plain(local.z)
-        ))
+        );
+        // Scale and rotation the dialog set are not asked for.
+        let Some(scale) = self.options.scale else {
+            return CmdResult::ReportMeasurement(message);
+        };
+        self.scale = scale;
+        self.step = Step::Rotation;
+        match self.options.rotation {
+            Some(degrees) => self.placed(degrees, message),
+            None => CmdResult::ReportMeasurement(message),
+        }
     }
 
     fn accept_scale(&mut self, text: &str) -> CmdResult {
@@ -129,10 +167,18 @@ impl PointCloudAttachCommand {
         }
         self.scale = scale;
         self.step = Step::Rotation;
-        CmdResult::ReportMeasurement(format!("Current scale factor: {scale:.6}"))
+        let message = format!("Current scale factor: {scale:.6}");
+        match self.options.rotation {
+            Some(degrees) => self.placed(degrees, message),
+            None => CmdResult::ReportMeasurement(message),
+        }
     }
 
     fn accept_rotation(&mut self, degrees: f64) -> CmdResult {
+        self.placed(degrees, format!("Current rotate angle: {}", plain(degrees)))
+    }
+
+    fn placed(&mut self, degrees: f64, message: String) -> CmdResult {
         let (sin, cos) = degrees.to_radians().sin_cos();
         let x = (self.plane.x * cos + self.plane.y * sin) * self.scale;
         let y = (self.plane.y * cos - self.plane.x * sin) * self.scale;
@@ -141,8 +187,9 @@ impl PointCloudAttachCommand {
                 path: self.path.clone(),
                 insertion: self.insertion,
                 axes: [x, y, self.plane.z * self.scale],
+                options: self.options.clone(),
             },
-            message: format!("Current rotate angle: {}", plain(degrees)),
+            message,
         }
     }
 }

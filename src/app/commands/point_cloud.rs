@@ -49,18 +49,8 @@ fn ensure_definition(
     name: &str,
     points: &crate::scene::model::point_cloud::CloudPoints,
 ) -> (Handle, Vector3, Vector3) {
-    let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
-    for p in &points.positions {
-        for k in 0..3 {
-            lo[k] = lo[k].min(p[k]);
-            hi[k] = hi[k].max(p[k]);
-        }
-    }
-    let (min, max) = if points.positions.is_empty() {
-        (Vector3::ZERO, Vector3::ZERO)
-    } else {
-        (Vector3::new(lo[0], lo[1], lo[2]), Vector3::new(hi[0], hi[1], hi[2]))
-    };
+    let [lo, hi] = points.bounds.unwrap_or_default();
+    let (min, max) = (Vector3::new(lo[0], lo[1], lo[2]), Vector3::new(hi[0], hi[1], hi[2]));
     let same = |stored: &str| stored.replace('/', "\\").eq_ignore_ascii_case(&path.replace('/', "\\"));
     let existing = document.objects.iter().find_map(|(handle, object)| match object {
         ObjectType::ClassObject(object) => match &object.data {
@@ -107,6 +97,25 @@ impl OpenCADStudio {
             return;
         };
         let path = placement.path.to_string_lossy().into_owned();
+        let options = placement.options.clone();
+        // The path stored: as chosen; relative to the drawing once it has a
+        // file (until then the full path, made relative on the first save).
+        let host = self.tabs[i].current_path.clone();
+        let stored = match &options.stored {
+            Some(stored) => stored.clone(),
+            None if options.relative => host
+                .as_deref()
+                .and_then(|host| {
+                    crate::io::xref_model::to_pathtype_result(&path, host, crate::io::xref_model::Pathtype::Relative).ok()
+                })
+                .map(|relative| relative.replace('/', "\\"))
+                .unwrap_or_else(|| path.clone()),
+            None => path.clone(),
+        };
+        if stored != path {
+            crate::scene::model::point_cloud::register_source(&stored, placement.path.clone());
+        }
+        let relative_later = options.relative && options.stored.is_none() && host.is_none();
         let name = placement
             .path
             .file_stem()
@@ -115,9 +124,11 @@ impl OpenCADStudio {
         let pending = self.begin_undo(i, label, 1, false);
         let document = &mut self.tabs[i].scene.document;
         // POINTCLOUDLOCK 1 attaches clouds locked.
-        let locked = crate::scene::model::point_cloud::setting("POINTCLOUDLOCK")
-            .is_some_and(|setting| crate::scene::model::point_cloud::setting_value(document, setting) == 1);
-        let (definition, extents_min, extents_max) = ensure_definition(document, &path, &name, &points);
+        let locked = options.locked.unwrap_or_else(|| {
+            crate::scene::model::point_cloud::setting("POINTCLOUDLOCK")
+                .is_some_and(|setting| crate::scene::model::point_cloud::setting_value(document, setting) == 1)
+        });
+        let (definition, extents_min, extents_max) = ensure_definition(document, &stored, &name, &points);
         let [x, y, z] = placement.axes;
         // As the reference creates a cloud: scan colours, the intensity
         // range 0–100 as a gradient, crops shown.
@@ -175,6 +186,12 @@ impl OpenCADStudio {
                 }
             }
             self.command_line.push_output("1 point cloud attached");
+            if relative_later {
+                self.tabs[i].xref_relative_on_save.insert(format!("{}{:X}", crate::io::xref::POINT_CLOUD_KEY, definition.value()));
+            }
+            if options.zoom {
+                self.tabs[i].scene.zoom_to_entities(&[cloud]);
+            }
         }
         self.tabs[i].dirty = true;
         if let Some(pd) = pending {

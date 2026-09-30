@@ -3899,6 +3899,39 @@ insert =
     .block-select-objects = BLOCK  Nesneleri seçin:
     .block-specify-insertion-base-point = BLOCK  Ekleme taban noktasını belirtin:
     .wblock-specify-insertion-base-point = WBLOCK  Ekleme taban noktasını belirleyin:
+    .ul-attach-point-cloud = Nokta Bulutu Bağla
+    .pc-rect-crop =
+        Dikdörtgen
+        Kırp
+    .pc-poly-crop =
+        Çokgen
+        Kırp
+    .pc-circ-crop =
+        Dairesel
+        Kırp
+    .pc-show-crop =
+        Kırpmayı
+        Göster
+    .pc-invert-crop =
+        Kırpmayı
+        Ters Çevir
+    .pc-uncrop =
+        Tüm Kırpmaları
+        Kaldır
+    .pc-data = Veri:
+    .pc-size = Boyut:
+    .pc-unit = Birim:
+    .pc-options = Seçenekler
+    .pc-geo = Coğrafi konumu kullan
+    .pc-lock = Nokta bulutunu kilitle
+    .pc-zoom = Nokta bulutuna yakınlaştır
+    .pc-scan-count = __ocs_fmt_0__ tarama
+    .pc-point-count = __ocs_fmt_0__ nokta
+    .pc-select-file = Nokta Bulutu Dosyası Seç
+    .pc-rcp = Nokta Bulutu Projesi
+    .pc-rcs = Nokta Bulutu Taraması
+    .pc-clouds = Nokta Bulutları
+    .pc-help = Bir nokta bulutu taramasını veya projesini bağlar.
 model =
     .create = Oluştur
     .boolean = Boole işlemleri

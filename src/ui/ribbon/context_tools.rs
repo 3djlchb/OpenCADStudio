@@ -59,6 +59,24 @@ pub fn pdf_underlay_tools(kind: codec::entities::UnderlayType) -> Vec<ToolDef> {
     tools
 }
 
+/// Point cloud tools: the three crops, showing, inverting and removing
+/// them, and the palette.
+pub fn point_cloud_tools() -> Vec<ToolDef> {
+    vec![
+        tool("_PCCROPRECT", "Rectangular\nCrop", CLIP),
+        tool("_PCCROPPOLY", "Polygonal\nCrop", CLIP),
+        tool("_PCCROPCIRC", "Circular\nCrop", CLIP),
+        tool(
+            "_PCCROPSHOW",
+            "Show\nCropping",
+            include_bytes!("../../../assets/icons/underlay_frames.svg"),
+        ),
+        tool("_PCCROPINVERT", "Invert\nCropping", CLIP),
+        tool("_PCUNCROP", "Remove All\nCropping", UNCLIP),
+        tool("EXTERNALREFERENCES", "External\nReferences", crate::ui::icons::FOLDER_OPEN),
+    ]
+}
+
 /// External reference tools: edit, open, clipping and the palette.
 pub fn xref_tools() -> Vec<ToolDef> {
     vec![
@@ -88,6 +106,15 @@ impl Ribbon {
 
     pub fn xref_context(&self) -> bool {
         self.xref_ctx
+    }
+
+    /// Only point clouds are selected: whether the first shows its crops.
+    pub fn set_point_cloud_context(&mut self, context: Option<bool>) {
+        self.point_cloud_ctx = context;
+    }
+
+    pub fn point_cloud_context(&self) -> Option<bool> {
+        self.point_cloud_ctx
     }
 
     /// Select a tab by its module id.

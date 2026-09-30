@@ -131,7 +131,7 @@ fn root_key(normalized: &str) -> String {
     String::new()
 }
 
-pub fn is_relative_path(normalized: &str) -> bool {
+fn is_relative_path(normalized: &str) -> bool {
     let b = normalized.as_bytes();
     if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
         return false;
@@ -305,6 +305,8 @@ pub enum RefKind {
     Image,
     /// A PDF, DWF or DGN underlay.
     Underlay,
+    /// A point cloud scan (.rcs) or project (.rcp).
+    PointCloud,
 }
 
 /// Lifecycle state of a [`ReferenceEntry`].

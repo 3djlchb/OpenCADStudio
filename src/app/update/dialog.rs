@@ -995,6 +995,8 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                     }
                 }
                 self.tabs[i].scene.reseed_underlays();
+                // Point clouds redraw as unloaded (box and saved path).
+                self.tabs[i].scene.bump_geometry();
             }
             XrefPaletteOp::Reload => {
                 let base_dir: std::path::PathBuf = host
@@ -1036,6 +1038,18 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                             self.tabs[i].xref_unloaded.remove(key);
                         }
                         self.tabs[i].scene.reseed_underlays();
+                    } else if *kind == crate::io::xref_model::RefKind::PointCloud {
+                        // A point cloud reloads by setting its definition loaded.
+                        for (key, row_name, row_kind, _) in &picked {
+                            if row_kind == kind && row_name == name {
+                                crate::io::xref::set_point_cloud_loaded(
+                                    &mut self.tabs[i].scene.document,
+                                    codec::types::Handle::new(*key),
+                                    true,
+                                );
+                            }
+                        }
+                        self.tabs[i].scene.bump_geometry();
                     } else if *kind != crate::io::xref_model::RefKind::DwgXref {
                         self.command_line.push_error(crate::tf!(
                             "{}: reload applies to drawing references only.",
