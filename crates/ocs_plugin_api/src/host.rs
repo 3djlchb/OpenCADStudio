@@ -833,11 +833,12 @@ pub trait HostApi {
     fn plugin_state_any(&self, plugin_id: &str) -> Option<&(dyn Any + Send + Sync)>;
     fn plugin_state_any_mut(&mut self, plugin_id: &str) -> Option<&mut (dyn Any + Send + Sync)>;
     /// Get the state for `plugin_id`, inserting `init()`'s result if absent.
+    /// Returns `None` when this host cannot store state (e.g. out-of-process).
     fn ensure_plugin_state_any(
         &mut self,
         plugin_id: &'static str,
         init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
-    ) -> &mut (dyn Any + Send + Sync);
+    ) -> Option<&mut (dyn Any + Send + Sync)>;
 
     // ── DocumentReader (added in API v3; appended at the end to keep vtable
     // indices stable for API v2 plugins) ─────────────────────────────────────
@@ -1159,17 +1160,20 @@ pub fn plugin_state_mut<'a, T: Any + Send + Sync>(
 }
 
 /// Typed get-or-insert of per-tab plugin state stored under `plugin_id`.
+///
+/// Returns `None` when this host cannot hold state (out-of-process plugins)
+/// or when existing state under `plugin_id` has a different type.
 pub fn ensure_plugin_state<'a, T: Any + Send + Sync>(
     host: &'a mut dyn HostApi,
     plugin_id: &'static str,
     init: impl FnOnce() -> T,
-) -> &'a mut T {
+) -> Option<&'a mut T> {
     let mut init = Some(init);
-    let any = host.ensure_plugin_state_any(plugin_id, &mut || {
-        Box::new((init.take().expect("init called once"))())
+    let any = host.ensure_plugin_state_any(plugin_id, &mut || match init.take() {
+        Some(make) => Box::new(make()),
+        None => Box::new(()),
     });
-    any.downcast_mut::<T>()
-        .expect("plugin state type mismatch for plugin_id")
+    any?.downcast_mut::<T>()
 }
 
 #[cfg(feature = "host")]

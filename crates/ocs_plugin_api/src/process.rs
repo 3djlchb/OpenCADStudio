@@ -128,8 +128,8 @@ impl HostApi for NullHost {
         &mut self,
         _plugin_id: &'static str,
         _init: &mut dyn FnMut() -> Box<dyn std::any::Any + Send + Sync>,
-    ) -> &mut (dyn std::any::Any + Send + Sync) {
-        panic!("NullHost: ensure_plugin_state_any not available")
+    ) -> Option<&mut (dyn std::any::Any + Send + Sync)> {
+        None
     }
 }
 
@@ -1158,6 +1158,22 @@ mod tests {
         let runner = distinct_runner_path(&host);
         assert_eq!(runner, PathBuf::from("/app/OpenCADStudio-plugin-runner"));
     }
+
+    #[test]
+    fn null_host_ensure_plugin_state_does_not_panic() {
+        let mut null = NullHost;
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = null.ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32));
+        }));
+        assert!(
+            outcome.is_ok(),
+            "NullHost ensure_plugin_state must degrade, not panic: {:?}",
+            outcome.err()
+        );
+        assert!(null
+            .ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32))
+            .is_none());
+    }
 }
 
 #[cfg(all(test, feature = "host"))]
@@ -1261,8 +1277,8 @@ mod timeout_tests {
             &mut self,
             _plugin_id: &'static str,
             _init: &mut dyn FnMut() -> Box<dyn std::any::Any + Send + Sync>,
-        ) -> &mut (dyn std::any::Any + Send + Sync) {
-            panic!("not used")
+        ) -> Option<&mut (dyn std::any::Any + Send + Sync)> {
+            None
         }
     }
 

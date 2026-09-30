@@ -2612,12 +2612,14 @@ impl HostApi for HostSession<'_> {
         &mut self,
         plugin_id: &'static str,
         init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
-    ) -> &mut (dyn Any + Send + Sync) {
-        self.app.tabs[self.tab]
-            .plugin_state
-            .entry(plugin_id)
-            .or_insert_with(|| init())
-            .as_mut()
+    ) -> Option<&mut (dyn Any + Send + Sync)> {
+        Some(
+            self.app.tabs[self.tab]
+                .plugin_state
+                .entry(plugin_id)
+                .or_insert_with(|| init())
+                .as_mut(),
+        )
     }
     fn document_reader(&self) -> Box<dyn ocs_plugin_api::host::DocumentReader + '_> {
         Box::new(ocs_plugin_api::host::CadDocumentReader(self.document()))
@@ -9157,7 +9159,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // Absent before first use.
         assert!(host::plugin_state::<u32>(&*host, "opencad.demo").is_none());
         // Insert via ensure, then mutate.
-        *host::ensure_plugin_state(host, "opencad.demo", || 7u32) += 1;
+        *host::ensure_plugin_state(host, "opencad.demo", || 7u32).unwrap() += 1;
         assert_eq!(
             *host::plugin_state::<u32>(&*host, "opencad.demo").unwrap(),
             8
@@ -9167,6 +9169,28 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             *host::plugin_state::<u32>(&*host, "opencad.demo").unwrap(),
             100
         );
+    }
+
+    #[test]
+    fn ensure_plugin_state_type_mismatch_does_not_panic() {
+        use ocs_plugin_api::host::{self, HostApi};
+        let mut app = OpenCADStudio::new_for_test();
+        let mut session = HostSession::new(&mut app, 0);
+        let host: &mut dyn HostApi = &mut session;
+        let _ = host::ensure_plugin_state(host, "opencad.demo", || 7u32);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ =
+                host::ensure_plugin_state::<String>(&mut *host, "opencad.demo", || "x".to_string());
+        }));
+        assert!(
+            outcome.is_ok(),
+            "type mismatch in ensure_plugin_state must degrade, not panic: {:?}",
+            outcome.err()
+        );
+        assert!(
+            host::ensure_plugin_state::<String>(host, "opencad.demo", || "x".to_string()).is_none()
+        );
+        assert_eq!(*host::ensure_plugin_state::<u32>(host, "opencad.demo", || 0).unwrap(), 7);
     }
 
     #[test]

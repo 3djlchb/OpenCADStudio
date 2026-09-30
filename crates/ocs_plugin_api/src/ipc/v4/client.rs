@@ -607,8 +607,10 @@ impl HostApi for V4PluginHostApi {
         &mut self,
         _plugin_id: &'static str,
         _init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
-    ) -> &mut (dyn Any + Send + Sync) {
-        panic!("ensure_plugin_state is not supported for out-of-process plugins; keep state in the plugin crate")
+    ) -> Option<&mut (dyn Any + Send + Sync)> {
+        // Same limitation as `plugin_state_any`; degrade to `None` so the
+        // plugin keeps running instead of dying on its own helper call.
+        None
     }
 
     fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
