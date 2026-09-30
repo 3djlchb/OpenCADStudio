@@ -792,6 +792,8 @@ pub(super) struct OpenCADStudio {
     /// Whether the Browser panel is shown. Off until BROWSER opens it, so
     /// the default layout is unchanged for existing users.
     pub(crate) show_browser: bool,
+    /// Point Cloud Manager palette (POINTCLOUDMANAGER).
+    pub(crate) pc_manager: crate::ui::window::pc_manager::PcManager,
     /// Which viewport background the colour wheel is editing, or `None` when
     /// it is closed. One slot, because only one wheel can be open at a time.
     pub(crate) bg_picker: Option<BgTarget>,
@@ -3843,6 +3845,8 @@ pub enum Message {
     PdfImportPick,
     /// An edit in one of the PDF dialogs.
     PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg),
+    /// A click or search in the Point Cloud Manager.
+    PcManager(crate::ui::window::pc_manager::PcManagerMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -4157,6 +4161,7 @@ impl OpenCADStudio {
             graph_undo_open: false,
             show_external_references: false,
             show_browser: false,
+            pc_manager: Default::default(),
             bg_picker: None,
             block_palette: Default::default(),
             xref_manager: Default::default(),

@@ -8403,7 +8403,13 @@ impl Scene {
                         common.color.clone()
                     };
                     let object_color = color.rgb().map_or([255; 3], |(r, g, b)| [r, g, b]);
-                    clouds.extend(point_cloud::placed(&self.document, data, object_color, transform));
+                    clouds.extend(point_cloud::placed(
+                        &self.document,
+                        data,
+                        object_color,
+                        transform,
+                        &point_cloud::hidden(common),
+                    ));
                 },
             );
             if clouds.is_empty() {

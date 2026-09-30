@@ -71,6 +71,7 @@ pub(super) const NAMES: &[&str] = &[
     "close_modal",
     "pdf_dialog_ok",
     "pdf_layer_toggle",
+    "pc_manager_toggle",
     "pdf_page_select",
     "ribbon_tab",
     "ribbon_dropdown",
@@ -688,6 +689,19 @@ impl OpenCADStudio {
             "pdf_layer_toggle" => Message::PdfDialog(
                 crate::ui::window::pdf_dialogs::PdfDialogMsg::LayersToggle(string(req, "value")?.into()),
             ),
+            // Point Cloud Manager: flip a row's switch, "<handle>:<row>" with
+            // row cloud, unassigned, scans or scan:<name>.
+            "pc_manager_toggle" => {
+                use crate::ui::window::pc_manager::{PcManagerMsg, Row};
+                let value = string(req, "value")?;
+                let parsed = value.split_once(':').and_then(|(handle, row)| {
+                    Some((codec::Handle::new(u64::from_str_radix(handle, 16).ok()?), Row::parse(row)?))
+                });
+                let Some((handle, row)) = parsed else {
+                    return Err(failure("bad_value", "Expected <handle>:<row>"));
+                };
+                Message::PcManager(PcManagerMsg::Toggle(handle, row))
+            }
             // Attach dialog: choose pages by index ("0,2").
             "pdf_page_select" => {
                 let pages: Vec<usize> = string(req, "value")?
