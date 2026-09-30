@@ -395,11 +395,13 @@ impl GuiClient {
                 "client_id",
                 Value::String(self.client_id.clone()),
             );
-            insert_default(
-                &mut object,
-                "document_id",
-                self.state["document_id"].clone(),
-            );
+            if op != "entities_copy_to" {
+                insert_default(
+                    &mut object,
+                    "document_id",
+                    self.state["document_id"].clone(),
+                );
+            }
             insert_default(&mut object, "revision", self.state["revision"].clone());
             if ["input", "property", "run", "action", "save", "save_verified", "undo", "redo"].contains(&op.as_str())
             {
@@ -655,224 +657,45 @@ fn required_string<'a>(arguments: &'a Value, key: &str) -> Result<&'a str, Strin
         .ok_or_else(|| format!("Missing {key}"))
 }
 
-fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
-    let missing = |field: &str, example: &str| {
-        Err(format!(
-            "Missing {field} for {op}. Example request: {example}"
-        ))
-    };
-    match op {
-        "batch" => {
-            let steps = request["steps"].as_array().ok_or_else(|| {
-                r#"Missing steps for batch. Example request: {"op":"batch","request_id":"draw-1","steps":[{"op":"run","cmd":"LINE 0,0 10,0"}]}"#.to_string()
-            })?;
-            if steps.is_empty() || steps.len() > MAX_BATCH_STEPS {
+fn validate_execute_request(
+    request: &Value,
+    op: &str,
+) -> Result<crate::mcp_ops::ValidationResult, String> {
+    if op == "batch" {
+        let steps = request["steps"].as_array().ok_or_else(|| {
+            r#"Missing steps for batch. Example request: {"op":"batch","request_id":"draw-1","steps":[{"op":"run","cmd":"LINE 0,0 10,0"}]}"#.to_string()
+        })?;
+        if steps.is_empty() || steps.len() > MAX_BATCH_STEPS {
+            return Err(format!(
+                "batch steps must contain 1 to {MAX_BATCH_STEPS} operations"
+            ));
+        }
+        let mut warnings = Vec::new();
+        for (index, step) in steps.iter().enumerate() {
+            let step_obj = step
+                .as_object()
+                .ok_or_else(|| format!("batch step {index} must be an object"))?;
+            if step_obj.contains_key("request_id") {
                 return Err(format!(
-                    "batch steps must contain 1 to {MAX_BATCH_STEPS} operations"
+                    "batch step {index} must omit request_id; the batch assigns idempotency keys"
                 ));
             }
-            for (index, step) in steps.iter().enumerate() {
-                let step = step
-                    .as_object()
-                    .ok_or_else(|| format!("batch step {index} must be an object"))?;
-                if step.contains_key("request_id") {
-                    return Err(format!(
-                        "batch step {index} must omit request_id; the batch assigns idempotency keys"
-                    ));
-                }
-                let step = Value::Object(step.clone());
-                let step_op = step["op"]
-                    .as_str()
-                    .ok_or_else(|| format!("batch step {index} is missing op"))?;
-                if !BATCH_STEP_OPS.contains(&step_op) {
-                    return Err(format!("Unknown operation {step_op} in batch step {index}"));
-                }
-                validate_execute_request(&step, step_op)
-                    .map_err(|error| format!("batch step {index}: {error}"))?;
+            let step_op = step_obj
+                .get("op")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("batch step {index} is missing op"))?;
+            if !BATCH_STEP_OPS.contains(&step_op) {
+                return Err(format!("Unknown operation {step_op} in batch step {index}"));
             }
-            Ok(())
-        }
-        "open" if request["path"].as_str().is_none_or(str::is_empty) => {
-            missing("path", r#"{"op":"open","path":"/path/drawing.dxf"}"#)
-        }
-        "activate" if request["document_id"].as_u64().is_none() => {
-            missing("document_id", r#"{"op":"activate","document_id":2}"#)
-        }
-        "run" | "start" if request["cmd"].as_str().is_none_or(str::is_empty) => {
-            missing("cmd", r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#)
-        }
-        "input" => match request["kind"].as_str() {
-            Some("text") => Ok(()),
-            Some("token")
-                if request["text"]
-                    .as_str()
-                    .is_some_and(|value| !value.is_empty()) =>
-            {
-                Ok(())
-            }
-            Some("token") => missing("text", r#"{"op":"input","kind":"token","text":"C"}"#),
-            Some("point")
-                if request["point"].as_array().is_some_and(|values| {
-                    values.len() == 3 && values.iter().all(Value::is_number)
-                }) =>
-            {
-                Ok(())
-            }
-            Some("point") => missing(
-                "point",
-                r#"{"op":"input","kind":"point","point":[0,0,0],"space":"wcs"}"#,
-            ),
-            Some("entity" | "structure")
-                if request["handle"]
-                    .as_str()
-                    .is_some_and(|value| !value.is_empty())
-                    && request["point"].as_array().is_some_and(|values| {
-                        values.len() == 3 && values.iter().all(Value::is_number)
-                    }) =>
-            {
-                Ok(())
-            }
-            Some("entity" | "structure") => missing(
-                "handle and point",
-                r#"{"op":"input","kind":"entity","handle":"2A","point":[0,0,0]}"#,
-            ),
-            Some("selection" | "enter") => Ok(()),
-            Some(kind) => Err(format!(
-                "Unknown input kind {kind}. Use text, token, point, entity, structure, selection or enter"
-            )),
-            None => missing("kind", r#"{"op":"input","kind":"point","point":[0,0,0]}"#),
-        },
-        "property"
-            if request["field"].as_str().is_none_or(str::is_empty)
-                || request.get("value").is_none() =>
-        {
-            missing(
-                "field or value",
-                r#"{"op":"property","field":"color","value":1}"#,
-            )
-        }
-        "set_properties"
-            if request["collection"].as_str().is_none_or(str::is_empty)
-                || request["updates"].as_array().is_none_or(Vec::is_empty) =>
-        {
-            missing(
-                "collection or updates",
-                r#"{"op":"set_properties","collection":"entities","handle":"2A","updates":[{"path":"/common/layer","value":"Walls"}]}"#,
-            )
-        }
-        "action" => match request["name"].as_str() {
-            Some(name) if crate::app::automation_action_names().contains(&name) => Ok(()),
-            Some(name) => Err(format!(
-                "Unknown action {name}. Call ocs_read commands to list actions"
-            )),
-            None => missing("name", r#"{"op":"action","name":"zoom_extents"}"#),
-        },
-        "embed_image" if request["path"].as_str().is_none_or(str::is_empty) => {
-            missing(
-                "path",
-                r#"{"op":"embed_image","path":"/path/logo.png","at":[0,0,0],"width":100}"#,
-            )
-        }
-        "wblock" if request["path"].as_str().is_none_or(str::is_empty) => {
-            missing(
-                "path",
-                r#"{"op":"wblock","path":"/path/part.dwg","handles":["2A","31"]}"#,
-            )
-        }
-        "plot" if request["path"].as_str().is_none_or(str::is_empty) => {
-            missing(
-                "path",
-                r#"{"op":"plot","path":"/path/pages.pdf","layout":"Model"}"#,
-            )
-        }
-        "entities_create"
-            if request["entities"].as_array().is_none_or(Vec::is_empty) =>
-        {
-            missing(
-                "entities",
-                r#"{"op":"entities_create","entities":[{"type":"Circle","center":[0,0,0],"radius":5}]}"#,
-            )
-        }
-        "entities_delete" | "entities_transform" | "view_focus"
-            if request["handles"].as_array().is_none_or(Vec::is_empty) =>
-        {
-            missing(
-                "handles",
-                r#"{"op":"entities_delete","handles":["2A","31"]}"#,
-            )
-        }
-        "block_define"
-            if request["name"].as_str().is_none_or(str::is_empty)
-                || request["handles"].as_array().is_none_or(Vec::is_empty)
-                || request["base"].as_array().is_none() =>
-        {
-            missing(
-                "name, handles and base",
-                r#"{"op":"block_define","name":"MARK","base":[0,0,0],"handles":["2A"]}"#,
-            )
-        }
-        "xdata_set"
-            if request["app"].as_str().is_none_or(str::is_empty)
-                || request["handles"].as_array().is_none_or(Vec::is_empty) =>
-        {
-            missing(
-                "app and handles",
-                r#"{"op":"xdata_set","app":"SPM","handles":["2A"],"data":[{"code":1000,"value":"tag"}]}"#,
-            )
-        }
-        "entities_copy_to"
-            if request["handles"].as_array().is_none_or(Vec::is_empty)
-                || request["document_id"].as_u64().is_none() =>
-        {
-            missing(
-                "handles and document_id",
-                r#"{"op":"entities_copy_to","handles":["2A"],"document_id":2}"#,
-            )
-        }
-        "group_create" | "selection_set_save"
-            if request["name"].as_str().is_none_or(str::is_empty)
-                || request["handles"].as_array().is_none_or(Vec::is_empty) =>
-        {
-            missing(
-                "name and handles",
-                r#"{"op":"group_create","name":"Frame","handles":["2A"]}"#,
-            )
-        }
-        "selection_set_load" if request["name"].as_str().is_none_or(str::is_empty) => {
-            missing("name", r#"{"op":"selection_set_load","name":"Frame"}"#)
-        }
-        "block_delete" if request["name"].as_str().is_none_or(str::is_empty) => {
-            missing("name", r#"{"op":"block_delete","name":"Frame"}"#)
-        }
-        "layout_create" if request["name"].as_str().is_none_or(str::is_empty) => {
-            missing("name", r#"{"op":"layout_create","name":"Plan"}"#)
-        }
-        "page_setup_set" if request["layout"].as_str().is_none_or(str::is_empty) => {
-            missing(
-                "layout",
-                r#"{"op":"page_setup_set","layout":"Plan","paper":"ISO_A4_(210.00_x_297.00_MM)"}"#,
-            )
-        }
-        "save_verified" if request["path"].as_str().is_none_or(str::is_empty) => {
-            missing(
-                "path",
-                r#"{"op":"save_verified","request_id":"deliver-1","path":"/absolute/output.dwg","target_version":"2018"}"#,
-            )
-        }
-        "text_replace" => {
-            if request["pairs"].as_array().is_none()
-                && request["find"].as_str().is_none_or(str::is_empty)
-            {
-                missing(
-                    "find or pairs",
-                    r#"{"op":"text_replace","request_id":"tr1","find":"OLD","replace":"NEW"}"#,
-                )
-            } else {
-                Ok(())
+            let step_val = crate::mcp_ops::validate_request(step, true)
+                .map_err(|error| format!("batch step {index}: {error}"))?;
+            for w in step_val.warnings {
+                warnings.push(format!("batch step {index}: {w}"));
             }
         }
-        _ => Ok(()),
+        return Ok(crate::mcp_ops::ValidationResult { warnings });
     }
+    crate::mcp_ops::validate_request(request, false)
 }
 
 fn compact_state(state: &Value) -> Value {
@@ -976,15 +799,23 @@ fn call_tool(
             if request_id.len() > 128 {
                 return Err("request_id must not exceed 128 bytes".into());
             }
-            validate_execute_request(&request, op)?;
+            let val_res = validate_execute_request(&request, op)?;
             let wait = arguments["wait_seconds"].as_f64().unwrap_or(30.0);
             let detail = arguments["response_detail"].as_str().unwrap_or("compact");
             let gui = client(clients, session_id)?;
-            let response = if op == "batch" {
+            let mut response = if op == "batch" {
                 gui.execute_batch(request, wait)?
             } else {
                 gui.request(request, wait)?
             };
+            if !val_res.warnings.is_empty() {
+                if let Some(object) = response.as_object_mut() {
+                    object.insert(
+                        "warnings".into(),
+                        Value::Array(val_res.warnings.into_iter().map(Value::String).collect()),
+                    );
+                }
+            }
             shape_execute_response(response, detail, gui)
         }
         "ocs_capture" => {
@@ -1007,184 +838,13 @@ fn call_tool(
     }
 }
 
+#[allow(dead_code)]
 fn batch_step_schema() -> Value {
-    json!({
-        "type":"object",
-        "properties":{
-            "op":{"type":"string","enum":BATCH_STEP_OPS},
-            "document_id":{"type":"integer","minimum":0},
-            "cmd":{"type":"string","minLength":1},
-            "path":{"type":"string","minLength":1},
-            "target_format":{"type":"string","enum":["dwg","dxf"]},
-            "target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"]},
-            "allow_lossy":{"type":"boolean","default":false},
-            "kind":{"type":"string","enum":["text","token","point","entity","structure","selection","enter"]},
-            "text":{"type":"string"},
-            "point":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},
-            "space":{"type":"string","enum":["wcs","ucs","relative"]},
-            "handle":{"type":"string"},
-            "handles":{"type":"array","items":{"type":"string"}},
-            "type":{"type":"string"},
-            "layer":{"type":"string"},
-            "clear":{"type":"boolean"},
-            "field":{"type":"string"},
-            "value":{"description":"New property value; its JSON type must match the property kind.","anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"},{"type":"object"},{"type":"array"},{"type":"null"}]},
-            "collection":{"type":"string"},
-            "updates":{"type":"array","minItems":1,"items":{"type":"object","properties":{"path":{"type":"string","pattern":"^/"},"value":{},"expected":{}},"required":["path","value"],"additionalProperties":false}},
-            "name":{"type":"string","enum":crate::app::automation_action_names()}
-        },
-        "required":["op"],
-        "additionalProperties":false
-    })
+    crate::mcp_ops::batch_step_schema()
 }
 
 fn execute_request_schema() -> Value {
-    let handle = json!({
-        "type":"string",
-        "pattern":"^(0[xX])?[0-9A-Fa-f]+$",
-        "description":"Entity handle returned by ocs_read entities or state selection."
-    });
-    let point = json!({
-        "type":"array","items":{"type":"number"},"minItems":3,"maxItems":3,
-        "description":"Finite [x,y,z] coordinates."
-    });
-    json!({
-        "type":"object",
-        "properties":{
-            "op":{"type":"string","enum":EXECUTE_OPS,"description":"Semantic editor operation."},
-            "request_id":{"type":"string","minLength":1,"maxLength":128,"description":"Caller-generated idempotency key. Reuse it only when retrying the identical request."},
-            "document_id":{"type":"integer","minimum":0,"description":"Target document from current state."},
-            "revision":{"type":"integer","minimum":0,"description":"Expected edit revision from current state."},
-            "geometry_revision":{"type":"integer","minimum":0,"description":"Expected geometry revision when geometry state matters."},
-            "camera_revision":{"type":"integer","minimum":0,"description":"Expected camera revision when view state matters."},
-            "selection":{"type":"array","items":handle.clone(),"description":"Expected selected handles from current state."},
-            "cmd":{"type":"string","minLength":1,"description":"Command name followed by its prompt answers separated by spaces. Points use x,y or x,y,z; option answers use their token. Read command details first when unsure.","examples":["LINE 0,0 10,10","CIRCLE 5,5 3","PLINE 0,0 10,0 10,10 C"]},
-            "find":{"type":"string","description":"Search text to replace; supports DXF Unicode escapes and special characters."},
-            "replace":{"type":"string","description":"Replacement text."},
-            "pairs":{"type":"array","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]},"description":"Batch find/replace pairs executed in a single atomic undo transaction."},
-            "match_case":{"type":"boolean","default":false,"description":"Case-sensitive text search/replace."},
-            "whole_word":{"type":"boolean","default":false,"description":"Match only whole words (bounded by non-alphanumeric characters)."},
-            "ignore_accents":{"type":"boolean","description":"Ignore accents/diacritics in text (defaults to true when match_case is false)."},
-            "dry_run":{"type":"boolean","default":false,"description":"When true, simulates replacement without mutating entities or pushing undo."},
-            "replace_all":{"type":"boolean","default":true,"description":"Replace all occurrences within matching entities (default true)."},
-            "scope":{"type":"string","enum":["all","active_space","blocks"],"default":"all","description":"Text search/replace scope."},
-            "path":{"type":"string","minLength":1,"description":"Absolute path: drawing for open or save, image file for embed_image, target DWG/DXF for wblock, target PDF for plot; save_verified requires .dwg or .dxf."},
-            "block":{"type":"string","description":"Block definition name for wblock (exports its entities flattened into model space)."},
-            "linked":{"type":"boolean","description":"embed_image: true stores a path-linked RasterImage instead of an embedded OLE2FRAME."},
-            "layout":{"type":"string","description":"plot: Model (default), a layout name, or all."},
-            "area":{"type":"string","enum":["extents","display","limits","window","layout"],"description":"plot area; layout applies to paper-space layouts."},
-            "window":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"World [x0,y0,x1,y1] plot rectangle for area window."},
-            "paper":{"type":"string","description":"plot: canonical paper-catalog sheet name."},
-            "orientation":{"type":"string","enum":["Portrait","Landscape"],"description":"plot sheet orientation."},
-            "fit":{"type":"boolean","description":"plot: scale content to fit the sheet (default true)."},
-            "scale":{"type":"string","description":"plot scale as paper:drawing, e.g. 1:100; disables fit."},
-            "center":{"type":"boolean","description":"plot: center the content on the sheet (default true)."},
-            "offset_x":{"type":"number","description":"plot offset when not centered."},
-            "offset_y":{"type":"number","description":"plot offset when not centered."},
-            "upside_down":{"type":"boolean","description":"plot: rotate content 180 degrees."},
-            "plot_style":{"type":"string","description":"plot: CTB file path or a discovered plot style name."},
-            "transparency":{"type":"boolean","description":"plot: keep transparency."},
-            "lineweights":{"type":"boolean","description":"plot: honor object lineweights."},
-            "merge_lines":{"type":"boolean","description":"plot: merge overlapping lines."},
-            "stamp":{"type":"boolean","description":"plot: draw the plot stamp."},
-            "entities":{"type":"array","minItems":1,"description":"entities_create: typed definitions, one object per entity. type is one of Line, Circle, Arc, LwPolyline, Point, Text, MText, Insert, Solid, Hatch; geometry fields depend on the type; layer and color (ACI) are optional and a missing layer is created.","items":{"type":"object"}},
-            "action":{"type":"string","enum":["move","copy","rotate","scale","mirror","array"],"description":"entities_transform action (default move)."},
-            "vector":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"move/copy displacement [dx,dy(,dz)]."},
-            "center":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"rotate/scale center point."},
-            "angle_deg":{"type":"number","description":"rotate angle, degrees CCW."},
-            "factor":{"type":"number","exclusiveMinimum":0,"description":"scale factor."},
-            "axis":{"type":"array","minItems":2,"maxItems":2,"description":"mirror line [[x1,y1],[x2,y2]].","items":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2}},
-            "copy":{"type":"boolean","description":"mirror: keep the originals and return mirrored copies."},
-            "rows":{"type":"integer","minimum":1,"description":"array row count (default 1)."},
-            "columns":{"type":"integer","minimum":1,"description":"array column count (default 1)."},
-            "row_spacing":{"type":"number","description":"array row spacing."},
-            "column_spacing":{"type":"number","description":"array column spacing."},
-            "base":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"block_define base point (becomes the block origin)."},
-            "insert_at":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"block_define Insert placement (default = base)."},
-            "app":{"type":"string","minLength":1,"description":"xdata_set: application name; its RegApp table entry is registered automatically."},
-            "data":{"type":"array","description":"xdata_set typed values [{code,value}]: 1000 string, 1003 layer, 1004 hex bytes, 1005 hex handle, 1010-1013 [x,y,z], 1040/1041/1042 real, 1070 int16, 1071 int32. An empty or absent list removes the application record.","items":{"type":"object","properties":{"code":{"type":"integer"},"value":{}},"required":["code","value"]}},
-            "highlight":{"type":"boolean","description":"view_focus: also select the entities (default true)."},
-            "template":{"type":"string","description":"new/wblock: load this DWG/DXF/DWT file as the base document so its tables and styles survive."},
-            "discard":{"type":"boolean","description":"close: true erases unsaved changes instead of refusing a dirty document."},
-            "per_page":{"type":"boolean","description":"plot: write one PDF per layout as <stem>-<Layout>.pdf."},
-            "get":{"type":"array","items":{"type":"string"},"description":"sysvar: variable names to read (ltscale, pdmode, pdsize, celtscale, textsize, filletrad, mirrtext, insunits, osmode, clayer, ctextstyle, extmin, extmax)."},
-            "set":{"type":"object","description":"sysvar: name=value pairs to write in one undo step.","additionalProperties":true},
-            "select":{"type":"boolean","description":"selection_set_load: also select the recalled entities (default true)."},
-            "where":{"type":"array","description":"query: cross-property filters over entity properties with RFC 6901 paths and the records operator set.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string"},"value":{}},"required":["path"]}},
-            "target_format":{"type":"string","enum":["dwg","dxf"],"description":"Explicit output format; it must match the path extension."},
-            "target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"],"description":"Explicit CAD output version. Omit only to preserve the document version."},
-            "allow_lossy":{"type":"boolean","default":false,"description":"Acknowledge dropping unsupported passthrough records reported by audit."},
-            "overwrite":{"type":"boolean","default":false,"description":"For save_verified only: replace an existing destination."},
-            "at":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World [x,y] or [x,y,z] placement corner for embed_image (picture grows up-right)."},
-            "width":{"type":"number","exclusiveMinimum":0,"description":"World width for embed_image; height follows the image aspect ratio. Defaults to pixel_width/100."},
-            "kind":{"type":"string","enum":["text","token","point","entity","structure","selection","enter"],"description":"Input kind listed in state.command.accepts."},
-            "text":{"type":"string","description":"Free text or one option/value token."},
-            "point":point,
-            "space":{"type":"string","enum":["wcs","ucs","relative"],"default":"wcs","description":"Coordinate space for point input."},
-            "handle":handle.clone(),
-            "handles":{"type":"array","items":handle,"description":"Entity handles: selection filter for select, export set for wblock."},
-            "type":{"type":"string","description":"Entity type filter for select."},
-            "layer":{"type":"string","description":"Layer filter for select."},
-            "clear":{"type":"boolean","description":"Clear the current selection before applying select filters."},
-            "field":{"type":"string","minLength":1,"description":"Property id returned by ocs_read properties."},
-            "value":{"description":"New property value; its JSON type must match the property kind.","anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"},{"type":"object"},{"type":"array"},{"type":"null"}]},
-            "collection":{"type":"string","description":"Record collection returned by ocs_read records."},
-            "updates":{"type":"array","minItems":1,"description":"Atomic, type-checked property replacements. Paths are RFC 6901 JSON Pointers relative to record.properties.","items":{"type":"object","properties":{"path":{"type":"string","pattern":"^/"},"value":{},"expected":{"description":"Optional compare-and-set value."}},"required":["path","value"],"additionalProperties":false}},
-            "name":{"type":"string","enum":crate::app::automation_action_names(),"description":"UI action returned by ocs_read commands."},
-            "steps":{"type":"array","minItems":1,"maxItems":MAX_BATCH_STEPS,"description":"Sequential editor operations executed with fresh state and idempotency keys. Execution stops at the first failure; completed_steps says what committed.","items":batch_step_schema()}
-        },
-        "required":["op","request_id"],
-        "additionalProperties":false,
-        "oneOf":[
-            {"properties":{"op":{"const":"new"}}},
-            {"properties":{"op":{"const":"open"}},"required":["path"]},
-            {"properties":{"op":{"const":"activate"}},"required":["document_id"]},
-            {"properties":{"op":{"const":"run"}},"required":["cmd"]},
-            {"properties":{"op":{"const":"start"}},"required":["cmd"]},
-            {"properties":{"op":{"const":"input"}},"required":["kind"],"oneOf":[
-                {"properties":{"kind":{"const":"text"}}},
-                {"properties":{"kind":{"const":"token"}},"required":["text"]},
-                {"properties":{"kind":{"const":"point"}},"required":["point"]},
-                {"properties":{"kind":{"const":"entity"}},"required":["handle","point"]},
-                {"properties":{"kind":{"const":"structure"}},"required":["handle","point"]},
-                {"properties":{"kind":{"const":"selection"}}},
-                {"properties":{"kind":{"const":"enter"}}}
-            ]},
-            {"properties":{"op":{"const":"cancel"}}},
-            {"properties":{"op":{"const":"undo"}}},
-            {"properties":{"op":{"const":"redo"}}},
-            {"properties":{"op":{"const":"select"}}},
-            {"properties":{"op":{"const":"property"}},"required":["field","value"]},
-            {"properties":{"op":{"const":"set_properties"}},"required":["collection","updates"]},
-            {"properties":{"op":{"const":"action"}},"required":["name"]},
-            {"properties":{"op":{"const":"embed_image"}},"required":["path"]},
-            {"properties":{"op":{"const":"wblock"}},"required":["path"]},
-            {"properties":{"op":{"const":"plot"}},"required":["path"]},
-            {"properties":{"op":{"const":"entities_create"}},"required":["entities"]},
-            {"properties":{"op":{"const":"entities_delete"}},"required":["handles"]},
-            {"properties":{"op":{"const":"entities_transform"}},"required":["handles"]},
-            {"properties":{"op":{"const":"text_replace"}}},
-            {"properties":{"op":{"const":"block_define"}},"required":["name","base","handles"]},
-            {"properties":{"op":{"const":"block_delete"}},"required":["name"]},
-            {"properties":{"op":{"const":"xdata_set"}},"required":["app","handles"]},
-            {"properties":{"op":{"const":"view_focus"}},"required":["handles"]},
-            {"properties":{"op":{"const":"entities_copy_to"}},"required":["handles","document_id"]},
-            {"properties":{"op":{"const":"group_create"}},"required":["name","handles"]},
-            {"properties":{"op":{"const":"selection_set_save"}},"required":["name","handles"]},
-            {"properties":{"op":{"const":"selection_set_load"}},"required":["name"]},
-            {"properties":{"op":{"const":"user_select"}},"description":"Ask the person at the screen to pick entities; resolves when they press Enter (or cancel on Escape). Optional type/layer/prompt/detail/clear."},
-            {"properties":{"op":{"const":"getpoint"}},"description":"Ask the person at the screen to pick one point; resolves with the picked point when they click, or cancels on Escape. Optional prompt."},
-            {"properties":{"op":{"const":"close"}}},
-            {"properties":{"op":{"const":"sysvar"}}},
-            {"properties":{"op":{"const":"layout_create"}},"required":["name"]},
-            {"properties":{"op":{"const":"page_setup_set"}},"required":["layout"]},
-            {"properties":{"op":{"const":"file_identity"}}},
-            {"properties":{"op":{"const":"save"}}},
-            {"properties":{"op":{"const":"save_verified"}},"required":["path"]},
-            {"properties":{"op":{"const":"stop"}}},
-            {"properties":{"op":{"const":"batch"}},"required":["steps"]}
-        ]
-    })
+    crate::mcp_ops::execute_request_schema()
 }
 
 fn read_output_schema() -> Value {
@@ -1569,13 +1229,10 @@ mod tests {
             tools[2]["inputSchema"]["properties"]["request"]["required"],
             json!(["op", "request_id"])
         );
-        assert_eq!(
-            tools[2]["inputSchema"]["properties"]["request"]["oneOf"]
-                .as_array()
-                .unwrap()
-                .len(),
-            EXECUTE_OPS.len()
-        );
+        let request_variants = tools[2]["inputSchema"]["properties"]["request"]["anyOf"]
+            .as_array()
+            .unwrap();
+        assert_eq!(request_variants.len(), EXECUTE_OPS.len());
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["request"]["properties"]["steps"]["maxItems"],
             MAX_BATCH_STEPS
@@ -1588,10 +1245,15 @@ mod tests {
             tools[3]["inputSchema"]["properties"]["scope"]["default"],
             "viewport"
         );
-        assert_eq!(
-            tools[2]["inputSchema"]["properties"]["request"]["properties"]["cmd"]["examples"][0],
-            "LINE 0,0 10,10"
-        );
+        let find_variant = |op_name: &str| {
+            request_variants
+                .iter()
+                .find(|v| v["properties"]["op"]["enum"][0] == op_name)
+                .cloned()
+                .unwrap_or_else(|| panic!("variant for {op_name} exists"))
+        };
+        let run_var = find_variant("run");
+        assert_eq!(run_var["properties"]["cmd"]["type"], "string");
         assert!(READ_OPS.contains(&"capabilities"));
         assert!(READ_OPS.contains(&"records"));
         assert!(READ_OPS.contains(&"record_schema"));
@@ -1602,9 +1264,9 @@ mod tests {
         assert!(EXECUTE_OPS.contains(&"save_verified"));
         assert!(EXECUTE_OPS.contains(&"text_replace"));
         assert!(BATCH_STEP_OPS.contains(&"text_replace"));
+        let save_var = find_variant("save_verified");
         assert_eq!(
-            tools[2]["inputSchema"]["properties"]["request"]["properties"]
-                ["target_version"]["enum"][0],
+            save_var["properties"]["target_version"]["enum"][0],
             "R14"
         );
         assert_eq!(
@@ -1625,8 +1287,9 @@ mod tests {
                 "not_exists"
             ])
         );
+        let set_props_var = find_variant("set_properties");
         assert_eq!(
-            tools[2]["inputSchema"]["properties"]["request"]["properties"]["updates"]["items"]["required"],
+            set_props_var["properties"]["updates"]["items"]["required"],
             json!(["path", "value"])
         );
         assert!(tools[0].get("outputSchema").is_some());
@@ -1822,5 +1485,107 @@ mod tests {
         }));
         assert_eq!(result["isError"], true);
         assert_eq!(result["structuredContent"]["code"], "stale_state");
+    }
+
+    #[test]
+    fn all_op_examples_pass_pre_dispatch_validation() {
+        for op in crate::mcp_ops::OPS {
+            let mut req: Value = serde_json::from_str(op.example)
+                .unwrap_or_else(|e| panic!("invalid json example for {}: {e}", op.name));
+            if let Some(obj) = req.as_object_mut() {
+                obj.insert("request_id".into(), Value::String("example-id".into()));
+            }
+            let res = crate::mcp_ops::validate_request(&req, false);
+            assert!(
+                res.is_ok(),
+                "example for op '{}' failed validation: {:?}",
+                op.name,
+                res.err()
+            );
+
+            if op.batchable {
+                let mut batch_req: Value = serde_json::from_str(op.example).unwrap();
+                if let Some(obj) = batch_req.as_object_mut() {
+                    obj.remove("request_id");
+                }
+                let b_res = crate::mcp_ops::validate_request(&batch_req, true);
+                assert!(
+                    b_res.is_ok(),
+                    "batch example for op '{}' failed validation: {:?}",
+                    op.name,
+                    b_res.err()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pre_dispatch_validator_catches_unknown_parameters_as_warnings() {
+        let req = json!({
+            "op": "run",
+            "request_id": "r1",
+            "cmd": "LINE 0,0 10,0",
+            "extra_param": 123
+        });
+        let res = crate::mcp_ops::validate_request(&req, false).expect("validation passes");
+        assert_eq!(res.warnings.len(), 1);
+        assert!(res.warnings[0].contains("unknown parameter 'extra_param' ignored for op 'run'"));
+
+        // Batch step warnings propagation
+        let batch = json!({
+            "op": "batch",
+            "request_id": "b1",
+            "steps": [
+                {"op": "run", "cmd": "LINE 0,0 10,0", "stray": true}
+            ]
+        });
+        let batch_res = validate_execute_request(&batch, "batch").expect("batch passes");
+        assert_eq!(batch_res.warnings.len(), 1);
+        assert!(batch_res.warnings[0].contains("batch step 0: unknown parameter 'stray' ignored for op 'run'"));
+    }
+
+    #[test]
+    fn pre_dispatch_validator_enforces_required_fields_and_rules() {
+        // Missing required field
+        let missing_cmd = json!({"op": "run", "request_id": "r1"});
+        let err = crate::mcp_ops::validate_request(&missing_cmd, false).unwrap_err();
+        assert!(err.contains("Missing cmd for run. Example request:"), "{err}");
+
+        // Required-when rule (scale requires factor)
+        let scale_missing_factor = json!({
+            "op": "entities_transform",
+            "request_id": "r2",
+            "handles": ["2A"],
+            "action": "scale"
+        });
+        let err2 = crate::mcp_ops::validate_request(&scale_missing_factor, false).unwrap_err();
+        assert!(err2.contains("Missing factor for entities_transform. Example request:"), "{err2}");
+
+        // Hex handle enforcement
+        let invalid_handle = json!({
+            "op": "entities_delete",
+            "request_id": "r3",
+            "handles": ["NOT_A_HEX_HANDLE!"]
+        });
+        let err3 = crate::mcp_ops::validate_request(&invalid_handle, false).unwrap_err();
+        assert!(err3.contains("hexadecimal handle strings"), "{err3}");
+
+        // Non-batchable op rejected in batch
+        let stop_in_batch = json!({"op": "stop"});
+        let err4 = crate::mcp_ops::validate_request(&stop_in_batch, true).unwrap_err();
+        assert!(err4.contains("operation 'stop' cannot be used in a batch step"), "{err4}");
+    }
+
+    #[test]
+    fn schema_size_and_defs_structure() {
+        let schema = execute_request_schema();
+        assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+        assert!(schema["$defs"]["handle"].is_object());
+        assert!(schema["$defs"]["point"].is_object());
+        assert!(schema["$defs"]["window"].is_object());
+        assert!(schema["$defs"]["batch_step"].is_object());
+        let json_str = schema.to_string();
+        // Generates cleanly without exponential blowup: compact ~15KB to 30KB
+        assert!(json_str.len() < 40_000, "schema size is {} bytes", json_str.len());
     }
 }

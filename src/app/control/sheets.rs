@@ -231,8 +231,9 @@ impl OpenCADStudio {
         req: &Value,
     ) -> Result<Task<Message>, Value> {
         let handles = crate::app::control::entities::hex_handles(req, "handles")?;
-        let target = req["document_id"]
+        let target = req["target_document_id"]
             .as_u64()
+            .or_else(|| req["document_id"].as_u64())
             .ok_or_else(|| failure("document_required", "Supply the target document_id"))?;
         let source_index = self.active_tab;
         let target_index = self
