@@ -24,6 +24,8 @@ pub struct CloudPoints {
     pub positions: Vec<[f64; 3]>,
     pub colors: Vec<[u8; 3]>,
     pub intensity: Vec<u8>,
+    /// Unit normals in the file's frame (empty without normals).
+    pub normals: Vec<[f32; 3]>,
     pub has_rgb: bool,
     pub has_intensity: bool,
     pub has_normals: bool,
@@ -86,6 +88,7 @@ fn decode(path: &Path) -> Option<CloudPoints> {
         positions: Vec::new(),
         colors: Vec::new(),
         intensity: Vec::new(),
+        normals: Vec::new(),
         has_rgb: scans.iter().any(|(scan, _)| scan.has_rgb),
         has_intensity: scans.iter().any(|(scan, _)| scan.has_intensity),
         has_normals: scans.iter().any(|(scan, _)| scan.has_normals),
@@ -94,7 +97,7 @@ fn decode(path: &Path) -> Option<CloudPoints> {
         bounds: None,
     };
     for (scan, [translation, rotation, scale]) in scans {
-        let rotate = euler(rotation);
+        let rotate = euler(rotation.map(f64::to_radians));
         let place = |p: &[f64; 3]| {
             let s = [p[0] * scale[0], p[1] * scale[1], p[2] * scale[2]];
             let r = rotate.map(|row| row[0] * s[0] + row[1] * s[1] + row[2] * s[2]);
@@ -121,14 +124,17 @@ fn decode(path: &Path) -> Option<CloudPoints> {
             cloud.colors.extend(scan.intensity.iter().map(|&i| [i; 3]));
         }
         cloud.intensity.extend_from_slice(&scan.intensity);
+        cloud.normals.extend(scan.normals.iter().map(|n| {
+            let r = rotate.map(|row| row[0] * f64::from(n[0]) + row[1] * f64::from(n[1]) + row[2] * f64::from(n[2]));
+            r.map(|v| v as f32)
+        }));
     }
     Some(cloud)
 }
 
-/// Rotation matrix of a scan's rotation angles (radians, applied about X,
-/// then Y, then Z).
-// ponytail: the angle convention is unverified — every sample scan has a
-// zero rotation; check against a rotated scan when one turns up.
+/// Rotation matrix of a scan's rotation angles (radians here; projects and
+/// scan headers store degrees), applied about X, then Y, then Z — the
+/// reference's extents of rotated scans match this order.
 fn euler([x, y, z]: [f64; 3]) -> [[f64; 3]; 3] {
     let (sx, cx) = x.sin_cos();
     let (sy, cy) = y.sin_cos();
@@ -314,6 +320,14 @@ pub(crate) fn placed(
     let color = |i: usize, z: f64| -> [u8; 4] {
         let [r, g, b] = match &style {
             Stylization::Object(c) => *c,
+            Stylization::Normal => match cloud.normals.get(i) {
+                Some(n) => {
+                    let w = axes[0] * f64::from(n[0]) + axes[1] * f64::from(n[1]) + axes[2] * f64::from(n[2]);
+                    let w = w / w.length().max(1e-12);
+                    [w.x, w.y, w.z].map(|v| ((v + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8)
+                }
+                None => object_color,
+            },
             Stylization::Ramp { colors, gradient, intensity: true, range } => {
                 let percent = f64::from(cloud.intensity.get(i).copied().unwrap_or(0)) * 100.0 / 255.0;
                 let (from, to) = (range.0 as f64, range.1 as f64);
@@ -397,6 +411,8 @@ enum Stylization {
     Scan,
     /// The cloud's object colour.
     Object([u8; 3]),
+    /// Each point's world normal as a colour, (n + 1) / 2 per component.
+    Normal,
     /// A colour scheme over intensity (per cent, in the range given) or
     /// elevation, blended or in bands.
     Ramp { colors: Vec<[u8; 3]>, gradient: bool, intensity: bool, range: (i64, i64) },
@@ -406,9 +422,10 @@ impl Stylization {
     fn of(document: &CadDocument, data: &PointCloudExData, object_color: [u8; 3]) -> Self {
         let (scheme, intensity, gradient) = match data.stylization_type {
             2 => return Self::Object(object_color),
+            3 => return Self::Normal,
             5 => (&data.intensity_color_scheme, true, data.intensity_as_gradient),
             4 => (&data.current_color_scheme, false, data.elevation_as_gradient),
-            // Normals and classification have no data here: scan colours.
+            // Classification has no data here: scan colours.
             _ => return Self::Scan,
         };
         let colors = ramp_colors(document, scheme, if intensity { "Spectrum" } else { "Earth" });

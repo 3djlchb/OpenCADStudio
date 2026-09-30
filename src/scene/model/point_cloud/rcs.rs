@@ -22,6 +22,8 @@ pub struct Scan {
     pub local: Vec<[f64; 3]>,
     pub colors: Vec<[u8; 3]>,
     pub intensity: Vec<u8>,
+    /// Unit normals (scan frame).
+    pub normals: Vec<[f32; 3]>,
     pub has_rgb: bool,
     pub has_normals: bool,
     pub has_intensity: bool,
@@ -48,6 +50,31 @@ fn f64_at(b: &[u8], at: usize) -> Option<f64> {
 
 fn vec3_at(b: &[u8], at: usize) -> Option<[f64; 3]> {
     Some([f64_at(b, at)?, f64_at(b, at + 8)?, f64_at(b, at + 16)?])
+}
+
+/// A normal from its cube-map code: six faces of 52 × 52 equal-angle
+/// cells. The face gives the main axis and its sign; the cell the other two
+/// components, which flip with the face.
+fn normal(code: u16) -> [f32; 3] {
+    let code = usize::from(code);
+    if code >= 6 * 52 * 52 {
+        return [0.0, 0.0, 1.0];
+    }
+    let (face, cell) = (code / 2704, code % 2704);
+    let tan = |i: usize| (((i as f64 + 0.5) / 26.0 - 1.0) * std::f64::consts::FRAC_PI_4).tan();
+    let axis = face >> 1;
+    let (b, c) = match axis {
+        0 => (1, 2),
+        1 => (0, 2),
+        _ => (0, 1),
+    };
+    let sign = if face % 2 == 0 { 1.0 } else { -1.0 };
+    let mut n = [0.0f64; 3];
+    n[axis] = sign;
+    n[b] = sign * tan(cell % 52);
+    n[c] = sign * tan(cell / 52);
+    let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    n.map(|v| (v / length) as f32)
 }
 
 pub fn decode(b: &[u8]) -> Option<Scan> {
@@ -84,6 +111,7 @@ pub fn decode(b: &[u8]) -> Option<Scan> {
         local: Vec::new(),
         colors: Vec::new(),
         intensity: Vec::new(),
+        normals: Vec::new(),
         has_rgb,
         has_normals,
         has_intensity,
@@ -116,6 +144,7 @@ pub fn decode(b: &[u8]) -> Option<Scan> {
             scan.local.push([cube_min[0] + q(0), cube_min[1] + q(18), cube_min[2] + q(36)]);
             scan.intensity.push(rec[8]);
             scan.colors.push([rec[11], rec[10], rec[9]]);
+            scan.normals.push(normal(u16::from_le_bytes([rec[12], rec[13]])));
         }
         block = end;
     }
