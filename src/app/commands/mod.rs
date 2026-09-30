@@ -14,6 +14,9 @@ mod inquiry;
 mod layerprops;
 mod layers;
 pub(crate) mod pdf_import;
+mod point_cloud;
+mod pc_colormap;
+mod pc_extract;
 mod pdf_underlay;
 mod pdf_dialogs;
 mod xclip;
@@ -267,6 +270,12 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_pdf_underlay(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_pc_colormap(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_pc_extract(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_draw(cmd, i) {
@@ -636,6 +645,21 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFIMPORTIMAGEPATH",
         "XDWGFADECTL",
         "POINTCLOUDCLIPFRAME",
+        "POINTCLOUDDENSITY",
+        "POINTCLOUDPOINTSIZE",
+        "POINTCLOUDLOCK",
+        "POINTCLOUDAUTOUPDATE",
+        "POINTCLOUDBOUNDARY",
+        "POINTCLOUDRTDENSITY",
+        "POINTCLOUDLOD",
+        "POINTCLOUDPOINTMAX",
+        "POINTCLOUDVISRETAIN",
+        "POINTCLOUDSHADING",
+        "POINTCLOUDCACHESIZE",
+        "POINTCLOUD2DVSDISPLAY",
+        "POINTCLOUDLIGHTING",
+        "POINTCLOUDLIGHTSOURCE",
+        "POINTCLOUDPOINTMAXLEGACY",
         "XCLIPFRAME",
         "WIPEOUTFRAME",
         "FRAMES0",
@@ -716,6 +740,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "EXPORTSTEP",
         "EXPORTSTL",
         "EXTERNALREFERENCES",
+        "POINTCLOUDMANAGER",
+        "POINTCLOUDMANAGERCLOSE",
         "EXTRIM",
         "FILETAB",
         "FIND",

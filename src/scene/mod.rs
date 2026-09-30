@@ -2186,6 +2186,11 @@ pub struct Scene {
     frozen_hatch_cache: RefCell<HashMap<(Handle, String, u64), (u64, u64, Arc<Vec<HatchModel>>)>>,
     frozen_wipeout_cache: RefCell<HashMap<(Handle, String, u64), (u64, Arc<Vec<HatchModel>>)>>,
     frozen_image_cache: RefCell<HashMap<(Handle, u64), (u64, Arc<Vec<ImageModel>>)>>,
+    /// Point clouds shown by the model content, keyed by target block and
+    /// frozen-layer signature, per geometry epoch.
+    point_cloud_cache: RefCell<
+        HashMap<(Handle, u64), (u64, Arc<crate::scene::model::point_cloud::PointCloudSet>)>,
+    >,
     frozen_mesh_cache: RefCell<HashMap<(Handle, String, u64), (u64, Arc<Vec<MeshLodSet>>)>>,
     /// Viewports that carry layer color/alpha/linetype/lineweight overrides.
     /// Cached per geometry epoch so ordinary viewports can share render data.
@@ -2648,6 +2653,7 @@ impl Scene {
             frozen_hatch_cache: RefCell::new(HashMap::default()),
             frozen_wipeout_cache: RefCell::new(HashMap::default()),
             frozen_image_cache: RefCell::new(HashMap::default()),
+            point_cloud_cache: RefCell::new(HashMap::default()),
             frozen_mesh_cache: RefCell::new(HashMap::default()),
             viewport_style_override_cache: RefCell::new(None),
             insert_hatch_cache: RefCell::new(None),
@@ -8338,6 +8344,135 @@ impl Scene {
         arc
     }
 
+    /// Point clouds of the model content, with a content viewport's frozen
+    /// layers removed. The paper sheet shows none. The set is rebuilt per
+    /// geometry epoch; unchanged clouds keep their placed points (and GPU
+    /// buffers) by key.
+    pub(super) fn point_clouds_for_viewport(
+        &self,
+        frozen: &HashSet<Handle>,
+        paper_sheet: bool,
+    ) -> Arc<crate::scene::model::point_cloud::PointCloudSet> {
+        use crate::scene::model::point_cloud;
+        static EMPTY: std::sync::OnceLock<Arc<point_cloud::PointCloudSet>> =
+            std::sync::OnceLock::new();
+        let empty = || Arc::clone(EMPTY.get_or_init(Default::default));
+        if paper_sheet {
+            return empty();
+        }
+        let target_block = self.content_render_block_handle();
+        let key = (target_block, Self::frozen_layers_sig(frozen));
+        if let Some((epoch, arc)) = self.point_cloud_cache.borrow().get(&key) {
+            if *epoch == self.geometry_epoch {
+                return Arc::clone(arc);
+            }
+        }
+        let arc = if point_cloud::any_definition(&self.document) {
+            let depths = rustc_hash::FxHashMap::default();
+            let graph = render_graph::RenderSceneGraph::new(
+                &self.document,
+                (!frozen.is_empty()).then_some(frozen),
+                None,
+                true,
+                &depths,
+            );
+            let mut clouds = Vec::new();
+            graph.walk_root(
+                self.render_scene_root(target_block),
+                |entity, context| {
+                    context.is_instanced() || !self.entity_temporarily_hidden(entity.common().handle)
+                },
+                |entity, context| {
+                    let EntityType::Extended(extended) = entity else {
+                        return;
+                    };
+                    let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data
+                    else {
+                        return;
+                    };
+                    let transform = context.is_instanced().then_some(&context.transform);
+                    // Object Color stylization draws the cloud in its own colour.
+                    let common = entity.common();
+                    let color = if matches!(common.color, codec::types::Color::ByLayer) {
+                        self.document
+                            .layers
+                            .get(&common.layer)
+                            .map(|layer| layer.color.clone())
+                            .unwrap_or(common.color.clone())
+                    } else {
+                        common.color.clone()
+                    };
+                    let object_color = color.rgb().map_or([255; 3], |(r, g, b)| [r, g, b]);
+                    clouds.extend(point_cloud::placed(
+                        &self.document,
+                        data,
+                        object_color,
+                        transform,
+                        &point_cloud::hidden(data),
+                    ));
+                },
+            );
+            if clouds.is_empty() {
+                empty()
+            } else {
+                Arc::new(point_cloud::PointCloudSet {
+                    point_size: point_cloud::point_size(&self.document),
+                    clouds,
+                })
+            }
+        } else {
+            empty()
+        };
+        self.point_cloud_cache
+            .borrow_mut()
+            .insert(key, (self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    /// Wireframe 2D draws no cloud points: each shown cloud whose file is
+    /// found draws its extents box and a message instead, unless
+    /// POINTCLOUD2DVSDISPLAY is 1.
+    // ponytail: model-space clouds only, rebuilt per frame; cache by epoch if
+    // drawings with many clouds make it show.
+    pub(super) fn point_cloud_2d_wires(&self) -> Vec<WireModel> {
+        use crate::scene::model::point_cloud::{resolve_source, setting, setting_value};
+        if !crate::scene::model::point_cloud::any_definition(&self.document)
+            || setting("POINTCLOUD2DVSDISPLAY").is_some_and(|s| setting_value(&self.document, s) == 1)
+        {
+            return Vec::new();
+        }
+        let mut wires = Vec::new();
+        for entity in self.document.entities() {
+            let EntityType::Extended(extended) = entity else {
+                continue;
+            };
+            let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data else {
+                continue;
+            };
+            let common = entity.common();
+            if common.invisible
+                || self.entity_temporarily_hidden(common.handle)
+                || self.document.layers.get(&common.layer).is_some_and(|layer| layer.is_off() || layer.is_frozen())
+                || resolve_source(&self.document, data).is_none()
+            {
+                continue;
+            }
+            let color = if matches!(common.color, codec::types::Color::ByLayer) {
+                self.document.layers.get(&common.layer).map(|layer| layer.color.clone()).unwrap_or(common.color.clone())
+            } else {
+                common.color.clone()
+            };
+            let (r, g, b) = color.rgb().unwrap_or((255, 255, 255));
+            wires.push(WireModel::solid_f64(
+                common.handle.value().to_string(),
+                crate::entities::extended::point_cloud_2d_style_lines(data),
+                [f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0],
+                false,
+            ));
+        }
+        wires
+    }
+
     /// Image / OLE models for a content viewport, with its frozen layers removed.
     pub(super) fn images_for_viewport(
         &self,
@@ -8408,14 +8543,19 @@ impl Scene {
         arc
     }
 
-    /// True when `handle`'s entity sits on a locked layer. Locked objects stay
-    /// visible, snappable and selectable, but mutation paths must skip them.
+    /// True when `handle`'s entity sits on a locked layer, or is a point cloud
+    /// locked on its own. Locked objects stay visible, snappable and
+    /// selectable, but mutation paths must skip them.
     pub fn is_layer_locked(&self, handle: Handle) -> bool {
-        self.document
-            .get_entity(handle)
-            .map(|e| e.common().layer.clone())
-            .and_then(|name| self.document.layers.get(&name).map(|l| l.is_locked()))
-            .unwrap_or(false)
+        let Some(entity) = self.document.get_entity(handle) else {
+            return false;
+        };
+        is_locked_point_cloud(entity)
+            || self
+                .document
+                .layers
+                .get(&entity.common().layer)
+                .is_some_and(|l| l.is_locked())
     }
 
     /// The name of the locked layer `handle` sits on, if any (for messages).
@@ -13832,4 +13972,21 @@ mod update_entities_batch_tests {
             );
         }
     }
+}
+
+pub(crate) fn is_point_cloud(entity: &EntityType) -> bool {
+    matches!(
+        entity,
+        EntityType::Extended(extended)
+            if matches!(extended.data, codec::entities::ExtendedEntityData::PointCloudEx(_))
+    )
+}
+
+/// A point cloud whose Locked property is set: edits leave it alone.
+pub(crate) fn is_locked_point_cloud(entity: &EntityType) -> bool {
+    matches!(
+        entity,
+        EntityType::Extended(extended)
+            if matches!(&extended.data, codec::entities::ExtendedEntityData::PointCloudEx(data) if data.locked)
+    )
 }

@@ -305,6 +305,8 @@ pub enum RefKind {
     Image,
     /// A PDF, DWF or DGN underlay.
     Underlay,
+    /// A point cloud scan (.rcs) or project (.rcp).
+    PointCloud,
 }
 
 /// Lifecycle state of a [`ReferenceEntry`].

@@ -90,6 +90,12 @@ pub fn ui_name_or_class(e: &EntityType) -> String {
         ) {
             return "Section Plane".to_string();
         }
+        if matches!(
+            entity.data,
+            codec::entities::ExtendedEntityData::PointCloudEx(_)
+        ) {
+            return "Point Cloud".to_string();
+        }
         return entity.class_name().to_string();
     }
     if let EntityType::Unknown(u) = e {

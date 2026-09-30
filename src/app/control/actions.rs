@@ -71,7 +71,11 @@ pub(super) const NAMES: &[&str] = &[
     "close_modal",
     "pdf_dialog_ok",
     "pdf_layer_toggle",
+    "pc_manager_toggle",
+    "pc_manager",
     "pdf_page_select",
+    "pc_colormap",
+    "pc_section",
     "ribbon_tab",
     "ribbon_dropdown",
     "dialog_ok",
@@ -688,6 +692,82 @@ impl OpenCADStudio {
             "pdf_layer_toggle" => Message::PdfDialog(
                 crate::ui::window::pdf_dialogs::PdfDialogMsg::LayersToggle(string(req, "value")?.into()),
             ),
+            // Point Cloud Color Map: one edit, "tab=elevation", "count=3",
+            // "even", "reverse", "scheme=Earth", "gradient=0", "max=90",
+            // "min=10", "interval=0.1", "extents=0", "range=2", "current=0".
+            "pc_colormap" => {
+                use crate::ui::window::pdf_dialogs::{OutOfRange, PdfDialogMsg as M};
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                let on = arg != "0";
+                Message::PdfDialog(match key {
+                    "tab" => M::MapTab(arg == "elevation"),
+                    "scheme" => M::MapScheme(arg.into()),
+                    "count" => M::MapCount(arg.parse().map_err(|_| failure("invalid_value", "count"))?),
+                    "even" => M::MapEven,
+                    "reverse" => M::MapReverse,
+                    "gradient" => M::MapGradient(on),
+                    "max" => M::MapMax(arg.into()),
+                    "min" => M::MapMin(arg.into()),
+                    "interval" => M::MapInterval(arg.into()),
+                    "extents" => M::MapExtents(on),
+                    "range" => M::MapOutOfRange(OutOfRange(arg.parse().unwrap_or(1))),
+                    "current" => M::MapCurrent(on),
+                    "new" => M::MapNew,
+                    "rename" => M::MapRename,
+                    "name" => M::MapNameInput(arg.into()),
+                    "name_ok" => M::MapNameOk,
+                    "delete" => M::MapDelete,
+                    "apply" => M::MapApply,
+                    _ => return Err(failure("invalid_value", "Unknown color map edit")),
+                })
+            }
+            // Section extraction dialog: "min=0.01", "connect=0.02", "angle=5",
+            // "points=18000", "lines=1", "perimeter=1", "preview=0", "width=0".
+            "pc_section" => {
+                use crate::ui::window::pdf_dialogs::PdfDialogMsg as M;
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                Message::PdfDialog(match key {
+                    "min" => M::SecMinLength(arg.into()),
+                    "connect" => M::SecConnect(arg.into()),
+                    "angle" => M::SecAngle(arg.into()),
+                    "points" => M::SecMaxPoints(arg.into()),
+                    "width" => M::SecWidth(arg.into()),
+                    "lines" => M::SecPolylines(arg == "0"),
+                    "perimeter" => M::SecPerimeter(arg != "0"),
+                    "preview" => M::SecPreview(arg != "0"),
+                    _ => return Err(failure("invalid_value", "Unknown section setting")),
+                })
+            }
+            // Point Cloud Manager: flip a row's switch, "<handle>:<row>" with
+            // row cloud, unassigned, scans or scan:<name>.
+            "pc_manager_toggle" => {
+                use crate::ui::window::pc_manager::{PcManagerMsg, Row};
+                let value = string(req, "value")?;
+                let parsed = value.split_once(':').and_then(|(handle, row)| {
+                    Some((codec::Handle::new(u64::from_str_radix(handle, 16).ok()?), Row::parse(row)?))
+                });
+                let Some((handle, row)) = parsed else {
+                    return Err(failure("bad_value", "Expected <handle>:<row>"));
+                };
+                Message::PcManager(PcManagerMsg::Toggle(handle, row))
+            }
+            // Point Cloud Manager tree: "search=<text>", "collapse", "expand",
+            // "toggle_node=<key>" or "select=<key>".
+            "pc_manager" => {
+                use crate::ui::window::pc_manager::PcManagerMsg as M;
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                Message::PcManager(match key {
+                    "search" => M::Search(arg.into()),
+                    "collapse" => M::CollapseAll,
+                    "expand" => M::ExpandAll,
+                    "toggle_node" => M::Expand(arg.into()),
+                    "select" => M::Select(arg.into()),
+                    _ => return Err(failure("invalid_value", "Unknown point cloud manager edit")),
+                })
+            }
             // Attach dialog: choose pages by index ("0,2").
             "pdf_page_select" => {
                 let pages: Vec<usize> = string(req, "value")?
@@ -713,6 +793,9 @@ impl OpenCADStudio {
                 use crate::ui::window::pdf_dialogs::PdfDialogMsg;
                 Message::PdfDialog(match self.active_modal {
                     Some(crate::app::ModalKind::PdfAttach) => PdfDialogMsg::AttachOk,
+                    Some(crate::app::ModalKind::PointCloudAttach) => PdfDialogMsg::CloudOk,
+                    Some(crate::app::ModalKind::PointCloudColorMap) => PdfDialogMsg::MapOk,
+                    Some(crate::app::ModalKind::PcSection) => PdfDialogMsg::SecCreate,
                     Some(crate::app::ModalKind::UnderlayLayers) => PdfDialogMsg::LayersOk,
                     Some(crate::app::ModalKind::PdfImportSettings) => PdfDialogMsg::SettingsOk,
                     Some(crate::app::ModalKind::PdfImportFile) => PdfDialogMsg::ImportOk,

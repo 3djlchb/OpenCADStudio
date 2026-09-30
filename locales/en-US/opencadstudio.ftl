@@ -3940,6 +3940,87 @@ insert =
     .block-select-objects = BLOCK  Select objects:
     .block-specify-insertion-base-point = BLOCK  Specify insertion base point:
     .wblock-specify-insertion-base-point = WBLOCK  Specify insertion base point:
+    .ul-attach-point-cloud = Attach Point Cloud
+    .pc-rect-crop =
+        Rectangular
+        Crop
+    .pc-poly-crop =
+        Polygonal
+        Crop
+    .pc-circ-crop =
+        Circular
+        Crop
+    .pc-show-crop =
+        Show
+        Cropping
+    .pc-invert-crop =
+        Invert
+        Cropping
+    .pc-uncrop =
+        Remove All
+        Cropping
+    .pc-data = Data:
+    .pc-size = Size:
+    .pc-unit = Unit:
+    .pc-options = Options
+    .pc-geo = Use geographic location
+    .pc-lock = Lock point cloud
+    .pc-zoom = Zoom to point cloud
+    .pc-scan-count = __ocs_fmt_0__ scans
+    .pc-point-count = __ocs_fmt_0__ points
+    .pc-select-file = Select Point Cloud File
+    .pc-rcp = Point Cloud Project
+    .pc-rcs = Point Cloud Scan
+    .pc-clouds = Point Clouds
+    .pc-help = Attaches a point cloud scan or project.
+    .pcm-title = Point Cloud Color Map
+    .pcm-ramp = Color ramp
+    .pcm-count = Number of colors
+    .pcm-gradient = Display as gradient
+    .pcm-range = Range of colorized points
+    .pcm-max-int = Maximum intensity
+    .pcm-min-int = Minimum intensity
+    .pcm-max-elev = Maximum elevation
+    .pcm-min-elev = Minimum elevation
+    .pcm-interval = Interval height
+    .pcm-extents = Apply to extents of point cloud
+    .pcm-oor = Out of range points
+    .pcm-oor-minmax = Use min/max colors
+    .pcm-oor-scan = Use RGB scan colors
+    .pcm-oor-hide = Hide points
+    .pcm-current = Make stylization current
+    .pcm-name-taken = A color scheme with this name already exists.
+    .pcm-bad-range = Invalid range of colorized points.
+    .pcm-help = Sets the color schemes and ranges a point cloud is colored by intensity or elevation.
+    .pc-manager = Point Cloud Manager
+    .pc-regions-scans = REGIONS AND SCANS
+    .pc-regions = Regions
+    .pc-unassigned = Unassigned Points
+    .pc-scans = Scans
+    .pc-search = Search
+    .pc-collapse-all = Collapse all
+    .pc-expand-all = Expand all
+    .pcm-scheme-name = Scheme name
+    .pcs-title = Extract Section Lines from Point Cloud
+    .pcs-extract = Extract
+    .pcs-entire = Entire cross section
+    .pcs-perimeter = Perimeter only
+    .pcs-max-points = Maximum points to process
+    .pcs-faster = Faster
+    .pcs-accurate = More accurate
+    .pcs-time = Estimated time: __ocs_fmt_0__ minutes
+    .pcs-output = Output geometry
+    .pcs-polylines = 2D Polylines
+    .pcs-width = Polyline width
+    .pcs-tolerances = Extraction tolerances
+    .pcs-min-length = Minimum line length
+    .pcs-connect = Connect lines tolerance
+    .pcs-angle = Collinear angle tolerance
+    .pcs-preview = Preview result
+    .pcs-use-current = Use Current
+    .pcs-positive = Requires a positive number.
+    .pcs-positive-int = Requires a positive integer.
+    .pcs-help = Traces the points on the kept side of a live section as lines.
 model =
     .create = Create
     .boolean = Boolean
@@ -5027,6 +5108,15 @@ properties =
 
     .model-text-height = Model text height
     .insert-unit-scale-is-outside-the-supported-range = INSERT unit scale is outside the supported range.
+    .stylization = Stylization
+    .color-scheme = Color scheme
+    .scan-colors = Scan Colors
+    .object-color = Object Color
+    .classification = Classification
+    .show-cropped = Show cropped
+    .geolocate = Geolocate
+    .segmentation = Segmentation
+    .saved-path-lower = Saved path
 
 styles =
     .blocks =   Blocks: __ocs_fmt_0__

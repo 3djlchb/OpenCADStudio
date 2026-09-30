@@ -165,6 +165,11 @@ pub struct ViewportData {
     /// Wipeout fills — rendered in a separate pass AFTER wires.
     pub(in crate::scene) wipeout_hatches: Arc<Vec<HatchModel>>,
     pub(in crate::scene) images: Arc<Vec<ImageModel>>,
+    /// Point cloud sprites; empty on the paper sheet and in 2D wireframe.
+    pub(in crate::scene) point_clouds: Arc<crate::scene::model::point_cloud::PointCloudSet>,
+    /// Point cloud lighting and density for this view: `[mode, source,
+    /// drawn fraction, _, light direction x, y, z, _]`.
+    pub(in crate::scene) point_cloud_light: [f32; 12],
     pub(in crate::scene) meshes: Arc<Vec<MeshLodSet>>,
     pub(in crate::scene) background_image:
         Option<crate::scene::model::image_model::DecodedImage>,
@@ -554,6 +559,15 @@ impl shader::Primitive for Primitive {
                 inner.upload_images(device, queue, &vp.images[..]);
                 inner.cached_image_source = Some(Arc::clone(&vp.images));
             }
+            if inner
+                .cached_point_cloud_source
+                .as_ref()
+                .map_or(true, |source| !Arc::ptr_eq(source, &vp.point_clouds))
+            {
+                inner.upload_point_clouds(device, queue, &vp.point_clouds);
+                inner.cached_point_cloud_source = Some(Arc::clone(&vp.point_clouds));
+            }
+            inner.set_point_cloud_view(queue, vp.point_cloud_light);
             if inner
                 .cached_text_source
                 .as_ref()
@@ -1411,6 +1425,13 @@ fn render_signature(vp: &ViewportData, placement: &PhysicalViewport) -> u64 {
         std::sync::Arc::as_ptr(&vp.meshes) as usize
     }
     .hash(&mut h);
+    if vp.point_clouds.clouds.is_empty() {
+        std::ptr::null()
+    } else {
+        std::sync::Arc::as_ptr(&vp.point_clouds)
+    }
+    .hash(&mut h);
+    vp.point_cloud_light.map(f32::to_bits).hash(&mut h);
     vp.geometry_epoch.hash(&mut h);
     vp.selection_generation.hash(&mut h);
     vp.selected_sig.hash(&mut h);
@@ -4510,21 +4531,31 @@ impl Scene {
         } else {
             Arc::new(Vec::new())
         };
+        // 2D wireframe draws no cloud points; the clouds show their extents
+        // and a message there instead (drawn with the live overlays).
+        let wireframe_2d = inst.render_mode == codec::entities::ViewportRenderMode::Wireframe2D;
+        let cloud_2d_wires = if wireframe_2d && show_live_overlay && !inst.paper_sheet {
+            self.point_cloud_2d_wires()
+        } else {
+            Vec::new()
+        };
         let preview_wires = if !show_live_overlay
             || (self.interim_wire.is_none()
                 && self.preview_wires.is_empty()
-                && self.constraint_hover_wires.is_empty())
+                && self.constraint_hover_wires.is_empty()
+                && cloud_2d_wires.is_empty())
         {
             Arc::new(Vec::new())
         } else {
             let mut v: Vec<WireModel> = Vec::with_capacity(
-                self.preview_wires.len() + self.constraint_hover_wires.len() + 1,
+                self.preview_wires.len() + self.constraint_hover_wires.len() + cloud_2d_wires.len() + 1,
             );
             if let Some(iw) = &self.interim_wire {
                 v.push(iw.clone());
             }
             v.extend(self.preview_wires.iter().cloned());
             v.extend(self.constraint_hover_wires.iter().cloned());
+            v.extend(cloud_2d_wires);
             Arc::new(v)
         };
         let preview_hatches = if show_live_overlay {
@@ -4720,6 +4751,7 @@ impl Scene {
         } else {
             self.meshes_for_viewport(inst.handle, &vp_frozen)
         };
+        let point_clouds = self.point_clouds_for_viewport(&vp_frozen, inst.paper_sheet || wireframe_2d);
 
         // SDF text quads (behind OCS_TEXT_SDF). The glyph quads ride on each
         // entity's own wire (produced by the tessellator, transformed for
@@ -4803,6 +4835,28 @@ impl Scene {
             Arc::new(vec![])
         };
         let navigating = !inst.paper_sheet && self.navigating_lod();
+        let point_cloud_light = {
+            use crate::scene::model::point_cloud::{setting, setting_value};
+            let value = |name| setting(name).map_or(0, |s| setting_value(&self.document, s)) as f32;
+            // Lit only in the shaded styles, as the reference.
+            let lighting = if flags.mesh_fill && !flags.hidden_line { value("POINTCLOUDLIGHTING") } else { 0.0 };
+            let source = value("POINTCLOUDLIGHTSOURCE");
+            // The lights follow the view (measured from the reference in
+            // view coordinates: right, up, toward the viewer): the default
+            // lighting is a key light from the upper left and a fill light
+            // from the lower right, the other source one light from above.
+            let view = |x: f32, y: f32, z: f32| {
+                (inst.camera.rotation * glam::Vec3::new(x, y, z)).normalize_or(glam::Vec3::Z)
+            };
+            let (first, second) = if source > 0.5 {
+                (view(-0.034, 0.987, 0.158), glam::Vec3::ZERO)
+            } else {
+                (view(-0.512, 0.500, 0.698), view(0.834, -0.451, 0.318))
+            };
+            // While the view moves, POINTCLOUDRTDENSITY per cent of the points.
+            let fraction = if navigating { value("POINTCLOUDRTDENSITY") / 100.0 } else { 1.0 };
+            [lighting, source, fraction, 0.0, first.x, first.y, first.z, 0.0, second.x, second.y, second.z, 0.0]
+        };
         Some(ViewportData {
             instance_id,
             force_rasterize,
@@ -4819,6 +4873,8 @@ impl Scene {
             hatches,
             wipeout_hatches,
             images,
+            point_clouds,
+            point_cloud_light,
             meshes,
             background_image: display.background.image.clone(),
             environment_image: display.background.environment.clone(),

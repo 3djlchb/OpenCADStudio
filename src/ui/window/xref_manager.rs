@@ -1103,6 +1103,11 @@ fn direct_identities(doc: &CadDocument) -> HashSet<(u64, String)> {
             ObjectType::UnderlayDefinition(def) => {
                 ids.insert((handle.value(), def.file_path.clone()));
             }
+            ObjectType::ClassObject(object) => {
+                if let codec::objects::ClassObjectData::PointCloudDefinitionEx(def) = &object.data {
+                    ids.insert((handle.value(), def.source_filename.clone()));
+                }
+            }
             _ => {}
         }
     }
@@ -1192,6 +1197,14 @@ fn type_text(entry: &ReferenceEntry) -> std::borrow::Cow<'static, str> {
                 "DGN" => crate::t!("DGN"),
                 _ => crate::t!("PDF"),
             }
+        }
+        // The file's own kind: RCP (project) or RCS (scan).
+        RefKind::PointCloud => {
+            let ext = std::path::Path::new(&entry.saved_path.replace('\\', "/"))
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_uppercase())
+                .unwrap_or_default();
+            if ext == "RCS" { "RCS".into() } else { "RCP".into() }
         }
     }
 }
@@ -2125,7 +2138,7 @@ fn reference_preview(entry: &ReferenceEntry) -> Option<image::RgbaImage> {
             let img = image::open(found).ok()?;
             Some(img.thumbnail(PREVIEW_MAX, PREVIEW_MAX).to_rgba8())
         }
-        RefKind::Underlay => None,
+        RefKind::Underlay | RefKind::PointCloud => None,
     }
 }
 

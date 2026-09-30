@@ -1911,7 +1911,7 @@ impl OpenCADStudio {
             }
 
             "UNDERLAYLAYERS" | "ULAYERS" => self.open_underlay_layers_dialog(i),
-            "POINTCLOUDATTACH" | "RECAP" | "SYNCPVIEWPORTS" => {
+            "RECAP" | "SYNCPVIEWPORTS" => {
                 self.command_line
                     .push_info(crate::tf!("{cmd}: not yet implemented.").as_ref());
             }

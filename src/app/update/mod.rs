@@ -1429,6 +1429,7 @@ impl OpenCADStudio {
             }
             message @ (Message::AttachPick
             | Message::UnderlayAttachPick(_)
+            | Message::PointCloudAttachPick
             | Message::AttachPickResult(_)
             | Message::XrefAttach(_)
             | Message::XrefAttachBrowseResult(_)) => self.update_xref_attach(message),
@@ -1805,6 +1806,7 @@ impl OpenCADStudio {
             }
 
             Message::PdfDialog(message) => self.update_pdf_dialog(message),
+            Message::PcManager(message) => self.update_pc_manager(message),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);
                 Task::none()
@@ -8494,6 +8496,11 @@ impl OpenCADStudio {
             }
 
             Message::CloseModal => {
+                // Cancelling the section settings drops the waiting extraction.
+                if self.active_modal == Some(super::ModalKind::PcSection) {
+                    crate::modules::insert::pc_extract::drop_job();
+                    self.pc_section = None;
+                }
                 if self.active_modal == Some(super::ModalKind::RecoveryPrompt) {
                     return self.update(Message::RecoveryDecline);
                 }

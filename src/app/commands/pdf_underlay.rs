@@ -62,6 +62,154 @@ impl OpenCADStudio {
             })
         };
         self.ribbon.set_underlay_context(context, xref);
+        let clouds = if self.tabs[i].is_start { Vec::new() } else { self.selected_point_clouds(i) };
+        self.ribbon.set_point_cloud_context(clouds.first().map(|(_, data)| data.show_cropping));
+    }
+
+    /// The selected point clouds, or nothing when anything else is selected.
+    fn selected_point_clouds(&self, i: usize) -> Vec<(codec::Handle, codec::entities::PointCloudExData)> {
+        let mut out = Vec::new();
+        for (handle, entity) in self.tabs[i].scene.selected_entities() {
+            match entity {
+                codec::EntityType::Extended(extended) => match &extended.data {
+                    codec::entities::ExtendedEntityData::PointCloudEx(data) => out.push((handle, data.clone())),
+                    _ => return Vec::new(),
+                },
+                _ => return Vec::new(),
+            }
+        }
+        out
+    }
+
+    /// POINTCLOUDSTYLIZE's result: the clouds that carry the data take the
+    /// stylization (one undo step); the rest are named.
+    fn stylize_point_clouds(&mut self, i: usize, handles: &[codec::Handle], stylization: i16) {
+        let mut done = Vec::new();
+        for &handle in handles {
+            if self.tabs[i].scene.is_layer_locked(handle) {
+                continue;
+            }
+            let document = &self.tabs[i].scene.document;
+            let Some(codec::EntityType::Extended(extended)) = document.get_entity(handle) else {
+                continue;
+            };
+            let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data else {
+                continue;
+            };
+            let cloud = crate::scene::model::point_cloud::resolve_source(document, data)
+                .and_then(|path| crate::scene::model::point_cloud::load(&path));
+            let supported = match (stylization, &cloud) {
+                (6, _) => false,
+                (_, None) => true,
+                (1, Some(c)) => c.has_rgb,
+                (5, Some(c)) => c.has_intensity,
+                (3, Some(c)) => c.has_normals,
+                _ => true,
+            };
+            if supported {
+                done.push(handle);
+            } else {
+                self.command_line.push_info(&format!(
+                    "The selected point cloud({}) does not support this stylization type.",
+                    data.name
+                ));
+            }
+        }
+        if !done.is_empty() {
+            self.push_undo_snapshot(i, "POINTCLOUDSTYLIZE");
+            for handle in &done {
+                if let Some(codec::EntityType::Extended(extended)) = self.tabs[i].scene.document.get_entity_mut(*handle) {
+                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
+                        crate::entities::extended::set_point_cloud_stylization(data, stylization);
+                    }
+                }
+            }
+            let changes: Vec<_> = done.iter().map(|h| (*h, crate::scene::ChangeKind::Modified)).collect();
+            self.tabs[i].scene.bump_entities(&changes);
+            self.tabs[i].dirty = true;
+            self.refresh_properties();
+        }
+        self.command_line.push_output(&format!("{} point cloud(s) stylized", done.len()));
+    }
+
+    /// One undo step that edits every selected point cloud not locked.
+    fn edit_selected_point_clouds(
+        &mut self,
+        i: usize,
+        label: &str,
+        edit: impl Fn(&mut codec::entities::PointCloudExData),
+    ) {
+        let handles: Vec<_> = self
+            .selected_point_clouds(i)
+            .into_iter()
+            .map(|(h, _)| h)
+            .filter(|h| !self.tabs[i].scene.is_layer_locked(*h))
+            .collect();
+        if handles.is_empty() {
+            return;
+        }
+        self.push_undo_snapshot(i, label);
+        for handle in &handles {
+            if let Some(codec::EntityType::Extended(extended)) = self.tabs[i].scene.document.get_entity_mut(*handle) {
+                if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
+                    edit(data);
+                }
+            }
+        }
+        let changes: Vec<_> = handles.iter().map(|h| (*h, crate::scene::ChangeKind::Modified)).collect();
+        self.tabs[i].scene.bump_entities(&changes);
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+    }
+
+    /// A Point Cloud Manager click: a switch writes the cloud's hidden scans
+    /// and regions as one undo step; the rest is palette state.
+    pub(in crate::app) fn update_pc_manager(&mut self, message: crate::ui::window::pc_manager::PcManagerMsg) -> Task<Message> {
+        use crate::scene::model::point_cloud::UNASSIGNED_OFF;
+        use crate::ui::window::pc_manager::{self, PcManagerMsg, Row};
+        let i = self.active_tab;
+        match message {
+            PcManagerMsg::Toggle(handle, row) => {
+                let Some(cloud) =
+                    pc_manager::clouds(&self.tabs[i].scene.document, &[]).into_iter().find(|c| c.handle == handle)
+                else {
+                    return Task::none();
+                };
+                if self.tabs[i].scene.is_layer_locked(handle) {
+                    return Task::none();
+                }
+                // A scan named by its file name (automation) is the scan with that name.
+                let row = match row {
+                    Row::Scan(key) => Row::Scan(
+                        cloud.scans.iter().find(|(name, _)| *name == key).map_or(key, |(_, id)| id.clone()),
+                    ),
+                    row => row,
+                };
+                let hidden = pc_manager::toggled(&cloud.hidden, &cloud.scans, &row);
+                self.push_undo_snapshot(i, "POINTCLOUDMANAGER");
+                if let Some(codec::EntityType::Extended(extended)) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
+                        data.hidden_regions = if hidden.iter().any(|h| h == UNASSIGNED_OFF) { vec![0] } else { Vec::new() };
+                        data.hidden_scans = hidden.into_iter().filter(|h| h != UNASSIGNED_OFF).collect();
+                    }
+                }
+                self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                self.tabs[i].dirty = true;
+            }
+            PcManagerMsg::Expand(key) => {
+                if !self.pc_manager.collapsed.remove(&key) {
+                    self.pc_manager.collapsed.insert(key);
+                }
+            }
+            PcManagerMsg::Select(key) => self.pc_manager.selected = Some(key),
+            PcManagerMsg::Search(text) => self.pc_manager.search = text,
+            PcManagerMsg::CollapseAll => {
+                let clouds = pc_manager::clouds(&self.tabs[i].scene.document, &[]);
+                self.pc_manager.collapsed.extend(pc_manager::folding_keys(&clouds));
+            }
+            PcManagerMsg::ExpandAll => self.pc_manager.collapsed.clear(),
+        }
+        Task::none()
     }
 
     /// One undo step that edits every selected PDF underlay.
@@ -156,6 +304,88 @@ impl OpenCADStudio {
                     self.apply_xclip(i, inserts, crate::modules::insert::xclip::XclipAction::Delete);
                 }
             }
+            // Point cloud tools: a crop of the first selected cloud, or the
+            // crops of every selected one.
+            "_PCCROPRECT" | "_PCCROPPOLY" | "_PCCROPCIRC" => {
+                use crate::command::CadCommand;
+                let Some(&(handle, _)) = self.selected_point_clouds(i).first() else {
+                    return Some(Task::none());
+                };
+                if self.tabs[i].scene.is_layer_locked(handle) {
+                    return Some(Task::none());
+                }
+                let Some(codec::EntityType::Extended(cloud)) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
+                    return Some(Task::none());
+                };
+                let option = match cmd {
+                    "_PCCROPPOLY" => "P",
+                    "_PCCROPCIRC" => "C",
+                    _ => "",
+                };
+                let command = crate::modules::insert::pc_crop::PointCloudCropCommand::for_cloud(handle, cloud, option);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            "POINTCLOUDSTYLIZE" => {
+                use crate::command::CadCommand;
+                let command = crate::modules::draw::select::SelectObjectsCommand::with_prompt(
+                    "POINTCLOUDSTYLIZE",
+                    "_PCSTYLIZE",
+                    "Select point cloud objects:",
+                );
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            // The chosen objects' point clouds, then the option.
+            "_PCSTYLIZE" => {
+                use crate::command::CadCommand;
+                let handles: Vec<codec::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .filter(|(_, entity)| crate::scene::is_point_cloud(entity))
+                    .map(|(h, _)| h)
+                    .collect();
+                if handles.is_empty() {
+                    return Some(self.finish_dispatch(cmd));
+                }
+                let command = crate::modules::insert::pc_stylize::PointCloudStylizeCommand::new(handles);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            c if c.starts_with("_PCSTYLIZEAPPLY ") => {
+                let mut parts = c.split_whitespace().skip(1);
+                let stylization: i16 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(1);
+                let handles: Vec<codec::Handle> =
+                    parts.filter_map(|h| u64::from_str_radix(h, 16).ok()).map(codec::Handle::new).collect();
+                self.stylize_point_clouds(i, &handles, stylization);
+            }
+            "_PCCROPSHOW" => {
+                let on = !self.selected_point_clouds(i).first().is_some_and(|(_, data)| data.show_cropping);
+                self.edit_selected_point_clouds(i, "POINTCLOUDCROP", |data| data.show_cropping = on);
+            }
+            "_PCCROPINVERT" => self.edit_selected_point_clouds(i, "POINTCLOUDCROP", |data| {
+                for crop in &mut data.croppings {
+                    crop.inverted = !crop.inverted;
+                }
+            }),
+            // The Point Cloud Manager docks on the right like External
+            // References and opens expanded.
+            "POINTCLOUDMANAGER" => {
+                let id = crate::ui::dock::PanelId::PointCloudManager;
+                self.pc_manager.show = true;
+                if self.dock.location(id).is_none() {
+                    self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
+                }
+                self.dock_expanded = Some(id);
+            }
+            "POINTCLOUDMANAGERCLOSE" => {
+                self.pc_manager.show = false;
+                if self.dock_expanded == Some(crate::ui::dock::PanelId::PointCloudManager) {
+                    self.dock_expanded = None;
+                }
+            }
+            "_PCUNCROP" =>self.edit_selected_point_clouds(i, "POINTCLOUDUNCROP", |data| data.croppings.clear()),
             "_PDFULUNCLIP" => {
                 self.edit_selected_underlays(i, "PDFCLIP", |u| {
                     u.clip_boundary_vertices.clear();

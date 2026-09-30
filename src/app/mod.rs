@@ -497,6 +497,9 @@ pub(super) struct OpenCADStudio {
     block_definition: Option<crate::ui::window::block_definition::BlockDefinitionState>,
     /// PDF dialogs' working copies; `None` while closed.
     pdf_attach: Option<crate::ui::window::pdf_dialogs::PdfAttachState>,
+    point_cloud_attach: Option<crate::ui::window::pdf_dialogs::PointCloudAttachState>,
+    point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
+    pc_section: Option<crate::ui::window::pdf_dialogs::PcSectionState>,
     underlay_layers: Option<crate::ui::window::pdf_dialogs::UnderlayLayersState>,
     pdf_import_settings: Option<crate::modules::insert::pdf_import::PdfImportSettings>,
     pdf_import_file: Option<crate::ui::window::pdf_dialogs::PdfImportFileState>,
@@ -791,6 +794,8 @@ pub(super) struct OpenCADStudio {
     /// Whether the Browser panel is shown. Off until BROWSER opens it, so
     /// the default layout is unchanged for existing users.
     pub(crate) show_browser: bool,
+    /// Point Cloud Manager palette (POINTCLOUDMANAGER).
+    pub(crate) pc_manager: crate::ui::window::pc_manager::PcManager,
     /// Which viewport background the colour wheel is editing, or `None` when
     /// it is closed. One slot, because only one wheel can be open at a time.
     pub(crate) bg_picker: Option<BgTarget>,
@@ -1903,6 +1908,9 @@ pub enum ModalKind {
     DrawingUnits,
     BlockDefinition,
     PdfAttach,
+    PointCloudAttach,
+    PointCloudColorMap,
+    PcSection,
     UnderlayLayers,
     PdfImportSettings,
     PdfImportFile,
@@ -3856,6 +3864,8 @@ pub enum Message {
     PdfImportPick,
     /// An edit in one of the PDF dialogs.
     PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg),
+    /// A click or search in the Point Cloud Manager.
+    PcManager(crate::ui::window::pc_manager::PcManagerMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -3869,6 +3879,9 @@ pub enum Message {
     AttachPick,
     /// DWFATTACH / DGNATTACH: pick the file (the result goes the ATTACH way).
     UnderlayAttachPick(codec::entities::UnderlayType),
+    /// POINTCLOUDATTACH: pick the scan or project (the result goes the
+    /// ATTACH way).
+    PointCloudAttachPick,
     /// The Reference slide-out's xref fading: amount dragged, drag done,
     /// switch.
     XrefFadeSlide(u8),
@@ -4043,6 +4056,9 @@ impl OpenCADStudio {
             drawing_units: None,
             block_definition: None,
             pdf_attach: None,
+            point_cloud_attach: None,
+            point_cloud_color_map: None,
+            pc_section: None,
             underlay_layers: None,
             pdf_import_settings: None,
             pdf_import_file: None,
@@ -4166,6 +4182,7 @@ impl OpenCADStudio {
             graph_undo_open: false,
             show_external_references: false,
             show_browser: false,
+            pc_manager: Default::default(),
             bg_picker: None,
             block_palette: Default::default(),
             xref_manager: Default::default(),

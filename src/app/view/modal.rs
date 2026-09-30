@@ -29,6 +29,9 @@ impl OpenCADStudio {
                 Some(codec::entities::UnderlayType::Dgn) => crate::t!("Attach DGN Underlay").into_owned(),
                 _ => crate::t!("Attach PDF Underlay").into_owned(),
             },
+            Some(K::PointCloudAttach) => crate::t!("Attach Point Cloud").into_owned(),
+            Some(K::PointCloudColorMap) => crate::t!("Point Cloud Color Map").into_owned(),
+            Some(K::PcSection) => crate::t!("Extract Section Lines from Point Cloud").into_owned(),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
             Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
             Some(K::PdfImportFile) => crate::t!("Import PDF").into_owned(),
@@ -521,6 +524,22 @@ impl OpenCADStudio {
                 sized_flow(ex, 880, 540, |flow| {
                     crate::ui::window::pdf_dialogs::view_attach(state, flow)
                 })
+            }
+            super::super::ModalKind::PointCloudAttach => {
+                let state = self.point_cloud_attach.as_ref()?;
+                sized_flow(ex, 880, 560, |flow| {
+                    crate::ui::window::pdf_dialogs::view_point_cloud_attach(state, flow)
+                })
+            }
+            super::super::ModalKind::PointCloudColorMap => {
+                let state = self.point_cloud_color_map.as_ref()?;
+                sized_flow(ex, 760, 560, |flow| {
+                    crate::ui::window::pdf_dialogs::view_point_cloud_color_map(state, flow)
+                })
+            }
+            super::super::ModalKind::PcSection => {
+                let state = self.pc_section.as_ref()?;
+                sized_flow(ex, 760, 470, |flow| crate::ui::window::pdf_dialogs::view_pc_section(state, flow))
             }
             super::super::ModalKind::UnderlayLayers => {
                 let state = self.underlay_layers.as_ref()?;

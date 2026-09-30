@@ -1432,11 +1432,7 @@ fn class_object_section(
                     "Ramps",
                     bounded_join(
                         value.color_ramps.iter().map(|ramp| {
-                            format!(
-                                "v{} [{}]",
-                                ramp.class_version,
-                                ramp.color_schemes.join(", ")
-                            )
+                            format!("{} v{} ({} colours)", ramp.name, ramp.class_version, ramp.colors.len())
                         }),
                         32,
                     ),
@@ -1445,11 +1441,7 @@ fn class_object_section(
                     "Classification Ramps",
                     bounded_join(
                         value.classification_color_ramps.iter().map(|ramp| {
-                            format!(
-                                "v{} [{}]",
-                                ramp.class_version,
-                                ramp.color_schemes.join(", ")
-                            )
+                            format!("{} v{} ({} colours)", ramp.name, ramp.class_version, ramp.colors.len())
                         }),
                         32,
                     ),

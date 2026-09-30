@@ -3899,6 +3899,87 @@ insert =
     .block-select-objects = BLOCK  Nesneleri seçin:
     .block-specify-insertion-base-point = BLOCK  Ekleme taban noktasını belirtin:
     .wblock-specify-insertion-base-point = WBLOCK  Ekleme taban noktasını belirleyin:
+    .ul-attach-point-cloud = Nokta Bulutu Bağla
+    .pc-rect-crop =
+        Dikdörtgen
+        Kırp
+    .pc-poly-crop =
+        Çokgen
+        Kırp
+    .pc-circ-crop =
+        Dairesel
+        Kırp
+    .pc-show-crop =
+        Kırpmayı
+        Göster
+    .pc-invert-crop =
+        Kırpmayı
+        Ters Çevir
+    .pc-uncrop =
+        Tüm Kırpmaları
+        Kaldır
+    .pc-data = Veri:
+    .pc-size = Boyut:
+    .pc-unit = Birim:
+    .pc-options = Seçenekler
+    .pc-geo = Coğrafi konumu kullan
+    .pc-lock = Nokta bulutunu kilitle
+    .pc-zoom = Nokta bulutuna yakınlaştır
+    .pc-scan-count = __ocs_fmt_0__ tarama
+    .pc-point-count = __ocs_fmt_0__ nokta
+    .pc-select-file = Nokta Bulutu Dosyası Seç
+    .pc-rcp = Nokta Bulutu Projesi
+    .pc-rcs = Nokta Bulutu Taraması
+    .pc-clouds = Nokta Bulutları
+    .pc-help = Bir nokta bulutu taramasını veya projesini bağlar.
+    .pcm-title = Nokta Bulutu Renk Haritası
+    .pcm-ramp = Renk rampası
+    .pcm-count = Renk sayısı
+    .pcm-gradient = Geçişli göster
+    .pcm-range = Renklendirilen nokta aralığı
+    .pcm-max-int = En büyük yoğunluk (%)
+    .pcm-min-int = En küçük yoğunluk (%)
+    .pcm-max-elev = En büyük yükseklik
+    .pcm-min-elev = En küçük yükseklik
+    .pcm-interval = Aralık yüksekliği
+    .pcm-extents = Nokta bulutu kapsamına uygula
+    .pcm-oor = Aralık dışı noktalar
+    .pcm-oor-minmax = En küçük/en büyük renkleri kullan
+    .pcm-oor-scan = Tarama RGB renklerini kullan
+    .pcm-oor-hide = Noktaları gizle
+    .pcm-current = Stilizasyonu geçerli yap
+    .pcm-name-taken = Bu adda bir renk şeması zaten var.
+    .pcm-bad-range = Renklendirilen nokta aralığı geçersiz.
+    .pcm-help = Nokta bulutunun yoğunluğa veya yüksekliğe göre renklendirildiği renk şemalarını ve aralıkları ayarlar.
+    .pc-manager = Nokta Bulutu Yöneticisi
+    .pc-regions-scans = BÖLGELER VE TARAMALAR
+    .pc-regions = Bölgeler
+    .pc-unassigned = Atanmamış Noktalar
+    .pc-scans = Taramalar
+    .pc-search = Ara
+    .pc-collapse-all = Tümünü daralt
+    .pc-expand-all = Tümünü genişlet
+    .pcm-scheme-name = Şema adı
+    .pcs-title = Nokta Bulutundan Kesit Çizgileri Çıkar
+    .pcs-extract = Çıkar
+    .pcs-entire = Tüm kesit
+    .pcs-perimeter = Yalnız çevre
+    .pcs-max-points = En fazla işlenecek nokta
+    .pcs-faster = Daha hızlı
+    .pcs-accurate = Daha doğru
+    .pcs-time = Tahmini süre: __ocs_fmt_0__ dk
+    .pcs-output = Çıktı geometrisi
+    .pcs-polylines = 2B Çoklu çizgiler
+    .pcs-width = Çoklu çizgi genişliği
+    .pcs-tolerances = Çıkarma toleransları
+    .pcs-min-length = En kısa çizgi uzunluğu
+    .pcs-connect = Çizgi birleştirme toleransı
+    .pcs-angle = Doğrusal açı toleransı
+    .pcs-preview = Sonucu önizle
+    .pcs-use-current = Geçerli katmanı kullan
+    .pcs-positive = Pozitif bir sayı gerekir.
+    .pcs-positive-int = Pozitif bir tamsayı gerekir.
+    .pcs-help = Canlı kesitin korunan tarafındaki noktaları çizgilerle izler.
 model =
     .create = Oluştur
     .boolean = Boole işlemleri
@@ -4966,6 +5047,15 @@ properties =
 
     .model-text-height = { common.model-uppercase } · { common.text-height-sentence-case }
     .insert-unit-scale-is-outside-the-supported-range = INSERT birim ölçeği desteklenen aralığın dışında.
+    .stylization = Stilize etme
+    .color-scheme = Renk şeması
+    .scan-colors = Tarama renkleri
+    .object-color = Nesne rengi
+    .classification = Sınıflandırma
+    .show-cropped = Kırpılanı göster
+    .geolocate = Coğrafi konumlandır
+    .segmentation = Segmentasyon
+    .saved-path-lower = Kayıtlı yol
 
 styles =
     .blocks = Bloklar: __ocs_fmt_0__
