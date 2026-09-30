@@ -3842,7 +3842,13 @@ fn tessellate_dimension_inner(
             dimfxlon,
             dimsoxd,
             dimcen,
-            ticks: dimtsz_raw > 1e-9,
+            // Oblique-stroke and architectural-tick arrow blocks are ticks
+            // too: they sit on the extension line and need no room of their
+            // own, and DIMDLE applies to them. Given arrow-sized room, an
+            // 18-long dimension flipped its strokes outside (#898).
+            ticks: dimtsz_raw > 1e-9
+                || (matches!(arrow1, ArrowKind::Tick { .. })
+                    && matches!(arrow2, ArrowKind::Tick { .. })),
             arrow_len: dimasz,
             text_width: text_layout.width,
             text_height: dim_txt as f32,
