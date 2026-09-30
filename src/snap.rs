@@ -1349,7 +1349,7 @@ impl Snapper {
         let unindexed = wires.segments().is_none();
         if unindexed {
             for w in wires.iter() {
-                if wire_in_range(w) {
+                if !w.is_display_only() && wire_in_range(w) {
                     in_range_pts += w.points.len();
                     in_range_wires.push(w);
                 }

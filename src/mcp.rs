@@ -42,6 +42,8 @@ const READ_OPS: &[&str] = &[
     "operation",
     "xdata_get",
     "audit",
+    "text_search",
+    "text_audit",
 ];
 const EXECUTE_OPS: &[&str] = &[
     "new",
@@ -63,6 +65,7 @@ const EXECUTE_OPS: &[&str] = &[
     "entities_create",
     "entities_delete",
     "entities_transform",
+    "text_replace",
     "block_define",
     "block_delete",
     "xdata_set",
@@ -103,6 +106,7 @@ const BATCH_STEP_OPS: &[&str] = &[
     "entities_create",
     "entities_delete",
     "entities_transform",
+    "text_replace",
     "block_define",
     "block_delete",
     "xdata_set",
@@ -855,6 +859,18 @@ fn validate_execute_request(request: &Value, op: &str) -> Result<(), String> {
                 r#"{"op":"save_verified","request_id":"deliver-1","path":"/absolute/output.dwg","target_version":"2018"}"#,
             )
         }
+        "text_replace" => {
+            if request["pairs"].as_array().is_none()
+                && request["find"].as_str().is_none_or(str::is_empty)
+            {
+                missing(
+                    "find or pairs",
+                    r#"{"op":"text_replace","request_id":"tr1","find":"OLD","replace":"NEW"}"#,
+                )
+            } else {
+                Ok(())
+            }
+        }
         _ => Ok(()),
     }
 }
@@ -1043,6 +1059,15 @@ fn execute_request_schema() -> Value {
             "camera_revision":{"type":"integer","minimum":0,"description":"Expected camera revision when view state matters."},
             "selection":{"type":"array","items":handle.clone(),"description":"Expected selected handles from current state."},
             "cmd":{"type":"string","minLength":1,"description":"Command name followed by its prompt answers separated by spaces. Points use x,y or x,y,z; option answers use their token. Read command details first when unsure.","examples":["LINE 0,0 10,10","CIRCLE 5,5 3","PLINE 0,0 10,0 10,10 C"]},
+            "find":{"type":"string","description":"Search text to replace; supports DXF Unicode escapes and special characters."},
+            "replace":{"type":"string","description":"Replacement text."},
+            "pairs":{"type":"array","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]},"description":"Batch find/replace pairs executed in a single atomic undo transaction."},
+            "match_case":{"type":"boolean","default":false,"description":"Case-sensitive text search/replace."},
+            "whole_word":{"type":"boolean","default":false,"description":"Match only whole words (bounded by non-alphanumeric characters)."},
+            "ignore_accents":{"type":"boolean","description":"Ignore accents/diacritics in text (defaults to true when match_case is false)."},
+            "dry_run":{"type":"boolean","default":false,"description":"When true, simulates replacement without mutating entities or pushing undo."},
+            "replace_all":{"type":"boolean","default":true,"description":"Replace all occurrences within matching entities (default true)."},
+            "scope":{"type":"string","enum":["all","active_space","blocks"],"default":"all","description":"Text search/replace scope."},
             "path":{"type":"string","minLength":1,"description":"Absolute path: drawing for open or save, image file for embed_image, target DWG/DXF for wblock, target PDF for plot; save_verified requires .dwg or .dxf."},
             "block":{"type":"string","description":"Block definition name for wblock (exports its entities flattened into model space)."},
             "linked":{"type":"boolean","description":"embed_image: true stores a path-linked RasterImage instead of an embedded OLE2FRAME."},
@@ -1138,6 +1163,7 @@ fn execute_request_schema() -> Value {
             {"properties":{"op":{"const":"entities_create"}},"required":["entities"]},
             {"properties":{"op":{"const":"entities_delete"}},"required":["handles"]},
             {"properties":{"op":{"const":"entities_transform"}},"required":["handles"]},
+            {"properties":{"op":{"const":"text_replace"}}},
             {"properties":{"op":{"const":"block_define"}},"required":["name","base","handles"]},
             {"properties":{"op":{"const":"block_delete"}},"required":["name"]},
             {"properties":{"op":{"const":"xdata_set"}},"required":["app","handles"]},
@@ -1199,7 +1225,7 @@ fn tool_definitions() -> Value {
         {
             "name":"ocs_read",
             "description":"Discover capabilities and record schemas, or read state, complete database records, command manifests, entities, properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session.",
-            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name or record name."},"search":{"type":"string","description":"Case-insensitive command or record-type search."},"document_id":{"type":"integer","minimum":0},"path":{"type":"string","description":"Optional intended output path for audit; extension determines target format."},"target_format":{"type":"string","enum":["dwg","dxf"],"description":"Intended output format for audit."},"target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"],"description":"Intended CAD output version for audit."},"collection":{"type":"string","description":"Record collection, all for records, or omit to discover collections and schema types."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."},"type":{"type":"string","description":"Entity or record type filter; for record_schema, returns its complete type graph and writable field paths."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"paths":{"type":"array","items":{"type":"string"},"description":"Project RFC 6901 JSON Pointer paths relative to record.properties."},"where":{"type":"array","description":"All property filters must match.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string","enum":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],"default":"eq"},"value":{}},"required":["path"],"additionalProperties":false}},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World point whose object snap the snap op reports."},"from":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Base point for perpendicular and tangent snaps (snap op)."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["ocs_session_id"],"additionalProperties":false},
+            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name or record name."},"search":{"type":"string","description":"Case-insensitive command or record-type search."},"find":{"type":"string","description":"Text query string for text_search."},"match_case":{"type":"boolean","default":false,"description":"Case-sensitive text search."},"whole_word":{"type":"boolean","default":false,"description":"Match only whole words."},"ignore_accents":{"type":"boolean","description":"Ignore accents/diacritics in text (defaults to true when match_case is false)."},"scope":{"type":"string","enum":["all","active_space","blocks"],"default":"all","description":"Text search scope."},"system_spellcheck":{"type":"boolean","default":false,"description":"Use native OS spell-checker (Windows, macOS, Linux)."},"language":{"type":"string","description":"Language tag for spell-checker (e.g. 'fr-FR', 'en-US', 'de-DE', 'es-ES')."},"suggest":{"type":"boolean","default":true,"description":"Include suggested corrections for misspelled words."},"check_terms":{"type":"array","items":{"type":"string"},"description":"List of terms or suspect misspellings to flag in text_audit."},"dictionary":{"type":"array","items":{"type":"string"},"description":"Known valid words for text_audit dictionary check."},"pairs":{"type":"array","description":"Find/replace pairs for dry-run simulation in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"dry_run_pairs":{"type":"array","description":"Alias for pairs in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"document_id":{"type":"integer","minimum":0},"path":{"type":"string","description":"Optional intended output path for audit; extension determines target format."},"target_format":{"type":"string","enum":["dwg","dxf"],"description":"Intended output format for audit."},"target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"],"description":"Intended CAD output version for audit."},"collection":{"type":"string","description":"Record collection, all for records, or omit to discover collections and schema types."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."},"type":{"type":"string","description":"Entity or record type filter; for record_schema, returns its complete type graph and writable field paths."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"paths":{"type":"array","items":{"type":"string"},"description":"Project RFC 6901 JSON Pointer paths relative to record.properties."},"where":{"type":"array","description":"All property filters must match.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string","enum":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],"default":"eq"},"value":{}},"required":["path"],"additionalProperties":false}},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World point whose object snap the snap op reports."},"from":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Base point for perpendicular and tangent snaps (snap op)."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["ocs_session_id"],"additionalProperties":false},
             "outputSchema":read_output_schema(),
             "annotations":{"title":"Read OCS state","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
@@ -1570,8 +1596,12 @@ mod tests {
         assert!(READ_OPS.contains(&"records"));
         assert!(READ_OPS.contains(&"record_schema"));
         assert!(READ_OPS.contains(&"audit"));
+        assert!(READ_OPS.contains(&"text_search"));
+        assert!(READ_OPS.contains(&"text_audit"));
         assert!(EXECUTE_OPS.contains(&"set_properties"));
         assert!(EXECUTE_OPS.contains(&"save_verified"));
+        assert!(EXECUTE_OPS.contains(&"text_replace"));
+        assert!(BATCH_STEP_OPS.contains(&"text_replace"));
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["request"]["properties"]
                 ["target_version"]["enum"][0],

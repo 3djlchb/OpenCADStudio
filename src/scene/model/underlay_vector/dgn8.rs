@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 
-use super::model::{arc_cubics, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text};
+use super::model::{arc_cubics, dgn_color_table, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS};
 
 // ── Compound file ───────────────────────────────────────────────────────────
 
@@ -188,7 +188,9 @@ fn elements(d: &[u8]) -> Vec<&[u8]> {
         // The stream can end inside its last element (its trailing words are
         // not stored); what is there is still read.
         let e = &d[at..(at + len).min(d.len())];
-        out.push(e);
+        if !is_deleted(e) {
+            out.push(e);
+        }
         at += len;
     }
     out
@@ -200,6 +202,12 @@ fn kind(e: &[u8]) -> u8 {
 
 fn flags(e: &[u8]) -> u16 {
     u16::from_le_bytes([e[2], e[3]])
+}
+
+/// A deleted element (flag 0x80 of its second byte), kept in the stream but
+/// no longer part of the file.
+fn is_deleted(e: &[u8]) -> bool {
+    e[1] & 0x80 != 0
 }
 
 /// A component of a complex element, cell or shared cell definition.
@@ -290,7 +298,7 @@ impl Styles {
     }
 }
 
-/// Geometry in raw UORs, placed through a transform.
+/// Plan geometry in UORs, and the shared cells it places.
 #[derive(Default, Clone)]
 struct Raw {
     paths: Vec<Path>,
@@ -301,8 +309,31 @@ struct Raw {
 #[derive(Clone)]
 struct Instance {
     name: String,
-    m: [f64; 4],
-    origin: [f64; 2],
+    /// The definition's placement, with every enclosing one applied.
+    xf: Xf,
+}
+
+/// A placement in UORs: x' = r[0]·(x, y, z, 1), y' = r[1]·…, z' = r[2]·….
+type Xf = [[f64; 4]; 3];
+
+const IDENTITY: Xf = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+
+fn xf_vector(m: &Xf, v: [f64; 3]) -> [f64; 3] {
+    m.map(|r| r[0] * v[0] + r[1] * v[1] + r[2] * v[2])
+}
+
+fn xf_point(m: &Xf, p: [f64; 3]) -> [f64; 3] {
+    m.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3])
+}
+
+fn xf_compose(outer: &Xf, inner: &Xf) -> Xf {
+    let mut out = [[0.0; 4]; 3];
+    for (i, row) in out.iter_mut().enumerate() {
+        for (j, v) in row.iter_mut().enumerate() {
+            *v = (0..3).map(|k| outer[i][k] * inner[k][j]).sum::<f64>() + if j == 3 { outer[i][3] } else { 0.0 };
+        }
+    }
+    out
 }
 
 /// A 3D element (flag 0x0800 of its properties word): three coordinates a
@@ -311,15 +342,20 @@ fn is_3d(e: &[u8]) -> bool {
     u32_at(e, 40).is_some_and(|v| v & 0x0800 != 0)
 }
 
-/// The in-plane x and y axes (projected onto the plan) of a 3D element's
-/// orientation quaternion w, x, y, z stored at `at` (the rows of its
-/// rotation matrix).
-fn quat_axes(e: &[u8], at: usize) -> Option<([f64; 2], [f64; 2])> {
+/// The in-plane x and y axes of a 3D element's orientation quaternion w, x,
+/// y, z stored at `at` (the rows of its rotation matrix).
+fn quat_axes(e: &[u8], at: usize) -> Option<([f64; 3], [f64; 3])> {
     let (w, x, y, z) = (f64_at(e, at)?, f64_at(e, at + 8)?, f64_at(e, at + 16)?, f64_at(e, at + 24)?);
     Some((
-        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z)],
-        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z)],
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
+        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
     ))
+}
+
+/// The in-plane axes of a 2D element turned by `rotation` (radians).
+fn turned_axes(rotation: f64) -> ([f64; 3], [f64; 3]) {
+    let (c, s) = (rotation.cos(), rotation.sin());
+    ([c, s, 0.0], [-s, c, 0.0])
 }
 
 /// An elliptical arc on axes `u` and `v` (plan projections) as cubics.
@@ -331,7 +367,8 @@ fn projected_arc(c: [f64; 2], a: f64, b: f64, u: [f64; 2], v: [f64; 2], start: f
         .collect()
 }
 
-fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
+/// Reads a run of elements placed through `xf` into plan geometry.
+fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
     let mut raw = Raw::default();
     // A complex shape or chain collects its components into one path.
     let mut complex: Option<(usize, PathBuilder, Option<([u8; 3], f64)>, Option<[u8; 3]>, bool)> = None;
@@ -363,14 +400,25 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
             raw.paths.push(path);
         }
     }
+    let plan = |p: [f64; 3]| {
+        let q = xf_point(xf, p);
+        [q[0], q[1]]
+    };
+    let axis = |v: [f64; 3]| {
+        let q = xf_vector(xf, v);
+        [q[0], q[1]]
+    };
     for e in run {
         if e.len() < 104 || styles.hidden.contains(&u32_at(e, 12).unwrap_or(0)) {
             continue;
         }
         let color = styles.color(e);
         let stroke = Some((color, -1.0));
-        let p2 = |at: usize| -> Option<[f64; 2]> { Some([f64_at(e, at)?, f64_at(e, at + 8)?]) };
         let d3 = is_3d(e);
+        // A point: x, y (and z in a 3D element).
+        let p3 = |at: usize| -> Option<[f64; 3]> {
+            Some([f64_at(e, at)?, f64_at(e, at + 8)?, if d3 { f64_at(e, at + 16)? } else { 0.0 }])
+        };
         match kind(e) {
             12 | 14 => {
                 let n = u32_at(e, 104).unwrap_or(0) as usize;
@@ -380,14 +428,14 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
                 }
             }
             3 => {
-                if let (Some(a), Some(b)) = (p2(104), p2(if d3 { 128 } else { 120 })) {
-                    push(&mut raw, &mut complex, Path { subpaths: vec![SubPath { segments: vec![Segment::Line(a, b)], closed: false }], stroke, fill: None });
+                if let (Some(a), Some(b)) = (p3(104), p3(if d3 { 128 } else { 120 })) {
+                    push(&mut raw, &mut complex, Path { subpaths: vec![SubPath { segments: vec![Segment::Line(plan(a), plan(b))], closed: false }], stroke, fill: None });
                 }
             }
             4 | 6 | 11 => {
                 let n = u32_at(e, 104).unwrap_or(0) as usize;
                 let stride = if d3 { 24 } else { 16 };
-                let pts: Vec<[f64; 2]> = (0..n).filter_map(|k| p2(112 + k * stride)).collect();
+                let pts: Vec<[f64; 2]> = (0..n).filter_map(|k| p3(112 + k * stride)).map(plan).collect();
                 if pts.len() >= 2 {
                     let mut pb = PathBuilder::default();
                     pb.move_to(pts[0]);
@@ -400,14 +448,16 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
                     push(&mut raw, &mut complex, Path { subpaths: pb.finish(), stroke, fill: None });
                 }
             }
-            15 | 16 if d3 => {
-                // Axes, orientation and centre: ellipse a 104, b 112,
+            15 | 16 => {
+                // Radii, orientation and centre. 3D: ellipse a 104, b 112,
                 // quaternion 120, centre 152; arc start 104, sweep 112, a 120,
-                // b 128, quaternion 136, centre 168.
-                let arc = if kind(e) == 15 {
-                    (|| Some((f64_at(e, 104)?, f64_at(e, 112)?, quat_axes(e, 120)?, p2(152)?, 0.0, std::f64::consts::TAU)))()
-                } else {
-                    (|| Some((f64_at(e, 120)?, f64_at(e, 128)?, quat_axes(e, 136)?, p2(168)?, f64_at(e, 104)?, f64_at(e, 112)?)))()
+                // b 128, quaternion 136, centre 168. 2D: the orientation is an
+                // angle, ellipse centre 128, arc centre 144.
+                let arc = match (kind(e), d3) {
+                    (15, true) => (|| Some((f64_at(e, 104)?, f64_at(e, 112)?, quat_axes(e, 120)?, p3(152)?, 0.0, 0.0)))(),
+                    (_, true) => (|| Some((f64_at(e, 120)?, f64_at(e, 128)?, quat_axes(e, 136)?, p3(168)?, f64_at(e, 104)?, f64_at(e, 112)?)))(),
+                    (15, false) => (|| Some((f64_at(e, 104)?, f64_at(e, 112)?, turned_axes(f64_at(e, 120)?), p3(128)?, 0.0, 0.0)))(),
+                    _ => (|| Some((f64_at(e, 120)?, f64_at(e, 128)?, turned_axes(f64_at(e, 136)?), p3(144)?, f64_at(e, 104)?, f64_at(e, 112)?)))(),
                 };
                 let Some((a, b, (u, v), c, start, sweep)) = arc else { continue };
                 let sweep = if sweep == 0.0 { std::f64::consts::TAU } else { sweep };
@@ -415,60 +465,52 @@ fn read_run(run: &[&[u8]], styles: &Styles) -> Raw {
                 push(
                     &mut raw,
                     &mut complex,
-                    Path { subpaths: vec![SubPath { segments: projected_arc(c, a, b, u, v, start, sweep), closed }], stroke, fill: None },
+                    Path { subpaths: vec![SubPath { segments: projected_arc(plan(c), a, b, axis(u), axis(v), start, sweep), closed }], stroke, fill: None },
                 );
             }
-            15 | 16 => {
-                let arc = if kind(e) == 15 {
-                    (|| Some((f64_at(e, 104)?, f64_at(e, 112)?, f64_at(e, 120)?, p2(128)?, 0.0, std::f64::consts::TAU)))()
+            17 => {
+                // 3D: width 112, height 120, quaternion 144, origin 176, the
+                // characters after the string marker. 2D: angle 144, origin
+                // 152, a byte count (with its 4-byte marker) at 110 and the
+                // characters from 174.
+                let placed = if d3 {
+                    (|| Some((f64_at(e, 112)?, f64_at(e, 120)?, quat_axes(e, 144)?, p3(176)?, marked_string(e, 200)?)))()
                 } else {
-                    (|| Some((f64_at(e, 120)?, f64_at(e, 128)?, f64_at(e, 136)?, p2(144)?, f64_at(e, 104)?, f64_at(e, 112)?)))()
+                    (|| {
+                        let count = u16::from_le_bytes(e.get(110..112)?.try_into().ok()?) as usize;
+                        let chars = e.get(174..170 + count.max(4))?;
+                        let text = String::from_utf8_lossy(chars).trim_end_matches(char::from(0)).to_string();
+                        Some((f64_at(e, 112)?, f64_at(e, 120)?, turned_axes(f64_at(e, 144)?), p3(152)?, text))
+                    })()
                 };
-                let Some((a, b, rot, c, start, sweep)) = arc else { continue };
-                let pieces = arc_cubics(c, a, b, rot, start, if sweep == 0.0 { std::f64::consts::TAU } else { sweep });
-                let closed = sweep.abs() >= std::f64::consts::TAU - 1e-9 || sweep == 0.0;
-                push(
-                    &mut raw,
-                    &mut complex,
-                    Path { subpaths: vec![SubPath { segments: pieces.into_iter().map(|[a, b, c, d]| Segment::Cubic(a, b, c, d)).collect(), closed }], stroke, fill: None },
-                );
-            }
-            17 if d3 => {
-                // Width 112, height 120, quaternion 144, origin 176; the
-                // characters follow the string marker.
-                let (Some(width), Some(height), Some((u, _)), Some(origin)) = (f64_at(e, 112), f64_at(e, 120), quat_axes(e, 144), p2(176)) else {
+                let Some((width, height, (u, v), origin, text)) = placed else { continue };
+                // The text's axes as the plan shows them: its baseline sets the
+                // angle, and each axis's plan length scales its size.
+                let (pu, pv) = (axis(u), axis(v));
+                let (su, sv) = (pu[0].hypot(pu[1]), pv[0].hypot(pv[1]));
+                if su < 1e-9 || sv < 1e-9 {
                     continue;
-                };
-                let Some(text) = marked_string(e, 200) else { continue };
-                let (height, width) = (height * 6.0 / 1000.0, width * 6.0 / 1000.0);
+                }
+                let (height, width) = (height * 6.0 / 1000.0 * sv, width * 6.0 / 1000.0 * su);
                 raw.texts.push(Text {
                     text,
-                    origin,
+                    origin: plan(origin),
                     height,
                     width_factor: if height > 0.0 { width / height } else { 1.0 },
-                    rotation: u[1].atan2(u[0]),
+                    rotation: pu[1].atan2(pu[0]),
                     color,
                     font: "txt".to_string(),
                 });
             }
-            17 => {
-                let (Some(width), Some(height), Some(rotation), Some(origin)) = (f64_at(e, 112), f64_at(e, 120), f64_at(e, 144), p2(152)) else {
-                    continue;
-                };
-                // The text: a byte count (with its 4-byte marker) and the
-                // characters after the marker.
-                let count = u16::from_le_bytes([e[110], e[111]]) as usize;
-                let Some(chars) = e.get(174..170 + count.max(4)) else { continue };
-                let text = String::from_utf8_lossy(chars).trim_end_matches(char::from(0)).to_string();
-                let (height, width) = (height * 6.0 / 1000.0, width * 6.0 / 1000.0);
-                raw.texts.push(Text { text, origin, height, width_factor: if height > 0.0 { width / height } else { 1.0 }, rotation, color, font: "txt".to_string() });
-            }
             35 => {
-                let (Some(m0), Some(m1), Some(m3), Some(m4), Some(origin)) = (f64_at(e, 160), f64_at(e, 168), f64_at(e, 184), f64_at(e, 192), p2(232)) else {
-                    continue;
-                };
+                // Shared cell instance: a 3×3 matrix by rows from 160, the
+                // origin at 232 (z at 248 in 3D), the definition's name after
+                // the string marker.
+                let m: Option<Vec<f64>> = (0..9).map(|k| f64_at(e, 160 + k * 8)).collect();
+                let (Some(m), Some(o)) = (m, p3(232)) else { continue };
                 let Some(name) = marked_string(e, 248) else { continue };
-                raw.instances.push(Instance { name: name.to_ascii_uppercase(), m: [m0, m1, m3, m4], origin });
+                let local: Xf = [[m[0], m[1], m[2], o[0]], [m[3], m[4], m[5], o[1]], [m[6], m[7], m[8], o[2]]];
+                raw.instances.push(Instance { name: name.to_ascii_uppercase(), xf: xf_compose(xf, &local) });
             }
             _ => {}
         }
@@ -489,18 +531,9 @@ fn apply(m: &Affine, p: [f64; 2]) -> [f64; 2] {
     [m[0] * p[0] + m[1] * p[1] + m[4], m[2] * p[0] + m[3] * p[1] + m[5]]
 }
 
-fn compose(o: &Affine, i: &Affine) -> Affine {
-    [
-        o[0] * i[0] + o[1] * i[2],
-        o[0] * i[1] + o[1] * i[3],
-        o[2] * i[0] + o[3] * i[2],
-        o[2] * i[1] + o[3] * i[3],
-        o[0] * i[4] + o[1] * i[5] + o[4],
-        o[2] * i[4] + o[3] * i[5] + o[5],
-    ]
-}
-
-fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Raw>, depth: usize, out: &mut Sheet) {
+/// Places plan geometry through the sheet mapping `m`, and the shared cells
+/// it instances (each definition read through its own placement).
+fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Vec<&[u8]>>, styles: &Styles, depth: usize, out: &mut Sheet) {
     let map = |p: [f64; 2]| apply(m, p);
     for path in &raw.paths {
         out.paths.push(Path {
@@ -533,8 +566,7 @@ fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Raw>, depth: usize, out: 
     }
     for inst in &raw.instances {
         let Some(def) = defs.get(&inst.name) else { continue };
-        let local: Affine = [inst.m[0], inst.m[1], inst.m[2], inst.m[3], inst.origin[0], inst.origin[1]];
-        place(def, &compose(m, &local), defs, depth + 1, out);
+        place(&read_run(def, styles, &inst.xf), m, defs, styles, depth + 1, out);
     }
 }
 
@@ -627,11 +659,10 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
     let (_, graphics, header) = all.iter().find(|m| m.0.eq_ignore_ascii_case(name)).or_else(|| all.first())?;
     let non_model = non_model(&cfb);
     let nm = elements(&non_model);
-    let colors = nm
-        .iter()
-        .find(|e| kind(e) == 5 && e.len() >= 37 + 768)
-        .map(|e| (0..256).map(|i| [e[37 + i * 3], e[38 + i * 3], e[39 + i * 3]]).collect())
-        .unwrap_or_else(|| vec![[255, 255, 255]; 256]);
+    // Colours 0-254 from byte 37, the background (255) opening the table.
+    let color_table = nm.iter().find(|e| kind(e) == 5).and_then(|e| dgn_color_table(e, 37));
+    let table_colors = color_table.is_some();
+    let colors = color_table.unwrap_or_else(|| DGN_DEFAULT_COLORS.to_vec());
     let table = level_table(&nm);
     let levels = table.iter().map(|l| (l.0, l.2)).collect();
     let hidden = table
@@ -641,7 +672,7 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         .collect();
     let styles = Styles { colors, levels, hidden, extended: extended_colors(&cfb) };
     // Shared cell definitions: a type-34 element and its components.
-    let mut defs = HashMap::new();
+    let mut defs: HashMap<String, Vec<&[u8]>> = HashMap::new();
     let mut i = 0;
     while i < nm.len() {
         if kind(nm[i]) == 34 && !is_component(nm[i]) {
@@ -650,17 +681,46 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
             while j < nm.len() && is_component(nm[j]) {
                 j += 1;
             }
-            defs.insert(name, read_run(&nm[i + 1..j], &styles));
+            defs.insert(name, nm[i + 1..j].to_vec());
             i = j;
         } else {
             i += 1;
         }
     }
-    let raw = read_run(&elements(graphics), &styles);
+    let graphics = elements(graphics);
+    let raw = read_run(&graphics, &styles, &IDENTITY);
     let (per_unit, sub_uor) = units(header);
-    let m: Affine = [1.0 / per_unit, 0.0, 0.0, 1.0 / per_unit, 0.0, 0.0];
-    let mut sheet = Sheet { sub_per_master: per_unit / sub_uor, ..Default::default() };
-    place(&raw, &m, &defs, 0, &mut sheet);
-    sheet.rect = paths_bounds(&sheet.paths)?;
+    let origin = global_origin(header);
+    let m: Affine = [1.0 / per_unit, 0.0, 0.0, 1.0 / per_unit, -origin[0] / per_unit, -origin[1] / per_unit];
+    let mut sheet = Sheet { sub_per_master: per_unit / sub_uor, table_colors, ..Default::default() };
+    place(&raw, &m, &defs, &styles, 0, &mut sheet);
+    // The model's extent is its elements' stored ranges (text by its full
+    // box), as the reference sizes a model.
+    sheet.rect = match stored_range(&graphics) {
+        Some([x0, y0, x1, y1]) => {
+            let (lo, hi) = (apply(&m, [x0, y0]), apply(&m, [x1, y1]));
+            [lo[0], lo[1], hi[0], hi[1]]
+        }
+        None => paths_bounds(&sheet.paths)?,
+    };
     Some(sheet)
+}
+
+/// The model's global origin (UORs; the design plane point drawn at the
+/// model's 0,0).
+fn global_origin(header: &[u8]) -> [f64; 2] {
+    let get = |at: usize| f64_at(header, at).filter(|v| v.is_finite()).unwrap_or(0.0);
+    [get(4212), get(4220)]
+}
+
+/// The union of the top-level elements' ranges (UORs): each graphic element
+/// stores its low corner at 56 and its size at 80, as 64-bit integers.
+fn stored_range(graphics: &[&[u8]]) -> Option<[f64; 4]> {
+    let i64_at = |e: &[u8], at: usize| Some(i64::from_le_bytes(e.get(at..at + 8)?.try_into().ok()?) as f64);
+    let mut r = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for e in graphics.iter().filter(|e| e.len() >= 104 && !is_component(e)) {
+        let (Some(x), Some(y), Some(w), Some(h)) = (i64_at(e, 56), i64_at(e, 64), i64_at(e, 80), i64_at(e, 88)) else { continue };
+        r = [r[0].min(x), r[1].min(y), r[2].max(x + w), r[3].max(y + h)];
+    }
+    (r[0] <= r[2]).then_some(r)
 }

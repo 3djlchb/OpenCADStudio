@@ -673,6 +673,10 @@ impl WireIndexBatch {
 }
 
 fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIndexBatch) {
+    // Drawn underlay content: neither picked nor snapped.
+    if wire.is_display_only() {
+        return;
+    }
     if let Some(aabb) = finite_wire_aabb3(wire) {
         batch.wire_entries.push(Entry3 {
             aabb,

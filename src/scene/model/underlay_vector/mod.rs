@@ -11,6 +11,9 @@ mod dgn7;
 mod dgn8;
 mod dwf;
 mod model;
+mod wires;
+
+pub(crate) use wires::display_wires;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -93,10 +96,11 @@ pub fn sheet_without(kind: UnderlayType, path: &str, item: &str, hidden: &[Strin
             UnderlayType::Dgn => dgn8::model(&bytes, item, hidden).unwrap_or_default(),
             UnderlayType::Pdf => return None,
         };
-        // A DGN model's extent includes its text: each text's box runs its
-        // length along the baseline and 1.5 × its height above it (as the
-        // reference measures a model). A DWF sheet keeps its plotted view.
-        if kind == UnderlayType::Dgn {
+        // A V7 model's extent includes its text: each text's box runs its
+        // length along the baseline and its height above it (as the
+        // reference measures a model). A V8 model has its stored element
+        // ranges; a DWF sheet keeps its plotted view.
+        if kind == UnderlayType::Dgn && dgn7::is_v7(&bytes) {
             let mut r = sheet.rect;
             for t in &sheet.texts {
                 let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
@@ -110,13 +114,14 @@ pub fn sheet_without(kind: UnderlayType, path: &str, item: &str, hidden: &[Strin
                 );
                 let length = strokes.iter().flatten().map(|p| p[0] as f64).fold(0.0, f64::max);
                 let (c, s) = (t.rotation.cos(), t.rotation.sin());
-                for [x, y] in [[0.0, 0.0], [length, 0.0], [length, 1.5 * t.height], [0.0, 1.5 * t.height]] {
+                for [x, y] in [[0.0, 0.0], [length, 0.0], [length, t.height], [0.0, t.height]] {
                     let p = [t.origin[0] + x * c - y * s, t.origin[1] + x * s + y * c];
                     r = [r[0].min(p[0]), r[1].min(p[1]), r[2].max(p[0]), r[3].max(p[1])];
                 }
             }
             sheet.rect = r;
         }
+        sheet.element_colors = element_colors(&sheet);
         outline_texts(&mut sheet);
         if !hidden.is_empty() {
             sheet.rect = sheet_without(kind, path, item, &[])?.rect;
@@ -126,6 +131,45 @@ pub fn sheet_without(kind: UnderlayType, path: &str, item: &str, hidden: &[Strin
     let value = read().map(Arc::new);
     sheet_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
     value
+}
+
+/// The colour of each path and text of the sheet (a path's fill before
+/// its stroke).
+fn element_colors(sheet: &Sheet) -> Vec<[u8; 3]> {
+    sheet
+        .paths
+        .iter()
+        .filter_map(|p| p.fill.or(p.stroke.map(|s| s.0)))
+        .chain(sheet.texts.iter().map(|t| t.color))
+        .collect()
+}
+
+/// The lightness a DGN model's contrast pulls its colours towards, in
+/// thousandths. The reference takes it from the model's own colours as
+/// shown (over `backdrop`, faded by `fade` into the background): about
+/// 0.788 × their mean lightness, each element counted once (0.788 for an
+/// all-white model, 0.416 for mid grey, 0.09 for dark red).
+pub fn dgn_contrast_pivot(
+    path: &str,
+    item: &str,
+    hidden: &[String],
+    backdrop: Backdrop,
+    fade: Option<([u8; 3], u8)>,
+) -> Option<u16> {
+    let sheet = sheet_without(UnderlayType::Dgn, path, item, hidden)?;
+    if sheet.element_colors.is_empty() {
+        return None;
+    }
+    let lightness = |c: [u8; 3]| {
+        let c = if sheet.table_colors { model::dgn_table_color(c, backdrop.max_channel, backdrop.light) } else { c };
+        let c = match fade {
+            Some((bg, f)) => [0, 1, 2].map(|i| c[i] as f64 + (bg[i] as f64 - c[i] as f64) * f.min(100) as f64 / 100.0),
+            None => c.map(|v| v as f64),
+        };
+        (c[0].max(c[1]).max(c[2]) + c[0].min(c[1]).min(c[2])) / 510.0
+    };
+    let mean = sheet.element_colors.iter().map(|&c| lightness(c)).sum::<f64>() / sheet.element_colors.len() as f64;
+    Some((0.788 * mean * 1000.0).round() as u16)
 }
 
 /// Text as strokes (and fills for outline fonts), in the text's colour.
@@ -165,21 +209,64 @@ fn outline_texts(sheet: &mut Sheet) {
 /// Longest side of a sheet's full-size display raster, pixels.
 pub const RASTER_SIDE: f64 = 3072.0;
 
+/// The background a sheet is shown over, as far as its colours depend on
+/// it: the largest channel (in the steps a DGN colour table changes at) and
+/// whether the background is light.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Backdrop {
+    pub max_channel: u8,
+    pub light: bool,
+}
+
+impl Backdrop {
+    pub fn of(rgb: [f32; 3]) -> Self {
+        let max = rgb[0].max(rgb[1]).max(rgb[2]);
+        let min = rgb[0].min(rgb[1]).min(rgb[2]);
+        let top = (max.clamp(0.0, 1.0) * 255.0).round() as u8;
+        Backdrop {
+            max_channel: match top {
+                0..=29 => 0,
+                30..=31 => 30,
+                _ => 32,
+            },
+            // Light means an HSL lightness of one half or more.
+            light: (max + min) / 2.0 >= 0.5,
+        }
+    }
+}
+
 /// The sheet drawn on a transparent background with `side` pixels on its
 /// longest side (at most [`RASTER_SIDE`]), straight alpha, rows from the
-/// top, memoised per size.
-pub fn display_raster(kind: UnderlayType, path: &str, item: &str, hidden: &[String], side: f64) -> Option<Arc<PdfPage>> {
+/// top, memoised per size and backdrop.
+pub fn display_raster(
+    kind: UnderlayType,
+    path: &str,
+    item: &str,
+    hidden: &[String],
+    side: f64,
+    backdrop: Backdrop,
+) -> Option<Arc<PdfPage>> {
     let side = side.clamp(16.0, RASTER_SIDE).round();
-    let key = (path.to_string(), format!("{}@{side}", layered_item(item, hidden)));
+    let key = (
+        path.to_string(),
+        format!("{}@{side}~{}{}", layered_item(item, hidden), backdrop.max_channel, backdrop.light),
+    );
     if let Some(hit) = raster_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return hit.clone();
     }
-    let value = sheet_without(kind, path, item, hidden).and_then(|s| rasterize(&s, side)).map(Arc::new);
+    let value = sheet_without(kind, path, item, hidden).and_then(|s| rasterize(&s, side, backdrop)).map(Arc::new);
     raster_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
     value
 }
 
-fn rasterize(sheet: &Sheet, side: f64) -> Option<PdfPage> {
+fn rasterize(sheet: &Sheet, side: f64, backdrop: Backdrop) -> Option<PdfPage> {
+    let shown = |c: [u8; 3]| {
+        if sheet.table_colors {
+            model::dgn_table_color(c, backdrop.max_channel, backdrop.light)
+        } else {
+            c
+        }
+    };
     let [x0, y0, x1, y1] = sheet.rect;
     let (w, h) = (x1 - x0, y1 - y0);
     if !(w > 0.0 && h > 0.0) {
@@ -188,7 +275,10 @@ fn rasterize(sheet: &Sheet, side: f64) -> Option<PdfPage> {
     let scale = side / w.max(h);
     let (pw, ph) = ((w * scale).ceil().max(1.0) as u32, (h * scale).ceil().max(1.0) as u32);
     let mut pixmap = tiny_skia::Pixmap::new(pw, ph)?;
-    let to_px = |p: [f64; 2]| (((p[0] - x0) * scale) as f32, ((y1 - p[1]) * scale) as f32);
+    // The rectangle's edges fall on the centres of the outer pixels, so a
+    // line along the edge of the extent (every extent has some) is drawn.
+    let (sx, sy) = ((pw.max(2) - 1) as f64 / w, (ph.max(2) - 1) as f64 / h);
+    let to_px = |p: [f64; 2]| (((p[0] - x0) * sx + 0.5) as f32, ((y1 - p[1]) * sy + 0.5) as f32);
     for path in &sheet.paths {
         let mut pb = tiny_skia::PathBuilder::new();
         for sp in &path.subpaths {
@@ -212,28 +302,43 @@ fn rasterize(sheet: &Sheet, side: f64) -> Option<PdfPage> {
             }
         }
         let Some(p) = pb.finish() else { continue };
-        if let Some(c) = path.fill {
+        if let Some(c) = path.fill.map(shown) {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(c[0], c[1], c[2], 255);
             // Fills that share an edge (triangle strips) would show a seam.
             paint.anti_alias = false;
             pixmap.fill_path(&p, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
         }
-        if let Some((c, width)) = path.stroke {
+        if let Some((c, width)) = path.stroke.map(|(c, w)| (shown(c), w)) {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(c[0], c[1], c[2], 255);
             // A negative width is in pixels (DGN line weights).
             let px = if width < 0.0 { (-width) as f32 } else { ((width * scale) as f32).max(1.0) };
-            // Hairlines are drawn solid, one pixel wide, as the reference
-            // draws them; anti-aliasing would spread them to half intensity.
-            paint.anti_alias = px > 1.5;
             let stroke = tiny_skia::Stroke {
                 width: px,
                 line_cap: tiny_skia::LineCap::Round,
                 line_join: tiny_skia::LineJoin::Round,
                 ..Default::default()
             };
-            pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            if px > 1.5 {
+                paint.anti_alias = true;
+                pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            } else {
+                // Hairlines: horizontal and vertical pieces solid, one pixel
+                // wide, as the reference draws them (anti-aliasing would
+                // spread them to half intensity); slanted pieces and curves
+                // anti-aliased, since their pixel steps break up once the
+                // raster is scaled to the screen.
+                let (straight, curved) = hairline_parts(path, &to_px);
+                paint.anti_alias = false;
+                if let Some(p) = straight {
+                    pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                }
+                paint.anti_alias = true;
+                if let Some(p) = curved {
+                    pixmap.stroke_path(&p, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                }
+            }
         }
     }
     let mut pixels = pixmap.take();
@@ -246,6 +351,57 @@ fn rasterize(sheet: &Sheet, side: f64) -> Option<PdfPage> {
         }
     }
     Some(PdfPage { pixels: Arc::new(pixels), width: pw, height: ph, dpi: 0.0 })
+}
+
+/// A path's horizontal and vertical segments, and its slanted and curved
+/// ones, each as a pixel path.
+fn hairline_parts(
+    path: &Path,
+    to_px: &dyn Fn([f64; 2]) -> (f32, f32),
+) -> (Option<tiny_skia::Path>, Option<tiny_skia::Path>) {
+    let (mut straight, mut curved) = (tiny_skia::PathBuilder::new(), tiny_skia::PathBuilder::new());
+    // Consecutive segments of one kind stay one run, so their joins are
+    // drawn once.
+    let (mut straight_at, mut curved_at) = (None, None);
+    for sp in &path.subpaths {
+        for seg in &sp.segments {
+            let a = to_px(seg.start());
+            match seg {
+                Segment::Line(_, b) if along_axis(a, to_px(*b)) => {
+                    let b = to_px(*b);
+                    if straight_at != Some(a) {
+                        straight.move_to(a.0, a.1);
+                    }
+                    straight.line_to(b.0, b.1);
+                    straight_at = Some(b);
+                }
+                Segment::Line(_, b) => {
+                    let b = to_px(*b);
+                    if curved_at != Some(a) {
+                        curved.move_to(a.0, a.1);
+                    }
+                    curved.line_to(b.0, b.1);
+                    curved_at = Some(b);
+                }
+                Segment::Cubic(_, c1, c2, b) => {
+                    let (c1, c2, b) = (to_px(*c1), to_px(*c2), to_px(*b));
+                    if curved_at != Some(a) {
+                        curved.move_to(a.0, a.1);
+                    }
+                    curved.cubic_to(c1.0, c1.1, c2.0, c2.1, b.0, b.1);
+                    curved_at = Some(b);
+                }
+            }
+        }
+        straight_at = None;
+        curved_at = None;
+    }
+    (straight.finish(), curved.finish())
+}
+
+/// A pixel segment that runs horizontally or vertically.
+fn along_axis(a: (f32, f32), b: (f32, f32)) -> bool {
+    (b.0 - a.0).abs() < 0.01 || (b.1 - a.1).abs() < 0.01
 }
 
 fn vector_cache() -> &'static Mutex<HashMap<Key, Option<Arc<super::pdf_vector::PageVectors>>>> {

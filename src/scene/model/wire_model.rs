@@ -506,8 +506,9 @@ pub struct WireModel {
     pub depth_override: Option<f32>,
     /// Whether this wire is drawn in the normal viewport pass.
     pub display_visible: bool,
-    /// Geometry that only object snaps use (the content of an underlay):
-    /// never drawn, plotted or picked.
+    /// Geometry that is never picked: the content of an underlay. Hidden
+    /// (`display_visible` false) it is what object snaps find; drawn, it is
+    /// display only and snaps skip it too ([`Self::is_display_only`]).
     pub snap_only: bool,
     /// Whether this wire is included in plotted output.
     pub plot_visible: bool,
@@ -531,6 +532,11 @@ impl WireModel {
     pub const SELECTED: [f32; 4] = [0.15, 0.55, 1.00, 1.0];
     /// Rollover (hover) highlight — orange, distinct from the blue selection.
     pub const HOVER: [f32; 4] = [0.95, 0.55, 0.10, 1.0];
+
+    /// Drawn underlay content: shown and plotted, never picked or snapped.
+    pub fn is_display_only(&self) -> bool {
+        self.snap_only && self.display_visible
+    }
     /// Sentinel AABB that never rejects any snap query.
     pub const UNBOUNDED_AABB: [f32; 4] = [
         f32::NEG_INFINITY,

@@ -2613,8 +2613,11 @@ fn emit_wire(
     // composed rank the text sits at the bare insert level, an exact tie with
     // every sibling fill, and the later wipeout pass erases it (unselected
     // block text vanished under its wipeout; selecting won only because the
-    // xray pass ignores depth).
-    let local_depth = (lw.world_width > 0.0 || !lw.text_verts.is_empty())
+    // xray pass ignores depth). Fill-only wires take the rank as well: an
+    // MTEXT background (a dimension's DIMTFILL box) left at the bare insert
+    // level sat in front of its own text whenever that text's rank was
+    // below zero.
+    let local_depth = (lw.world_width > 0.0 || lw.is_fill_only || !lw.text_verts.is_empty())
         .then(|| d_range.0 + lw.local_rank * d_range.1);
     let plot_visible = ctx.plot_visible
         && lw.plot_visible
@@ -2997,21 +3000,22 @@ fn transform_tangent(
             start_param,
             end_param,
         } => {
-            let c = t.apply(Vector3::new(center[0], center[1], center[2]));
-            let m = t.apply_rotation(Vector3::new(major_axis[0], major_axis[1], major_axis[2]));
-            let n = t.apply_rotation(Vector3::new(normal[0], normal[1], normal[2]));
-            let n_len = n.length();
-            if n_len <= 1.0e-12 {
-                return None;
-            }
-            let n = n / n_len;
+            let (c, m, n, ratio, s, e) = crate::scene::view::transform::transform_ellipse_geometry(
+                Vector3::new(center[0], center[1], center[2]),
+                Vector3::new(major_axis[0], major_axis[1], major_axis[2]),
+                Vector3::new(normal[0], normal[1], normal[2]),
+                *minor_axis_ratio,
+                *start_param,
+                *end_param,
+                t,
+            )?;
             Some(TangentGeom::PlanarEllipse {
                 center: [c.x, c.y, c.z],
                 major_axis: [m.x, m.y, m.z],
                 normal: [n.x, n.y, n.z],
-                minor_axis_ratio: *minor_axis_ratio,
-                start_param: *start_param,
-                end_param: *end_param,
+                minor_axis_ratio: ratio,
+                start_param: s,
+                end_param: e,
             })
         }
     }
@@ -3265,5 +3269,61 @@ mod compact_nested_tests {
         assert_eq!(finite_points, 6_000);
         assert_eq!(wires.len(), 1);
         assert!(wires[0].render_instance.is_none());
+    }
+
+    #[test]
+    fn test_transform_tangent_ellipse_arc_negative_scale_and_rotation() {
+        let ellipse_geom = TangentGeom::PlanarEllipse {
+            center: [10.0, 20.0, 0.0],
+            major_axis: [100.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            minor_axis_ratio: 0.5,
+            start_param: std::f64::consts::FRAC_PI_4,
+            end_param: 3.0 * std::f64::consts::FRAC_PI_4,
+        };
+
+        // Negative scale (-1, -1, 1), negative rotation -45 deg, distant translation (7000, 5000, 0)
+        let t = Transform::from_scaling(Vector3::new(-1.0, -1.0, 1.0))
+            .then(&Transform::from_rotation(Vector3::UNIT_Z, -std::f64::consts::FRAC_PI_4))
+            .then(&Transform::from_translation(Vector3::new(7000.0, 5000.0, 0.0)));
+
+        let transformed = transform_tangent(&ellipse_geom, &t).expect("transform_tangent should succeed");
+        let TangentGeom::PlanarEllipse {
+            center: c,
+            major_axis: m,
+            normal: n,
+            minor_axis_ratio: ratio,
+            start_param: s,
+            end_param: _e,
+        } = transformed else {
+            panic!("Expected PlanarEllipse");
+        };
+
+        // Center must be transformed
+        let expected_c = t.apply(Vector3::new(10.0, 20.0, 0.0));
+        assert!((c[0] - expected_c.x).abs() < 1e-9);
+        assert!((c[1] - expected_c.y).abs() < 1e-9);
+
+        // Major axis length must be 100, ratio 0.5
+        let m_vec = Vector3::new(m[0], m[1], m[2]);
+        assert!((m_vec.length() - 100.0).abs() < 1e-9);
+        assert!((ratio - 0.5).abs() < 1e-9);
+        assert!((n[2] - 1.0).abs() < 1e-9);
+
+        // Start and end points on the curve must match mathematical transformation of original start/end
+        let orig_start_pt = Vector3::new(10.0, 20.0, 0.0)
+            + Vector3::new(100.0, 0.0, 0.0) * (std::f64::consts::FRAC_PI_4).cos()
+            + Vector3::new(0.0, 50.0, 0.0) * (std::f64::consts::FRAC_PI_4).sin();
+        let expected_start_pt = t.apply(orig_start_pt);
+
+        let new_v = Vector3::new(n[0], n[1], n[2]).cross(&m_vec) * ratio;
+        let actual_start_pt = Vector3::new(c[0], c[1], c[2])
+            + m_vec * s.cos()
+            + new_v * s.sin();
+
+        assert!(
+            (actual_start_pt - expected_start_pt).length() < 1e-9,
+            "Start point mismatch: expected {expected_start_pt:?}, got {actual_start_pt:?}"
+        );
     }
 }

@@ -99,6 +99,59 @@ pub struct ImageModel {
     pub use_alpha: bool,
 }
 
+/// The colour adjustments an underlay's content is drawn with over
+/// the background: contrast, monochrome, the background adjustment and (DGN)
+/// the fade.
+pub(crate) fn underlay_adjust(
+    u: &codec::entities::Underlay,
+    def: &codec::entities::UnderlayDefinition,
+    background: [f32; 4],
+) -> super::pdf_raster::PageAdjust {
+    use codec::entities::{UnderlayDisplayFlags, UnderlayType};
+    use super::pdf_raster::PageAdjust;
+    let page = crate::entities::underlay::page_of(def);
+    // Dark means an HSL lightness under one half: pure blue counts as
+    // light, (0, 128, 0) as dark.
+    let bg_max = background[0].max(background[1]).max(background[2]);
+    let bg_min = background[0].min(background[1]).min(background[2]);
+    let bg_lum = (bg_max + bg_min) / 2.0;
+    let dgn = def.underlay_type == UnderlayType::Dgn;
+    // A DGN model is faded into the background before its contrast is
+    // applied (the reference's order), so it is drawn opaque.
+    let bg_rgb = [0, 1, 2].map(|i| (background[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+    let fade_before_contrast = (dgn && u.fade > 0).then_some((bg_rgb, u.fade.min(100)));
+    PageAdjust {
+        contrast: u.contrast.min(100),
+        // Measured: PDF 0.5; DWF 0.243, or 0.73 once its colours are
+        // turned over for a dark background; a DGN model's from its
+        // own colours, over any background.
+        contrast_pivot: match def.underlay_type {
+            UnderlayType::Pdf => 500,
+            UnderlayType::Dwf
+                if u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND) && bg_lum < 0.5 =>
+            {
+                730
+            }
+            UnderlayType::Dwf => 243,
+            UnderlayType::Dgn => super::underlay_vector::dgn_contrast_pivot(
+                &def.file_path,
+                page,
+                &super::pdf_layers::hidden_layers(u),
+                super::underlay_vector::Backdrop::of([background[0], background[1], background[2]]),
+                fade_before_contrast,
+            )
+            .unwrap_or(404),
+        },
+        monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
+        // A DGN model's colours follow the background through its
+        // colour table, whatever this setting.
+        adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND)
+            && !dgn,
+        dark_background: bg_lum < 0.5,
+        fade_before_contrast,
+    }
+}
+
 impl ImageModel {
     /// Build an ImageModel from a DXF RasterImage entity.
     /// Returns `None` if the image file cannot be opened or decoded.
@@ -197,7 +250,7 @@ impl ImageModel {
         world_per_pixel: Option<f64>,
     ) -> Option<Self> {
         use codec::entities::{UnderlayDisplayFlags, UnderlayType};
-        use super::pdf_raster::{self, PageAdjust};
+        use super::pdf_raster;
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
             return None;
         }
@@ -229,56 +282,11 @@ impl ImageModel {
                 };
                 (source, raster)
             }
-            kind => {
-                let hidden = super::pdf_layers::hidden_layers(u);
-                // The adjusted-pixel memo keys on the source: one per set of
-                // hidden layers.
-                let source = if hidden.is_empty() {
-                    def.file_path.clone()
-                } else {
-                    format!("{}#{}", def.file_path, hidden.join("|"))
-                };
-                let raster = super::underlay_vector::display_raster(
-                    kind,
-                    &def.file_path,
-                    page,
-                    &hidden,
-                    screen_side.unwrap_or(super::underlay_vector::RASTER_SIDE),
-                )?;
-                (source, raster)
-            }
+            // DWF sheets and DGN models are drawn as vector wires
+            // (`underlay_vector::display_wires`).
+            _ => return None,
         };
-        // Dark means an HSL lightness under one half: pure blue counts as
-        // light, (0, 128, 0) as dark.
-        let bg_max = background[0].max(background[1]).max(background[2]);
-        let bg_min = background[0].min(background[1]).min(background[2]);
-        let bg_lum = (bg_max + bg_min) / 2.0;
-        let pixels = pdf_raster::adjusted_pixels(
-            &source,
-            page,
-            &raster,
-            PageAdjust {
-                contrast: u.contrast.min(100),
-                // Measured: PDF 0.5; DWF 0.243, or 0.73 once its colours are
-                // turned over for a dark background; DGN 0.65.
-                contrast_pivot: match def.underlay_type {
-                    UnderlayType::Pdf => 500,
-                    UnderlayType::Dwf
-                        if u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND) && bg_lum < 0.5 =>
-                    {
-                        730
-                    }
-                    UnderlayType::Dwf => 243,
-                    UnderlayType::Dgn => 650,
-                },
-                monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
-                adjust_for_background: u.flags.contains(UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND),
-                // A DGN model is drawn for a black background, so its
-                // colours turn over on a light one instead (white text stays
-                // light on a dark background, as the reference shows it).
-                dark_background: (bg_lum < 0.5) != (def.underlay_type == UnderlayType::Dgn),
-            },
-        );
+        let pixels = pdf_raster::adjusted_pixels(&source, page, &raster, underlay_adjust(u, def, background));
 
         // The page rectangle in drawing units (1 unit per PDF inch, or per
         // DWF/DGN sheet unit), entity scale applied, from its lower-left

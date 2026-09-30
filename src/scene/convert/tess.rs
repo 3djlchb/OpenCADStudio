@@ -1321,6 +1321,10 @@ fn tessellate_entity_inner(
             set_wire_aabb(&mut wire, WireModel::UNBOUNDED_AABB);
             bases.push(wire);
         }
+        // DWF / DGN content: vector wires, sharp at every zoom.
+        if let Some(def) = crate::entities::underlay::definition(underlay, document) {
+            bases.extend(crate::scene::model::underlay_vector::display_wires(underlay, def, &h.value().to_string(), bg_color));
+        }
     }
 
     // A hidden mask frame remains selectable and appears while selected, but

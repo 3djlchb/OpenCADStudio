@@ -471,6 +471,8 @@ impl OpenCADStudio {
                 | "xdata_get"
                 | "get_selection"
                 | "audit"
+                | "text_search"
+                | "text_audit"
         );
         if !query && !self.control.enabled {
             return (
@@ -729,6 +731,8 @@ impl OpenCADStudio {
                 }
                 "xdata_get" => self.xdata_read(&req),
                 "get_selection" => self.control_get_selection(),
+                "text_search" => self.control_text_search(&req).unwrap_or_else(|e| e),
+                "text_audit" => self.control_text_audit(&req).unwrap_or_else(|e| e),
                 "history" => {
                     json!({"ok":true,"entries":self.command_line.history.iter().map(|e|json!({"kind":format!("{:?}",e.kind),"text":e.text})).collect::<Vec<_>>()})
                 }
@@ -975,6 +979,7 @@ impl OpenCADStudio {
             "entities_delete" => self.control_entities_delete(req)?,
             "entities_transform" => self.control_entities_transform(req)?,
             "entities_copy_to" => self.control_entities_copy_to(req)?,
+            "text_replace" => self.control_text_replace(req)?,
             "xdata_set" => self.control_xdata_set(req)?,
             "block_define" => self.control_block_define(req)?,
             "block_delete" => self.control_block_delete(req)?,
@@ -1340,6 +1345,8 @@ pub(crate) mod http_bridge;
 mod interactive;
 mod sheets;
 pub(crate) use sheets::new_guid_v4;
+pub(crate) mod text_ops;
+pub(crate) mod spellcheck;
 
 #[cfg(test)]
 mod p1_tests;

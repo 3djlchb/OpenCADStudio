@@ -120,6 +120,50 @@ pub fn reflect_xy_point(x: &mut f64, y: &mut f64, p1: DVec3, p2: DVec3) {
     *y = p1.y as f64 + my;
 }
 
+/// An ellipse / elliptical arc's image under any affine transform, through the
+/// codec's `transform_ellipse` so the block-cache fast path and the entity
+/// agree with every other path (explode, insert) by construction.
+///
+/// Returns `(center, major_axis, normal, minor_axis_ratio, start_param,
+/// end_param)`; the major axis is the longer one and a reflection flips the
+/// normal.
+pub fn transform_ellipse_geometry(
+    center: Vector3,
+    major_axis: Vector3,
+    normal: Vector3,
+    minor_axis_ratio: f64,
+    start_param: f64,
+    end_param: f64,
+    transform: &Transform,
+) -> Option<(Vector3, Vector3, Vector3, f64, f64, f64)> {
+    use codec::Entity;
+    if normal.length() <= 1e-12 || major_axis.length() <= 1e-12 {
+        return None;
+    }
+    let mut ellipse = codec::entities::Ellipse {
+        center,
+        major_axis,
+        normal,
+        minor_axis_ratio,
+        start_parameter: start_param,
+        end_parameter: end_param,
+        ..Default::default()
+    };
+    ellipse.apply_transform(transform);
+    let values = [ellipse.center, ellipse.major_axis, ellipse.normal];
+    if values.iter().any(|v| !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite())) {
+        return None;
+    }
+    Some((
+        ellipse.center,
+        ellipse.major_axis,
+        ellipse.normal,
+        ellipse.minor_axis_ratio,
+        ellipse.start_parameter,
+        ellipse.end_parameter,
+    ))
+}
+
 /// DXF arbitrary-axis algorithm — returns the OCS X and Y basis vectors in WCS
 /// for a given entity normal vector.
 ///
@@ -269,5 +313,156 @@ mod ocs_axes_142 {
         assert!(nz(ay) > 0.5, "ay collapsed: {:?}", ay);
         let p = super::ocs_point_to_wcs((-25.0, 90.0, 0.0), (-1.0,0.0,0.0));
         assert!(p.0.abs()+p.1.abs()+p.2.abs() > 1.0, "point collapsed: {:?}", p);
+    }
+}
+
+#[cfg(test)]
+mod ellipse_transform_tests {
+    use super::*;
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+
+    fn sample_point(center: Vector3, major: Vector3, normal: Vector3, ratio: f64, t: f64) -> Vector3 {
+        let u = major;
+        let v = normal.normalize().cross(&major) * ratio;
+        center + u * t.cos() + v * t.sin()
+    }
+
+    #[test]
+    fn negative_rotation_negative_scale_distant_origin() {
+        // Original ellipse arc at distant center (7000, 5000, 0)
+        let center = Vector3::new(7000.0, 5000.0, 0.0);
+        let major = Vector3::new(10.0, 0.0, 0.0);
+        let normal = Vector3::new(0.0, 0.0, 1.0);
+        let ratio = 0.5;
+        let start_param = FRAC_PI_4;
+        let end_param = 3.0 * FRAC_PI_4;
+
+        // Transform: non-uniform negative scale (-1.0, -1.0, 1.0), rotation -45 deg, translation (100, 200, 0)
+        let rot_rad = -FRAC_PI_4;
+        let transform = Transform::from_scaling(Vector3::new(-1.0, -1.0, 1.0))
+            .then(&Transform::from_rotation(Vector3::UNIT_Z, rot_rad))
+            .then(&Transform::from_translation(Vector3::new(100.0, 200.0, 0.0)));
+
+        let (c, m, n, r, s, e) = transform_ellipse_geometry(
+            center,
+            major,
+            normal,
+            ratio,
+            start_param,
+            end_param,
+            &transform,
+        )
+        .expect("transformation should succeed");
+
+        assert!(r <= 1.0 && r > 0.0, "ratio must be in (0, 1], got {r}");
+        assert!(m.length() >= m.length() * r);
+
+        // Verify that start, end, and intermediate points match exactly
+        for i in 0..=10 {
+            let frac = i as f64 / 10.0;
+            let orig_t = start_param + frac * (end_param - start_param);
+            let orig_pt = sample_point(center, major, normal, ratio, orig_t);
+            let expected_pt = transform.apply(orig_pt);
+
+            let new_t = s + frac * (e - s);
+            let actual_pt = sample_point(c, m, n, r, new_t);
+
+            let diff = (expected_pt - actual_pt).length();
+            assert!(
+                diff < 1e-9,
+                "Point at frac {frac} differs by {diff}: expected {expected_pt:?}, got {actual_pt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn axis_swapping_under_non_uniform_negative_scale() {
+        // When scale along Y is much larger, the minor axis becomes the major axis
+        let center = Vector3::new(0.0, 0.0, 0.0);
+        let major = Vector3::new(10.0, 0.0, 0.0);
+        let normal = Vector3::new(0.0, 0.0, 1.0);
+        let ratio = 0.5; // initial minor length is 5.0
+        let start_param = 0.1;
+        let end_param = 2.0;
+
+        // Scale X by -1, Scale Y by -3: transformed major length is 10, transformed minor length is 15.
+        // So axes must swap!
+        let transform = Transform::from_scaling(Vector3::new(-1.0, -3.0, 1.0))
+            .then(&Transform::from_rotation(Vector3::UNIT_Z, -FRAC_PI_2));
+
+        let (c, m, n, r, s, e) = transform_ellipse_geometry(
+            center,
+            major,
+            normal,
+            ratio,
+            start_param,
+            end_param,
+            &transform,
+        )
+        .expect("transformation should succeed");
+
+        assert!(r <= 1.0, "ratio must be <= 1.0 after axis swap, got {r}");
+        assert!((r - (10.0 / 15.0)).abs() < 1e-9);
+
+        // Verify points match
+        for i in 0..=10 {
+            let frac = i as f64 / 10.0;
+            let orig_t = start_param + frac * (end_param - start_param);
+            let orig_pt = sample_point(center, major, normal, ratio, orig_t);
+            let expected_pt = transform.apply(orig_pt);
+
+            let new_t = s + frac * (e - s);
+            let actual_pt = sample_point(c, m, n, r, new_t);
+
+            let diff = (expected_pt - actual_pt).length();
+            assert!(
+                diff < 1e-9,
+                "Point at frac {frac} differs by {diff}: expected {expected_pt:?}, got {actual_pt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn reflection_handedness_flip_arc_preservation() {
+        // Reflection across Y axis (scale X by -1, Y by 1)
+        let center = Vector3::new(50.0, 60.0, 0.0);
+        let major = Vector3::new(8.0, 0.0, 0.0);
+        let normal = Vector3::new(0.0, 0.0, 1.0);
+        let ratio = 0.75;
+        let start_param = 0.2;
+        let end_param = 1.8;
+
+        let transform = Transform::from_scaling(Vector3::new(-1.0, 1.0, 1.0))
+            .then(&Transform::from_rotation(Vector3::UNIT_Z, -0.6));
+
+        let (c, m, n, r, s, e) = transform_ellipse_geometry(
+            center,
+            major,
+            normal,
+            ratio,
+            start_param,
+            end_param,
+            &transform,
+        )
+        .expect("transformation should succeed");
+
+        // Normal must be inverted in Z due to reflection
+        assert!(n.z < 0.0, "normal Z should be flipped, got {}", n.z);
+
+        for i in 0..=10 {
+            let frac = i as f64 / 10.0;
+            let orig_t = start_param + frac * (end_param - start_param);
+            let orig_pt = sample_point(center, major, normal, ratio, orig_t);
+            let expected_pt = transform.apply(orig_pt);
+
+            let new_t = s + frac * (e - s);
+            let actual_pt = sample_point(c, m, n, r, new_t);
+
+            let diff = (expected_pt - actual_pt).length();
+            assert!(
+                diff < 1e-9,
+                "Point at frac {frac} differs by {diff}: expected {expected_pt:?}, got {actual_pt:?}"
+            );
+        }
     }
 }

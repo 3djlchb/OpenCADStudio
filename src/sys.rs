@@ -429,6 +429,69 @@ pub mod crash_log {
         crate::config::config_dir().map(|path| path.join("crash_logs"))
     }
 
+    /// The report a given process left behind, if it left one.
+    ///
+    /// Reports are named for the process that wrote them, so a caller holding
+    /// a process id from somewhere else — the GPU crash sentinel does — can
+    /// ask what killed that exact run instead of guessing from the newest
+    /// file, which on a busy machine may belong to a different one.
+    ///
+    /// Process ids are reused, so only a report written at or after
+    /// `not_before` (Unix seconds — when that run started) counts: an old
+    /// report from an unrelated run that once had the same id does not.
+    pub fn report_for_pid(pid: u32, not_before: u64) -> Option<String> {
+        let directory = directory()?;
+        let suffix = format!("-{pid}.log");
+        let entry = std::fs::read_dir(directory)
+            .ok()?
+            .flatten()
+            .find(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.strip_prefix("crash-")
+                    .and_then(|rest| rest.strip_suffix(suffix.as_str()))
+                    .and_then(|when| when.parse::<u64>().ok())
+                    .is_some_and(|when| when >= not_before)
+            })?;
+        std::fs::read_to_string(entry.path()).ok()
+    }
+
+    /// Whether a report describes the graphics device giving up.
+    ///
+    /// Deliberately narrow. Anything that reaches wgpu — an exhausted device,
+    /// a lost one, a buffer that was never created — is the backend's
+    /// business; a panic in the drawing code that happens to run on a frame
+    /// is not, and must not cost the user a working backend.
+    pub fn is_device_failure(report: &str) -> bool {
+        let mut panic_line = "";
+        let mut at_line = "";
+        for line in report.lines() {
+            if let Some(rest) = line.strip_prefix("panic: ") {
+                panic_line = rest;
+            } else if let Some(rest) = line.strip_prefix("at: ") {
+                at_line = rest;
+            }
+        }
+        // The message wgpu panics with names the call, and the location names
+        // wgpu itself; either alone is enough, since a stripped build can
+        // leave the message terse. Plain words like "buffer" or "surface"
+        // are not: drawing code and the modelling kernel panic with those
+        // too, and that is no reason to give up a working backend.
+        let haystack = format!("{panic_line} {at_line}").to_ascii_lowercase();
+        ["wgpu", "out of memory", "device lost", "validation error"]
+            .iter()
+            .any(|needle| haystack.contains(needle))
+    }
+
+    /// The backend a report says was live, as written by [`report_from`].
+    pub fn backend_in_report(report: &str) -> Option<String> {
+        report
+            .lines()
+            .find_map(|line| line.strip_prefix("gpu backend: "))
+            .map(str::trim)
+            .filter(|backend| !backend.is_empty() && *backend != "(default)")
+            .map(str::to_string)
+    }
+
     /// Chain a report writer onto the current panic hook.
     ///
     /// Call once, early: a panic before this runs is still silent.
@@ -560,6 +623,46 @@ pub mod crash_log {
                 header.lines().all(|line| !line.starts_with(' ')),
                 "header lines must not be indented:\n{header}"
             );
+        }
+
+        /// Only the device's own failures may cost a backend. A panic in
+        /// drawing code that merely happened to run on a frame must not.
+        #[test]
+        fn a_device_failure_is_told_apart_from_an_ordinary_panic() {
+            let device = super::report_from(
+                "Error in Buffer::get_mapped_range: Validation Error",
+                "wgpu-29.0.4/src/backend/wgpu_core.rs:2253:18",
+                1,
+            );
+            assert!(super::is_device_failure(&device), "{device}");
+
+            let oom = super::report_from("Out of Memory", "src/scene/pipeline/mod.rs:10:1", 1);
+            assert!(super::is_device_failure(&oom), "{oom}");
+
+            let ordinary = super::report_from(
+                "index out of bounds: the len is 3 but the index is 7",
+                "src/app/commands/draw.rs:120:5",
+                1,
+            );
+            assert!(
+                !super::is_device_failure(&ordinary),
+                "an indexing bug is not the graphics device's fault:
+{ordinary}"
+            );
+        }
+
+        /// The backend line is what the sentinel joins on, so it has to come
+        /// back out — and "(default)" names nothing to blame.
+        #[test]
+        fn the_backend_is_read_back_out_of_a_report() {
+            // SAFETY: single-threaded test mutating a process-local variable.
+            unsafe { std::env::set_var("WGPU_BACKEND", "dx12") };
+            let named = super::report_from("boom", "x.rs:1:1", 0);
+            assert_eq!(super::backend_in_report(&named).as_deref(), Some("dx12"));
+
+            unsafe { std::env::remove_var("WGPU_BACKEND") };
+            let unnamed = super::report_from("boom", "x.rs:1:1", 0);
+            assert_eq!(super::backend_in_report(&unnamed), None);
         }
 
         /// A panic with no message still has to produce a filed report rather

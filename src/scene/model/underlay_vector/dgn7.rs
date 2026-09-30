@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use super::model::{arc_cubics, bspline_points, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text};
+use super::model::{arc_cubics, bspline_points, dgn_color_table, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS};
 
 /// A 32-bit integer stored as two little-endian words, high word first.
 fn int32(b: &[u8], at: usize) -> Option<i32> {
@@ -76,36 +76,13 @@ fn elements(b: &[u8]) -> Vec<&[u8]> {
     out
 }
 
-/// The file's colour table (element type 5 on level 1): the colour of
-/// index i is at 41 + 3i.
+/// The file's colour table (element type 5 on level 1): index i < 255 at
+/// 41 + 3i, the background (255) at 38.
 fn color_table(elements: &[&[u8]]) -> Option<Vec<[u8; 3]>> {
-    elements.iter().find_map(|e| {
-        (e[1] & 0x7f == 5 && e[0] & 0x3f == 1 && e.len() >= 41 + 765).then(|| {
-            (0..256)
-                .map(|i| {
-                    let at = 41 + i * 3;
-                    e.get(at..at + 3).map(|c| [c[0], c[1], c[2]]).unwrap_or([255, 255, 255])
-                })
-                .collect()
-        })
-    })
-}
-
-/// A usable default: the first eight DGN colours, then greys.
-// ponytail: The full DGN default table is not reproduced; the files
-// the reference writes carry their own colour table.
-fn default_colors() -> Vec<[u8; 3]> {
-    let base: [[u8; 3]; 8] = [
-        [255, 255, 255],
-        [0, 0, 255],
-        [0, 255, 0],
-        [255, 0, 0],
-        [255, 255, 0],
-        [255, 0, 255],
-        [255, 127, 0],
-        [0, 255, 255],
-    ];
-    (0..256).map(|i| if i < 8 { base[i] } else { [i as u8; 3] }).collect()
+    elements
+        .iter()
+        .find(|e| e[1] == 5 && e[0] & 0x3f == 1)
+        .and_then(|e| dgn_color_table(e, 41))
 }
 
 /// Model names of a V7 file (it has one).
@@ -432,7 +409,9 @@ pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
     }
     let u = units(bytes)?;
     let all = elements(bytes);
-    let colors = color_table(&all).unwrap_or_else(default_colors);
+    let table = color_table(&all);
+    let table_colors = table.is_some();
+    let colors = table.unwrap_or_else(|| DGN_DEFAULT_COLORS.to_vec());
     let names = level_names(&all);
     let off = |e: &[u8]| {
         let l = level(e);
@@ -463,7 +442,7 @@ pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
     let raw = read_run(&top, &colors);
     let per_unit = u.uor_per_sub * u.sub_per_master;
     let m: Affine = [1.0 / per_unit, 0.0, 0.0, 1.0 / per_unit, -u.origin[0] / per_unit, -u.origin[1] / per_unit];
-    let mut sheet = Sheet { sub_per_master: u.sub_per_master, ..Default::default() };
+    let mut sheet = Sheet { sub_per_master: u.sub_per_master, table_colors, ..Default::default() };
     place(&raw, &m, &defs, 0, &mut sheet);
     sheet.rect = paths_bounds(&sheet.paths).or_else(|| {
         let t = sheet.texts.first()?;

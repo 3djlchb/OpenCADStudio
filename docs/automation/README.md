@@ -301,9 +301,57 @@ maps onto these three steps rather than a native op.
 
 `query` entities of type `TEXT`/`MTEXT` return the raw stored string in `value` plus a formatting-free rendering in `text` (MTEXT inline codes such as `\A1;` or `\P` are resolved; `%%d`-style TEXT codes become their glyphs). With `detail:"full"`, degenerate-width text bounds are widened with a documented estimate (height × 0.8 × character count) so `bounds`-based region filters stay usable.
 
+### Text operations — search, audit and replace
+
+Three dedicated text operations go beyond `query` for bulk text work:
+
+**`text_search`** (read) scans all `Text`, `MText`, and `Insert` attribute values for a pattern. It supports case-insensitive, whole-word, and accent-insensitive matching, scoped to a layer, entity type list, or handle set.
+
+```json
+{"op":"text_search","find":"CUVE","match_case":false,"whole_word":true,"ignore_accents":true}
+```
+
+**`text_audit`** (read) is a non-mutating spell-check and dry-run replacement preview. It accepts three independent analysis modes, all optional, in one call:
+
+| Parameter | Effect |
+|---|---|
+| `pairs` | `[{"find":"X","replace":"Y"}, …]` — simulates a batch replacement and reports what would change, without touching the document |
+| `check_terms` | `["CIRTUITS","NON TRAITE"]` — flags entities that contain suspect strings |
+| `dictionary` | `["EAU","POMPE","VANNE"]` — any word ≥ 3 letters not found in this list is reported as unrecognised |
+| `system_spellcheck` | `true` to use the OS native spell-checker alongside or instead of the agent dictionary |
+| `language` | BCP-47 tag for the system speller, e.g. `"en-US"` or `"fr-FR"` (defaults to the OS default) |
+| `suggest` | `true` (default) to include spelling suggestions for unrecognised words |
+
+The agent dictionary and system spell-checker work as a layered pipeline: a word that matches the agent dictionary is accepted immediately; only words that fail (or when no dictionary is supplied) are forwarded to the OS spell-checker when enabled.
+
+System spell-check backends:
+
+| Platform | Backend | Notes |
+|---|---|---|
+| Windows 8.1+ | Win32 `ISpellChecker` COM API | Per-language; checks available via Settings → Language. ALL-CAPS words are checked in lowercase since Windows skips all-caps by default. |
+| macOS | `NSSpellChecker` | Uses the system language or the `language` parameter |
+| Linux | Hunspell `.dic` files or `hunspell` CLI | Reads `/usr/share/hunspell/` dictionaries; falls back to pipe mode |
+
+Example combining an agent dictionary with system spell-check:
+
+```json
+{
+  "op": "text_audit",
+  "dictionary": ["VANNE", "CHAUDIÈRE", "POMPE"],
+  "system_spellcheck": true,
+  "language": "fr-FR",
+  "suggest": true
+}
+```
+
+The response includes a `system_speller` object with `enabled`, `available`, `backend`, and `language` fields, plus an `unrecognized_words` array with each word's `handle`, `position`, and optional `suggestions`.
+
+**`text_replace`** (execute) performs the actual batch replacement with single-transaction undo. Add `"dry_run": true` to preview the result without mutating the document or pushing an undo entry.
+
 ### Smoke test
 
 The stdio path is covered black-box by a Python script that draws two entities, exports them with `wblock`, plots them with `plot`, and checks the capability advertisement:
+
 
 ```sh
 python3 docs/automation/serve_smoke.py target/debug/OpenCADStudio
