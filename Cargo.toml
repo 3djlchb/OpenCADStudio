@@ -153,6 +153,15 @@ web-sys = { version = "=0.3.85", features = [
 ] }
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["webgl", "fira-sans"] }
 
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test]
+debug = 1
+
 [profile.release]
 strip = true
 
