@@ -720,9 +720,11 @@ impl OpenCADStudio {
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
-            "POINTCLOUDCROP" => {
+            "POINTCLOUDCROP" | "POINTCLOUDUNCROP" => {
                 use crate::command::CadCommand;
-                let command = crate::modules::insert::pc_crop::PointCloudCropCommand::new();
+                use crate::modules::insert::pc_crop::PointCloudCropCommand;
+                let command =
+                    if cmd == "POINTCLOUDUNCROP" { PointCloudCropCommand::uncrop() } else { PointCloudCropCommand::new() };
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }

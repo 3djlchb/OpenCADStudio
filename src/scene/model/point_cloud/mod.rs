@@ -260,9 +260,10 @@ pub(crate) fn placed(
 ) -> Option<Arc<PlacedCloud>> {
     let cloud = load(&resolve_source(document, data)?)?;
     // The points shown: POINTCLOUDDENSITY per cent of POINTCLOUDPOINTMAX,
-    // every n-th point of a larger cloud.
+    // in tenths by POINTCLOUDLOD, every n-th point of a larger cloud.
     let shown = |name| setting(name).map_or(0, |s| setting_value(document, s));
-    let limit = (shown("POINTCLOUDPOINTMAX") * shown("POINTCLOUDDENSITY") / 100).max(1) as usize;
+    let limit =
+        (shown("POINTCLOUDPOINTMAX") * shown("POINTCLOUDDENSITY") / 100 * shown("POINTCLOUDLOD") / 10).max(1) as usize;
     let step = cloud.positions.len().div_ceil(limit).max(1);
     let style = Stylization::of(document, data, object_color);
     let mut origin = data.ucs_origin;
@@ -382,9 +383,13 @@ pub(crate) fn placed(
 /// is in that plane's coordinates. `inside` keeps the prism's interior and
 /// `inverted` flips it.
 fn keeps(crop: &PointCloudExCrop, p: &[f64; 3]) -> bool {
-    let d = Vector3::new(p[0], p[1], p[2]) - crop.plane;
-    let (x, y) = (d.dot(&crop.x_direction), d.dot(&crop.y_direction));
-    let points = &crop.points;
+    // Points and crop outline on the crop plane, along its normal.
+    let on_plane = |v: Vector3| {
+        let d = v - crop.plane;
+        Vector3::new(d.dot(&crop.x_direction), d.dot(&crop.y_direction), 0.0)
+    };
+    let Vector3 { x, y, .. } = on_plane(Vector3::new(p[0], p[1], p[2]));
+    let points: Vec<Vector3> = crop.points.iter().copied().map(on_plane).collect();
     // A circle: its centre and a point on it.
     if crop.crop_type == 3 {
         let (c, e) = (points[0], points[1]);

@@ -1,4 +1,5 @@
 // POINTCLOUDCROP — crop a point cloud to a rectangle, polygon or circle.
+// POINTCLOUDUNCROP — `Select point cloud:` and all its crops go.
 //
 //   Select point cloud:
 //   Specify first corner point or [Polygon/Circular]:
@@ -8,9 +9,10 @@
 //   Specify center point:  /  Specify radius:                   (Circular)
 //   Keep points inside or outside? [Inside/Outside] <Inside>:
 //
-// Crops are kept in the cloud's own coordinates, on the plane of its X and
-// Y axes: a rectangle as its four corners, a polygon as its points, a
-// circle as its centre and a point on it. They add up; Invert flips them,
+// Crops are kept in the cloud's own coordinates, on the view plane (its
+// right and up directions) and running along the view: a rectangle as its
+// four corners, a polygon as its points, a circle as its centre and a point
+// on it. They add up; Invert flips them,
 // Remove last drops the newest, ON / OFF shows or hides them.
 
 use std::sync::Mutex;
@@ -59,6 +61,10 @@ pub struct PointCloudCropCommand {
     picked: Option<EntityType>,
     shape: Shape,
     points: Vec<DVec3>,
+    /// POINTCLOUDUNCROP: the picked cloud loses its crops.
+    uncrop: bool,
+    /// The view's right and up directions in the drawing.
+    view: (DVec3, DVec3),
 }
 
 impl PointCloudCropCommand {
@@ -70,7 +76,13 @@ impl PointCloudCropCommand {
             picked: None,
             shape: Shape::Rectangle,
             points: Vec::new(),
+            uncrop: false,
+            view: (DVec3::X, DVec3::Y),
         }
+    }
+
+    pub fn uncrop() -> Self {
+        Self { uncrop: true, ..Self::new() }
     }
 
     /// The toolbar's crops: the cloud already chosen, the shape too
@@ -108,13 +120,21 @@ impl PointCloudCropCommand {
         CmdResult::UpdateEntityAndFinish { handle: self.handle, entity: EntityType::Extended(cloud) }
     }
 
-    /// A point of the drawing in the cloud's own coordinates.
-    fn to_local(data: &PointCloudExData, p: DVec3) -> Vector3 {
+    fn axes(data: &PointCloudExData) -> glam::DMat3 {
         let v = |a: Vector3| DVec3::new(a.x, a.y, a.z);
-        let axes = glam::DMat3::from_cols(v(data.ucs_x_direction), v(data.ucs_y_direction), v(data.ucs_z_direction));
-        let local = axes.inverse() * (p - v(data.ucs_origin));
-        // On the plane of the cloud's X and Y axes.
-        Vector3::new(local.x, local.y, 0.0)
+        glam::DMat3::from_cols(v(data.ucs_x_direction), v(data.ucs_y_direction), v(data.ucs_z_direction))
+    }
+
+    /// A point of the drawing in the cloud's own coordinates.
+    fn to_local(data: &PointCloudExData, p: DVec3) -> DVec3 {
+        let origin = data.ucs_origin;
+        Self::axes(data).inverse() * (p - DVec3::new(origin.x, origin.y, origin.z))
+    }
+
+    /// The view's right and up directions in the cloud's own coordinates.
+    fn view_local(&self, data: &PointCloudExData) -> (DVec3, DVec3) {
+        let inverse = Self::axes(data).inverse();
+        ((inverse * self.view.0).normalize_or(DVec3::X), (inverse * self.view.1).normalize_or(DVec3::Y))
     }
 
     fn option(&mut self, text: &str) -> CmdResult {
@@ -157,24 +177,26 @@ impl PointCloudCropCommand {
         let Some(data) = self.data() else {
             return CmdResult::Cancel;
         };
-        let points: Vec<Vector3> = match self.shape {
+        let (right, up) = self.view_local(data);
+        let local: Vec<DVec3> = self.points.iter().map(|p| Self::to_local(data, *p)).collect();
+        let local = match self.shape {
+            // The corners along the view's right and up directions.
             Shape::Rectangle => {
-                let (a, b) = (self.points[0], self.points[1]);
-                [DVec3::new(a.x, a.y, a.z), DVec3::new(b.x, a.y, a.z), DVec3::new(b.x, b.y, a.z), DVec3::new(a.x, b.y, a.z)]
-                    .into_iter()
-                    .map(|p| Self::to_local(data, p))
-                    .collect()
+                let (a, d) = (local[0], local[1] - local[0]);
+                let (dx, dy) = (right * d.dot(right), up * d.dot(up));
+                vec![a, a + dx, a + dx + dy, a + dy]
             }
-            _ => self.points.iter().map(|p| Self::to_local(data, *p)).collect(),
+            _ => local,
         };
+        let vector = |v: DVec3| Vector3::new(v.x, v.y, v.z);
         let crop = PointCloudExCrop {
             crop_type: self.shape as i16,
             inside,
             inverted: false,
             plane: Vector3::ZERO,
-            x_direction: Vector3::UNIT_X,
-            y_direction: Vector3::UNIT_Y,
-            points,
+            x_direction: vector(right),
+            y_direction: vector(up),
+            points: local.into_iter().map(vector).collect(),
         };
         self.finish(move |data| {
             data.croppings.push(crop);
@@ -190,7 +212,7 @@ impl PointCloudCropCommand {
 
 impl CadCommand for PointCloudCropCommand {
     fn name(&self) -> &'static str {
-        "POINTCLOUDCROP"
+        if self.uncrop { "POINTCLOUDUNCROP" } else { "POINTCLOUDCROP" }
     }
 
     fn prompt(&self) -> String {
@@ -247,6 +269,21 @@ impl CadCommand for PointCloudCropCommand {
         self.step == Step::Select
     }
 
+    fn wants_point_pick_context(&self) -> bool {
+        !matches!(self.step, Step::Select | Step::Keep)
+    }
+
+    fn set_point_pick_context(&mut self, context: Option<crate::command::PointPickContext>) {
+        // The projection's first two rows run along the view's right and up.
+        if let Some(context) = context {
+            let row = |i: usize| context.view.row(i).truncate().as_dvec3().normalize_or_zero();
+            let (right, up) = (row(0), row(1));
+            if right != DVec3::ZERO && up != DVec3::ZERO {
+                self.view = (right, up);
+            }
+        }
+    }
+
     fn inject_before_entity_pick(&self) -> bool {
         true
     }
@@ -260,6 +297,9 @@ impl CadCommand for PointCloudCropCommand {
             Some(EntityType::Extended(cloud)) if matches!(cloud.data, ExtendedEntityData::PointCloudEx(_)) => {
                 self.handle = handle;
                 self.cloud = Some(cloud);
+                if self.uncrop {
+                    return self.finish(|data| data.croppings.clear());
+                }
                 self.step = Step::First;
                 CmdResult::NeedPoint
             }
@@ -366,4 +406,4 @@ impl CadCommand for PointCloudCropCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["POINTCLOUDCROP"] });
+inventory::submit!(crate::command::CommandRegistration { names: &["POINTCLOUDCROP", "POINTCLOUDUNCROP"] });

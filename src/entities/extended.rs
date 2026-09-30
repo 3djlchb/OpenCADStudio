@@ -535,22 +535,20 @@ fn point_cloud_ex_clip_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
             if crop.points.len() < 2 {
                 continue;
             }
-            // Crop boundaries are kept in the cloud's own coordinates, on
-            // the crop plane through `plane` spanned by its two directions.
-            let normal = crop.x_direction.cross(&crop.y_direction);
+            // Crop points are kept in the cloud's own coordinates; the crop
+            // runs along the normal of the plane its two directions span.
             let place = |p: Vector3| {
-                let local = crop.plane + crop.x_direction * p.x + crop.y_direction * p.y + normal * p.z;
-                let w = codec::entities::point_cloud_ex_to_world(data, local);
+                let w = codec::entities::point_cloud_ex_to_world(data, p);
                 [w.x, w.y, w.z]
             };
             // A circle is stored as its centre and a point on it.
             let outline: Vec<Vector3> = if crop.crop_type == 3 {
-                let (c, e) = (crop.points[0], crop.points[1]);
-                let r = ((e.x - c.x).powi(2) + (e.y - c.y).powi(2)).sqrt();
+                let (c, d) = (crop.points[0], crop.points[1] - crop.points[0]);
+                let r = d.dot(&crop.x_direction).hypot(d.dot(&crop.y_direction));
                 (0..64)
                     .map(|k| {
                         let a = k as f64 / 64.0 * std::f64::consts::TAU;
-                        Vector3::new(c.x + r * a.cos(), c.y + r * a.sin(), c.z)
+                        c + crop.x_direction * (r * a.cos()) + crop.y_direction * (r * a.sin())
                     })
                     .collect()
             } else {
