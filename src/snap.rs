@@ -2223,7 +2223,8 @@ impl Snapper {
                             major_axis,
                             normal,
                             minor_axis_ratio,
-                            ..
+                            start_param,
+                            end_param,
                         } => {
                             let c = DVec3::from_array(*center);
                             let u_vec = DVec3::from_array(*major_axis);
@@ -2234,13 +2235,64 @@ impl Snapper {
                                 let v_hat = n_hat.cross(u_hat).normalize_or_zero();
                                 let b = (a * minor_axis_ratio).max(1e-9);
 
+                                let candidate = self.from_point.and_then(|from| {
+                                    planar_ellipse_tangent_points(
+                                        from,
+                                        c,
+                                        u_vec,
+                                        n_hat,
+                                        *minor_axis_ratio,
+                                        *start_param,
+                                        *end_param,
+                                    )
+                                    .into_iter()
+                                    .min_by(|pt_a, pt_b| {
+                                        let sa = world_to_screen(*pt_a, view_rot, eye, bounds);
+                                        let sb = world_to_screen(*pt_b, view_rot, eye, bounds);
+                                        dist2(sa, cursor_screen).total_cmp(&dist2(sb, cursor_screen))
+                                    })
+                                });
+
                                 let d_vec = cursor_world - c;
                                 let u_proj = d_vec.dot(u_hat);
                                 let v_proj = d_vec.dot(v_hat);
                                 let t = (v_proj / b).atan2(u_proj / a);
-                                let world = c + u_hat * (a * t.cos()) + v_hat * (b * t.sin());
-                                let screen_pt = world_to_screen(world, view_rot, eye, bounds);
-                                let edge_d2 = dist2(screen_pt, cursor_screen);
+
+                                let fallback = if is_ellipse_param_on_arc(t, *start_param, *end_param) {
+                                    c + u_hat * (a * t.cos()) + v_hat * (b * t.sin())
+                                } else {
+                                    let p_start = c + u_hat * (a * start_param.cos()) + v_hat * (b * start_param.sin());
+                                    let p_end = c + u_hat * (a * end_param.cos()) + v_hat * (b * end_param.sin());
+                                    let sa = world_to_screen(p_start, view_rot, eye, bounds);
+                                    let sb = world_to_screen(p_end, view_rot, eye, bounds);
+                                    if dist2(sa, cursor_screen) <= dist2(sb, cursor_screen) {
+                                        p_start
+                                    } else {
+                                        p_end
+                                    }
+                                };
+
+                                let world = candidate.unwrap_or(fallback);
+                                let edge_d2 = if wire.points.len() >= 2 {
+                                    wire.points
+                                        .windows(2)
+                                        .enumerate()
+                                        .filter_map(|(index, _)| {
+                                            let p0 = wp_f64(wire, index);
+                                            let p1 = wp_f64(wire, index + 1);
+                                            (p0.is_finite() && p1.is_finite()).then(|| {
+                                                dist2_to_segment(
+                                                    cursor_screen,
+                                                    world_to_screen(p0, view_rot, eye, bounds),
+                                                    world_to_screen(p1, view_rot, eye, bounds),
+                                                )
+                                            })
+                                        })
+                                        .fold(f32::INFINITY, f32::min)
+                                } else {
+                                    let screen_pt = world_to_screen(world, view_rot, eye, bounds);
+                                    dist2(screen_pt, cursor_screen)
+                                };
                                 (world, edge_d2)
                             } else {
                                 (c, f32::INFINITY)
@@ -3236,6 +3288,70 @@ fn arc_tangent_points(
         .into_iter()
         .map(|point| DVec3::from_array(plane.point_at(point.point)))
         .collect()
+}
+
+pub fn is_ellipse_param_on_arc(t: f64, start_param: f64, end_param: f64) -> bool {
+    let raw_sweep = end_param - start_param;
+    if (raw_sweep.abs() - std::f64::consts::TAU).abs() < 1e-9
+        || raw_sweep.abs() >= std::f64::consts::TAU - 1e-9
+        || raw_sweep.abs() < 1e-9
+    {
+        return true;
+    }
+    let sweep = raw_sweep.rem_euclid(std::f64::consts::TAU);
+    let sweep = if sweep.abs() <= 1e-9 && raw_sweep.abs() > 1e-5 {
+        std::f64::consts::TAU
+    } else {
+        sweep
+    };
+    if sweep >= std::f64::consts::TAU - 1e-9 {
+        return true;
+    }
+    let d_t = (t - start_param).rem_euclid(std::f64::consts::TAU);
+    d_t <= sweep + 1e-6 || d_t >= std::f64::consts::TAU - 1e-6
+}
+
+fn planar_ellipse_tangent_points(
+    from: DVec3,
+    center: DVec3,
+    major_axis: DVec3,
+    normal: DVec3,
+    minor_axis_ratio: f64,
+    start_param: f64,
+    end_param: f64,
+) -> Vec<DVec3> {
+    let a = major_axis.length();
+    let b = a * minor_axis_ratio;
+    if a < 1e-9 || b < 1e-9 {
+        return Vec::new();
+    }
+    let u_dir = major_axis / a;
+    let n_hat = normal.normalize_or_zero();
+    let v_dir = n_hat.cross(u_dir).normalize_or_zero();
+
+    let d = from - center;
+    let u0 = d.dot(u_dir);
+    let v0 = d.dot(v_dir);
+    let u_norm = u0 / a;
+    let v_norm = v0 / b;
+    let dist = (u_norm * u_norm + v_norm * v_norm).sqrt();
+    if dist <= 1.0 + 1e-9 {
+        return Vec::new();
+    }
+
+    let theta0 = v_norm.atan2(u_norm);
+    let delta = (1.0 / dist).acos();
+    let t0 = theta0 + delta;
+    let t1 = theta0 - delta;
+
+    let mut points = Vec::new();
+    if is_ellipse_param_on_arc(t0, start_param, end_param) {
+        points.push(center + u_dir * (a * t0.cos()) + v_dir * (b * t0.sin()));
+    }
+    if is_ellipse_param_on_arc(t1, start_param, end_param) {
+        points.push(center + u_dir * (a * t1.cos()) + v_dir * (b * t1.sin()));
+    }
+    points
 }
 
 /// Snap to the extension of a ray beyond `origin` in `dir` direction.
@@ -4688,5 +4804,140 @@ mod ext_tests {
             assert_eq!(b, DVec3::from_array(verts[i + 1]));
             assert_eq!(cursor, i + 1, "cursor must land on the segment's end vertex");
         }
+    }
+
+    #[test]
+    fn test_is_ellipse_param_on_arc() {
+        use std::f64::consts::{PI, TAU};
+        // Full ellipse
+        assert!(is_ellipse_param_on_arc(0.0, 0.0, TAU));
+        assert!(is_ellipse_param_on_arc(PI, 0.0, TAU));
+        assert!(is_ellipse_param_on_arc(PI, 0.0, 0.0));
+        assert!(is_ellipse_param_on_arc(0.5, -PI, PI));
+
+        // Upper half: 0 to PI
+        assert!(is_ellipse_param_on_arc(0.0, 0.0, PI));
+        assert!(is_ellipse_param_on_arc(PI / 2.0, 0.0, PI));
+        assert!(is_ellipse_param_on_arc(PI, 0.0, PI));
+        // Over the break
+        assert!(!is_ellipse_param_on_arc(3.0 * PI / 2.0, 0.0, PI));
+        assert!(!is_ellipse_param_on_arc(7.0 * PI / 4.0, 0.0, PI));
+
+        // Wrapping arc: 3*PI/2 to PI/2
+        let start = 3.0 * PI / 2.0;
+        let end = PI / 2.0;
+        assert!(is_ellipse_param_on_arc(start, start, end));
+        assert!(is_ellipse_param_on_arc(0.0, start, end));
+        assert!(is_ellipse_param_on_arc(end, start, end));
+        // Over the break (e.g. at PI)
+        assert!(!is_ellipse_param_on_arc(PI, start, end));
+        assert!(!is_ellipse_param_on_arc(3.0 * PI / 4.0, start, end));
+    }
+
+    #[test]
+    fn test_planar_ellipse_tangent_points() {
+        use std::f64::consts::{PI, TAU};
+        let center = DVec3::ZERO;
+        let major = DVec3::new(10.0, 0.0, 0.0);
+        let normal = DVec3::Z;
+        let ratio = 0.5; // a = 10, b = 5
+
+        // Point outside at (10, 10, 0)
+        let from = DVec3::new(10.0, 10.0, 0.0);
+
+        // Full ellipse should have 2 tangent points
+        let full_pts = planar_ellipse_tangent_points(from, center, major, normal, ratio, 0.0, TAU);
+        assert_eq!(full_pts.len(), 2);
+
+        // Ellipse arc only spanning 0..PI (upper half)
+        // Tangent points from (10, 10): one is near (10, 0), one near (0, 5)
+        // Upper half includes [0, PI], so any tangent with t in [0, PI] is kept.
+        let arc_pts = planar_ellipse_tangent_points(from, center, major, normal, ratio, 0.0, PI);
+        for pt in &arc_pts {
+            let t = (pt.y / 5.0).atan2(pt.x / 10.0);
+            assert!(is_ellipse_param_on_arc(t, 0.0, PI));
+        }
+
+        // Ellipse arc spanning 4.0..5.0 (third quadrant, far away from tangents)
+        let empty_pts = planar_ellipse_tangent_points(from, center, major, normal, ratio, 4.0, 5.0);
+        assert!(empty_pts.is_empty());
+    }
+
+    #[test]
+    fn test_ellipse_arc_tangent_snap_ignores_break() {
+        use std::f64::consts::PI;
+        let mut snapper = Snapper::default();
+        snapper.snap_enabled = true;
+        snapper.enabled = [SnapType::Tangent].into_iter().collect();
+
+        // Upper semi-ellipse: center at (0, 0), a = 100, b = 50, theta from 0 to PI
+        let center = [0.0, 0.0, 0.0];
+        let major_axis = [100.0, 0.0, 0.0];
+        let normal = [0.0, 0.0, 1.0];
+        let minor_axis_ratio = 0.5;
+        let start_param = 0.0;
+        let end_param = PI;
+
+        // Sample points along the upper semi-ellipse (0..PI)
+        let mut points = Vec::new();
+        let segments = 32;
+        for i in 0..=segments {
+            let t = (i as f64 / segments as f64) * PI;
+            points.push([(100.0 * t.cos()) as f32, (50.0 * t.sin()) as f32, 0.0]);
+        }
+
+        let ellipse_arc = WireModel {
+            points,
+            aabb: [-100.0, -50.0, 100.0, 50.0],
+            tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                center,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            }],
+            ..Default::default()
+        };
+        let wires = vec![ellipse_arc];
+
+        let view_rot = Mat4::from_scale(Vec3::new(0.005, 0.005, 1.0));
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 1000.0, height: 1000.0 };
+        let eye = DVec3::ZERO;
+
+        // 1. Cursor hovering directly over the drawn arc near apex (0, 50, 0)
+        let cursor_world_arc = DVec3::new(0.0, 50.0, 0.0);
+        let cursor_screen_arc = world_to_screen(cursor_world_arc, view_rot, eye, bounds);
+        let res_arc = snapper.snap(
+            cursor_world_arc,
+            cursor_screen_arc,
+            wires.as_slice(),
+            view_rot,
+            eye,
+            bounds,
+            Vec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            None,
+        );
+        assert!(res_arc.is_some(), "cursor near valid ellipse arc must snap to tangent");
+        let snap = res_arc.unwrap();
+        assert_eq!(snap.snap_type, SnapType::Tangent);
+        assert!((snap.world.y - 50.0).abs() < 1.0);
+
+        // 2. Cursor hovering over the break at (0, -50, 0)
+        let cursor_world_break = DVec3::new(0.0, -50.0, 0.0);
+        let cursor_screen_break = world_to_screen(cursor_world_break, view_rot, eye, bounds);
+        let res_break = snapper.snap(
+            cursor_world_break,
+            cursor_screen_break,
+            wires.as_slice(),
+            view_rot,
+            eye,
+            bounds,
+            Vec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            None,
+        );
+        assert!(res_break.is_none(), "cursor over ellipse arc break must NOT snap to tangent");
     }
 }
