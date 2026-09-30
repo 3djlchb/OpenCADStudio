@@ -34,7 +34,13 @@ impl OpenCADStudio {
                 common.color.clone()
             };
             let color = color.rgb().map_or([255; 3], |(r, g, b)| [r, g, b]);
-            if let Some(placed) = crate::scene::model::point_cloud::placed(document, data, color, None) {
+            if let Some(placed) = crate::scene::model::point_cloud::placed(
+                document,
+                data,
+                color,
+                None,
+                &crate::scene::model::point_cloud::hidden(common),
+            ) {
                 clouds.push((common.handle, placed));
             }
         }

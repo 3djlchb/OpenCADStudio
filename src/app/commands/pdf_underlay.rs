@@ -162,6 +162,59 @@ impl OpenCADStudio {
         self.refresh_properties();
     }
 
+    /// A Point Cloud Manager click: a switch writes the cloud's visibility
+    /// extended data as one undo step; the rest is palette state.
+    pub(in crate::app) fn update_pc_manager(&mut self, message: crate::ui::window::pc_manager::PcManagerMsg) -> Task<Message> {
+        use crate::scene::model::point_cloud::VISIBILITY_APP;
+        use crate::ui::window::pc_manager::{self, PcManagerMsg};
+        let i = self.active_tab;
+        match message {
+            PcManagerMsg::Toggle(handle, row) => {
+                let Some(cloud) =
+                    pc_manager::clouds(&self.tabs[i].scene.document, &[]).into_iter().find(|c| c.handle == handle)
+                else {
+                    return Task::none();
+                };
+                if self.tabs[i].scene.is_layer_locked(handle) {
+                    return Task::none();
+                }
+                let hidden = pc_manager::toggled(&cloud.hidden, &cloud.scans, &row);
+                self.push_undo_snapshot(i, "POINTCLOUDMANAGER");
+                self.tabs[i].scene.ensure_app_id(VISIBILITY_APP);
+                let app_handle = self.tabs[i].scene.document.app_ids.get(VISIBILITY_APP).map(|a| a.handle.value());
+                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    let data = &mut entity.common_mut().extended_data;
+                    if let Some(app) = app_handle {
+                        data.raw_dwg_eed.retain(|(a, _)| *a != app);
+                    }
+                    data.remove_record(VISIBILITY_APP);
+                    if !hidden.is_empty() {
+                        let mut record = codec::xdata::ExtendedDataRecord::new(VISIBILITY_APP);
+                        for name in hidden {
+                            record.add_value(codec::xdata::XDataValue::String(name));
+                        }
+                        data.add_record(record);
+                    }
+                }
+                self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                self.tabs[i].dirty = true;
+            }
+            PcManagerMsg::Expand(key) => {
+                if !self.pc_manager.collapsed.remove(&key) {
+                    self.pc_manager.collapsed.insert(key);
+                }
+            }
+            PcManagerMsg::Select(key) => self.pc_manager.selected = Some(key),
+            PcManagerMsg::Search(text) => self.pc_manager.search = text,
+            PcManagerMsg::CollapseAll => {
+                let clouds = pc_manager::clouds(&self.tabs[i].scene.document, &[]);
+                self.pc_manager.collapsed.extend(pc_manager::folding_keys(&clouds));
+            }
+            PcManagerMsg::ExpandAll => self.pc_manager.collapsed.clear(),
+        }
+        Task::none()
+    }
+
     /// One undo step that edits every selected PDF underlay.
     fn edit_selected_underlays(&mut self, i: usize, label: &str, edit: impl Fn(&mut Underlay)) {
         let handles: Vec<_> = self
@@ -319,7 +372,23 @@ impl OpenCADStudio {
                     crop.inverted = !crop.inverted;
                 }
             }),
-            "_PCUNCROP" => self.edit_selected_point_clouds(i, "POINTCLOUDUNCROP", |data| data.croppings.clear()),
+            // The Point Cloud Manager docks on the right like External
+            // References and opens expanded.
+            "POINTCLOUDMANAGER" => {
+                let id = crate::ui::dock::PanelId::PointCloudManager;
+                self.pc_manager.show = true;
+                if self.dock.location(id).is_none() {
+                    self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
+                }
+                self.dock_expanded = Some(id);
+            }
+            "POINTCLOUDMANAGERCLOSE" => {
+                self.pc_manager.show = false;
+                if self.dock_expanded == Some(crate::ui::dock::PanelId::PointCloudManager) {
+                    self.dock_expanded = None;
+                }
+            }
+            "_PCUNCROP" =>self.edit_selected_point_clouds(i, "POINTCLOUDUNCROP", |data| data.croppings.clear()),
             "_PDFULUNCLIP" => {
                 self.edit_selected_underlays(i, "PDFCLIP", |u| {
                     u.clip_boundary_vertices.clear();

@@ -46,6 +46,8 @@ pub enum PanelId {
     Browser,
     /// Node library of the node graph overlay.
     NodeGraph,
+    /// Regions and scans of the drawing's point clouds.
+    PointCloudManager,
 }
 
 impl PanelId {
@@ -57,6 +59,7 @@ impl PanelId {
             PanelId::ExternalReferences => "External References",
             PanelId::Browser => "Browser",
             PanelId::NodeGraph => "Node Graph",
+            PanelId::PointCloudManager => "Point Cloud Manager",
         }
     }
 
@@ -68,6 +71,7 @@ impl PanelId {
             PanelId::ExternalReferences => 460.0,
             PanelId::Browser => 230.0,
             PanelId::NodeGraph => 220.0,
+            PanelId::PointCloudManager => 280.0,
         }
     }
 
@@ -157,6 +161,7 @@ impl DockState {
             PanelId::ExternalReferences,
             PanelId::Browser,
             PanelId::NodeGraph,
+            PanelId::PointCloudManager,
         ] {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         }
