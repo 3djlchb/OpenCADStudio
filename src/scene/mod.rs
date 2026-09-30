@@ -8429,6 +8429,50 @@ impl Scene {
         arc
     }
 
+    /// Wireframe 2D draws no cloud points: each shown cloud whose file is
+    /// found draws its extents box and a message instead, unless
+    /// POINTCLOUD2DVSDISPLAY is 1.
+    // ponytail: model-space clouds only, rebuilt per frame; cache by epoch if
+    // drawings with many clouds make it show.
+    pub(super) fn point_cloud_2d_wires(&self) -> Vec<WireModel> {
+        use crate::scene::model::point_cloud::{resolve_source, setting, setting_value};
+        if !crate::scene::model::point_cloud::any_definition(&self.document)
+            || setting("POINTCLOUD2DVSDISPLAY").is_some_and(|s| setting_value(&self.document, s) == 1)
+        {
+            return Vec::new();
+        }
+        let mut wires = Vec::new();
+        for entity in self.document.entities() {
+            let EntityType::Extended(extended) = entity else {
+                continue;
+            };
+            let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data else {
+                continue;
+            };
+            let common = entity.common();
+            if common.invisible
+                || self.entity_temporarily_hidden(common.handle)
+                || self.document.layers.get(&common.layer).is_some_and(|layer| layer.is_off() || layer.is_frozen())
+                || resolve_source(&self.document, data).is_none()
+            {
+                continue;
+            }
+            let color = if matches!(common.color, codec::types::Color::ByLayer) {
+                self.document.layers.get(&common.layer).map(|layer| layer.color.clone()).unwrap_or(common.color.clone())
+            } else {
+                common.color.clone()
+            };
+            let (r, g, b) = color.rgb().unwrap_or((255, 255, 255));
+            wires.push(WireModel::solid_f64(
+                common.handle.value().to_string(),
+                crate::entities::extended::point_cloud_2d_style_lines(data),
+                [f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0],
+                false,
+            ));
+        }
+        wires
+    }
+
     /// Image / OLE models for a content viewport, with its frozen layers removed.
     pub(super) fn images_for_viewport(
         &self,

@@ -209,13 +209,15 @@ pub(crate) fn resolve_source(document: &CadDocument, data: &PointCloudExData) ->
 }
 
 /// One drawn point: position as two f32 (high + low, like every other
-/// renderer vertex) and its colour.
+/// renderer vertex), its colour and its world normal (zero without normals;
+/// lit only then).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PointInstance {
     pub pos: [f32; 3],
     pub pos_low: [f32; 3],
     pub color: [u8; 4],
+    pub normal: [i8; 4],
 }
 
 /// The points one cloud shows, placed in the drawing.
@@ -414,6 +416,11 @@ pub(crate) fn placed(
             continue;
         };
         let pos = [w.x as f32, w.y as f32, w.z as f32];
+        let normal = cloud.normals.get(i).map_or([0; 4], |n| {
+            let v = axes[0] * f64::from(n[0]) + axes[1] * f64::from(n[1]) + axes[2] * f64::from(n[2]);
+            let v = v / v.length().max(1e-12);
+            [v.x, v.y, v.z, 0.0].map(|c| (c * 127.0).round() as i8)
+        });
         instances.push(PointInstance {
             pos,
             pos_low: [
@@ -422,8 +429,12 @@ pub(crate) fn placed(
                 (w.z - pos[2] as f64) as f32,
             ],
             color,
+            normal,
         });
     }
+    // Spread the points so any leading part of the list is an even sample:
+    // a real-time density draws only that part.
+    let instances = spread(instances);
     crate::perf::record(format_args!(
         "[perf] point-cloud-place {:>7.1}ms shown={}",
         crate::perf::elapsed_ms(started),
@@ -434,6 +445,27 @@ pub(crate) fn placed(
     cache.retain(|_, weak| weak.strong_count() > 0);
     cache.insert(key, Arc::downgrade(&placed));
     Some(placed)
+}
+
+/// The items in a stride order coprime to their count: every prefix samples
+/// the whole list evenly.
+fn spread<T: Copy>(items: Vec<T>) -> Vec<T> {
+    let n = items.len();
+    if n < 3 {
+        return items;
+    }
+    let gcd = |mut a: usize, mut b: usize| {
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a
+    };
+    // Near the golden section, so consecutive picks land far apart.
+    let mut stride = (n as f64 * 0.618_033_988_75) as usize | 1;
+    while gcd(stride, n) != 1 {
+        stride += 2;
+    }
+    (0..n).map(|k| items[k * stride % n]).collect()
 }
 
 /// Whether a crop keeps point `p` (file coordinates). The crop is a prism

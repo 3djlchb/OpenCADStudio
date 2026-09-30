@@ -1343,7 +1343,9 @@ pub fn view_point_cloud_color_map<'a>(
         ramp_bar(&colors, slot.gradient, state.cloud.and(state.range()), !state.elevation_tab),
     );
 
-    let names: Vec<String> = state.ramps.iter().map(|r| r.name.clone()).collect();
+    // Listed by name, as the reference lists them.
+    let mut names: Vec<String> = state.ramps.iter().map(|r| r.name.clone()).collect();
+    names.sort_by_key(|n| n.to_lowercase());
     let scheme = pick_list(ramp.map(|r| r.name.clone()), names, |n: &String| n.clone())
         .on_select(|n| msg(PdfDialogMsg::MapScheme(n)))
         .text_size(12)
@@ -1397,7 +1399,7 @@ pub fn view_point_cloud_color_map<'a>(
     if let Some((_, name)) = &state.naming {
         scheme_rows = scheme_rows.push(
             row![
-                text(t!("Name")).size(11).style(muted_style).width(Length::Fixed(110.0)),
+                text(t!("Scheme name")).size(11).style(muted_style).width(Length::Fixed(110.0)),
                 text_input("", name)
                     .on_input(|v| msg(PdfDialogMsg::MapNameInput(v)))
                     .on_submit(msg(PdfDialogMsg::MapNameOk))

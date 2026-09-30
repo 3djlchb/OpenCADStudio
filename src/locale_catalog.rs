@@ -142,6 +142,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Search" => Some(("insert", "pc-search")),
         "Collapse all" => Some(("insert", "pc-collapse-all")),
         "Expand all" => Some(("insert", "pc-expand-all")),
+        "Scheme name" => Some(("insert", "pcm-scheme-name")),
         "Stylization" => Some(("properties", "stylization")),
         "Color scheme" => Some(("properties", "color-scheme")),
         "Scan Colors" => Some(("properties", "scan-colors")),

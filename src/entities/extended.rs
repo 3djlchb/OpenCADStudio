@@ -474,6 +474,17 @@ fn point_cloud_clip_lines(data: &PointCloudData) -> Vec<[f64; 3]> {
 /// the scan file; the box only picks the cloud, unless the file cannot be
 /// found: then the box shows, with the saved path written across it.
 fn point_cloud_ex_lines(data: &PointCloudExData, document: &codec::CadDocument) -> Vec<[f64; 3]> {
+    let mut points = point_cloud_ex_box(data);
+    if crate::scene::model::point_cloud::resolve_source(document, data).is_none() {
+        let saved = crate::scene::model::point_cloud::definition(document, data)
+            .map(|definition| definition.source_filename.clone())
+            .unwrap_or_default();
+        append_missing_cloud_label(&mut points, data, &saved);
+    }
+    points
+}
+
+fn point_cloud_ex_box(data: &PointCloudExData) -> Vec<[f64; 3]> {
     let corners = codec::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
     let mut points = Vec::new();
     for a in 0..8 {
@@ -483,12 +494,14 @@ fn point_cloud_ex_lines(data: &PointCloudExData, document: &codec::CadDocument) 
             }
         }
     }
-    if crate::scene::model::point_cloud::resolve_source(document, data).is_none() {
-        let saved = crate::scene::model::point_cloud::definition(document, data)
-            .map(|definition| definition.source_filename.clone())
-            .unwrap_or_default();
-        append_missing_cloud_label(&mut points, data, &saved);
-    }
+    points
+}
+
+/// A cloud in the 2D wireframe visual style, which draws no points: its
+/// extents box with the reference's message across the base.
+pub(crate) fn point_cloud_2d_style_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
+    let mut points = point_cloud_ex_box(data);
+    append_missing_cloud_label(&mut points, data, "Point clouds are not displayed in 2D visual style.");
     points
 }
 

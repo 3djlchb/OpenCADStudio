@@ -3848,6 +3848,10 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.gpu_point_clouds.upload(device, queue, set);
     }
 
+    pub fn set_point_cloud_view(&mut self, queue: &wgpu::Queue, light: [f32; 8]) {
+        self.gpu_point_clouds.set_view(queue, light);
+    }
+
     /// Upload the frame's SDF text-quad vertices, and (re)build the GPU glyph
     /// atlas from the shared CPU atlas when it grew (new glyphs baked by the
     /// text collector). `verts` empty (flag off) leaves nothing to draw.

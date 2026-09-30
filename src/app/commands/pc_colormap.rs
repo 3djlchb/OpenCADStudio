@@ -216,7 +216,11 @@ impl OpenCADStudio {
             }
             PdfDialogMsg::MapGradient(on) => state.slot_mut().gradient = on,
             PdfDialogMsg::MapNew => {
-                let name = state.ramp().map(|r| format!("{} (2)", r.name)).unwrap_or_default();
+                // "Color Scheme 0", or the first number not taken.
+                let name = (0..)
+                    .map(|n| format!("Color Scheme {n}"))
+                    .find(|name| !state.ramps.iter().any(|r| r.name.eq_ignore_ascii_case(name)))
+                    .unwrap_or_default();
                 state.naming = Some((true, name));
             }
             PdfDialogMsg::MapRename => {

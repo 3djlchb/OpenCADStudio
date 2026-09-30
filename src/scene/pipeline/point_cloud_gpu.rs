@@ -1,7 +1,8 @@
 // Point cloud GPU buffers — one instance buffer per placed cloud, drawn as
 // screen-space square sprites (6 vertices per instance, no vertex buffer).
 //
-// Group 1 binding 0 — PointParams (sprite size in pixels, 16 bytes).
+// Group 1 binding 0 — PointParams (sprite size in pixels, lighting mode and
+// light source, the light direction; 32 bytes).
 //
 // Buffers are keyed by `PlacedCloud::key`: a new render set re-uploads only
 // the clouds whose points changed; the rest keep their buffers.
@@ -25,6 +26,11 @@ pub fn instance_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
             offset: std::mem::offset_of!(PointInstance, color) as u64,
             shader_location: 2,
             format: wgpu::VertexFormat::Unorm8x4,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::offset_of!(PointInstance, normal) as u64,
+            shader_location: 3,
+            format: wgpu::VertexFormat::Snorm8x4,
         },
     ];
     wgpu::VertexBufferLayout {
@@ -62,13 +68,16 @@ pub struct PointCloudGpu {
     params: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     point_size: f32,
+    params_written: [f32; 8],
+    /// The share of each cloud's points drawn (real-time density).
+    fraction: f32,
 }
 
 impl PointCloudGpu {
     pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("point_cloud.params"),
-            size: 16,
+            size: 32,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -77,7 +86,14 @@ impl PointCloudGpu {
             layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() }],
         });
-        Self { clouds: Vec::new(), params, bind_group, point_size: f32::NAN }
+        Self {
+            clouds: Vec::new(),
+            params,
+            bind_group,
+            point_size: f32::NAN,
+            params_written: [f32::NAN; 8],
+            fraction: 1.0,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -104,9 +120,17 @@ impl PointCloudGpu {
                 count: cloud.instances.len() as u32,
             });
         }
-        if self.point_size != set.point_size {
-            self.point_size = set.point_size;
-            queue.write_buffer(&self.params, 0, bytemuck::cast_slice(&[set.point_size, 0.0, 0.0, 0.0]));
+        self.point_size = set.point_size;
+    }
+
+    /// The view's lighting (`[mode, source, fraction, _, light x, y, z, _]`)
+    /// with the sprite size, written when they change.
+    pub fn set_view(&mut self, queue: &wgpu::Queue, light: [f32; 8]) {
+        self.fraction = light[2].clamp(0.0, 1.0);
+        let params = [self.point_size, light[0], light[1], 0.0, light[4], light[5], light[6], 0.0];
+        if params != self.params_written {
+            self.params_written = params;
+            queue.write_buffer(&self.params, 0, bytemuck::cast_slice(&params));
         }
     }
 
@@ -114,7 +138,8 @@ impl PointCloudGpu {
         pass.set_bind_group(1, &self.bind_group, &[]);
         for cloud in &self.clouds {
             pass.set_vertex_buffer(0, cloud.buffer.slice(..));
-            pass.draw(0..6, 0..cloud.count);
+            let count = ((cloud.count as f32 * self.fraction).ceil() as u32).clamp(1, cloud.count);
+            pass.draw(0..6, 0..count);
         }
     }
 }
