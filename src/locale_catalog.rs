@@ -150,7 +150,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Maximum points to process" => Some(("insert", "pcs-max-points")),
         "Faster" => Some(("insert", "pcs-faster")),
         "More accurate" => Some(("insert", "pcs-accurate")),
-        "Estimated time: {count} min" => Some(("insert", "pcs-time")),
+        "Estimated time: {count} minutes" => Some(("insert", "pcs-time")),
         "Output geometry" => Some(("insert", "pcs-output")),
         "2D Polylines" => Some(("insert", "pcs-polylines")),
         "Polyline width" => Some(("insert", "pcs-width")),

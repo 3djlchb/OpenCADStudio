@@ -15,9 +15,12 @@
 //                    [Accept/Settings/Undo] <Settings>:
 //                    (-PCEXTRACTSECTION creates them without asking.)
 //
-// A plane is found from the cloud points under the cursor: the front-most
-// point in the pick aperture, a plane fitted to the points around it, then
-// grown over the points on that plane connected to it.
+// Planes, cylinders and section lines come from structured (segmented)
+// scans only; on an unstructured scan a plane or cylinder pick asks again
+// and a section extracts nothing, as the reference does. On a
+// structured scan a plane is found from the cloud points under the cursor:
+// the front-most point in the pick aperture, a plane fitted to the points
+// around it, then grown over the points on that plane connected to it.
 
 use std::sync::{Arc, Mutex};
 
@@ -51,6 +54,13 @@ impl Clouds {
                 )
             })
         })
+    }
+
+    /// Whether the clouds carry segments (structured scans) to extract from.
+    // ponytail: scan segmentation is not decoded, so every scan counts as
+    // unstructured; read the scan's segmentation to extract from structured ones.
+    fn segmented(&self) -> bool {
+        false
     }
 
     fn of(&self, handle: Handle) -> Option<Clouds> {
@@ -406,7 +416,10 @@ impl CadCommand for PlanesCommand {
         let Some(context) = self.context else {
             return CmdResult::NeedPoint;
         };
-        // Off the cloud or not on a plane: the prompt again.
+        // Off the cloud, not on a plane or an unstructured scan: the prompt again.
+        if !self.clouds.segmented() {
+            return CmdResult::NeedPoint;
+        }
         let Some(plane) = surface_hit(&self.clouds, &context, pt)
             .and_then(|(hit, pixel)| detect_plane(&self.clouds, hit, pixel))
         else {
@@ -470,6 +483,9 @@ impl CadCommand for CenterlineCommand {
         let Some(context) = self.context else {
             return CmdResult::NeedPoint;
         };
+        if !self.clouds.segmented() {
+            return CmdResult::NeedPoint;
+        }
         match surface_hit(&self.clouds, &context, pt).and_then(|(hit, pixel)| detect_cylinder(&self.clouds, hit, pixel)) {
             Some((start, end)) => CmdResult::CommitAndExit(EntityType::Line(Line::from_points(vector(start), vector(end)))),
             None => CmdResult::NeedPoint,
@@ -746,6 +762,10 @@ impl SectionCommand {
         let (Some(cloud), Some(section)) = (&self.cloud, self.section) else {
             return Ok(Vec::new());
         };
+        // An unstructured scan gives no section lines (nothing, silently).
+        if !cloud.segmented() {
+            return Ok(Vec::new());
+        }
         let s = settings();
         let n = section.viewing;
         let kept: Vec<DVec3> = cloud

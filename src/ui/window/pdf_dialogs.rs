@@ -1592,7 +1592,7 @@ pub fn view_pc_section<'a>(state: &'a PcSectionState, sizing: crate::ui::modal::
                 Space::new().width(Fill),
                 text(t!("More accurate")).size(10).style(muted_style),
                 Space::new().width(Fill),
-                text(crate::tf!("Estimated time: {count} min", count = minutes)).size(10).style(muted_style),
+                text(crate::tf!("Estimated time: {count} minutes", count = minutes)).size(10).style(muted_style),
             ],
         ]
         .spacing(6),
