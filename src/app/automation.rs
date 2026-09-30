@@ -29,7 +29,8 @@ use super::OpenCADStudio;
 
 /// Run the headless JSON server. Default transport is stdin/stdout; with
 /// `--port <N>` it instead listens on `127.0.0.1:<N>` and serves one client at
-/// a time (the document session persists across reconnects).
+/// a time (the document session persists across reconnects); every socket
+/// request carries `"token"` (see `rest::api_token`).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn serve() {
     let mut app = OpenCADStudio::new();
@@ -163,6 +164,7 @@ fn serve_socket_with_idle(
     let bound = listener.local_addr().map(|a| a.port()).unwrap_or(port);
     bound_port.store(bound, std::sync::atomic::Ordering::SeqCst);
     eprintln!("OpenCADStudio --serve listening on 127.0.0.1:{bound}");
+    crate::rest::announce_token();
     for stream in listener.incoming().flatten() {
         let _ = stream.set_read_timeout(Some(idle));
         let Ok(read_half) = stream.try_clone() else {
@@ -178,7 +180,18 @@ fn serve_socket_with_idle(
             if line.is_empty() {
                 continue;
             }
-            let resp = app.automation_op(line);
+            // Loopback is shared by every process and user on the machine:
+            // each request carries the session token, like the GUI's own
+            // channel, and a connection that fails it is dropped.
+            let mut request: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+            if !crate::rest::token_matches(request["token"].as_str()) {
+                let _ = writeln!(writer, "{}", crate::rest::unauthorized());
+                break;
+            }
+            if let Some(object) = request.as_object_mut() {
+                object.remove("token");
+            }
+            let resp = app.automation_op(&request.to_string());
             if writeln!(writer, "{resp}").is_err() {
                 break;
             }

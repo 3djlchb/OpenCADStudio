@@ -9,7 +9,11 @@
 //! the identical handlers with identical validation, undo and idempotency.
 //!
 //! Conventions: one request per connection (`Connection: close`), JSON
-//! bodies, permissive CORS for local browser clients, loopback bind only.
+//! bodies, loopback bind only, and every request carries
+//! `Authorization: Bearer <token>` (see [`api_token`]). Loopback is shared by
+//! every process and user on the machine, and a web page can aim requests at
+//! it too, so the port alone proves nothing; no CORS headers are sent, so a
+//! browser page cannot read an answer either.
 //! Connections are served one thread each: a slow op (plot, open a large
 //! drawing) or a client that connects and stalls must never keep other
 //! callers — `state`, `get_selection`, `cancel`, `operation` — from being
@@ -102,11 +106,62 @@ pub fn serve(port: u16) {
     listen(OpenCADStudio::new(), port, Arc::new(AtomicU16::new(0)));
 }
 
+/// The secret every TCP automation client presents: `OCS_API_TOKEN` when the
+/// launcher set one (so a script knows it in advance), otherwise 32 random
+/// bytes printed once on stderr when a listener starts. The GUI's private
+/// channel keeps its own per-session token in the user-only descriptor.
+pub fn api_token() -> &'static str {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN.get_or_init(|| {
+        if let Some(token) = std::env::var("OCS_API_TOKEN")
+            .ok()
+            .filter(|token| !token.trim().is_empty())
+        {
+            return token.trim().to_owned();
+        }
+        let mut secret = [0u8; 32];
+        getrandom::fill(&mut secret).expect("system random source");
+        secret.iter().map(|byte| format!("{byte:02x}")).collect()
+    })
+}
+
+/// Tells a listener's user how to authenticate. A token the launcher chose
+/// is not echoed back.
+pub(crate) fn announce_token() {
+    if std::env::var("OCS_API_TOKEN").map_or(true, |token| token.trim().is_empty()) {
+        eprintln!("API token (or set OCS_API_TOKEN before launch): {}", api_token());
+    }
+}
+
+/// Whether `presented` is the session's token, compared in constant time.
+pub(crate) fn token_matches(presented: Option<&str>) -> bool {
+    let expected = api_token().as_bytes();
+    let Some(presented) = presented.map(str::as_bytes) else {
+        return false;
+    };
+    presented.len() == expected.len()
+        && presented
+            .iter()
+            .zip(expected)
+            .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+            == 0
+}
+
+/// The answer to a request without the session's token.
+pub(crate) fn unauthorized() -> Value {
+    json!({
+        "ok": false,
+        "code": "unauthorized",
+        "error": "Send the session token (printed at startup, or OCS_API_TOKEN): Authorization: Bearer <token> over HTTP, \"token\" in each --serve --port request",
+    })
+}
+
 pub(crate) struct HttpRequest {
     pub(crate) method: String,
     pub(crate) path: String,
     query: Vec<(String, String)>,
     body: Vec<u8>,
+    bearer: Option<String>,
 }
 
 impl HttpRequest {
@@ -119,6 +174,10 @@ impl HttpRequest {
 
     pub(crate) fn json(&self) -> Value {
         serde_json::from_slice(&self.body).unwrap_or(Value::Null)
+    }
+
+    pub(crate) fn authorized(&self) -> bool {
+        token_matches(self.bearer.as_deref())
     }
 }
 
@@ -144,6 +203,7 @@ fn listen(mut app: OpenCADStudio, port: u16, bound_port: Arc<AtomicU16>) {
     let bound = listener.local_addr().map(|a| a.port()).unwrap_or(port);
     bound_port.store(bound, Ordering::SeqCst);
     eprintln!("OpenCADStudio REST listening on http://127.0.0.1:{bound}/api/v1");
+    announce_token();
     let (jobs, incoming) = std::sync::mpsc::channel::<Job>();
     // Connections are served one thread each: a slow op (plot, open a large
     // drawing) or a client that connects and stalls must never keep other
@@ -185,8 +245,8 @@ fn serve_connection(mut stream: TcpStream, jobs: std::sync::mpsc::Sender<Job>) {
     let Ok(Some(request)) = read_request(&mut stream) else {
         return;
     };
-    if request.method == "OPTIONS" {
-        let _ = write_response(&mut stream, 204, &Value::Null);
+    if !request.authorized() {
+        let _ = write_response(&mut stream, 401, &unauthorized());
         return;
     }
     let (reply, answer) = std::sync::mpsc::channel();
@@ -243,6 +303,7 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
 
     let mut content_length = 0usize;
     let mut header_bytes = 0usize;
+    let mut bearer = None;
     loop {
         let mut header = String::new();
         match read_line_capped(&mut reader, &mut header, MAX_LINE) {
@@ -265,6 +326,14 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
         {
             content_length = value.trim().parse().unwrap_or(0);
         }
+        if let Some((name, value)) = header.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("authorization") {
+                bearer = value
+                    .trim()
+                    .strip_prefix("Bearer ")
+                    .map(|token| token.trim().to_owned());
+            }
+        }
     }
     if content_length > MAX_BODY {
         return Ok(Some(HttpRequest {
@@ -272,6 +341,7 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
             path,
             query,
             body: Vec::new(),
+            bearer,
         }));
     }
     let mut body = vec![0u8; content_length];
@@ -283,6 +353,7 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Htt
         path,
         query,
         body,
+        bearer,
     }))
 }
 
@@ -328,6 +399,7 @@ pub(crate) fn write_response(stream: &mut TcpStream, status: u16, body: &Value) 
         201 => "Created",
         204 => "No Content",
         400 => "Bad Request",
+        401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
@@ -337,7 +409,7 @@ pub(crate) fn write_response(stream: &mut TcpStream, status: u16, body: &Value) 
         _ => "OK",
     };
     let header = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
     stream.write_all(header.as_bytes())?;
@@ -733,6 +805,7 @@ mod tests {
             path: path.to_string(),
             query: Vec::new(),
             body: body.as_bytes().to_vec(),
+            bearer: None,
         }
     }
 
@@ -763,19 +836,30 @@ mod tests {
         }
         assert_ne!(port, 0, "listener never bound a port");
 
+        let status = |authorization: &str| {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .write_all(
+                    format!("GET /api/v1/ready HTTP/1.1\r\nHost: 127.0.0.1\r\n{authorization}\r\n")
+                        .as_bytes(),
+                )
+                .unwrap();
+            let mut status_line = String::new();
+            BufReader::new(stream)
+                .read_line(&mut status_line)
+                .expect("readiness answered");
+            status_line
+        };
         // Stalls the thread that accepted it: no request line, ever.
         let _stalled = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-            .write_all(b"GET /api/v1/ready HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-            .unwrap();
-        let mut reader = BufReader::new(stream);
-        let mut status_line = String::new();
-        reader.read_line(&mut status_line).expect("readiness answered");
-        assert!(status_line.contains("200"), "{status_line}");
+        let answered = status(&format!("Authorization: Bearer {}\r\n", api_token()));
+        assert!(answered.contains("200"), "{answered}");
+        // Anything else on the machine that finds the port is turned away.
+        assert!(status("").contains("401"));
+        assert!(status("Authorization: Bearer guess\r\n").contains("401"));
     }
 
     #[test]

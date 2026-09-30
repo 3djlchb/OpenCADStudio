@@ -369,13 +369,22 @@ editor, events and plotting.
 resource-oriented REST surface on `http://127.0.0.1:<port>/api/v1`. Any
 HTTP client works — curl, Python, C# `HttpClient`, JS `fetch`; there is no
 SDK and nothing AI-specific. The server keeps one drawing session alive
-across requests, binds loopback only, sends permissive CORS headers, and
-serves its machine-readable description at `GET /api/v1/openapi`
-(OpenAPI 3, embedded from `src/rest_openapi.json`).
+across requests, binds loopback only, and serves its machine-readable
+description at `GET /api/v1/openapi` (OpenAPI 3, embedded from
+`src/rest_openapi.json`).
+
+Every request carries `Authorization: Bearer <token>`; anything else is
+answered `401 {"code":"unauthorized"}`. Loopback is shared by every process
+and user on the machine, so the port alone proves nothing. Set the token
+yourself with `OCS_API_TOKEN` before launching, or read the random one the
+server prints on stderr at startup. No CORS headers are sent, so a web page
+cannot drive or read the session. The same token guards `--serve --port`
+(as a `"token"` field in each JSON line) and the GUI-hosted channel below.
 
 ```sh
+export OCS_API_TOKEN=$(openssl rand -hex 32)
 OpenCADStudio --http 8090            # start the REST server (headless)
-curl http://127.0.0.1:8090/api/v1/ready
+curl -H "Authorization: Bearer $OCS_API_TOKEN" http://127.0.0.1:8090/api/v1/ready
 ```
 
 ### GUI-hosted REST channel (`--http` + file)
@@ -503,7 +512,7 @@ HTTP.
 ```sh
 # 1. Create entities (the missing layer "FRAME" is created automatically;
 #    the whole batch commits as one undoable step or not at all).
-curl -s -X POST http://127.0.0.1:8090/api/v1/entities \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/entities \
   -H "Content-Type: application/json" \
   -d '{"entities":[
         {"type":"Line","start":[0,0],"end":[100,0],"layer":"FRAME"},
@@ -514,71 +523,71 @@ curl -s -X POST http://127.0.0.1:8090/api/v1/entities \
 # → 201 {"ok":true,"status":"completed","result":{"handles":["63","64","65","66"],…}}
 
 # 2. Verify: query it back.
-curl -s "http://127.0.0.1:8090/api/v1/entities?type=Line&detail=full"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/entities?type=Line&detail=full"
 # → {"ok":true,"entities":[{"handle":"63","start":[0,0,0],"end":[100,0,0],…},…]
 
 # 3. Move the circle 10 units right.
-curl -s -X POST http://127.0.0.1:8090/api/v1/entities/transform \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/entities/transform \
   -H "Content-Type: application/json" \
   -d '{"handles":["66"],"action":"move","vector":[10,0]}'
 
 # 4. Mark the text with extended data (RegApp "SPM" registered implicitly).
-curl -s -X PUT http://127.0.0.1:8090/api/v1/entities/65/xdata/SPM \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X PUT http://127.0.0.1:8090/api/v1/entities/65/xdata/SPM \
   -H "Content-Type: application/json" \
   -d '[{"code":1000,"value":"PAGE-01"},{"code":1070,"value":3}]'
-curl -s "http://127.0.0.1:8090/api/v1/entities/65/xdata?app=SPM"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/entities/65/xdata?app=SPM"
 
 # 5. Turn the two frame lines into a block definition + Insert.
-curl -s -X POST http://127.0.0.1:8090/api/v1/blocks \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/blocks \
   -H "Content-Type: application/json" \
   -d '{"name":"FRAME-MARK","base":[0,0,0],"handles":["63","67"]}'
 # → 201 {"result":{"block":"FRAME-MARK","insert":"6B"}}
 
 # 6. Save and prove persistence.
-curl -s -X POST http://127.0.0.1:8090/api/v1/save \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/save \
   -H "Content-Type: application/json" -d '{"path":"C:/out/session.dwg"}'
 
 # 7. Filter entities by any property (RFC 6901 pointers, SQL-ish operators).
-curl -s "http://127.0.0.1:8090/api/v1/entities?type=Circle&detail=geometry&where=%5B%7B%22path%22%3A%22%2Fradius%22%2C%22op%22%3A%22gt%22%2C%22value%22%3A2%7D%5D"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/entities?type=Circle&detail=geometry&where=%5B%7B%22path%22%3A%22%2Fradius%22%2C%22op%22%3A%22gt%22%2C%22value%22%3A2%7D%5D"
 
 # 8. Set and read back drawing sysvars.
-curl -s -X POST http://127.0.0.1:8090/api/v1/sysvars \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/sysvars \
   -H "Content-Type: application/json" -d '{"set":{"ltscale":2.5}}'
-curl -s "http://127.0.0.1:8090/api/v1/sysvars?names=ltscale,mirrtext"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/sysvars?names=ltscale,mirrtext"
 
 # 9. Provision a sheet: create the layout, write its page setup, then
 #    plot every layout to its own PDF (one file per entry in result.files).
-curl -s -X POST http://127.0.0.1:8090/api/v1/layouts \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/layouts \
   -H "Content-Type: application/json" -d '{"name":"PLAN"}'
-curl -s -X PUT http://127.0.0.1:8090/api/v1/layouts/PLAN/page-setup \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X PUT http://127.0.0.1:8090/api/v1/layouts/PLAN/page-setup \
   -H "Content-Type: application/json" \
   -d '{"paper":"ISO_A4_(210.00_x_297.00_MM)","orientation":"landscape","fit":true,"center":true}'
-curl -s -X POST http://127.0.0.1:8090/api/v1/plot \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/plot \
   -H "Content-Type: application/json" \
   -d '{"path":"C:/out/plan.pdf","layout":"all","per_page":true}'
 
 # 10. Save the drawing as a template (a .dwt is DWG bytes — same writer,
 #     no lock held on the file) and start a fresh drawing from it.
-curl -s -X POST http://127.0.0.1:8090/api/v1/save \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/save \
   -H "Content-Type: application/json" -d '{"path":"C:/out/session.dwt"}'
-curl -s -X POST http://127.0.0.1:8090/api/v1/documents \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/documents \
   -H "Content-Type: application/json" -d '{"template":"C:/out/session.dwt"}'
 
 # 11. Second document, then copy entities across documents.
-curl -s -X POST http://127.0.0.1:8090/api/v1/documents -d '{}'   # a fresh document
-curl -s -X POST http://127.0.0.1:8090/api/v1/entities/copy-to \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/documents -d '{}'   # a fresh document
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/entities/copy-to \
   -H "Content-Type: application/json" \
   -d '{"handles":["63","67"],"document_id":2}'
 
 # 12. Group the copies, save them as a named selection set, recall it.
-curl -s -X POST http://127.0.0.1:8090/api/v1/groups \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/groups \
   -H "Content-Type: application/json" -d '{"name":"FRAME","handles":["63","67"]}'
-curl -s -X POST http://127.0.0.1:8090/api/v1/selection-sets \
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/selection-sets \
   -H "Content-Type: application/json" -d '{"name":"frame-set","handles":["63","67"]}'
-curl -s "http://127.0.0.1:8090/api/v1/selection-sets/frame-set?select=true"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/selection-sets/frame-set?select=true"
 
 # 13. Close a document, discarding unsaved changes.
-curl -s -X DELETE "http://127.0.0.1:8090/api/v1/documents/2?discard=true"
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X DELETE "http://127.0.0.1:8090/api/v1/documents/2?discard=true"
 ```
 
 The same lifecycle — create → verify → transform → xdata → block →
