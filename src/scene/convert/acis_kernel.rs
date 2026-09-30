@@ -103,10 +103,14 @@ pub fn tessellate_sat(
     // parameters leaves a hole, the same as one that never lifted — so both
     // are counted before calling the mesh whole.
     let mut undrawn = 0usize;
-    let source_fit = if document.header.spatial_resolution.is_finite()
-        && document.header.spatial_resolution > 0.0
-    {
-        document.header.spatial_resolution
+    // The header's tolerance line is `<mm per unit> <resabs> <resnor>`: the
+    // codec's `spatial_resolution` is the unit scale (1, or 25.4 for inches)
+    // and its `normal_tolerance` is resabs, the file's absolute tolerance.
+    // Fitting to the unit scale let every edge wander a whole unit, and on a
+    // bad pcurve that meant minutes of refinement (#1538).
+    let resabs = document.header.normal_tolerance;
+    let source_fit = if resabs.is_finite() && resabs > 0.0 && resabs < 1e-2 {
+        resabs
     } else {
         DEFAULT_FIT_TOLERANCE
     };
