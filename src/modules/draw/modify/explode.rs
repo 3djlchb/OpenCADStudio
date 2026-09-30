@@ -466,6 +466,7 @@ fn dim_geom_entities(
     for (points, common) in [
         (geometry.ext_lines.as_slice(), ext_common),
         (geometry.dim_lines.as_slice(), dim_common),
+        (geometry.arrow_lines.as_slice(), dim_common),
     ] {
         for run in points.split(|point| point[0].is_nan()) {
             for pair in run.windows(2) {

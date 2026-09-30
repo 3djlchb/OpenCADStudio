@@ -4169,6 +4169,21 @@ fn tessellate_dimension_inner(
         // match emit_wire's paired fill path.
         fill_tris_low: Vec::new(),
     });
+    // Arrowheads and ticks: the dimension line's colour and weight, never
+    // its dashes.
+    if !geom.arrow_lines.is_empty() {
+        if let Some(line) = wires.last() {
+            let mut arrows = line.clone();
+            arrows.points = std::mem::take(&mut geom.arrow_lines);
+            arrows.pattern_length = 0.0;
+            arrows.pattern = [0.0; 8];
+            arrows.fill_tris = Vec::new();
+            arrows.snap_pts = Vec::new();
+            arrows.key_vertices = Vec::new();
+            arrows.tangent_geoms = Vec::new();
+            wires.push(arrows);
+        }
+    }
 
     if let Some(symbol) = style.and_then(|style| {
         arc_length_symbol_points(dim, Some(style), dim_txt, dim_scale, style.dimarcsym)
@@ -4408,6 +4423,22 @@ fn resolve_dim_lineweight_px(code: i16, fallback_px: f32) -> f32 {
 
 /// Look up a linetype in the document's line_types table by handle and
 /// resolve it to a (pattern_length, pattern) pair compatible with WireModel.
+/// An arrowhead of a dimension, kept apart from its dimension line: the
+/// line takes DIMLTYPE's dashes, an arrowhead or tick is always drawn solid —
+/// dashed, a tick broke into two stubs once the line followed its layer's
+/// linetype. (#898)
+fn append_dim_arrow(g: &mut DimGeom, tip: Vec3, dir: Vec3, arrow: &ArrowKind) {
+    let mut head = DimGeom::new();
+    append_arrow(&mut head, tip, dir, arrow);
+    if !head.dim_lines.is_empty() {
+        if g.arrow_lines.last().is_some_and(|point| !point[0].is_nan()) {
+            g.arrow_lines.push([f32::NAN; 3]);
+        }
+        g.arrow_lines.extend(head.dim_lines);
+    }
+    g.arrow_fill.extend(head.arrow_fill);
+}
+
 /// A dimension line's dash pattern. A linetype the style names draws as
 /// itself; none or ByBlock takes the dimension's own linetype (ByLayer: its
 /// layer's), which is what the ByBlock lines of its baked `*D` block drew —
@@ -4818,7 +4849,7 @@ fn dimension_geometry(
                 }
                 if !suppress.dim2 {
                     // The arrowhead's tip is on the arc, its body inside.
-                    append_arrow(&mut g, point, normalized_or(center - point, Vec3::X), arrow1);
+                    append_dim_arrow(&mut g, point, normalized_or(center - point, Vec3::X), arrow1);
                 }
                 // The centre mark belongs to a radius drawn without its
                 // inside line; the line itself already marks the centre.
@@ -4839,7 +4870,7 @@ fn dimension_geometry(
                 if !suppress.dim2 {
                     // The arrowhead sits on the arc with its body toward the text.
                     let body = if text_is_outside { point - center } else { center - point };
-                    append_arrow(&mut g, point, normalized_or(body, Vec3::X), arrow1);
+                    append_dim_arrow(&mut g, point, normalized_or(body, Vec3::X), arrow1);
                 }
                 if text_is_outside {
                     append_center_mark(&mut g, center, params.dimcen, radius);
@@ -5043,7 +5074,7 @@ fn dimension_geometry(
                 );
             }
             if !suppress.dim2 {
-                append_arrow(
+                append_dim_arrow(
                     &mut g,
                     chord,
                     if arrows_outside { axis } else { -axis },
@@ -5298,11 +5329,11 @@ fn append_linear_dimension(
 
     if arrows_outside {
         // Tip on the ext line, body pointing outward.
-        append_arrow(g, d1, normalized_or(d1 - d2, -axis), arrow1);
-        append_arrow(g, d2, normalized_or(d2 - d1, axis), arrow2);
+        append_dim_arrow(g, d1, normalized_or(d1 - d2, -axis), arrow1);
+        append_dim_arrow(g, d2, normalized_or(d2 - d1, axis), arrow2);
     } else {
-        append_arrow(g, d1, normalized_or(d2 - d1, axis), arrow1);
-        append_arrow(g, d2, normalized_or(d1 - d2, -axis), arrow2);
+        append_dim_arrow(g, d1, normalized_or(d2 - d1, axis), arrow1);
+        append_dim_arrow(g, d2, normalized_or(d1 - d2, -axis), arrow2);
     }
 
     // Horizontal text outside the extension lines of a dimension that is not
@@ -5422,7 +5453,7 @@ fn append_diameter_dimension(
         }
         if !params.constraint {
             if !suppressed {
-                append_arrow(g, tip, normalized_or(tip - center, axis), arrow1);
+                append_dim_arrow(g, tip, normalized_or(tip - center, axis), arrow1);
             }
             return;
         }
@@ -5483,11 +5514,11 @@ fn append_diameter_dimension(
         append_center_mark(g, center, params.dimcen, diameter * 0.5);
     }
     if arrows_outside {
-        append_arrow(g, chord, -axis, arrow1);
-        append_arrow(g, far_chord, axis, arrow2);
+        append_dim_arrow(g, chord, -axis, arrow1);
+        append_dim_arrow(g, far_chord, axis, arrow2);
     } else {
-        append_arrow(g, chord, axis, arrow1);
-        append_arrow(g, far_chord, -axis, arrow2);
+        append_dim_arrow(g, chord, axis, arrow1);
+        append_dim_arrow(g, far_chord, -axis, arrow2);
     }
 
     if params.text_movement == 0 {
@@ -6085,7 +6116,7 @@ fn append_angular_dimension(
     let end_tangent = Vec3::new(-end.sin(), end.cos(), 0.0) * direction;
     let draw_arrows = !arrows_outside || !params.dimsoxd;
     if draw_arrows && !suppress.dim1 {
-        append_arrow(
+        append_dim_arrow(
             g,
             arc_start,
             if arrows_outside { -start_tangent } else { start_tangent },
@@ -6093,7 +6124,7 @@ fn append_angular_dimension(
         );
     }
     if draw_arrows && !suppress.dim2 {
-        append_arrow(
+        append_dim_arrow(
             g,
             arc_end,
             if arrows_outside { end_tangent } else { -end_tangent },
@@ -7694,6 +7725,25 @@ fn radial_outside_text(
     )
 }
 
+/// Whether `point` lies on the diameter's leader line — the line through its
+/// two defining points — rather than a DIMTAD offset away from it.
+fn diameter_point_on_leader(
+    d: &codec::entities::dimension::DimensionDiameter,
+    point: Vector3,
+    offset: f64,
+) -> bool {
+    let (dx, dy) = (
+        d.definition_point.x - d.angle_vertex.x,
+        d.definition_point.y - d.angle_vertex.y,
+    );
+    let length = dx.hypot(dy);
+    if length < 1e-12 {
+        return true;
+    }
+    let across = ((point.x - d.angle_vertex.x) * dy - (point.y - d.angle_vertex.y) * dx) / length;
+    across.abs() < offset.abs() * 0.5
+}
+
 fn dimension_text_pos_f64(
     dim: &Dimension,
     style: Option<&DimStyle>,
@@ -7747,7 +7797,14 @@ fn dimension_text_pos_f64(
             }
             // A diameter whose text the user dragged keeps the grip point on
             // the leader and lifts the text by the DIMTAD offset (#1323).
-            Dimension::Diameter(d) if base.text_user_positioned && dimtad != 0 => {
+            // A stored point already standing off the leader is the text's
+            // own middle, as a file saved elsewhere writes it; lifting that
+            // again floated the text a text height clear of its line (#898).
+            Dimension::Diameter(d)
+                if base.text_user_positioned
+                    && dimtad != 0
+                    && diameter_point_on_leader(d, point, perp_off) =>
+            {
                 let dx = d.definition_point.x - d.angle_vertex.x;
                 let dy = d.definition_point.y - d.angle_vertex.y;
                 let len = (dx * dx + dy * dy).sqrt().max(1e-12);

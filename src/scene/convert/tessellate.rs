@@ -2529,9 +2529,13 @@ fn builtin_arrow_from_block_name(name: &str, dimasz: f32) -> Option<ArrowKind> {
             Some(ArrowKind::Origin { size: dimasz })
         }
         // `ArrowKind::Tick` draws the stroke `size` to either side of the tip
-        // (total 2·size — its `size` is a half-length, matching DIMTSZ). For
-        // a block-selected tick DIMASZ is the full stroke length, so halve it.
-        "OBLIQUE" | "ARCHTICK" => Some(ArrowKind::Tick { size: dimasz * 0.5 }),
+        // (total 2·size — its `size` is a half-length, matching DIMTSZ). The
+        // block's stroke runs (-0.5,-0.5)→(0.5,0.5) scaled by DIMASZ, so its
+        // half-length is DIMASZ/√2, not DIMASZ/2 — halving drew every
+        // oblique stroke √2 short of the file's own. (#898)
+        "OBLIQUE" | "ARCHTICK" => Some(ArrowKind::Tick {
+            size: dimasz * std::f32::consts::FRAC_1_SQRT_2,
+        }),
         "BOXFILLED" => Some(ArrowKind::Box_ {
             size: dimasz,
             filled: true,
@@ -2850,6 +2854,9 @@ fn append_custom_fill_points(
 pub(crate) struct DimGeom {
     pub(crate) ext_lines: Vec<[f32; 3]>,
     pub(crate) dim_lines: Vec<[f32; 3]>,
+    /// Arrowhead / tick outlines of a dimension: drawn solid, never in the
+    /// dimension line's dashes.
+    pub(crate) arrow_lines: Vec<[f32; 3]>,
     pub(crate) arrow_fill: Vec<[f32; 3]>,
 }
 
@@ -2858,6 +2865,7 @@ impl DimGeom {
         Self {
             ext_lines: Vec::new(),
             dim_lines: Vec::new(),
+            arrow_lines: Vec::new(),
             arrow_fill: Vec::new(),
         }
     }
