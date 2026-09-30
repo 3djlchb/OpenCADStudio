@@ -18,6 +18,7 @@ mod mview_block;
 mod open_obj;
 pub(crate) mod pc_attach;
 pub(crate) mod pc_crop;
+pub(crate) mod pc_extract;
 pub(crate) mod pc_stylize;
 pub(crate) mod pdf_attach;
 pub(crate) mod pdf_clip;
