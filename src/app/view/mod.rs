@@ -4257,7 +4257,7 @@ pub(super) fn recent_files_panel<'a>(
             .style(step_style),
         count_box,
         button(crate::ui::icons::themed(crate::ui::icons::PLUS, 11.0))
-            .on_press(Message::SetRecentLimit(shown + STEP))
+            .on_press(Message::SetRecentLimit(shown.saturating_add(STEP)))
             .padding([3, 6])
             .style(step_style),
         text(format!("/ {}", super::recent::RECENT_MAX))
@@ -4305,5 +4305,30 @@ mod tests {
         let bg = crosshair_background(&tab, true);
         assert_eq!(bg, tab.scene.paper_bg_color);
         assert!(crate::ui::style::common::canvas_is_light(bg));
+    }
+
+    /// The [+] step on the keep-recent-files box is built eagerly from an
+    /// uncapped user string (`RecentLimitInput` keeps every ASCII digit):
+    /// `18446744073709551615` parses to `usize::MAX`, and the plain
+    /// `shown + STEP` overflowed while the *widget was constructed* —
+    /// i.e. during `view()`, before any click. The [−] button next to it
+    /// already used `saturating_sub`.
+    #[test]
+    fn recent_limit_plus_step_survives_an_overflowing_input() {
+        let _ = start_page_content(
+            &[],
+            &[],
+            false,
+            &std::collections::HashMap::new(),
+            &[],
+            false,
+            &[],
+            &std::collections::HashMap::new(),
+            50,
+            "18446744073709551615",
+            800.0,
+            std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            super::super::StartSection::default(),
+        );
     }
 }
