@@ -3290,25 +3290,18 @@ fn arc_tangent_points(
         .collect()
 }
 
-pub fn is_ellipse_param_on_arc(t: f64, start_param: f64, end_param: f64) -> bool {
-    let raw_sweep = end_param - start_param;
-    if (raw_sweep.abs() - std::f64::consts::TAU).abs() < 1e-9
-        || raw_sweep.abs() >= std::f64::consts::TAU - 1e-9
-        || raw_sweep.abs() < 1e-9
-    {
+/// Whether ellipse parameter `t` lies on the arc running counter-clockwise
+/// from `start_param` to `end_param`. A zero or full-turn span is the whole
+/// ellipse.
+fn is_ellipse_param_on_arc(t: f64, start_param: f64, end_param: f64) -> bool {
+    use std::f64::consts::TAU;
+    let span = end_param - start_param;
+    if span.abs() < 1e-9 || span.abs() >= TAU - 1e-9 {
         return true;
     }
-    let sweep = raw_sweep.rem_euclid(std::f64::consts::TAU);
-    let sweep = if sweep.abs() <= 1e-9 && raw_sweep.abs() > 1e-5 {
-        std::f64::consts::TAU
-    } else {
-        sweep
-    };
-    if sweep >= std::f64::consts::TAU - 1e-9 {
-        return true;
-    }
-    let d_t = (t - start_param).rem_euclid(std::f64::consts::TAU);
-    d_t <= sweep + 1e-6 || d_t >= std::f64::consts::TAU - 1e-6
+    let sweep = span.rem_euclid(TAU);
+    let along = (t - start_param).rem_euclid(TAU);
+    along <= sweep + 1e-6 || along >= TAU - 1e-6
 }
 
 fn planar_ellipse_tangent_points(
