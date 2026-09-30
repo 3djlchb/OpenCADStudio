@@ -421,7 +421,7 @@ impl Stylization {
     }
 }
 
-/// The colour schemes a new drawing's colour map carries, low to high.
+/// The colour schemes a new drawing's colour map carries, high end first.
 const BUILTIN_RAMPS: [(&str, &[u32]); 7] = [
     ("Hydro", &[0x00bfff, 0x007ca5, 0x005f7f, 0x00394c, 0x00264c, 0x00134c, 0x00004c, 0x000026]),
     ("Grayscale", &[0xffffff, 0xcccccc, 0x999999, 0x666666, 0x333333, 0x000000]),
@@ -465,9 +465,10 @@ fn ramp_colors(document: &CadDocument, id: &str, fallback: &str) -> Vec<[u8; 3]>
 }
 
 /// The colour at `t` (0–1, clamped) along a scheme: blended between its
-/// colours, or the band `t` falls in.
+/// colours, or the band `t` falls in. A scheme lists its high end first
+/// (Spectrum: magenta at the highest value, red at the lowest).
 fn ramp(colors: &[[u8; 3]], t: f64, gradient: bool) -> [u8; 3] {
-    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
+    let t = 1.0 - if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
     if colors.len() < 2 {
         return colors.first().copied().unwrap_or([255; 3]);
     }
