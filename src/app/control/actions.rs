@@ -75,6 +75,7 @@ pub(super) const NAMES: &[&str] = &[
     "pc_manager",
     "pdf_page_select",
     "pc_colormap",
+    "pc_section",
     "ribbon_tab",
     "ribbon_dropdown",
     "dialog_ok",
@@ -721,6 +722,24 @@ impl OpenCADStudio {
                     _ => return Err(failure("invalid_value", "Unknown color map edit")),
                 })
             }
+            // Section extraction dialog: "min=0.01", "connect=0.02", "angle=5",
+            // "points=18000", "lines=1", "perimeter=1", "preview=0", "width=0".
+            "pc_section" => {
+                use crate::ui::window::pdf_dialogs::PdfDialogMsg as M;
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                Message::PdfDialog(match key {
+                    "min" => M::SecMinLength(arg.into()),
+                    "connect" => M::SecConnect(arg.into()),
+                    "angle" => M::SecAngle(arg.into()),
+                    "points" => M::SecMaxPoints(arg.into()),
+                    "width" => M::SecWidth(arg.into()),
+                    "lines" => M::SecPolylines(arg == "0"),
+                    "perimeter" => M::SecPerimeter(arg != "0"),
+                    "preview" => M::SecPreview(arg != "0"),
+                    _ => return Err(failure("invalid_value", "Unknown section setting")),
+                })
+            }
             // Point Cloud Manager: flip a row's switch, "<handle>:<row>" with
             // row cloud, unassigned, scans or scan:<name>.
             "pc_manager_toggle" => {
@@ -776,6 +795,7 @@ impl OpenCADStudio {
                     Some(crate::app::ModalKind::PdfAttach) => PdfDialogMsg::AttachOk,
                     Some(crate::app::ModalKind::PointCloudAttach) => PdfDialogMsg::CloudOk,
                     Some(crate::app::ModalKind::PointCloudColorMap) => PdfDialogMsg::MapOk,
+                    Some(crate::app::ModalKind::PcSection) => PdfDialogMsg::SecCreate,
                     Some(crate::app::ModalKind::UnderlayLayers) => PdfDialogMsg::LayersOk,
                     Some(crate::app::ModalKind::PdfImportSettings) => PdfDialogMsg::SettingsOk,
                     Some(crate::app::ModalKind::PdfImportFile) => PdfDialogMsg::ImportOk,

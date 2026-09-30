@@ -8485,6 +8485,11 @@ impl OpenCADStudio {
             }
 
             Message::CloseModal => {
+                // Cancelling the section settings drops the waiting extraction.
+                if self.active_modal == Some(super::ModalKind::PcSection) {
+                    crate::modules::insert::pc_extract::drop_job();
+                    self.pc_section = None;
+                }
                 if self.active_modal == Some(super::ModalKind::RecoveryPrompt) {
                     return self.update(Message::RecoveryDecline);
                 }

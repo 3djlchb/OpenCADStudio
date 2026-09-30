@@ -378,6 +378,7 @@ impl OpenCADStudio {
                     }
                     "attach" => crate::t!("Attaches a PDF file as an underlay."),
                     "pointcloud" => crate::t!("Attaches a point cloud scan or project."),
+                    "pcsection" => crate::t!("Traces the points on the kept side of a live section as lines."),
                     "pointcloudcolormap" => {
                         crate::t!("Sets the color schemes and ranges a point cloud is colored by intensity or elevation.")
                     }
@@ -503,6 +504,18 @@ impl OpenCADStudio {
             | PdfDialogMsg::MapCurrent(_)
             | PdfDialogMsg::MapApply
             | PdfDialogMsg::MapOk) => return self.update_point_cloud_color_map(message),
+            message @ (PdfDialogMsg::SecPerimeter(_)
+            | PdfDialogMsg::SecMaxPoints(_)
+            | PdfDialogMsg::SecLayer(_)
+            | PdfDialogMsg::SecColor(_)
+            | PdfDialogMsg::SecPolylines(_)
+            | PdfDialogMsg::SecWidth(_)
+            | PdfDialogMsg::SecMinLength(_)
+            | PdfDialogMsg::SecConnect(_)
+            | PdfDialogMsg::SecAngle(_)
+            | PdfDialogMsg::SecPick(_)
+            | PdfDialogMsg::SecPreview(_)
+            | PdfDialogMsg::SecCreate) => return self.update_pc_section(message),
             PdfDialogMsg::CloudPathType(choice) => {
                 let stored = self.point_cloud_attach.as_ref().map(|s| self.pdf_stored_path(&s.path, choice.0));
                 if let (Some(s), Some(stored)) = (self.point_cloud_attach.as_mut(), stored) {

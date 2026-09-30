@@ -70,6 +70,20 @@ pub enum PdfDialogMsg {
     MapCurrent(bool),
     MapApply,
     MapOk,
+    // Extract Section Lines from Point Cloud
+    SecPerimeter(bool),
+    SecMaxPoints(String),
+    SecLayer(String),
+    SecColor(LineColor),
+    SecPolylines(bool),
+    SecWidth(String),
+    SecMinLength(String),
+    SecConnect(String),
+    SecAngle(String),
+    /// Measure the connect tolerance (else the minimum length) on screen.
+    SecPick(bool),
+    SecPreview(bool),
+    SecCreate,
     // Underlay Layers
     LayersUnderlay(String),
     LayersSearch(String),
@@ -1487,4 +1501,172 @@ pub fn view_point_cloud_color_map<'a>(
     .spacing(6)
     .align_y(iced::Center);
     column![tabs, body, footer].spacing(10).padding([10, 12]).width(sizing.width).into()
+}
+
+// ── Extract Section Lines from Point Cloud ─────────────────────────────────
+
+/// A colour the extracted lines can take (ACI; 256 ByLayer, 0 ByBlock).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineColor(pub i16);
+
+impl LineColor {
+    pub const ALL: [LineColor; 9] = [
+        LineColor(256),
+        LineColor(0),
+        LineColor(1),
+        LineColor(2),
+        LineColor(3),
+        LineColor(4),
+        LineColor(5),
+        LineColor(6),
+        LineColor(7),
+    ];
+}
+
+impl fmt::Display for LineColor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self.0 {
+            256 => t!("ByLayer"),
+            0 => t!("ByBlock"),
+            1 => t!("Red"),
+            2 => t!("Yellow"),
+            3 => t!("Green"),
+            4 => t!("Cyan"),
+            5 => t!("Blue"),
+            6 => t!("Magenta"),
+            _ => t!("White"),
+        };
+        f.write_str(label.as_ref())
+    }
+}
+
+/// The dialog's fields; numbers as typed.
+pub struct PcSectionState {
+    pub perimeter: bool,
+    pub max_points: String,
+    /// "Use Current" first, then the drawing's layers.
+    pub layers: Vec<String>,
+    pub layer: String,
+    pub color: LineColor,
+    pub polylines: bool,
+    pub width: String,
+    pub min_length: String,
+    pub connect: String,
+    pub angle: String,
+    pub preview: bool,
+}
+
+pub fn view_pc_section<'a>(state: &'a PcSectionState, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    let extract = card(
+        t!("Extract").into_owned(),
+        segmented(
+            vec![(false, t!("Entire cross section").into_owned()), (true, t!("Perimeter only").into_owned())],
+            state.perimeter,
+            PdfDialogMsg::SecPerimeter,
+        ),
+    );
+    let points = state.max_points.trim().parse::<f32>().unwrap_or(18_000.0).clamp(1_000.0, 200_000.0);
+    // ponytail: the time shown scales with the points (18000 ≈ 1 minute, as
+    // the reference shows it); the real rate depends on the machine.
+    let minutes = (points / 18_000.0).ceil().max(1.0) as u32;
+    let max_points = card(
+        t!("Maximum points to process").into_owned(),
+        column![
+            row![
+                iced::widget::slider(1_000.0..=200_000.0, points, |v| msg(PdfDialogMsg::SecMaxPoints(
+                    ((v / 1_000.0).round() * 1_000.0).to_string()
+                )))
+                .step(1_000.0)
+                .width(Fill),
+                text_input("", &state.max_points)
+                    .on_input(|v| msg(PdfDialogMsg::SecMaxPoints(v)))
+                    .size(11)
+                    .padding([4, 8])
+                    .width(Length::Fixed(90.0))
+                    .style(field_style),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+            row![
+                text(t!("Faster")).size(10).style(muted_style),
+                Space::new().width(Fill),
+                text(t!("More accurate")).size(10).style(muted_style),
+                Space::new().width(Fill),
+                text(crate::tf!("Estimated time: {count} min", count = minutes)).size(10).style(muted_style),
+            ],
+        ]
+        .spacing(6),
+    );
+    let layer = pick_list(Some(state.layer.clone()), state.layers.clone(), |n: &String| n.clone())
+        .on_select(|n| msg(PdfDialogMsg::SecLayer(n)))
+        .text_size(12)
+        .padding([4, 8])
+        .width(Fill);
+    let color = pick_list(Some(state.color), LineColor::ALL.to_vec(), |c: &LineColor| c.to_string())
+        .on_select(|c| msg(PdfDialogMsg::SecColor(c)))
+        .text_size(12)
+        .padding([4, 8])
+        .width(Fill);
+    let labelled = |label: std::borrow::Cow<'static, str>, control: Element<'a, Message>| -> Element<'a, Message> {
+        row![text(label).size(11).style(muted_style).width(Length::Fixed(70.0)), control]
+            .spacing(6)
+            .align_y(iced::Center)
+            .into()
+    };
+    let output = card(
+        t!("Output geometry").into_owned(),
+        column![
+            labelled(t!("Layer"), layer.into()),
+            labelled(t!("Color"), color.into()),
+            segmented(
+                vec![(false, t!("Lines").into_owned()), (true, t!("2D Polylines").into_owned())],
+                state.polylines,
+                PdfDialogMsg::SecPolylines,
+            ),
+            field(t!("Polyline width").into_owned(), &state.width, state.polylines, 150.0, |v| msg(PdfDialogMsg::SecWidth(v))),
+        ]
+        .spacing(8),
+    );
+    let pick = |connect: bool| {
+        button(text("⌖").size(12))
+            .on_press(msg(PdfDialogMsg::SecPick(connect)))
+            .style(button_style(false))
+            .padding([4, 8])
+    };
+    let tolerances = card(
+        t!("Extraction tolerances").into_owned(),
+        column![
+            row![field(t!("Minimum line length").into_owned(), &state.min_length, true, 170.0, |v| msg(PdfDialogMsg::SecMinLength(v))), pick(false)]
+                .spacing(6)
+                .align_y(iced::Center),
+            row![field(t!("Connect lines tolerance").into_owned(), &state.connect, true, 170.0, |v| msg(PdfDialogMsg::SecConnect(v))), pick(true)]
+                .spacing(6)
+                .align_y(iced::Center),
+            row![
+                field(t!("Collinear angle tolerance").into_owned(), &state.angle, true, 170.0, |v| msg(PdfDialogMsg::SecAngle(v))),
+                text("0–10°").size(10).style(muted_style)
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
+        ]
+        .spacing(8),
+    );
+    let body = column![
+        row![extract, max_points].spacing(10),
+        row![output, tolerances].spacing(10),
+    ]
+    .spacing(10);
+    let footer = row![
+        button(text("?").size(12))
+            .on_press(msg(PdfDialogMsg::Help("pcsection")))
+            .style(button_style(false))
+            .padding([5, 11]),
+        chip(t!("Preview result").into_owned(), state.preview, msg(PdfDialogMsg::SecPreview(!state.preview))),
+        Space::new().width(Fill),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button(t!("Create"), msg(PdfDialogMsg::SecCreate), true),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+    column![body, footer].spacing(10).padding([10, 12]).width(sizing.width).into()
 }

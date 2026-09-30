@@ -496,31 +496,61 @@ pub struct Section {
 
 /// The extraction settings (the reference's dialog defaults), kept for the
 /// session.
-#[derive(Clone, Copy)]
-struct Settings {
-    perimeter: bool,
-    max_points: usize,
-    polylines: bool,
-    width: f64,
-    min_length: f64,
-    connect: f64,
-    angle: f64,
+#[derive(Clone, Debug, PartialEq)]
+pub struct Settings {
+    pub perimeter: bool,
+    pub max_points: usize,
+    /// The layer the lines go on; `None` is the current layer.
+    pub layer: Option<String>,
+    /// The lines' colour (ACI; 256 ByLayer, 0 ByBlock).
+    pub color: i16,
+    pub polylines: bool,
+    pub width: f64,
+    pub min_length: f64,
+    pub connect: f64,
+    pub angle: f64,
+    /// Show the result and ask to accept it (else create it at once).
+    pub preview: bool,
 }
 
 const DEFAULTS: Settings = Settings {
     perimeter: false,
     max_points: 18_000,
+    layer: None,
+    color: 3,
     polylines: true,
     width: 0.0,
     min_length: 150.0,
     connect: 300.0,
     angle: 5.0,
+    preview: true,
 };
 
 static SETTINGS: Mutex<Settings> = Mutex::new(DEFAULTS);
 
-fn settings() -> Settings {
-    SETTINGS.lock().map(|s| *s).unwrap_or(DEFAULTS)
+pub fn settings() -> Settings {
+    SETTINGS.lock().map(|s| s.clone()).unwrap_or(DEFAULTS)
+}
+
+pub fn set_settings(settings: Settings) {
+    if let Ok(mut stored) = SETTINGS.lock() {
+        *stored = settings;
+    }
+}
+
+/// The cloud and section a PCEXTRACTSECTION is extracting from while its
+/// settings dialog is open.
+static JOB: Mutex<Option<(Clouds, Section)>> = Mutex::new(None);
+
+/// Whether an extraction waits for its settings dialog.
+pub fn has_job() -> bool {
+    JOB.lock().is_ok_and(|job| job.is_some())
+}
+
+pub fn drop_job() {
+    if let Ok(mut job) = JOB.lock() {
+        *job = None;
+    }
 }
 
 const TOO_FEW: &str = "Too few points to process. No geometry extracted from point cloud.";
@@ -734,7 +764,11 @@ impl SectionCommand {
             .into_iter()
             .map(|p| plane.to_local(p).truncate())
             .collect();
-        let color = Color::from_index(3);
+        let color = match s.color {
+            256 => Color::ByLayer,
+            0 => Color::ByBlock,
+            index => Color::from_index(index),
+        };
         let mut out = Vec::new();
         for chain in trace(&flat, &s) {
             if s.polylines {
@@ -744,6 +778,9 @@ impl SectionCommand {
                     ..Default::default()
                 };
                 pline.common.color = color.clone();
+                if let Some(layer) = &s.layer {
+                    pline.common.layer = layer.clone();
+                }
                 out.push(plane.place_entity(EntityType::LwPolyline(pline)));
             } else {
                 for w in chain.windows(2) {
@@ -752,6 +789,9 @@ impl SectionCommand {
                         vector(plane.to_world(w[1].extend(0.0))),
                     );
                     line.common.color = color.clone();
+                    if let Some(layer) = &s.layer {
+                        line.common.layer = layer.clone();
+                    }
                     out.push(EntityType::Line(line));
                 }
             }
@@ -759,11 +799,22 @@ impl SectionCommand {
         Ok(out)
     }
 
+    /// PCEXTRACTSECTION after its settings dialog: the waiting cloud and
+    /// section, extracted with the settings.
+    pub fn resume() -> Option<Self> {
+        let (cloud, section) = JOB.lock().ok()?.take()?;
+        let mut command = Self::new(true, Clouds::default(), Vec::new());
+        command.cloud = Some(cloud);
+        command.section = Some(section);
+        command.step = SectionStep::Accept;
+        Some(command)
+    }
+
     /// Extracts; asks to accept when previewing, else creates.
-    fn run(&mut self) -> CmdResult {
+    pub fn run(&mut self) -> CmdResult {
         match self.extract() {
             Err(message) => CmdResult::CancelWithMessage(message.to_string()),
-            Ok(entities) if !self.ask => {
+            Ok(entities) if !self.ask || !settings().preview => {
                 if entities.is_empty() { CmdResult::Cancel } else { CmdResult::CommitEntitiesAndExit(entities) }
             }
             Ok(entities) => {
@@ -862,18 +913,65 @@ impl SectionCommand {
                     "2" | "2D" | "P" | "POLYLINES" | "2D POLYLINES" => s.polylines = true,
                     _ => return CmdResult::ReportError("Invalid option keyword.".to_string()),
                 }
-                if let Ok(mut stored) = SETTINGS.lock() {
-                    *stored = s;
-                }
+                set_settings(s);
                 return self.run();
             }
             _ => return CmdResult::NeedPoint,
         };
-        if let Ok(mut stored) = SETTINGS.lock() {
-            *stored = s;
-        }
+        set_settings(s);
         self.step = next;
         CmdResult::NeedPoint
+    }
+}
+
+/// The dialog's pick buttons: a distance measured by two points on screen,
+/// then the dialog again.
+pub struct SectionDistanceCommand {
+    /// Connect lines tolerance (else minimum line length).
+    connect: bool,
+    first: Option<DVec3>,
+}
+
+impl SectionDistanceCommand {
+    pub fn new(connect: bool) -> Self {
+        Self { connect, first: None }
+    }
+}
+
+impl CadCommand for SectionDistanceCommand {
+    fn name(&self) -> &'static str {
+        "PCEXTRACTSECTION"
+    }
+
+    fn prompt(&self) -> String {
+        if self.first.is_none() { "Specify first point:" } else { "Specify second point:" }.to_string()
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        let Some(first) = self.first else {
+            self.first = Some(pt);
+            return CmdResult::NeedPoint;
+        };
+        let mut s = settings();
+        let distance = first.distance(pt);
+        if distance > 0.0 {
+            if self.connect {
+                s.connect = distance;
+            } else {
+                s.min_length = distance;
+            }
+            set_settings(s);
+        }
+        CmdResult::Dispatch("_PCSECTIONDLG".to_string())
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Dispatch("_PCSECTIONDLG".to_string())
+    }
+
+    fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        let first = self.first?;
+        Some(WireModel::solid_f64("pc_section_distance".into(), vec![first.to_array(), pt.to_array()], [1.0, 1.0, 1.0, 1.0], false))
     }
 }
 
@@ -950,6 +1048,13 @@ impl CadCommand for SectionCommand {
         let Some(cloud) = self.clouds.of(handle) else {
             return CmdResult::CancelWithMessage("The point cloud is not loaded.".to_string());
         };
+        // PCEXTRACTSECTION asks its settings in the dialog first.
+        if self.ask {
+            if let Ok(mut job) = JOB.lock() {
+                *job = Some((cloud, section));
+            }
+            return CmdResult::Dispatch("_PCSECTIONDLG".to_string());
+        }
         self.cloud = Some(cloud);
         self.section = Some(section);
         self.run()
@@ -966,6 +1071,13 @@ impl CadCommand for SectionCommand {
                 "A" | "ACCEPT" => {
                     let entities = std::mem::take(&mut self.result);
                     if entities.is_empty() { CmdResult::Cancel } else { CmdResult::CommitEntitiesAndExit(entities) }
+                }
+                // Back to the settings dialog with the same cloud and section.
+                "" | "S" | "SETTINGS" if self.ask => {
+                    if let (Some(cloud), Some(section), Ok(mut job)) = (self.cloud.take(), self.section, JOB.lock()) {
+                        *job = Some((cloud, section));
+                    }
+                    CmdResult::Dispatch("_PCSECTIONDLG".to_string())
                 }
                 "" | "S" | "SETTINGS" => {
                     self.step = SectionStep::Extract;
