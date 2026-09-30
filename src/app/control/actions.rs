@@ -72,6 +72,7 @@ pub(super) const NAMES: &[&str] = &[
     "pdf_dialog_ok",
     "pdf_layer_toggle",
     "pc_manager_toggle",
+    "pc_manager",
     "pdf_page_select",
     "pc_colormap",
     "ribbon_tab",
@@ -732,6 +733,21 @@ impl OpenCADStudio {
                     return Err(failure("bad_value", "Expected <handle>:<row>"));
                 };
                 Message::PcManager(PcManagerMsg::Toggle(handle, row))
+            }
+            // Point Cloud Manager tree: "search=<text>", "collapse", "expand",
+            // "toggle_node=<key>" or "select=<key>".
+            "pc_manager" => {
+                use crate::ui::window::pc_manager::PcManagerMsg as M;
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                Message::PcManager(match key {
+                    "search" => M::Search(arg.into()),
+                    "collapse" => M::CollapseAll,
+                    "expand" => M::ExpandAll,
+                    "toggle_node" => M::Expand(arg.into()),
+                    "select" => M::Select(arg.into()),
+                    _ => return Err(failure("invalid_value", "Unknown point cloud manager edit")),
+                })
             }
             // Attach dialog: choose pages by index ("0,2").
             "pdf_page_select" => {
