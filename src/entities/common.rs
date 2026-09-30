@@ -122,7 +122,7 @@ pub fn without_negative_zero(text: String) -> String {
 
 fn format_signed_length(value: f64) -> String {
     let ctx = unit_context();
-    let prec = ctx.luprec.max(0) as usize;
+    let prec = ctx.luprec.max(0).min(15) as usize;
     match ctx.lunits {
         1 => format!("{:.*e}", prec, value),
         3 => {
@@ -196,7 +196,7 @@ pub fn format_angle(value_rad: f64) -> String {
 
 fn format_signed_angle(value_rad: f64) -> String {
     let ctx = unit_context();
-    let prec = ctx.auprec.max(0) as usize;
+    let prec = ctx.auprec.max(0).min(15) as usize;
     match ctx.aunits {
         1 => dms(value_rad.to_degrees(), prec),
         2 => {
@@ -1264,6 +1264,39 @@ mod length_format_tests {
                 );
             }
         }
+    }
+
+    /// LUPREC / AUPREC reach the formatters straight from the header, where
+    /// `SETVAR` or a carried file can hold any `i16`. `format_area` already
+    /// caps itself at 15; `format_length` and `format_angle` printed the raw
+    /// count on every call, so precision 30_000 bloated each formatted value
+    /// to ~30 KB on the properties hot path.
+    #[test]
+    fn huge_precision_cannot_bloat_formatting_output() {
+        let original = unit_context();
+        let length = with_units(2, 30_000, 12.3456);
+        let mut ctx = unit_context();
+        ctx.aunits = 0;
+        ctx.auprec = 30_000;
+        set_unit_context(ctx);
+        let angle = format_angle(1.0);
+        let area = format_area(12.3456);
+        set_unit_context(original);
+        assert!(
+            length.len() < 64,
+            "format_length produced {} chars",
+            length.len()
+        );
+        assert!(
+            angle.len() < 64,
+            "format_angle produced {} chars",
+            angle.len()
+        );
+        assert!(
+            area.len() < 64,
+            "format_area produced {} chars",
+            area.len()
+        );
     }
 }
 

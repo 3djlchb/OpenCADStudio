@@ -2149,6 +2149,7 @@ impl OpenCADStudio {
                                 Some(v) => v
                                     .parse::<i16>()
                                     .map(|x| {
+                                        let x = x.clamp(0, 8);
                                         h.linear_unit_precision = x;
                                         (format!("LUPREC = {x}"), true)
                                     })
@@ -2171,6 +2172,7 @@ impl OpenCADStudio {
                                 Some(v) => v
                                     .parse::<i16>()
                                     .map(|x| {
+                                        let x = x.clamp(0, 8);
                                         h.angular_unit_precision = x;
                                         (format!("AUPREC = {x}"), true)
                                     })
@@ -3443,6 +3445,28 @@ mod tests {
 
         let _ = app.run_command_line("SETVAR ISOLINES -3");
         assert_eq!(app.tabs[i].scene.document.header.isolines, 0);
+    }
+
+    /// `SETVAR LUPREC` / `AUPREC` stored any parseable `i16` verbatim. The
+    /// units dialog only ever offers 0-8 places, and the formatters read the
+    /// header on every properties/annotation call, so an unclamped value
+    /// (positive or negative) fed unbounded strings into those hot paths.
+    #[test]
+    fn setvar_precision_stays_within_the_range_the_units_dialog_offers() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("SETVAR LUPREC 30000");
+        assert_eq!(app.tabs[i].scene.document.header.linear_unit_precision, 8);
+
+        let _ = app.run_command_line("SETVAR AUPREC 30000");
+        assert_eq!(app.tabs[i].scene.document.header.angular_unit_precision, 8);
+
+        let _ = app.run_command_line("SETVAR LUPREC -3");
+        assert_eq!(app.tabs[i].scene.document.header.linear_unit_precision, 0);
+
+        let _ = app.run_command_line("SETVAR LUPREC 5");
+        assert_eq!(app.tabs[i].scene.document.header.linear_unit_precision, 5);
     }
 
     #[test]
