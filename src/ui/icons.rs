@@ -1030,8 +1030,13 @@ mod themed_cache_tests {
     /// on a different static.
     ///
     /// Run with `--nocapture` to see the numbers:
-    /// `cargo test --lib themed_cache_speedup_over_uncached_handle_creation -- --nocapture`.
+    /// `cargo test --lib themed_cache_speedup_over_uncached_handle_creation -- --ignored --nocapture`.
+    ///
+    /// Ignored by default: it compares wall-clock times, and under the
+    /// parallel suite's load the uncached loop can finish first. The cache's
+    /// behaviour is pinned by the entry-count tests above.
     #[test]
+    #[ignore = "wall-clock benchmark; run with --ignored"]
     fn themed_cache_speedup_over_uncached_handle_creation() {
         use std::time::Instant;
 
