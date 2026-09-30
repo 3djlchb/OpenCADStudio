@@ -3989,15 +3989,18 @@ fn tessellate_dimension_inner(
     // DIMLTEX (dim line) / DIMLTEX1 (ext1) / DIMLTEX2 (ext2) — linetype
     // handles → pattern. Looked up in document.line_types by handle.
     let lt_scale = document.header.linetype_scale as f32 * dim.base().common.linetype_scale as f32;
-    let (dim_pat_len, dim_pat) = style
-        .map(|s| resolve_pattern_by_handle(document, s.dimltex_handle, lt_scale))
-        .unwrap_or((0.0, [0.0; 8]));
-    let (ext1_pat_len, ext1_pat) = style
-        .map(|s| resolve_pattern_by_handle(document, s.dimltex1_handle, lt_scale))
-        .unwrap_or((0.0, [0.0; 8]));
-    let (ext2_pat_len, ext2_pat) = style
-        .map(|s| resolve_pattern_by_handle(document, s.dimltex2_handle, lt_scale))
-        .unwrap_or((0.0, [0.0; 8]));
+    let pattern = |line_type: Option<codec::types::Handle>| {
+        resolve_pattern_by_handle(
+            document,
+            line_type.unwrap_or(codec::types::Handle::NULL),
+            &dim.base().common,
+            active_viewport,
+            lt_scale,
+        )
+    };
+    let (dim_pat_len, dim_pat) = pattern(style.map(|s| s.dimltex_handle));
+    let (ext1_pat_len, ext1_pat) = pattern(style.map(|s| s.dimltex1_handle));
+    let (ext2_pat_len, ext2_pat) = pattern(style.map(|s| s.dimltex2_handle));
 
     let mut wires = Vec::new();
 
@@ -4399,23 +4402,31 @@ fn resolve_dim_lineweight_px(code: i16, fallback_px: f32) -> f32 {
 
 /// Look up a linetype in the document's line_types table by handle and
 /// resolve it to a (pattern_length, pattern) pair compatible with WireModel.
+/// A dimension line's dash pattern. A linetype the style names draws as
+/// itself; none or ByBlock takes the dimension's own linetype (ByLayer: its
+/// layer's), which is what the ByBlock lines of its baked `*D` block drew —
+/// an edited dimension, drawn live, lost its layer's dashes. (#898)
 fn resolve_pattern_by_handle(
     doc: &CadDocument,
     handle: codec::types::Handle,
+    common: &codec::entities::EntityCommon,
+    viewport: Option<codec::Handle>,
     scale: f32,
 ) -> (f32, [f32; 8]) {
-    if handle.is_null() {
-        return (0.0, [0.0; 8]);
-    }
-    let name = doc
-        .line_types
-        .iter()
-        .find(|lt| lt.handle == handle)
-        .map(|lt| lt.name.clone());
-    match name {
-        Some(n) => crate::scene::view::render::resolve_pattern(&doc.line_types, &n, scale),
-        None => (0.0, [0.0; 8]),
-    }
+    let named = (!handle.is_null())
+        .then(|| doc.line_types.iter().find(|lt| lt.handle == handle))
+        .flatten()
+        .map(|lt| lt.name.as_str())
+        .filter(|name| !name.eq_ignore_ascii_case("byblock"));
+    let name = match named {
+        Some(name) if name.eq_ignore_ascii_case("bylayer") => doc
+            .layers
+            .get(&common.layer)
+            .map_or("Continuous", |layer| layer.line_type.as_str()),
+        Some(name) => name,
+        None => crate::scene::view::render::linetype_name_for_common_viewport(doc, common, viewport),
+    };
+    crate::scene::view::render::resolve_pattern(&doc.line_types, name, scale)
 }
 
 /// Split the combined ext-lines point list (NaN-separated segment pairs)

@@ -3383,7 +3383,7 @@ pub(in crate::scene) fn linetype_name_for<'a>(document: &'a CadDocument, e: &'a 
     linetype_name_for_viewport(document, e, None)
 }
 
-pub(in crate::scene) fn linetype_name_for_common_viewport<'a>(
+pub(crate) fn linetype_name_for_common_viewport<'a>(
     document: &'a CadDocument,
     common: &'a codec::entities::EntityCommon,
     viewport: Option<Handle>,
