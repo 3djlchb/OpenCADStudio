@@ -4,6 +4,7 @@ version = "2026.39.0"
 edition = "2021"
 build = "build.rs"
 default-run = "OpenCADStudio"
+autotests = false
 
 [workspace]
 members = [
@@ -162,3 +163,7 @@ harness = false
 [[bench]]
 name = "command_benchmarks"
 harness = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
