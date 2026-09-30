@@ -1836,6 +1836,31 @@ fn grips(entity: &ExtendedEntity) -> Vec<GripDef> {
     }
 }
 
+/// The move gizmo at a point cloud's insertion point: arrows 1-3 along X/Y/Z
+/// and squares 4-6 for the XY/YZ/ZX planes.
+pub(crate) fn point_cloud_gizmo_grips(data: &PointCloudExData) -> Vec<GripDef> {
+    use crate::scene::model::object::GripShape;
+    let world = glam::DVec3::new(data.ucs_origin.x, data.ucs_origin.y, data.ucs_origin.z);
+    (0..3u8)
+        .map(|k| GripDef {
+            id: 1 + k as usize,
+            world,
+            is_midpoint: true,
+            shape: GripShape::GizmoAxis(k),
+            dir: None,
+            axis: Some(crate::scene::pick::grip::gizmo_axis(k)),
+        })
+        .chain((0..3u8).map(|k| GripDef {
+            id: 4 + k as usize,
+            world,
+            is_midpoint: true,
+            shape: GripShape::GizmoPlane(k),
+            dir: None,
+            axis: None,
+        }))
+        .collect()
+}
+
 fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
     match &mut entity.data {
         ExtendedEntityData::SectionObject(data) => {
@@ -1911,8 +1936,9 @@ fn apply_grip(entity: &mut ExtendedEntity, grip_id: usize, apply: GripApply) {
                 data.ucs_origin = data.ucs_origin + delta;
             }
         }
+        // The insertion grip and every move-gizmo part move the cloud.
         ExtendedEntityData::PointCloudEx(data) => {
-            if grip_id == 0 {
+            if grip_id <= 6 {
                 apply_point(&mut data.ucs_origin, apply);
             }
         }

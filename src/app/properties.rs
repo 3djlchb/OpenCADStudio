@@ -2966,6 +2966,29 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                     grips.push(grip);
                 }
             }
+            // A lone unlocked point cloud in a 3D visual style carries the
+            // move gizmo at its insertion point.
+            let gizmo = single_handle
+                .filter(|_| {
+                    !is_paper
+                        && self.tabs[i].scene.active_model_tile_render_mode()
+                            != codec::entities::ViewportRenderMode::Wireframe2D
+                })
+                .and_then(|handle| Some((handle, self.tabs[i].scene.document.get_entity(handle)?)))
+                .filter(|(_, entity)| !crate::scene::is_locked_point_cloud(entity))
+                .and_then(|(handle, entity)| match entity {
+                    codec::EntityType::Extended(extended) => match &extended.data {
+                        codec::entities::ExtendedEntityData::PointCloudEx(data) => {
+                            Some((handle, crate::entities::extended::point_cloud_gizmo_grips(data)))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                });
+            if let Some((handle, gizmo)) = gizmo {
+                handles.extend(std::iter::repeat(handle).take(gizmo.len()));
+                grips.extend(gizmo);
+            }
             let (grips, handles) = apply_grip_budget(grips, handles);
             (single_handle, grips, handles)
         };

@@ -966,6 +966,80 @@ struct SelectionCanvas {
     constraint_cursor_badge: Option<String>,
 }
 
+/// The move gizmo: an arrow per axis (X red, Y green, Z blue) from the
+/// centre grip and a square per axis pair; the hovered or dragged part is
+/// yellow.
+fn draw_move_gizmo(frame: &mut canvas::Frame, grips: &[GripMarker]) {
+    use crate::scene::pick::grip::{gizmo_plane_axes, GIZMO_AXIS_PX};
+    const COLORS: [Color; 3] = [
+        Color::from_rgb(0.90, 0.22, 0.20),
+        Color::from_rgb(0.27, 0.70, 0.29),
+        Color::from_rgb(0.18, 0.52, 0.93),
+    ];
+    let active = Color::from_rgb(1.0, 0.84, 0.0);
+    // Unit screen direction (y down) and tip of each shown arrow.
+    let mut axes: [Option<(Point, iced::Vector)>; 3] = [None; 3];
+    for grip in grips {
+        if let (GripShape::GizmoAxis(k), Some([dx, dy])) = (grip.shape, grip.dir) {
+            axes[k as usize % 3] = Some((grip.pos, iced::Vector::new(dx, -dy)));
+        }
+    }
+    let Some(center) = axes
+        .iter()
+        .flatten()
+        .next()
+        .map(|(tip, d)| Point::new(tip.x - d.x * GIZMO_AXIS_PX, tip.y - d.y * GIZMO_AXIS_PX))
+    else {
+        return;
+    };
+    for grip in grips {
+        let GripShape::GizmoPlane(k) = grip.shape else {
+            continue;
+        };
+        let (a, b) = gizmo_plane_axes(k);
+        let (Some((_, a)), Some((_, b))) = (axes[a as usize], axes[b as usize]) else {
+            continue;
+        };
+        let corner = |u: f32, v: f32| {
+            Point::new(
+                center.x + (a.x * u + b.x * v) * GIZMO_AXIS_PX,
+                center.y + (a.y * u + b.y * v) * GIZMO_AXIS_PX,
+            )
+        };
+        let quad = canvas::Path::new(|p| {
+            p.move_to(corner(0.18, 0.18));
+            p.line_to(corner(0.42, 0.18));
+            p.line_to(corner(0.42, 0.42));
+            p.line_to(corner(0.18, 0.42));
+            p.close();
+        });
+        let lit = grip.is_hovered || grip.is_hot;
+        let color = if lit { active } else { Color::from_rgb(0.85, 0.85, 0.85) };
+        frame.fill(&quad, color.scale_alpha(if lit { 0.55 } else { 0.25 }));
+        frame.stroke(&quad, canvas::Stroke::default().with_width(1.0).with_color(color));
+    }
+    for grip in grips {
+        let (GripShape::GizmoAxis(k), Some((tip, d))) =
+            (grip.shape, grip.dir.map(|[dx, dy]| (grip.pos, iced::Vector::new(dx, -dy))))
+        else {
+            continue;
+        };
+        let color = if grip.is_hovered || grip.is_hot { active } else { COLORS[k as usize % 3] };
+        let base = Point::new(tip.x - d.x * 13.0, tip.y - d.y * 13.0);
+        frame.stroke(
+            &canvas::Path::line(center, base),
+            canvas::Stroke::default().with_width(2.5).with_color(color),
+        );
+        let head = canvas::Path::new(|p| {
+            p.move_to(tip);
+            p.line_to(Point::new(base.x - d.y * 6.0, base.y + d.x * 6.0));
+            p.line_to(Point::new(base.x + d.y * 6.0, base.y - d.x * 6.0));
+            p.close();
+        });
+        frame.fill(&head, color);
+    }
+}
+
 fn draw_grip_marker(
     frame: &mut canvas::Frame,
     grip: &GripMarker,
@@ -1019,6 +1093,7 @@ fn draw_grip_marker(
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
+        GripShape::GizmoAxis(_) | GripShape::GizmoPlane(_) => return,
         GripShape::Dropdown | GripShape::DropdownAdjacent => canvas::Path::new(|b| {
             b.move_to(Point::new(sp.x - h, sp.y - h * 0.5));
             b.line_to(Point::new(sp.x + h, sp.y - h * 0.5));
@@ -1393,8 +1468,11 @@ impl canvas::Program<Message> for SelectionCanvas {
                         );
                     }
                 }
+                draw_move_gizmo(frame, &self.grips);
                 for grip in &self.grips {
-                    draw_grip_marker(frame, grip, theme, &self.selection_visual);
+                    if !matches!(grip.shape, GripShape::GizmoAxis(_) | GripShape::GizmoPlane(_)) {
+                        draw_grip_marker(frame, grip, theme, &self.selection_visual);
+                    }
                 }
             });
         }

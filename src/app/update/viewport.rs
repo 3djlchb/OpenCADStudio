@@ -167,6 +167,29 @@ fn cursor_on_projected_axis(
         .then_some(origin + direction * distance as f64)
 }
 
+/// The point under `cursor` on the plane through `origin` with `normal`.
+fn cursor_on_plane(
+    cursor: Point,
+    bounds: iced::Rectangle,
+    view: glam::Mat4,
+    eye: glam::DVec3,
+    origin: glam::DVec3,
+    normal: glam::DVec3,
+) -> Option<glam::DVec3> {
+    let inverse = view.as_dmat4().inverse();
+    let x = cursor.x as f64 / bounds.width as f64 * 2.0 - 1.0;
+    let y = 1.0 - cursor.y as f64 / bounds.height as f64 * 2.0;
+    let near = inverse.project_point3(glam::DVec3::new(x, y, 0.0));
+    let far = inverse.project_point3(glam::DVec3::new(x, y, 1.0));
+    let direction = far - near;
+    let along = direction.dot(normal);
+    if along.abs() <= 1e-12 {
+        return None;
+    }
+    let t = ((origin - eye) - near).dot(normal) / along;
+    t.is_finite().then(|| eye + near + direction * t)
+}
+
 fn is_added_polyline_vertex(
     original: &AcadEntityType,
     current: &AcadEntityType,
@@ -635,6 +658,36 @@ impl OpenCADStudio {
             .find(|(owner, grip)| *owner == handle && grip.id == grip_id)
             .and_then(|(_, grip)| grip.axis);
 
+        // A move-gizmo part moves its cloud alone, along its axis or plane.
+        let gizmo_shape = self.tabs[i]
+            .selected_grip_handles
+            .iter()
+            .copied()
+            .zip(self.tabs[i].selected_grips.iter())
+            .find(|(owner, grip)| *owner == handle && grip.id == grip_id)
+            .map(|(_, grip)| grip.shape)
+            .filter(|shape| {
+                matches!(
+                    shape,
+                    crate::scene::model::object::GripShape::GizmoAxis(_)
+                        | crate::scene::model::object::GripShape::GizmoPlane(_)
+                )
+            });
+        if let Some(shape) = gizmo_shape {
+            self.tabs[i].hot_grips.clear();
+            let mut edit = GripEdit::single(handle, grip_id, true, world);
+            edit.axis = axis;
+            edit.gizmo = true;
+            if let crate::scene::model::object::GripShape::GizmoPlane(k) = shape {
+                let (a, b) = crate::scene::pick::grip::gizmo_plane_axes(k);
+                edit.plane = Some(
+                    crate::scene::pick::grip::gizmo_axis(a)
+                        .cross(crate::scene::pick::grip::gizmo_axis(b)),
+                );
+            }
+            return edit;
+        }
+
         let clicked_is_hot = self.tabs[i].hot_grips.contains(&(handle, grip_id));
 
         let mut targets: Vec<GripTarget> = if clicked_is_hot {
@@ -716,6 +769,9 @@ impl OpenCADStudio {
             axis,
             targets,
             rectangle_frame: None,
+            plane: None,
+            grab: None,
+            gizmo: false,
         }
     }
 
@@ -927,6 +983,10 @@ impl OpenCADStudio {
         self.tabs[i].dirty = true;
         self.command_line
             .push_output(crate::tf!("Visual style: {label}").as_ref());
+        // The point cloud move gizmo follows the visual style.
+        if i == self.active_tab {
+            self.refresh_selected_grips();
+        }
         Task::none()
     }
 
@@ -1597,6 +1657,28 @@ impl OpenCADStudio {
                         cursor_on_projected_axis(p, bounds, view_rot, eye, grip.origin_world, axis)
                             .unwrap_or(snapped);
                 }
+            }
+
+            if let Some(normal) = grip.plane {
+                if snap_hit.is_none_or(|hit| hit.snap_type == crate::snap::SnapType::Grid) {
+                    snapped = cursor_on_plane(p, bounds, view_rot, eye, grip.origin_world, normal)
+                        .unwrap_or(snapped);
+                }
+            }
+            if grip.gizmo {
+                // The first move measures where the part was grabbed; the
+                // cloud then follows the cursor by that offset.
+                let grab = match grip.grab {
+                    Some(grab) => grab,
+                    None => {
+                        let grab = snapped - grip.origin_world;
+                        if let Some(active) = self.tabs[i].active_grip.as_mut() {
+                            active.grab = Some(grab);
+                        }
+                        grab
+                    }
+                };
+                snapped -= grab;
             }
 
             let snap_ms = snap_started.elapsed().as_secs_f64() * 1000.0;
