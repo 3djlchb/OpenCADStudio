@@ -1755,6 +1755,53 @@ impl Snapper {
         if self.is_on(SnapType::Intersection)
             && (local_segments.is_some() || allow_unindexed_pairwise)
         {
+            // Unindexed fallback: also test non-adjacent segments belonging to the
+            // same wire. A polyline is one entity but its own segments may cross.
+            if local_segments.is_none() {
+                for wire in in_range_wires.iter() {
+                    let src = wire_source(wire);
+                    let segment_count = wire.points.len().saturating_sub(1);
+
+                    for ai in 0..segment_count {
+                        let a0 = wp_f64(wire, ai);
+                        let a1 = wp_f64(wire, ai + 1);
+
+                        let a_min_x = a0.x.min(a1.x);
+                        let a_max_x = a0.x.max(a1.x);
+                        let a_min_y = a0.y.min(a1.y);
+                        let a_max_y = a0.y.max(a1.y);
+
+                        for bi in (ai + 1)..segment_count {
+                            let b0 = wp_f64(wire, bi);
+                            let b1 = wp_f64(wire, bi + 1);
+
+                            // Consecutive polyline segments meet at a normal vertex.
+                            // That is already an Endpoint snap, not a self-intersection.
+                            if segments_share_endpoint(a0, a1, b0, b1) {
+                                continue;
+                            }
+
+                            // Cheap AABB rejection before the exact 3-D intersection.
+                            if a_max_x < b0.x.min(b1.x)
+                                || a_min_x > b0.x.max(b1.x)
+                                || a_max_y < b0.y.min(b1.y)
+                                || a_min_y > b0.y.max(b1.y)
+                            {
+                                continue;
+                            }
+
+                            if let Some(pt) = seg_intersect_3d(a0, a1, b0, b1) {
+                                try_pt(
+                                    pt,
+                                    SnapType::Intersection,
+                                    src,
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(segments) = &local_segments {
                 let local_wires: Vec<_> = wires.iter().filter(|wire| wire_in_range(wire)).collect();
                 let mut resolved_pairs = rustc_hash::FxHashSet::default();
@@ -1789,7 +1836,13 @@ impl Snapper {
                             if b.min_x() > a.max_x() {
                                 break;
                             }
-                            if a.wire == b.wire || a.max_y() < b.min_y() || a.min_y() > b.max_y() {
+                            let same_wire_neighbours = a.wire == b.wire
+                                && segments_share_endpoint(a.a, a.b, b.a, b.b);
+
+                            if same_wire_neighbours
+                                || a.max_y() < b.min_y()
+                                || a.min_y() > b.max_y()
+                            {
                                 continue;
                             }
                             if wires.source_wire(a.wire).zip(wires.source_wire(b.wire))
@@ -1801,11 +1854,23 @@ impl Snapper {
                                     world_to_screen(pt, view_rot, eye, bounds),
                                     cursor_screen,
                                 ) <= f32::EPSILON;
+                                let primary = wires
+                                    .source_wire(a.wire)
+                                    .and_then(wire_source);
+
+                                let secondary = if a.wire == b.wire {
+                                    None
+                                } else {
+                                    wires
+                                        .source_wire(b.wire)
+                                        .and_then(wire_source)
+                                };
+
                                 try_pt(
                                     pt,
                                     SnapType::Intersection,
-                                    wires.source_wire(a.wire).and_then(wire_source),
-                                    wires.source_wire(b.wire).and_then(wire_source),
+                                    primary,
+                                    secondary,
                                 );
                                 if exact_cursor {
                                     break 'intersection_sweep;
@@ -3099,6 +3164,24 @@ pub(crate) fn exact_curve_intersections(
     Some(points)
 }
 
+/// Two segments of the same polyline that merely meet at a shared endpoint
+/// are neighbours, not a self-intersection.
+///
+/// Non-adjacent segments are allowed to intersect even when they belong to
+/// the same WireModel.
+fn segments_share_endpoint(
+    a0: DVec3,
+    a1: DVec3,
+    b0: DVec3,
+    b1: DVec3,
+) -> bool {
+    const EPS2: f64 = 1.0e-18;
+
+    a0.distance_squared(b0) <= EPS2
+        || a0.distance_squared(b1) <= EPS2
+        || a1.distance_squared(b0) <= EPS2
+        || a1.distance_squared(b1) <= EPS2
+}
 /// XY-plane segment-segment intersection.  Returns `None` if parallel or outside.
 /// True 3D intersection of two segments: the point where their plan (XY)
 /// projections cross **and** both segments are at the same height there. Returns
