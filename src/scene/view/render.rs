@@ -169,7 +169,7 @@ pub struct ViewportData {
     pub(in crate::scene) point_clouds: Arc<crate::scene::model::point_cloud::PointCloudSet>,
     /// Point cloud lighting and density for this view: `[mode, source,
     /// drawn fraction, _, light direction x, y, z, _]`.
-    pub(in crate::scene) point_cloud_light: [f32; 8],
+    pub(in crate::scene) point_cloud_light: [f32; 12],
     pub(in crate::scene) meshes: Arc<Vec<MeshLodSet>>,
     pub(in crate::scene) background_image:
         Option<crate::scene::model::image_model::DecodedImage>,
@@ -4841,18 +4841,21 @@ impl Scene {
             // Lit only in the shaded styles, as the reference.
             let lighting = if flags.mesh_fill && !flags.hidden_line { value("POINTCLOUDLIGHTING") } else { 0.0 };
             let source = value("POINTCLOUDLIGHTSOURCE");
-            let forward = (inst.camera.rotation * glam::Vec3::NEG_Z).normalize_or(glam::Vec3::NEG_Z);
-            // ponytail: the default lights as one light from the upper left
-            // of the view; the reference's exact light set is not known.
-            let light = if source > 0.5 {
-                let (up, right) = (inst.camera.rotation * glam::Vec3::Y, inst.camera.rotation * glam::Vec3::X);
-                (-forward * 0.6 + up * 0.6 - right * 0.5).normalize_or(-forward)
+            // The lights follow the view (measured from the reference in
+            // view coordinates: right, up, toward the viewer): the default
+            // lighting is a key light from the upper left and a fill light
+            // from the lower right, the other source one light from above.
+            let view = |x: f32, y: f32, z: f32| {
+                (inst.camera.rotation * glam::Vec3::new(x, y, z)).normalize_or(glam::Vec3::Z)
+            };
+            let (first, second) = if source > 0.5 {
+                (view(-0.034, 0.987, 0.158), glam::Vec3::ZERO)
             } else {
-                -forward
+                (view(-0.512, 0.500, 0.698), view(0.834, -0.451, 0.318))
             };
             // While the view moves, POINTCLOUDRTDENSITY per cent of the points.
             let fraction = if navigating { value("POINTCLOUDRTDENSITY") / 100.0 } else { 1.0 };
-            [lighting, source, fraction, 0.0, light.x, light.y, light.z, 0.0]
+            [lighting, source, fraction, 0.0, first.x, first.y, first.z, 0.0, second.x, second.y, second.z, 0.0]
         };
         Some(ViewportData {
             instance_id,

@@ -1666,8 +1666,8 @@ impl OpenCADStudio {
                 }
             }
             if grip.gizmo {
-                // The first move measures where the part was grabbed; the
-                // cloud then follows the cursor by that offset.
+                // The cloud follows the cursor by the offset it was grabbed
+                // at (measured on the press; the first move as a fallback).
                 let grab = match grip.grab {
                     Some(grab) => grab,
                     None => {
@@ -3639,8 +3639,25 @@ impl OpenCADStudio {
                         self.grip_popup = None;
                         return Task::none();
                     }
-                    self.tabs[i].active_grip =
-                        Some(self.grip_edit_for_hit(i, handle, grip_id, is_translate, world));
+                    let mut edit = self.grip_edit_for_hit(i, handle, grip_id, is_translate, world);
+                    if edit.gizmo {
+                        // Where the gizmo part was grabbed: the drag keeps
+                        // that offset from the cloud's insertion point.
+                        let (view_rot, eye) = match &edit_cam {
+                            Some(cam) => (cam.view_proj_rte(bounds), cam.eye()),
+                            None => {
+                                let cam = self.tabs[i].scene.camera.borrow();
+                                (cam.view_proj_rte(bounds), cam.eye())
+                            }
+                        };
+                        let grabbed = match (edit.axis, edit.plane) {
+                            (Some(axis), _) => cursor_on_projected_axis(p, bounds, view_rot, eye, world, axis),
+                            (_, Some(normal)) => cursor_on_plane(p, bounds, view_rot, eye, world, normal),
+                            _ => None,
+                        };
+                        edit.grab = grabbed.map(|point| point - world);
+                    }
+                    self.tabs[i].active_grip = Some(edit);
                     self.grip_hover = None;
                     self.grip_popup = None;
                     self.tabs[i]

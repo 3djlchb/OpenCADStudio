@@ -22,13 +22,15 @@ struct Uniforms {
 
 struct PointParams {
     size_px: f32,
-    // POINTCLOUDLIGHTING (0 off; 1 lit from both sides; 2 back faces dark)
-    // and POINTCLOUDLIGHTSOURCE (0 headlight; 1 the default lights).
+    // POINTCLOUDLIGHTING (0 off; 1 front faces lit; 2 both faces) and
+    // POINTCLOUDLIGHTSOURCE (0 key + fill light; 1 one light from above).
     lighting: f32,
     source: f32,
     _pad0: f32,
     light_dir: vec3<f32>,
     _pad1: f32,
+    fill_dir: vec3<f32>,
+    _pad2: f32,
 };
 @group(1) @binding(0) var<uniform> params: PointParams;
 
@@ -61,18 +63,25 @@ fn vs_main(@builtin(vertex_index) corner: u32, in: PointIn) -> VertOut {
     out.color = in.color;
     let n = in.normal.xyz;
     if params.lighting > 0.5 && dot(n, n) > 0.01 {
-        // Measured from the reference: headlight ambient 0.2 + 0.576 diffuse,
-        // the default lights 0.3 + 0.9 (clamped).
-        let d = dot(normalize(n), params.light_dir);
+        // Fitted to the reference's shading of the normals.
+        let nn = normalize(n);
+        var d = dot(nn, params.light_dir);
+        var f = dot(nn, params.fill_dir);
+        if params.lighting > 1.5 {
+            d = abs(d);
+            f = abs(f);
+        }
         var shade: f32;
         if params.source > 0.5 {
-            shade = min(0.3 + 0.9 * max(d, 0.0), 1.0);
+            shade = 0.3 + 0.7 * max(d, 0.0);
         } else if params.lighting > 1.5 {
-            shade = 0.2 + 0.576 * max(d, 0.0);
+            // ponytail: best fit only; the reference also darkens some
+            // regions that no normal-based term explains.
+            shade = 0.133 + 0.61 * d + 0.086 * f;
         } else {
-            shade = 0.2 + 0.576 * abs(d);
+            shade = 0.204 + 0.569 * max(d, 0.0) + 0.329 * max(f, 0.0);
         }
-        out.color = vec4<f32>(in.color.rgb * shade, in.color.a);
+        out.color = vec4<f32>(in.color.rgb * min(shade, 1.0), in.color.a);
     }
     return out;
 }

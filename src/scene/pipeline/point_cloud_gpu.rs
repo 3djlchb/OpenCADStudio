@@ -2,7 +2,7 @@
 // screen-space square sprites (6 vertices per instance, no vertex buffer).
 //
 // Group 1 binding 0 — PointParams (sprite size in pixels, lighting mode and
-// light source, the light direction; 32 bytes).
+// light source, the two light directions; 48 bytes).
 //
 // Buffers are keyed by `PlacedCloud::key`: a new render set re-uploads only
 // the clouds whose points changed; the rest keep their buffers.
@@ -68,7 +68,7 @@ pub struct PointCloudGpu {
     params: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     point_size: f32,
-    params_written: [f32; 8],
+    params_written: [f32; 12],
     /// The share of each cloud's points drawn (real-time density).
     fraction: f32,
 }
@@ -77,7 +77,7 @@ impl PointCloudGpu {
     pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("point_cloud.params"),
-            size: 32,
+            size: 48,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -91,7 +91,7 @@ impl PointCloudGpu {
             params,
             bind_group,
             point_size: f32::NAN,
-            params_written: [f32::NAN; 8],
+            params_written: [f32::NAN; 12],
             fraction: 1.0,
         }
     }
@@ -125,9 +125,13 @@ impl PointCloudGpu {
 
     /// The view's lighting (`[mode, source, fraction, _, light x, y, z, _]`)
     /// with the sprite size, written when they change.
-    pub fn set_view(&mut self, queue: &wgpu::Queue, light: [f32; 8]) {
+    pub fn set_view(&mut self, queue: &wgpu::Queue, light: [f32; 12]) {
         self.fraction = light[2].clamp(0.0, 1.0);
-        let params = [self.point_size, light[0], light[1], 0.0, light[4], light[5], light[6], 0.0];
+        let mut params = light;
+        params[0] = self.point_size;
+        params[1] = light[0];
+        params[2] = light[1];
+        params[3] = 0.0;
         if params != self.params_written {
             self.params_written = params;
             queue.write_buffer(&self.params, 0, bytemuck::cast_slice(&params));

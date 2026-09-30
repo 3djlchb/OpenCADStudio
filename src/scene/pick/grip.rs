@@ -79,6 +79,21 @@ fn placed_marker(
     }
 }
 
+/// Pixel distance from `cursor` to a marker; a gizmo arrow counts along its
+/// whole shaft, not only at its tip.
+fn marker_distance(shape: GripShape, screen: Vec2, dir: Option<[f32; 2]>, cursor: Point) -> f32 {
+    let cursor = Vec2::new(cursor.x, cursor.y);
+    match (shape, dir) {
+        (GripShape::GizmoAxis(_), Some([dx, dy])) => {
+            let d = Vec2::new(dx, -dy);
+            let start = screen - d * (GIZMO_AXIS_PX - 14.0);
+            let t = (cursor - start).dot(d).clamp(0.0, GIZMO_AXIS_PX - 14.0);
+            cursor.distance(start + d * t)
+        }
+        _ => cursor.distance(screen),
+    }
+}
+
 // ── Active drag state ─────────────────────────────────────────────────────
 
 /// Stored on `OpenCADStudio` while a grip is being dragged.
@@ -327,12 +342,10 @@ pub fn find_hit_grip(
 
     for (index, g) in grips.iter().enumerate() {
         let project = |world: DVec3| camera.project(world, bounds);
-        let Some((screen, _)) = placed_marker(g, project(g.world), project) else {
+        let Some((screen, dir)) = placed_marker(g, project(g.world), project) else {
             continue;
         };
-        let dx = screen.x - cursor.x;
-        let dy = screen.y - cursor.y;
-        let d = (dx * dx + dy * dy).sqrt();
+        let d = marker_distance(g.shape, screen, dir, cursor);
         if d < best_dist {
             best_dist = d;
             best = Some((index, g.id, g.is_midpoint, g.world));
@@ -396,12 +409,10 @@ pub fn find_hit_grip_rte(
 
     for (index, g) in grips.iter().enumerate() {
         let project = |world: DVec3| project_rte(world, view_rot, eye, bounds);
-        let Some((screen, _)) = placed_marker(g, project(g.world), project) else {
+        let Some((screen, dir)) = placed_marker(g, project(g.world), project) else {
             continue;
         };
-        let dx = screen.x - cursor.x;
-        let dy = screen.y - cursor.y;
-        let d = (dx * dx + dy * dy).sqrt();
+        let d = marker_distance(g.shape, screen, dir, cursor);
         if d < best_dist {
             best_dist = d;
             best = Some((index, g.id, g.is_midpoint, g.world));

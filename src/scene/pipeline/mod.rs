@@ -2813,7 +2813,9 @@ impl Pipeline {
                 );
                 for &i in idxs {
                     if let Some(w) = wires.get(i as usize) {
-                        if !w.display_visible {
+                        // An unseen pick hull (a point cloud's extents box) shows while
+                        // highlighted, as the reference does.
+                        if !w.display_visible && (w.pick_tris.is_empty() || w.snap_only) {
                             continue;
                         }
                         selected_wires.push(w);
@@ -2825,7 +2827,9 @@ impl Pipeline {
             if let Some(idxs) = self.wire_handle_index.get(&h.value()) {
                 for &i in idxs {
                     if let Some(w) = wires.get(i as usize) {
-                        if !w.display_visible {
+                        // An unseen pick hull (a point cloud's extents box) shows while
+                        // highlighted, as the reference does.
+                        if !w.display_visible && (w.pick_tris.is_empty() || w.snap_only) {
                             continue;
                         }
                         hover_wires.push(w);
@@ -3848,7 +3852,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.gpu_point_clouds.upload(device, queue, set);
     }
 
-    pub fn set_point_cloud_view(&mut self, queue: &wgpu::Queue, light: [f32; 8]) {
+    pub fn set_point_cloud_view(&mut self, queue: &wgpu::Queue, light: [f32; 12]) {
         self.gpu_point_clouds.set_view(queue, light);
     }
 
