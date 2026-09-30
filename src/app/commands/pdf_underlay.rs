@@ -162,11 +162,11 @@ impl OpenCADStudio {
         self.refresh_properties();
     }
 
-    /// A Point Cloud Manager click: a switch writes the cloud's visibility
-    /// extended data as one undo step; the rest is palette state.
+    /// A Point Cloud Manager click: a switch writes the cloud's hidden scans
+    /// and regions as one undo step; the rest is palette state.
     pub(in crate::app) fn update_pc_manager(&mut self, message: crate::ui::window::pc_manager::PcManagerMsg) -> Task<Message> {
-        use crate::scene::model::point_cloud::VISIBILITY_APP;
-        use crate::ui::window::pc_manager::{self, PcManagerMsg};
+        use crate::scene::model::point_cloud::UNASSIGNED_OFF;
+        use crate::ui::window::pc_manager::{self, PcManagerMsg, Row};
         let i = self.active_tab;
         match message {
             PcManagerMsg::Toggle(handle, row) => {
@@ -178,22 +178,19 @@ impl OpenCADStudio {
                 if self.tabs[i].scene.is_layer_locked(handle) {
                     return Task::none();
                 }
+                // A scan named by its file name (automation) is the scan with that name.
+                let row = match row {
+                    Row::Scan(key) => Row::Scan(
+                        cloud.scans.iter().find(|(name, _)| *name == key).map_or(key, |(_, id)| id.clone()),
+                    ),
+                    row => row,
+                };
                 let hidden = pc_manager::toggled(&cloud.hidden, &cloud.scans, &row);
                 self.push_undo_snapshot(i, "POINTCLOUDMANAGER");
-                self.tabs[i].scene.ensure_app_id(VISIBILITY_APP);
-                let app_handle = self.tabs[i].scene.document.app_ids.get(VISIBILITY_APP).map(|a| a.handle.value());
-                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                    let data = &mut entity.common_mut().extended_data;
-                    if let Some(app) = app_handle {
-                        data.raw_dwg_eed.retain(|(a, _)| *a != app);
-                    }
-                    data.remove_record(VISIBILITY_APP);
-                    if !hidden.is_empty() {
-                        let mut record = codec::xdata::ExtendedDataRecord::new(VISIBILITY_APP);
-                        for name in hidden {
-                            record.add_value(codec::xdata::XDataValue::String(name));
-                        }
-                        data.add_record(record);
+                if let Some(codec::EntityType::Extended(extended)) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
+                        data.hidden_regions = if hidden.iter().any(|h| h == UNASSIGNED_OFF) { vec![0] } else { Vec::new() };
+                        data.hidden_scans = hidden.into_iter().filter(|h| h != UNASSIGNED_OFF).collect();
                     }
                 }
                 self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);

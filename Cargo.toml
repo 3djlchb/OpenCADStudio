@@ -164,4 +164,4 @@ name = "command_benchmarks"
 harness = false
 
 [patch."https://github.com/HakanSeven12/opencadcodec.git"]
-opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "380e105" }
+opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "43f83ed" }

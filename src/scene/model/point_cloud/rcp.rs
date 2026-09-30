@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 /// One visible scan of the project.
 pub struct ScanEntry {
     pub path: PathBuf,
+    /// The scan's identifier ("{…}").
+    pub id: String,
     pub translation: [f64; 3],
     pub rotation: [f64; 3],
     pub scale: [f64; 3],
@@ -90,6 +92,7 @@ fn entry(node: roxmltree::Node, folder: &Path) -> Option<ScanEntry> {
     })?;
     Some(ScanEntry {
         path,
+        id: node.attribute("Id").unwrap_or_default().to_string(),
         translation: xyz(node, "Translation", 0.0),
         rotation: xyz(node, "Rotation", 0.0),
         scale: xyz(node, "Scale", 1.0),

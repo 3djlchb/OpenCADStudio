@@ -570,7 +570,8 @@ fn point_cloud_wires(
     let mut shown = true;
     let (mut pick_tris, mut pick_tris_low) = (Vec::new(), Vec::new());
     if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data {
-        shown = crate::scene::model::point_cloud::resolve_source(document, data).is_none();
+        // Its box shows too with every point hidden (the reference does).
+        shown = crate::scene::model::point_cloud::shows_no_points(document, data);
         let c = codec::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
         let mut tris = Vec::with_capacity(36);
         for [a, b, d, e] in [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 4, 5], [2, 3, 6, 7], [0, 2, 4, 6], [1, 3, 5, 7]] {

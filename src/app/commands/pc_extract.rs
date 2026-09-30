@@ -39,7 +39,7 @@ impl OpenCADStudio {
                 data,
                 color,
                 None,
-                &crate::scene::model::point_cloud::hidden(common),
+                &crate::scene::model::point_cloud::hidden(data),
             ) {
                 clouds.push((common.handle, placed));
             }

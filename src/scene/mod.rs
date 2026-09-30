@@ -8408,7 +8408,7 @@ impl Scene {
                         data,
                         object_color,
                         transform,
-                        &point_cloud::hidden(common),
+                        &point_cloud::hidden(data),
                     ));
                 },
             );

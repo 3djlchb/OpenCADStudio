@@ -32,7 +32,7 @@ pub struct CloudPoints {
     /// Scans read (one for a scan file).
     pub scans: usize,
     /// Each scan's name (its file stem) and its points' index range.
-    pub scan_ranges: Vec<(String, std::ops::Range<usize>)>,
+    pub scan_ranges: Vec<ScanRange>,
     /// A project's preview picture (JPEG).
     pub preview: Option<Vec<u8>>,
     /// Bounds from the scans' headers, placed like their points: the
@@ -73,18 +73,21 @@ fn decode(path: &Path) -> Option<CloudPoints> {
     // A project lists its scans with their own transforms; a scan file
     // carries the same transform in its header.
     let stem = |p: &Path| p.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
-    let scans: Vec<(rcs::Scan, [[f64; 3]; 3], String)> = if is_project {
+    let scans: Vec<(rcs::Scan, [[f64; 3]; 3], String, String)> = if is_project {
         rcp::scans(&bytes, path)?
             .into_iter()
             .filter_map(|entry| {
                 let scan = rcs::decode(&std::fs::read(&entry.path).ok()?)?;
-                Some((scan, [entry.translation, entry.rotation, entry.scale], stem(&entry.path)))
+                // The project's identifier, else the scan file's own.
+                let id = if entry.id.is_empty() { scan.id.clone() } else { entry.id.clone() };
+                Some((scan, [entry.translation, entry.rotation, entry.scale], stem(&entry.path), id))
             })
             .collect()
     } else {
         let scan = rcs::decode(&bytes)?;
         let transform = [scan.translation, scan.rotation, scan.scale];
-        vec![(scan, transform, stem(path))]
+        let id = scan.id.clone();
+        vec![(scan, transform, stem(path), id)]
     };
     let mut cloud = CloudPoints {
         id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -100,7 +103,7 @@ fn decode(path: &Path) -> Option<CloudPoints> {
         preview: is_project.then(|| rcp::preview(&bytes)).flatten(),
         bounds: None,
     };
-    for (scan, [translation, rotation, scale], name) in scans {
+    for (scan, [translation, rotation, scale], name, id) in scans {
         let rotate = euler(rotation.map(f64::to_radians));
         let place = |p: &[f64; 3]| {
             let s = [p[0] * scale[0], p[1] * scale[1], p[2] * scale[2]];
@@ -109,7 +112,8 @@ fn decode(path: &Path) -> Option<CloudPoints> {
         };
         let first = cloud.positions.len();
         cloud.positions.extend(scan.local.iter().map(place));
-        cloud.scan_ranges.push((name, first..cloud.positions.len()));
+        let id = if id.is_empty() { name.clone() } else { id };
+        cloud.scan_ranges.push(ScanRange { name, id, range: first..cloud.positions.len() });
         let [lo, hi] = scan.bounds;
         for corner in 0..8 {
             let p = place(&[
@@ -257,27 +261,37 @@ pub(crate) fn any_definition(document: &CadDocument) -> bool {
     })
 }
 
-/// What the Point Cloud Manager turned off on a cloud: extended data under
-/// this application, one string per hidden scan plus the markers below.
-pub const VISIBILITY_APP: &str = "OCS_POINTCLOUD_VISIBILITY";
-/// The whole cloud is off.
-pub const CLOUD_OFF: &str = "*CLOUD_OFF";
-/// Its unassigned points (every point of a cloud without regions) are off.
-pub const UNASSIGNED_OFF: &str = "*UNASSIGNED_OFF";
+/// One scan's points in a cloud: its name (the file's), its identifier and
+/// its index range.
+#[derive(Debug, Clone)]
+pub struct ScanRange {
+    pub name: String,
+    pub id: String,
+    pub range: std::ops::Range<usize>,
+}
 
-/// The scans and markers a cloud entity hides.
-pub(crate) fn hidden(common: &codec::entities::EntityCommon) -> Vec<String> {
-    common
-        .extended_data
-        .records()
-        .iter()
-        .filter(|r| r.application_name.eq_ignore_ascii_case(VISIBILITY_APP))
-        .flat_map(|r| r.values.iter())
-        .filter_map(|v| match v {
-            codec::xdata::XDataValue::String(s) => Some(s.clone()),
-            _ => None,
-        })
-        .collect()
+/// Stands in a hidden list for the cloud's unassigned points (region 0),
+/// which are every point of a cloud without regions.
+pub const UNASSIGNED_OFF: &str = "*UNASSIGNED";
+
+/// What a cloud turns off: the identifiers of its hidden scans, and
+/// [`UNASSIGNED_OFF`] when its unassigned points are hidden.
+pub(crate) fn hidden(data: &PointCloudExData) -> Vec<String> {
+    let mut hidden = data.hidden_scans.clone();
+    if data.hidden_regions.contains(&0) {
+        hidden.push(UNASSIGNED_OFF.to_string());
+    }
+    hidden
+}
+
+/// Whether a cloud draws none of its points: its file is not found, or its
+/// unassigned points or every scan are turned off.
+pub(crate) fn shows_no_points(document: &CadDocument, data: &PointCloudExData) -> bool {
+    let Some(cloud) = resolve_source(document, data).and_then(|path| load(&path)) else {
+        return true;
+    };
+    data.hidden_regions.contains(&0)
+        || (!cloud.scan_ranges.is_empty() && cloud.scan_ranges.iter().all(|s| data.hidden_scans.contains(&s.id)))
 }
 
 /// The points `data` shows, placed through its origin and axes and then
@@ -292,10 +306,10 @@ pub(crate) fn placed(
 ) -> Option<Arc<PlacedCloud>> {
     let cloud = load(&resolve_source(document, data)?)?;
     let skipped: Vec<std::ops::Range<usize>> =
-        if hidden.iter().any(|h| h == CLOUD_OFF || h == UNASSIGNED_OFF) {
+        if hidden.iter().any(|h| h == UNASSIGNED_OFF) {
             vec![0..cloud.positions.len()]
         } else {
-            cloud.scan_ranges.iter().filter(|(name, _)| hidden.contains(name)).map(|(_, r)| r.clone()).collect()
+            cloud.scan_ranges.iter().filter(|s| hidden.contains(&s.id)).map(|s| s.range.clone()).collect()
         };
     // The points shown: POINTCLOUDDENSITY per cent of POINTCLOUDPOINTMAX,
     // in tenths by POINTCLOUDLOD, every n-th point of a larger cloud.

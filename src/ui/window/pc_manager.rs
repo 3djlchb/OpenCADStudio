@@ -1,10 +1,10 @@
 //! Point Cloud Manager (POINTCLOUDMANAGER): the regions and scans of the
 //! drawing's point clouds as a tree, each with a switch that shows or hides
-//! its points. The switches are the cloud's own visibility extended data, so
+//! its points. The switches are the cloud's own hidden scans and regions, so
 //! the tree is read straight from the document on every view.
 
 use crate::app::Message;
-use crate::scene::model::point_cloud::{self, CLOUD_OFF, UNASSIGNED_OFF};
+use crate::scene::model::point_cloud::{self, UNASSIGNED_OFF};
 use crate::ui::dock::PanelId;
 use codec::entities::ExtendedEntityData;
 use codec::{CadDocument, EntityType, Handle};
@@ -32,11 +32,21 @@ pub enum Row {
     Cloud,
     Unassigned,
     Scans,
+    /// A scan, by identifier.
     Scan(String),
 }
 
+/// A switch's state: a parent is mixed while some children are on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Switch {
+    On,
+    Off,
+    Mixed,
+}
+
 impl Row {
-    /// `cloud`, `unassigned`, `scans` or `scan:<name>` (automation).
+    /// `cloud`, `unassigned`, `scans` or `scan:<name or identifier>`
+    /// (automation).
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "cloud" => Some(Self::Cloud),
@@ -62,7 +72,8 @@ pub struct Cloud {
     pub handle: Handle,
     pub name: String,
     pub hidden: Vec<String>,
-    pub scans: Vec<String>,
+    /// Each scan's name and identifier.
+    pub scans: Vec<(String, String)>,
 }
 
 /// The drawing's point clouds; only the selected ones when any is selected.
@@ -79,12 +90,12 @@ pub fn clouds(document: &CadDocument, selected: &[Handle]) -> Vec<Cloud> {
             let common = entity.common();
             let scans = point_cloud::resolve_source(document, data)
                 .and_then(|path| point_cloud::load(&path))
-                .map(|cloud| cloud.scan_ranges.iter().map(|(name, _)| name.clone()).collect())
+                .map(|cloud| cloud.scan_ranges.iter().map(|s| (s.name.clone(), s.id.clone())).collect())
                 .unwrap_or_default();
             Some(Cloud {
                 handle: common.handle,
                 name: if data.name.is_empty() { format!("{:X}", common.handle.value()) } else { data.name.clone() },
-                hidden: point_cloud::hidden(common),
+                hidden: point_cloud::hidden(data),
                 scans,
             })
         })
@@ -96,35 +107,48 @@ pub fn clouds(document: &CadDocument, selected: &[Handle]) -> Vec<Cloud> {
     }
 }
 
-/// Whether a row's switch is on. A parent is on while any child is.
-pub fn is_on(hidden: &[String], scans: &[String], row: &Row) -> bool {
-    let off = |name: &str| hidden.iter().any(|h| h == name);
-    let any_scan = scans.is_empty() || scans.iter().any(|s| !off(s));
+/// A row's switch. A parent is on with all its children on, off with all
+/// off, mixed otherwise (the reference shows the cloud mixed with its only
+/// scan off and its unassigned points on).
+pub fn switch_state(hidden: &[String], scans: &[(String, String)], row: &Row) -> Switch {
+    let on = |id: &str| !hidden.iter().any(|h| h == id);
+    let of = |states: &[bool]| match (states.iter().all(|s| *s), states.iter().any(|s| *s)) {
+        (true, _) => Switch::On,
+        (false, false) => Switch::Off,
+        _ => Switch::Mixed,
+    };
+    let scan_states: Vec<bool> = scans.iter().map(|(_, id)| on(id)).collect();
     match row {
-        Row::Scan(name) => !off(name),
-        Row::Scans => any_scan,
-        Row::Unassigned => !off(UNASSIGNED_OFF),
-        Row::Cloud => !off(CLOUD_OFF) && (!off(UNASSIGNED_OFF) || any_scan),
+        Row::Scan(id) => of(&[on(id)]),
+        Row::Scans => of(&scan_states),
+        Row::Unassigned => of(&[on(UNASSIGNED_OFF)]),
+        Row::Cloud => {
+            let mut all = scan_states;
+            all.push(on(UNASSIGNED_OFF));
+            of(&all)
+        }
     }
 }
 
-/// The hidden list after flipping `row`. Switching the cloud back on shows
-/// everything under it.
-pub fn toggled(hidden: &[String], scans: &[String], row: &Row) -> Vec<String> {
-    fn set(out: &mut Vec<String>, name: &str, off: bool) {
-        out.retain(|h| h != name);
+/// The hidden list after clicking `row`: an on switch turns its rows off,
+/// an off or mixed one turns them all on.
+pub fn toggled(hidden: &[String], scans: &[(String, String)], row: &Row) -> Vec<String> {
+    fn set(out: &mut Vec<String>, id: &str, off: bool) {
+        out.retain(|h| h != id);
         if off {
-            out.push(name.to_string());
+            out.push(id.to_string());
         }
     }
-    let on = is_on(hidden, scans, row);
+    let off = switch_state(hidden, scans, row) == Switch::On;
     let mut out = hidden.to_vec();
     match row {
-        Row::Cloud if on => set(&mut out, CLOUD_OFF, true),
-        Row::Cloud => out.clear(),
-        Row::Unassigned => set(&mut out, UNASSIGNED_OFF, on),
-        Row::Scans => scans.iter().for_each(|s| set(&mut out, s, on)),
-        Row::Scan(name) => set(&mut out, name, on),
+        Row::Cloud => {
+            scans.iter().for_each(|(_, id)| set(&mut out, id, off));
+            set(&mut out, UNASSIGNED_OFF, off);
+        }
+        Row::Unassigned => set(&mut out, UNASSIGNED_OFF, off),
+        Row::Scans => scans.iter().for_each(|(_, id)| set(&mut out, id, off)),
+        Row::Scan(id) => set(&mut out, id, off),
     }
     out
 }
@@ -151,7 +175,7 @@ fn tree_row<'a>(
     fold: Option<bool>,
     icon: Element<'a, Message>,
     label: String,
-    switch: Option<(bool, Message)>,
+    switch: Option<(Switch, Message)>,
 ) -> Element<'a, Message> {
     let arrow: Element<'a, Message> = match fold {
         Some(open) => button(if open {
@@ -169,7 +193,15 @@ fn tree_row<'a>(
     let label = text(label).size(12).width(Fill);
     let label = if enabled { label } else { label.style(crate::ui::style::common::muted_style) };
     let switch: Element<'a, Message> = match switch {
-        Some((on, message)) => checkbox(on).on_toggle(move |_| message.clone()).size(14).into(),
+        // Mixed: a dash in the box, as the reference's indeterminate state.
+        Some((Switch::Mixed, message)) => button(crate::ui::icons::themed_primary(crate::ui::icons::MINUS, 10.0))
+            .on_press(message)
+            .style(button::secondary)
+            .padding(1)
+            .width(Length::Fixed(16.0))
+            .height(Length::Fixed(16.0))
+            .into(),
+        Some((on, message)) => checkbox(on == Switch::On).on_toggle(move |_| message.clone()).size(14).into(),
         None => checkbox(false).size(14).into(),
     };
     let selected = state.selected.as_deref() == Some(key.as_str());
@@ -218,14 +250,14 @@ pub fn view<'a>(
     let mut tree = column![].spacing(1);
     for cloud in clouds(document, selected) {
         let root = key(cloud.handle);
-        let scans: Vec<&String> = cloud.scans.iter().filter(|s| matches(s)).collect();
+        let scans: Vec<&(String, String)> = cloud.scans.iter().filter(|(name, _)| matches(name)).collect();
         let show_scans = matches(&scans_label) || !scans.is_empty();
         let children = matches(&regions) || matches(&unassigned) || show_scans;
         if !matches(&cloud.name) && !children {
             continue;
         }
         let switch = |row: Row| {
-            let on = is_on(&cloud.hidden, &cloud.scans, &row);
+            let on = switch_state(&cloud.hidden, &cloud.scans, &row);
             Some((on, msg(PcManagerMsg::Toggle(cloud.handle, row))))
         };
         let cloud_icon = || crate::ui::icons::semantic(CLOUD_ICON, 14.0);
@@ -277,15 +309,15 @@ pub fn view<'a>(
                 switch(Row::Scans),
             ));
             if scans_open {
-                for name in scans {
+                for (name, id) in scans {
                     tree = tree.push(tree_row(
                         state,
-                        format!("{scans_key}/{name}"),
+                        format!("{scans_key}/{id}"),
                         2,
                         None,
                         cloud_icon(),
                         name.clone(),
-                        switch(Row::Scan(name.clone())),
+                        switch(Row::Scan(id.clone())),
                     ));
                 }
             }

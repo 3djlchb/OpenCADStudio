@@ -32,6 +32,9 @@ pub struct Scan {
     pub scale: [f64; 3],
     /// The scan's bounds as its header records them (local frame).
     pub bounds: [[f64; 3]; 2],
+    /// The scan's identifier ("{…}"), as its project and a cloud's hidden
+    /// scans name it.
+    pub id: String,
 }
 
 const NODE_RECORD: usize = 368;
@@ -77,6 +80,16 @@ fn normal(code: u16) -> [f32; 3] {
     n.map(|v| (v / length) as f32)
 }
 
+/// The identifier the header carries after its flags, NUL-terminated.
+fn header_id(b: &[u8]) -> String {
+    let tail = b.get(0xE3..b.len().min(0xE3 + 64)).unwrap_or_default();
+    let text = &tail[..tail.iter().position(|c| *c == 0).unwrap_or(tail.len())];
+    match std::str::from_utf8(text) {
+        Ok(id) if id.starts_with('{') && id.ends_with('}') => id.to_string(),
+        _ => String::new(),
+    }
+}
+
 pub fn decode(b: &[u8]) -> Option<Scan> {
     if b.get(0..5)? != b"ADOCT" {
         return None;
@@ -119,6 +132,7 @@ pub fn decode(b: &[u8]) -> Option<Scan> {
         rotation,
         scale,
         bounds,
+        id: header_id(b),
     };
     for node in 0..nodes {
         let record = directory + 8 + node * NODE_RECORD;
