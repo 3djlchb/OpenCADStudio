@@ -3412,9 +3412,13 @@ mod tests {
                 .contains("no whitespace")
         );
     }
+    #[cfg(feature = "host")]
     #[test]
     fn hatch_geometry_and_boundaries_are_validated() {
-        use codec::entities::hatch::{BoundaryEdge, BoundaryPath, LineEdge};
+        use crate::host::codec::{
+            self,
+            entities::hatch::{BoundaryEdge, BoundaryPath, LineEdge},
+        };
         let mut hatch = codec::entities::Hatch::new();
         let mut path = BoundaryPath::new();
         for (start, end) in [
