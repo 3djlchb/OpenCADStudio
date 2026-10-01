@@ -344,6 +344,12 @@ impl OpenCADStudio {
             _ => "FRAMES3",
         };
         self.ribbon.set_dropdown_current("FRAMES_DROPDOWN", current);
+        let attmode = match tab.scene.document.header.attribute_visibility {
+            0 => "ATTMODE0",
+            2 => "ATTMODE2",
+            _ => "ATTMODE1",
+        };
+        self.ribbon.set_dropdown_current("ATTMODE_DROPDOWN", attmode);
     }
 
     fn update_message(&mut self, msg: Message) -> Task<Message> {

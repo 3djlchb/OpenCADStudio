@@ -34,6 +34,9 @@ pub enum AttdefDialogMsg {
     PickHeight,
     PickRotation,
     PickWidth,
+    /// Edit the default value in the multi-line text editor.
+    EditValue,
+    DismissError,
     Ok,
     Help,
     EditTag(String),
@@ -71,6 +74,8 @@ pub struct AttdefDialogState {
     pub align_below: bool,
     /// A definition was placed before in this session.
     pub can_align_below: bool,
+    /// Validation message shown above the buttons.
+    pub error: Option<String>,
 }
 
 /// The Edit Attribute Definition dialog's fields.
@@ -81,6 +86,7 @@ pub struct AttdefEditState {
     pub prompt: String,
     pub default: String,
     pub constant: bool,
+    pub error: Option<String>,
 }
 
 fn msg(m: AttdefDialogMsg) -> Message {
@@ -130,6 +136,36 @@ fn mode<'a>(label: String, on: bool, bit: u8) -> Element<'a, Message> {
         .on_toggle(move |v| msg(AttdefDialogMsg::Mode(bit, v)))
         .into()
 }
+
+/// The validation message band, as in the Write Block dialog.
+fn error_band<'a>(error: &Option<String>) -> Option<Element<'a, Message>> {
+    let error = error.clone()?;
+    Some(
+        container(
+            row![
+                crate::ui::icons::semantic(ICON_WARN, 14.0),
+                text(error).size(11),
+                Space::new().width(Fill),
+                button(text("×").size(12))
+                    .on_press(msg(AttdefDialogMsg::DismissError))
+                    .style(button_style(false))
+                    .padding([1, 6]),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .padding([6, 10])
+        .width(Fill)
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(theme.palette().danger.base.color.scale_alpha(0.18))),
+            border: iced::Border { radius: 4.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .into(),
+    )
+}
+
+static ICON_WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
 
 fn footer<'a>(action: std::borrow::Cow<'static, str>, ok: AttdefDialogMsg) -> Element<'a, Message> {
     row![
@@ -194,11 +230,18 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
             ),
             labelled(
                 if constant { t!("Value") } else { t!("Default") }.into_owned(),
-                row![
-                    input(&state.default, true, AttdefDialogMsg::Default),
+                {
+                    let mut value = row![input(&state.default, true, AttdefDialogMsg::Default)].spacing(6);
+                    if multiline {
+                        value = value.push(pick(
+                            "…",
+                            t!("Multiline editor").into_owned(),
+                            Some(AttdefDialogMsg::EditValue),
+                        ));
+                    }
                     // No field picker in this application yet.
-                    pick("ƒ", t!("Insert field").into_owned(), None),
-                ]
+                    value.push(pick("ƒ", t!("Insert field").into_owned(), None))
+                }
                 .spacing(6)
                 .into(),
                 true
@@ -295,7 +338,12 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
         column![attribute, settings].spacing(10).width(Fill),
     ]
     .spacing(10);
-    column![body, align, footer(t!("Define"), AttdefDialogMsg::Ok)]
+    let mut content = column![body, align];
+    if let Some(band) = error_band(&state.error) {
+        content = content.push(band);
+    }
+    content
+        .push(footer(t!("Define"), AttdefDialogMsg::Ok))
         .spacing(10)
         .padding([10, 12])
         .width(sizing.width)
@@ -331,7 +379,12 @@ pub fn view_edit<'a>(state: &'a AttdefEditState, sizing: crate::ui::modal::Modal
         ]
         .spacing(8),
     );
-    column![content, footer(t!("Apply"), AttdefDialogMsg::EditOk)]
+    let mut content = column![content];
+    if let Some(band) = error_band(&state.error) {
+        content = content.push(band);
+    }
+    content
+        .push(footer(t!("Apply"), AttdefDialogMsg::EditOk))
         .spacing(10)
         .padding([10, 12])
         .width(sizing.width)

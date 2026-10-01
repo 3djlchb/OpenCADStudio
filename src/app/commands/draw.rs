@@ -183,68 +183,32 @@ impl OpenCADStudio {
                 }
             }
 
-            // ATTDISP — control attribute display visibility.
-            // ATTDISP ON   — make all AttributeDefinitions visible
-            // ATTDISP OFF  — make all AttributeDefinitions invisible
-            // ATTDISP NORMAL — restore: show only those without the invisible flag
+            // ATTDISP sets ATTMODE: 0 hides every attribute, 1 shows the
+            // visible ones, 2 shows them all. The definitions are not touched.
             "ATTDISP" => {
-                use crate::command::KeywordCommand;
-                let c = KeywordCommand::new(
-                    "ATTDISP",
-                    "ATTDISP  attribute display  [On / Off / Normal]:",
-                    vec![
-                        ("On", "ON", None),
-                        ("Off", "OFF", None),
-                        ("Normal", "NORMAL", None),
-                    ],
+                let command = crate::modules::draw::draw::attdef::AttdispCommand::new(
+                    self.tabs[i].scene.document.header.attribute_visibility,
                 );
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
             }
             cmd if cmd.starts_with("ATTDISP ") => {
-                let sub = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
-                match sub.as_str() {
-                    "ON" | "OFF" | "NORMAL" => {
-                        let handles: Vec<_> = self.tabs[i]
-                            .scene
-                            .document
-                            .entities()
-                            .filter_map(|entity| {
-                                matches!(entity, codec::EntityType::AttributeDefinition(_))
-                                    .then_some(entity.common().handle)
-                            })
-                            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
-                            .collect();
-                        self.push_undo_snapshot(i, "ATTDISP");
-                        let mut count = 0usize;
-                        for handle in handles {
-                            if let Some(codec::EntityType::AttributeDefinition(ad)) =
-                                self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                match sub.as_str() {
-                                    "ON" => {
-                                        ad.flags.invisible = false;
-                                        count += 1;
-                                    }
-                                    "OFF" => {
-                                        ad.flags.invisible = true;
-                                        count += 1;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        self.tabs[i].dirty = true;
-                        self.command_line.push_output(
-                            crate::tf!("ATTDISP {sub}: {count} attribute definition(s) updated.")
-                                .as_ref(),
-                        );
-                    }
+                let mode = match cmd[8..].trim().to_ascii_uppercase().as_str() {
+                    "OFF" => 0,
+                    "ON" => 2,
+                    "NORMAL" | "N" => 1,
                     _ => {
-                        self.command_line
-                            .push_info(crate::t!("Usage: ATTDISP ON | OFF | NORMAL").as_ref());
+                        self.command_line.push_error("Invalid option keyword.");
+                        return Some(Task::none());
                     }
+                };
+                if self.tabs[i].scene.document.header.attribute_visibility != mode {
+                    self.push_undo_snapshot(i, "ATTDISP");
+                    self.tabs[i].scene.document.header.attribute_visibility = mode;
+                    self.tabs[i].dirty = true;
+                    self.tabs[i].scene.bump_geometry();
                 }
+                self.command_line.push_output("Regenerating model.");
             }
 
             "DONUT" => {

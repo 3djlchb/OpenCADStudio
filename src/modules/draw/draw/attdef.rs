@@ -32,12 +32,18 @@ pub struct AttdefSession {
     pub aflags: u8,
     pub annotative: bool,
     pub last: Option<AttributeDefinition>,
+    /// The dialog's "Specify on-screen" choice, kept for the session.
+    pub on_screen: bool,
+    /// Text the multi-line editor handed back to the dialog's Default field.
+    pub editor_value: Option<String>,
 }
 
 pub static SESSION: Mutex<AttdefSession> = Mutex::new(AttdefSession {
     aflags: AFLAG_LOCK,
     annotative: false,
     last: None,
+    on_screen: true,
+    editor_value: None,
 });
 
 pub fn session() -> std::sync::MutexGuard<'static, AttdefSession> {
@@ -1044,5 +1050,94 @@ impl CadCommand for AttdefPickCommand {
 
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Dispatch("_ATTDEF_PICKED".into())
+    }
+}
+
+/// ATTDISP: `Enter attribute visibility setting [Normal/ON/OFF] <current>:`.
+/// Hands the chosen setting back as `ATTDISP <word>`; Enter keeps the current
+/// one.
+pub struct AttdispCommand {
+    current: &'static str,
+}
+
+impl AttdispCommand {
+    /// `mode` is ATTMODE: 0 OFF, 1 Normal, 2 ON.
+    pub fn new(mode: i16) -> Self {
+        Self { current: attdisp_word(mode) }
+    }
+}
+
+/// The ATTDISP keyword for an ATTMODE value.
+pub fn attdisp_word(mode: i16) -> &'static str {
+    match mode {
+        0 => "OFF",
+        2 => "ON",
+        _ => "Normal",
+    }
+}
+
+impl CadCommand for AttdispCommand {
+    fn name(&self) -> &'static str {
+        "ATTDISP"
+    }
+
+    fn prompt(&self) -> String {
+        format!("Enter attribute visibility setting [Normal/ON/OFF] <{}>:", self.current)
+    }
+
+    fn input_kind(&self) -> InputKind {
+        InputKind::SingleToken
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let word = text.trim().trim_start_matches('_').to_ascii_uppercase();
+        if word.is_empty() {
+            return Some(self.on_enter());
+        }
+        let mode = match word.as_str() {
+            "N" | "NORMAL" => "NORMAL",
+            "ON" => "ON",
+            "OF" | "OFF" => "OFF",
+            _ => return Some(CmdResult::ReportError("Invalid option keyword.".into())),
+        };
+        Some(CmdResult::Dispatch(format!("ATTDISP {mode}")))
+    }
+
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+}
+
+/// The dialog's "…" button: the default value is edited in the multi-line
+/// text editor, then handed back to the dialog (`_ATTDEF_VALUE`).
+pub struct AttdefValueCommand;
+
+impl CadCommand for AttdefValueCommand {
+    fn name(&self) -> &'static str {
+        "ATTDEF"
+    }
+
+    fn prompt(&self) -> String {
+        String::new()
+    }
+
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_editor_text(&mut self, value: String) {
+        session().editor_value = Some(value);
+    }
+
+    fn on_editor_closed(&mut self, _committed: bool) -> CmdResult {
+        CmdResult::Dispatch("_ATTDEF_VALUE".into())
     }
 }

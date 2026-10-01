@@ -46,6 +46,19 @@ impl OpenCADStudio {
                 self.push_ucs_to_cmd(i);
                 Some(Task::none())
             }
+            "ATTMODE0" => self.dispatch_draw("ATTDISP OFF", i),
+            "ATTMODE1" => self.dispatch_draw("ATTDISP NORMAL", i),
+            "ATTMODE2" => self.dispatch_draw("ATTDISP ON", i),
+            "_ATTDEF_VALUE" => {
+                let value = attdef::session().editor_value.take();
+                if let Some(state) = self.attdef_dialog.as_mut() {
+                    if let Some(value) = value {
+                        state.default = value;
+                    }
+                    self.active_modal = Some(crate::app::ModalKind::AttDef);
+                }
+                Some(Task::none())
+            }
             cmd if cmd == "_ATTDEF_PICKED" || cmd.starts_with("_ATTDEF_PICKED ") => {
                 let mut parts = cmd.split_whitespace().skip(1);
                 if let (Some(kind), Some(value), Some(state)) =
@@ -116,10 +129,11 @@ impl OpenCADStudio {
             height: short(defaults.height),
             rotation: "0".into(),
             width: "0".into(),
-            on_screen: true,
+            on_screen: session.on_screen,
             coords: ["0".into(), "0".into(), "0".into()],
             align_below: false,
             can_align_below: session.last.is_some(),
+            error: None,
         });
         drop(session);
         self.tabs[i].active_cmd = None;
@@ -139,6 +153,7 @@ impl OpenCADStudio {
             prompt: a.prompt.clone(),
             default: a.default_value.clone(),
             constant: a.flags.constant,
+            error: None,
         });
         self.active_modal = Some(crate::app::ModalKind::AttDefEdit);
     }
@@ -155,6 +170,7 @@ impl OpenCADStudio {
                         .as_ref(),
                 ),
                 AttdefDialogMsg::EditOk => return self.attdef_edit_ok(i),
+                AttdefDialogMsg::DismissError => edit.error = None,
                 _ => {}
             }
             return Task::none();
@@ -201,7 +217,30 @@ impl OpenCADStudio {
                     .as_ref(),
             ),
             AttdefDialogMsg::Ok => return self.attdef_dialog_ok(i),
+            AttdefDialogMsg::DismissError => state.error = None,
+            AttdefDialogMsg::EditValue => {
+                // The dialog waits while the multi-line editor collects the value.
+                let initial = state.default.clone();
+                let height = state.height.trim().parse::<f64>().ok().filter(|h| *h > 0.0).unwrap_or(2.5);
+                self.active_modal = None;
+                attdef::session().editor_value = None;
+                self.tabs[i].active_cmd = Some(Box::new(attdef::AttdefValueCommand));
+                let pos = self.tabs[i].scene.camera.borrow().target;
+                return self.apply_cmd_result(crate::command::CmdResult::SuspendForMTextInput {
+                    pos,
+                    initial,
+                    height,
+                });
+            }
             _ => {}
+        }
+        Task::none()
+    }
+
+    /// Show a validation message in the dialog; it stays open.
+    fn attdef_dialog_error(&mut self, error: &str) -> Task<Message> {
+        if let Some(state) = self.attdef_dialog.as_mut() {
+            state.error = Some(crate::t!(error).into_owned());
         }
         Task::none()
     }
@@ -211,20 +250,17 @@ impl OpenCADStudio {
             return Task::none();
         };
         if let Some(error) = tag_error(&state.tag) {
-            self.command_line.push_error(error);
-            return Task::none();
+            return self.attdef_dialog_error(error);
         }
         let number = |s: &str| s.trim().parse::<f64>().ok().filter(|v| v.is_finite());
         let height = match number(&state.height) {
             Some(v) if v > 0.0 => v,
             _ => {
-                self.command_line.push_error("Value must be positive and nonzero.");
-                return Task::none();
+                return self.attdef_dialog_error("Value must be positive and nonzero.");
             }
         };
         let Some(rotation) = number(&state.rotation) else {
-            self.command_line.push_error("Requires valid numeric angle or second point.");
-            return Task::none();
+            return self.attdef_dialog_error("Requires valid numeric angle or second point.");
         };
         let width = number(&state.width).unwrap_or(0.0).max(0.0);
         let defaults =
@@ -250,6 +286,7 @@ impl OpenCADStudio {
             let mut session = attdef::session();
             session.aflags = spec.aflags;
             session.annotative = spec.annotative;
+            session.on_screen = state.on_screen;
         }
         self.reset_command_start_state(i);
         if state.align_below {
@@ -288,7 +325,9 @@ impl OpenCADStudio {
             return Task::none();
         };
         if let Some(error) = tag_error(&state.tag) {
-            self.command_line.push_error(error);
+            if let Some(edit) = self.attdef_edit.as_mut() {
+                edit.error = Some(crate::t!(error).into_owned());
+            }
             return Task::none();
         }
         self.attdef_edit = None;

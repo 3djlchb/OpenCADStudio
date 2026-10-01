@@ -105,7 +105,28 @@ impl CadModule for InsertModule {
                     tools: vec![
                         RibbonItem::LargeTool(mview_block::tool()),
                         RibbonItem::LargeTool(insert_block::tool()),
-                        RibbonItem::LargeTool(attedit::tool()),
+                        RibbonItem::LabeledDropdown {
+                            id: "ATTEDIT_DROPDOWN",
+                            label: "Edit Attribute",
+                            icon: attedit::ICON,
+                            items: vec![
+                                ("ATTEDIT", "Single", attedit::ICON),
+                                ("-ATTEDIT", "Multiple", attedit::ICON),
+                            ],
+                            default: "ATTEDIT",
+                        },
+                        // ATTMODE: the face shows the drawing's current setting.
+                        RibbonItem::LabeledDropdown {
+                            id: "ATTMODE_DROPDOWN",
+                            label: "",
+                            icon: attedit::ICON,
+                            items: vec![
+                                ("ATTMODE1", "Retain Attribute Display", attedit::ICON),
+                                ("ATTMODE2", "Display All Attributes", attedit::ICON),
+                                ("ATTMODE0", "Hide All Attributes", attedit::ICON),
+                            ],
+                            default: "ATTMODE1",
+                        },
                     ],
                 },
                 // ── Block Definition (slide-out: Set Base Point, Synchronize) ─────
