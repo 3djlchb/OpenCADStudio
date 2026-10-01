@@ -254,7 +254,10 @@ pub(crate) fn compute_grounding(
                     s_max_y = y0.max(y1);
                 }
 
-                let area = ((s_max_x - s_min_x).abs() * (s_max_y - s_min_y).abs()) as f32;
+                // An unbounded entity (XLINE, RAY) projects to saturated i32
+                // corners, whose difference overflows i32.
+                let width = (f64::from(s_max_x) - f64::from(s_min_x)).abs();
+                let area = (width * (f64::from(s_max_y) - f64::from(s_min_y)).abs()) as f32;
                 let selected = selected_set.contains(&handle);
                 let layer = entity.common().layer.clone();
 
