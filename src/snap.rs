@@ -3801,7 +3801,7 @@ mod ext_tests {
             text_verts: Vec::new(),
             points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
             ..Default::default()
-        };
+};
         let wires = [wire];
 
         // Extension-driven acquisition (endpoints_only): a midpoint — like an

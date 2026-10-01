@@ -364,7 +364,9 @@ fn preview_line(far_chord: Vec3, chord: Vec3, text: Vec3) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMDIAMETER"] });

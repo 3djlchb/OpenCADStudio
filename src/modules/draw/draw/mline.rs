@@ -213,7 +213,9 @@ impl MlineCommand {
             plinegen: true,
             fill_tris,
             fill_tris_low,
-        })
+        
+            ..Default::default()
+})
     }
 }
 

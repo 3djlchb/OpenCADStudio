@@ -961,7 +961,9 @@ fn tessellate_entity_inner(
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        }];
+        
+            ..Default::default()
+}];
     }
 
     // Render non-annotative dimensions from their stored picture block.
@@ -1207,7 +1209,9 @@ fn tessellate_entity_inner(
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        };
+        
+            ..Default::default()
+};
 
         let expanded = expand_block_object(
             document,
@@ -1592,7 +1596,9 @@ fn lod_stub_wire(
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 /// Sub-pixel LOD stub for 3D entities. Emits the entity's 3D AABB as a
@@ -1687,7 +1693,9 @@ fn lod_stub_wire_3d(
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 /// Tessellate each visible AttributeEntity attached to an Insert and append

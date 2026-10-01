@@ -755,7 +755,9 @@ fn preview_for_dimension(dimension: &Dimension) -> WireModel {
         plinegen: true,
         fill_tris: Vec::new(),
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 fn linear_preview(

@@ -799,7 +799,9 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+            ..Default::default()
+}
 }
 
 fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {

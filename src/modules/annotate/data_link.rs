@@ -134,7 +134,9 @@ impl DataLinkPlaceCommand {
             plinegen: true,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
-        }
+        
+            ..Default::default()
+}
     }
 }
 
