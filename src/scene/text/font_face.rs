@@ -146,6 +146,34 @@ impl Face {
         }
     }
 
+    /// The TrueType face [`glyph`](Self::glyph) takes `ch`'s outline from, or
+    /// `None` when that glyph is a stroke (LFF / SHX / big-font) glyph. Follows
+    /// the exact dispatch of `glyph` so an exporter that embeds the face draws
+    /// the same glyph the screen shows.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn glyph_source(&self, ch: char) -> Option<ttf_glyph::GlyphSource> {
+        match self {
+            Face::Lff(f) => match f.glyph(ch) {
+                Some(_) => None,
+                None => ttf_glyph::fallback_source(ch),
+            },
+            Face::Ttf { family, .. } => match ttf_glyph::glyph(family, ch) {
+                Some(_) => ttf_glyph::glyph_source(family, ch),
+                None => ttf_glyph::fallback_source(ch),
+            },
+            Face::Shx { path, .. } => match shx::font_glyph(path, ch as u16) {
+                Some(_) => None,
+                None => ttf_glyph::fallback_source(ch),
+            },
+            Face::WithBig { primary, big } => {
+                if ttf_glyph::is_full_width(ch) && shx::bigfont_glyph(big, ch).is_some() {
+                    return None;
+                }
+                primary.glyph_source(ch)
+            }
+        }
+    }
+
     /// Extra spacing added after every glyph (9-unit). TTF advances already
     /// include side bearings, so no extra tracking is added there.
     pub fn letter_spacing(&self) -> f32 {

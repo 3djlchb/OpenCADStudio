@@ -6,6 +6,7 @@ version = 4
 name = "OpenCADStudio"
 version = "2026.39.0"
 dependencies = [
+ "allsorts",
  "ashpd",
  "base64",
  "bincode",

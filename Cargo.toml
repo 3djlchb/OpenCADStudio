@@ -103,6 +103,9 @@ i18n-embed = { version = "0.16", features = ["desktop-requester"] }
 rayon = "1"
 open = "5"
 printpdf = { version = "0.9.1", default-features = false, features = ["images"] }
+# Font subsetting for PDF text (printpdf 0.9 embeds whole fonts); same version
+# and features as printpdf's own dependency, so nothing new is compiled.
+allsorts = { version = "0.16.1", default-features = false, features = ["flate2_rust"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "win-system-proxy"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
