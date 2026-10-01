@@ -45,6 +45,23 @@ fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
     tab.scene.paper_bg_color
 }
 
+/// Which navigation tool the viewport cursor should advertise. The three flags
+/// are mutually exclusive — every command entry point clears all of them before
+/// arming one (`crate::app::commands`) — so the order here only settles a state
+/// that cannot occur.
+pub(in crate::app) fn nav_cursor(tab: &DocumentTab) -> crate::ui::overlay::NavCursor {
+    use crate::ui::overlay::NavCursor;
+    if tab.pan_mode {
+        NavCursor::Pan
+    } else if tab.orbit_mode {
+        NavCursor::Orbit
+    } else if tab.zoom_dynamic_mode {
+        NavCursor::Zoom
+    } else {
+        NavCursor::None
+    }
+}
+
 /// Clear gap (px) kept between the render-mode bar (top-left) and the ViewCube
 /// (top-right) before the cube is judged to collide and hides.
 const VIEWCUBE_GAP: f32 = 12.0;
@@ -894,7 +911,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 dividers,
                 pane_move_rect,
                 pane_drop_rect,
-                tab.pan_mode || tab.orbit_mode || tab.zoom_dynamic_mode,
+                nav_cursor(tab),
                 self.ribbon.open_dropdown.is_some(),
                 hover_locked,
                 crosshair_background(tab, is_paper),

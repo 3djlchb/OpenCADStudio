@@ -213,6 +213,18 @@ pub(crate) fn pick_box_aperture_px(value: i32) -> f32 {
     aperture.max(1.0)
 }
 
+/// Which interactive navigation tool is armed. Each one owns the whole
+/// viewport and hides the CAD crosshair, but they do not share a cursor: the
+/// hand reads as "drag the sheet", which is wrong for a zoom or an orbit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum NavCursor {
+    #[default]
+    None,
+    Pan,
+    Orbit,
+    Zoom,
+}
+
 #[derive(Clone, Copy)]
 pub struct CrosshairOptions {
     pub size_percent: i32,
@@ -852,7 +864,7 @@ pub fn selection_overlay<'a>(
     dividers: Vec<iced::Rectangle>,
     pane_move_rect: Option<iced::Rectangle>,
     pane_drop_rect: Option<iced::Rectangle>,
-    pan_mode: bool,
+    nav: NavCursor,
     suppressed: bool,
     hover_locked: bool,
     crosshair_bg: [f32; 4],
@@ -882,7 +894,7 @@ pub fn selection_overlay<'a>(
         dividers,
         pane_move_rect,
         pane_drop_rect,
-        pan_mode,
+        nav,
         suppressed,
         hover_locked,
         crosshair_bg,
@@ -936,9 +948,10 @@ struct SelectionCanvas {
     pane_move_rect: Option<iced::Rectangle>,
     /// The pane under the cursor during a pane move (drop target), highlighted.
     pane_drop_rect: Option<iced::Rectangle>,
-    /// Interactive PAN mode: the crosshair is hidden and the cursor becomes a
-    /// hand so the viewport reads as a draggable surface.
-    pan_mode: bool,
+    /// Which interactive navigation tool is armed. Any of them hides the
+    /// crosshair — the viewport is being driven, not drawn on — and each
+    /// picks its own cursor in `mouse_interaction`.
+    nav: NavCursor,
     /// A ribbon dropdown (or similar overlay) is open over the viewport. The
     /// crosshair is not drawn and the OS cursor is shown normally so the panel
     /// is usable instead of the cursor vanishing over it. (#227)
@@ -1197,13 +1210,30 @@ impl canvas::Program<Message> for SelectionCanvas {
         if self.suppressed {
             return mouse::Interaction::default();
         }
-        // PAN mode owns the whole viewport: an open hand when hovering, a
-        // closed hand while dragging.
-        if self.pan_mode && cursor.is_over(bounds) {
-            return if self.selection.borrow().middle_down {
-                mouse::Interaction::Grabbing
-            } else {
-                mouse::Interaction::Grab
+        // An armed navigation tool owns the whole viewport, and the cursor
+        // says which one: a hand to drag the sheet, four-way arrows to swing
+        // the model, a magnifier that carries the sign of the zoom actually
+        // under way. Hovering before the drag starts shows the neutral "+"
+        // magnifier rather than guessing a direction.
+        if self.nav != NavCursor::None && cursor.is_over(bounds) {
+            let dragging = self.selection.borrow().middle_down;
+            return match self.nav {
+                NavCursor::Pan => {
+                    if dragging {
+                        mouse::Interaction::Grabbing
+                    } else {
+                        mouse::Interaction::Grab
+                    }
+                }
+                NavCursor::Orbit => mouse::Interaction::AllScroll,
+                NavCursor::Zoom => {
+                    if dragging && self.selection.borrow().zoom_dir_out {
+                        mouse::Interaction::ZoomOut
+                    } else {
+                        mouse::Interaction::ZoomIn
+                    }
+                }
+                NavCursor::None => unreachable!("guarded above"),
             };
         }
         if self.show_viewcube {
@@ -1367,8 +1397,14 @@ impl canvas::Program<Message> for SelectionCanvas {
             );
         }
 
-        if let (Some(a), Some(b)) = (self.selection.borrow().box_anchor, self.selection.borrow().box_current) {
-            draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme, &self.selection_visual, self.crosshair_bg);
+        // ZOOM Dynamic reuses `box_anchor` to remember where the drag began,
+        // so the marquee would otherwise rubber-band across the screen while
+        // the view zooms. Suppress the drawing, not the state — the anchor is
+        // still re-projected as the camera moves.
+        if self.nav != NavCursor::Zoom {
+            if let (Some(a), Some(b)) = (self.selection.borrow().box_anchor, self.selection.borrow().box_current) {
+                draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme, &self.selection_visual, self.crosshair_bg);
+            }
         }
         // Preview marquee for point-picked windows (STRETCH) — same look, no pick.
         if let Some((a, b, crossing)) = self.selection.borrow().preview_box {
@@ -1826,10 +1862,10 @@ impl canvas::Program<Message> for SelectionCanvas {
         // arrow (see `mouse_interaction`); drawing the CAD crosshair on
         // top of it would double up the visual feedback.
         let over_divider = self.divider_under(cursor, bounds);
-        // PAN mode replaces the crosshair with a hand cursor.
+        // An armed navigation tool replaces the crosshair with its own cursor.
         if !over_viewcube
             && !over_divider
-            && !self.pan_mode
+            && self.nav == NavCursor::None
             && !self.suppressed
             && self.crosshair.cursor_type == CursorType::Crosshair
         {

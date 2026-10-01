@@ -11933,78 +11933,15 @@ vis_index={:.1} visible_probe={:.1}",
 
     fn compute_model_space_extents(&self) -> Option<(glam::Vec3, glam::Vec3)> {
         let model_block = self.model_space_block_handle();
-        if model_block.is_null() {
-            return None;
-        }
-        // Reuse the full resident source in every layout. The kernel bounds
-        // its world-space key vertices; camera fitting never tessellates a
-        // second copy or reads the current paper sheet's wire cache.
-        let scale = crate::scene::annotative::scale_handle_by_name(
-            &self.document,
-            &self.document.header.current_annotation_scale,
-        );
-        let wires =
-            self.resident_wires_for(model_block, Some(self.annotation_scale), scale, None, None);
-        let mut min = [f64::INFINITY; 3];
-        let mut max = [f64::NEG_INFINITY; 3];
-        let mut has_points = false;
-
-        for wire in wires.iter() {
-            for &[x, y, z] in &wire.key_vertices {
-                if (x as f32).is_finite() && (y as f32).is_finite() && (z as f32).is_finite() {
-                    min[0] = min[0].min(x);
-                    min[1] = min[1].min(y);
-                    min[2] = min[2].min(z);
-                    max[0] = max[0].max(x);
-                    max[1] = max[1].max(y);
-                    max[2] = max[2].max(z);
-                    has_points = true;
-                }
-            }
-        }
-
-        if !self.meshes.is_empty() {
-            for (&handle, set) in &self.meshes {
-                let Some(entity) = self.document.get_entity(handle) else {
-                    continue;
-                };
-                if !self.mesh_entity_visible(handle)
-                    || !self.belongs_to_visible_block(
-                        handle,
-                        entity.common().owner_handle,
-                        model_block,
-                    )
-                {
-                    continue;
-                }
-                let [ax, ay, bx, by] = set.world_aabb;
-                let [az, bz] = set.z_aabb;
-                let (ax, ay, bx, by, az, bz) = (
-                    ax as f64, ay as f64, bx as f64, by as f64, az as f64, bz as f64,
-                );
-                if (ax as f32).is_finite()
-                    && (ay as f32).is_finite()
-                    && (az as f32).is_finite()
-                    && (bx as f32).is_finite()
-                    && (by as f32).is_finite()
-                    && (bz as f32).is_finite()
-                {
-                    min[0] = min[0].min(ax.min(bx));
-                    min[1] = min[1].min(ay.min(by));
-                    min[2] = min[2].min(az.min(bz));
-                    max[0] = max[0].max(ax.max(bx));
-                    max[1] = max[1].max(ay.max(by));
-                    max[2] = max[2].max(az.max(bz));
-                    has_points = true;
-                }
-            }
-        }
-
-        if has_points {
-            return Some((
-                glam::Vec3::new(min[0] as f32, min[1] as f32, min[2] as f32),
-                glam::Vec3::new(max[0] as f32, max[1] as f32, max[2] as f32),
-            ));
+        // Shared with ZOOM EXTENTS so the two never disagree about what the
+        // drawing covers. The previous walk here read only `key_vertices`,
+        // which is empty for every tessellated curve (see `WireModel`) — so
+        // circles, arcs, ellipses and splines contributed nothing, and
+        // neither did hatches or images. Everything that reads drawing
+        // extents (plot Extents, sheet-set framing, viewport auto-fit,
+        // SpaceMouse model bounds) inherited that blind spot.
+        if let Some((min, max)) = self.visible_block_bounds(model_block) {
+            return Some((min.as_vec3(), max.as_vec3()));
         }
         // Last resort: saved EXTMIN/EXTMAX before the wire cache is built.
         const SANE_EXTENT: f64 = 1.0e16;
@@ -13541,42 +13478,27 @@ mod layout_cache_tests {
         s.add_entity(EntityType::LwPolyline(pl));
 
         let bounds = s.model_space_extents().expect("Extents must exist");
-        // Key vertices come from entities with distinct vertex positions (Line, LwPolyline).
-        // Line vertices: (0, 0, 10), (50, 100, 20)
-        // LwPolyline vertices: (300, -200, 0), (400, -100, 0)
-        // Min X = 0.0, Max X = 400.0
-        // Min Y = -200.0, Max Y = 100.0
-        // Min Z = 0.0, Max Z = 20.0
-        assert!(
-            (bounds.0.x - 0.0).abs() < 1e-3,
-            "min.x mismatch: {}",
-            bounds.0.x
-        );
-        assert!(
-            (bounds.1.x - 400.0).abs() < 1e-3,
-            "max.x mismatch: {}",
-            bounds.1.x
-        );
-        assert!(
-            (bounds.0.y - (-200.0)).abs() < 1e-3,
-            "min.y mismatch: {}",
-            bounds.0.y
-        );
-        assert!(
-            (bounds.1.y - 100.0).abs() < 1e-3,
-            "max.y mismatch: {}",
-            bounds.1.y
-        );
-        assert!(
-            (bounds.0.z - 0.0).abs() < 1e-3,
-            "min.z mismatch: {}",
-            bounds.0.z
-        );
-        assert!(
-            (bounds.1.z - 20.0).abs() < 1e-3,
-            "max.z mismatch: {}",
-            bounds.1.z
-        );
+        // Every entity counts, curves included. The circle and the arc used to
+        // contribute nothing at all: the walk read only `key_vertices`, which
+        // is empty for anything tessellated, so the drawing looked 275 units
+        // narrower and 150 shorter than it is.
+        //   Line:       (0, 0, 10) .. (50, 100, 20)
+        //   Circle:     (150, 150, 0) .. (250, 250, 0)      centre 200,200 r50
+        //   Arc:        (-125, -50, -5) .. (-75, -25, -5)   centre -100,-50 r25, 0..PI
+        //   LwPolyline: (300, -200, 0) .. (400, -100, 0)
+        for (got, want, axis) in [
+            (bounds.0.x, -125.0, "min.x"),
+            (bounds.1.x, 400.0, "max.x"),
+            (bounds.0.y, -200.0, "min.y"),
+            (bounds.1.y, 250.0, "max.y"),
+            (bounds.0.z, -5.0, "min.z"),
+            (bounds.1.z, 20.0, "max.z"),
+        ] {
+            assert!(
+                (got - want).abs() < 1e-3,
+                "{axis} mismatch: got {got}, want {want}"
+            );
+        }
     }
 
     #[test]

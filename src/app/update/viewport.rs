@@ -48,6 +48,11 @@ enum ScrollIntent {
     Pan { dx: f32, dy: f32 },
 }
 
+/// How far a ZOOM Dynamic drag must travel vertically before the magnifier
+/// cursor flips between "+" and "-". Without the dead zone a hand holding
+/// still at the top of a drag strobes the glyph on every jittered pixel.
+const ZOOM_DIR_FLIP_PX: f32 = 2.0;
+
 /// A wheel notch zooms; a trackpad's two fingers pan.
 ///
 /// A wheel reports notches, a precise-scrolling device reports pixels, and that
@@ -1238,7 +1243,14 @@ impl OpenCADStudio {
                     self.tabs[i]
                         .scene
                         .record_nav_perf(crate::scene::NavPerfOp::Zoom, move_started);
-                    self.tabs[i].scene.selection.borrow_mut().middle_last_pos = Some(p);
+                    let mut sel = self.tabs[i].scene.selection.borrow_mut();
+                    // Latch the direction for the magnifier cursor. A dead
+                    // zone keeps the +/- glyph from strobing when a slow drag
+                    // wobbles a pixel either side of where it started.
+                    if dy.abs() >= ZOOM_DIR_FLIP_PX {
+                        sel.zoom_dir_out = dy > 0.0;
+                    }
+                    sel.middle_last_pos = Some(p);
                     return Task::none();
                 }
                 // Shift+MMB drag orbits the model view instead of panning
@@ -3471,6 +3483,9 @@ impl OpenCADStudio {
                 sel.box_current = Some(p);
                 sel.box_crossing = false;
                 sel.box_crossing_locked = true;
+                // A fresh drag starts neutral: the magnifier shows "+" until
+                // the pointer has actually moved far enough to mean zoom out.
+                sel.zoom_dir_out = false;
             }
             return Task::none();
         }
@@ -3740,6 +3755,7 @@ impl OpenCADStudio {
             sel.box_anchor_world = None;
             sel.box_current = None;
             sel.box_crossing_locked = false;
+            sel.zoom_dir_out = false;
             drop(sel);
             self.arm_hover_after_navigation(i);
             return Task::none();
@@ -6724,6 +6740,94 @@ mod scroll_intent_tests {
         assert!(pinch_zoom_steps(-0.05) < 0.0, "pinching in zooms out");
         // No pinch, no step: a zero delta must not divide the view away.
         assert_eq!(pinch_zoom_steps(0.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod zoom_dynamic_cursor_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use crate::ui::overlay::NavCursor;
+
+    fn zoom_armed_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.tabs[0].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        let _ = app.dispatch_command("ZOOM DYNAMIC");
+        app
+    }
+
+    fn drag_to(app: &mut OpenCADStudio, y: f32) {
+        let _ = app.update(Message::ViewportMove(Point::new(400.0, y)));
+    }
+
+    fn zoom_dir_out(app: &OpenCADStudio) -> bool {
+        app.tabs[0].scene.selection.borrow().zoom_dir_out
+    }
+
+    /// The magnifier has to carry the sign of the zoom actually under way:
+    /// dragging up zooms in, dragging back down zooms out.
+    #[test]
+    fn the_magnifier_follows_the_drag_direction() {
+        let mut app = zoom_armed_app();
+        assert!(app.tabs[0].zoom_dynamic_mode);
+        drag_to(&mut app, 300.0);
+        let _ = app.update(Message::ViewportLeftPress);
+        // A fresh drag starts neutral — "+" until told otherwise.
+        assert!(!zoom_dir_out(&app));
+
+        drag_to(&mut app, 200.0);
+        assert!(!zoom_dir_out(&app), "dragging up zooms in");
+
+        drag_to(&mut app, 400.0);
+        assert!(zoom_dir_out(&app), "dragging down zooms out");
+
+        drag_to(&mut app, 250.0);
+        assert!(!zoom_dir_out(&app), "dragging up again zooms in");
+
+        // Releasing disarms the direction, so the next hover shows "+".
+        let _ = app.update(Message::ViewportLeftRelease);
+        assert!(!zoom_dir_out(&app));
+    }
+
+    /// Sub-pixel wobble while a hand holds still must not strobe the glyph.
+    #[test]
+    fn jitter_below_the_dead_zone_does_not_flip_the_glyph() {
+        let mut app = zoom_armed_app();
+        drag_to(&mut app, 300.0);
+        let _ = app.update(Message::ViewportLeftPress);
+        drag_to(&mut app, 400.0);
+        assert!(zoom_dir_out(&app));
+
+        // Back up by less than ZOOM_DIR_FLIP_PX: still zooming out.
+        drag_to(&mut app, 399.0);
+        assert!(zoom_dir_out(&app), "1 px of wobble must not flip the sign");
+    }
+
+    /// Each navigation tool owns its own cursor. They used to share the pan
+    /// hand, which read as "drag the sheet" during a zoom and an orbit.
+    #[test]
+    fn each_navigation_tool_reports_its_own_mode() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        for (command, want) in [
+            ("PAN", NavCursor::Pan),
+            ("ORBIT", NavCursor::Orbit),
+            ("ZOOM DYNAMIC", NavCursor::Zoom),
+        ] {
+            let _ = app.dispatch_command(command);
+            assert_eq!(
+                crate::app::view::nav_cursor(&app.tabs[0]),
+                want,
+                "{command} must have its own cursor"
+            );
+            let _ = app.update(Message::CommandEscape);
+            assert_eq!(
+                crate::app::view::nav_cursor(&app.tabs[0]),
+                NavCursor::None,
+                "Esc must disarm {command}"
+            );
+        }
     }
 }
 
