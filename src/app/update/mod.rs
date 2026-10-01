@@ -1806,6 +1806,7 @@ impl OpenCADStudio {
             }
 
             Message::PdfDialog(message) => self.update_pdf_dialog(message),
+            Message::AttdefDialog(message) => self.on_attdef_dialog(message),
             Message::PcManager(message) => self.update_pc_manager(message),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);
@@ -8496,6 +8497,15 @@ impl OpenCADStudio {
             }
 
             Message::CloseModal => {
+                if matches!(
+                    self.active_modal,
+                    Some(super::ModalKind::AttDef | super::ModalKind::AttDefEdit)
+                ) {
+                    self.attdef_dialog = None;
+                    let editing = self.attdef_edit.take().is_some();
+                    self.close_active_modal();
+                    return if editing { self.post_editor_closed(false) } else { Task::none() };
+                }
                 // Cancelling the section settings drops the waiting extraction.
                 if self.active_modal == Some(super::ModalKind::PcSection) {
                     crate::modules::insert::pc_extract::drop_job();

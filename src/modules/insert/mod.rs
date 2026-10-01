@@ -1,14 +1,13 @@
 // Insert module — references, point clouds, blocks, attributes, import, content.
 
 mod attdef;
-mod attedit;
+pub(crate) mod attedit;
 mod attman;
-mod attsync;
 pub mod base_point;
 mod content_browser;
 pub(crate) mod create_block;
 mod design_center;
-mod edit_block;
+pub(crate) mod edit_block;
 pub(crate) mod image_transparency;
 pub(crate) mod insert_block;
 mod landxml;
@@ -106,19 +105,17 @@ impl CadModule for InsertModule {
                     tools: vec![
                         RibbonItem::LargeTool(mview_block::tool()),
                         RibbonItem::LargeTool(insert_block::tool()),
-                        RibbonItem::Tool(create_block::tool()),
-                        RibbonItem::Tool(edit_block::tool()),
-                        RibbonItem::Tool(base_point::tool()),
+                        RibbonItem::LargeTool(attedit::tool()),
                     ],
                 },
-                // ── Attributes ────────────────────────────────────────────────────
+                // ── Block Definition (slide-out: Set Base Point, Synchronize) ─────
                 RibbonGroup {
-                    title: "Attributes",
+                    title: "Block Definition",
                     tools: vec![
+                        RibbonItem::LargeTool(create_block::tool()),
                         RibbonItem::LargeTool(attdef::tool()),
-                        RibbonItem::LargeTool(attedit::tool()),
-                        RibbonItem::Tool(attman::tool()),
-                        RibbonItem::Tool(attsync::tool()),
+                        RibbonItem::LargeTool(attman::tool()),
+                        RibbonItem::LargeTool(edit_block::tool()),
                     ],
                 },
                 // ── Import ────────────────────────────────────────────────────────

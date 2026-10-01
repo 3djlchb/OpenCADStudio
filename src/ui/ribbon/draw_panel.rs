@@ -106,6 +106,9 @@ const TOOLS: &[Tool] = &[
 #[derive(Clone, Copy)]
 struct Panel {
     id: &'static str,
+    /// A command the owning ribbon group must hold, for titles more than one
+    /// tab uses ("Block" on Home and Insert).
+    anchor: Option<&'static str>,
     title_id: &'static str,
     title: &'static str,
     tools: &'static [Tool],
@@ -121,24 +124,59 @@ const REFERENCE_TOOLS: &[Tool] = &[Tool {
 }];
 pub(super) const REFERENCE_PANEL_ID: &str = "reference_extension";
 
+const fn icon_tool(command: &'static str, label: &'static str, icon: &'static [u8]) -> Tool {
+    Tool { command, label, icon, options: &[] }
+}
+
+/// Home > Block slide-out.
+const HOME_BLOCK_TOOLS: &[Tool] = &[
+    icon_tool("ATTDEF", "Define Attributes", include_bytes!("../../../assets/icons/attdef.svg")),
+    icon_tool("ATTMAN", "Manage Attributes", include_bytes!("../../../assets/icons/attman.svg")),
+    icon_tool("ATTSYNC", "Synchronize", include_bytes!("../../../assets/icons/attsync.svg")),
+    icon_tool("BASE", "Set Base Point", include_bytes!("../../../assets/icons/base_point.svg")),
+];
+
+/// Insert > Block Definition slide-out.
+const BLOCK_DEFINITION_TOOLS: &[Tool] = &[
+    icon_tool("BASE", "Set Base Point", include_bytes!("../../../assets/icons/base_point.svg")),
+    icon_tool("ATTSYNC", "Synchronize", include_bytes!("../../../assets/icons/attsync.svg")),
+];
+
 const PANELS: &[Panel] = &[
     Panel {
         id: PANEL_ID,
+        anchor: None,
         title_id: TITLE_ID,
         title: "Draw",
         tools: TOOLS,
     },
     Panel {
         id: "modify_extension",
+        anchor: None,
         title_id: "modify_extension_title",
         title: "Modify",
         tools: super::modify_panel::TOOLS,
     },
     Panel {
         id: REFERENCE_PANEL_ID,
+        anchor: None,
         title_id: "reference_extension_title",
         title: "Reference",
         tools: REFERENCE_TOOLS,
+    },
+    Panel {
+        id: "home_block_extension",
+        anchor: Some("BEDIT"),
+        title_id: "home_block_extension_title",
+        title: "Block",
+        tools: HOME_BLOCK_TOOLS,
+    },
+    Panel {
+        id: "block_definition_extension",
+        anchor: None,
+        title_id: "block_definition_extension_title",
+        title: "Block Definition",
+        tools: BLOCK_DEFINITION_TOOLS,
     },
 ];
 
@@ -169,10 +207,16 @@ pub(super) fn parent_panel(id: &str) -> Option<&'static str> {
     panel_for_dropdown(id).map(|panel| panel.id)
 }
 
-pub(super) fn group_title<'a>(title: &'static str, open: &Option<String>) -> Element<'a, Message> {
-    let Some(panel) = PANELS
-        .iter()
-        .find(|panel| panel.title == title && !panel.tools.is_empty())
+pub(super) fn group_title<'a>(
+    title: &'static str,
+    group_ids: &[&'static str],
+    open: &Option<String>,
+) -> Element<'a, Message> {
+    let Some(panel) = PANELS.iter().copied().find(|panel| {
+        panel.title == title
+            && !panel.tools.is_empty()
+            && panel.anchor.is_none_or(|anchor| group_ids.contains(&anchor))
+    })
     else {
         return container(text(t!(title)).size(9).style(muted_text_style))
             .padding([1, 4])

@@ -79,6 +79,7 @@ pub(super) const NAMES: &[&str] = &[
     "ribbon_tab",
     "ribbon_dropdown",
     "dialog_ok",
+    "attdef_dialog",
     "close_document",
     "toggle_properties",
     "toggle_layers",
@@ -788,6 +789,47 @@ impl OpenCADStudio {
                 }
                 return Ok(Task::none());
             }
+            // One field of the open attribute definition dialog: `tag=…`,
+            // `prompt=…`, `default=…`, `justify=MC`, `style=…`, `height=…`,
+            // `rotation=…`, `width=…`, `on_screen=0|1`, `x=…` / `y=…` / `z=…`,
+            // `mode=<bit>:0|1`, `annotative=0|1`, `align_below=0|1`.
+            "attdef_dialog" => {
+                use crate::ui::window::attdef_dialog::{AttdefDialogMsg as M, JustifyChoice};
+                let value = string(req, "value")?;
+                let (key, v) = value.split_once('=').unwrap_or((value, ""));
+                let on = v == "1";
+                let editing = self.active_modal == Some(crate::app::ModalKind::AttDefEdit);
+                Message::AttdefDialog(match key {
+                    "tag" if editing => M::EditTag(v.into()),
+                    "prompt" if editing => M::EditPrompt(v.into()),
+                    "default" if editing => M::EditDefault(v.into()),
+                    "tag" => M::Tag(v.into()),
+                    "prompt" => M::Prompt(v.into()),
+                    "default" => M::Default(v.into()),
+                    "style" => M::Style(v.into()),
+                    "height" => M::Height(v.into()),
+                    "rotation" => M::Rotation(v.into()),
+                    "width" => M::Width(v.into()),
+                    "on_screen" => M::OnScreen(on),
+                    "annotative" => M::Annotative(on),
+                    "align_below" => M::AlignBelow(on),
+                    "x" => M::Coord(0, v.into()),
+                    "y" => M::Coord(1, v.into()),
+                    "z" => M::Coord(2, v.into()),
+                    "justify" => M::Justify(JustifyChoice(
+                        crate::modules::draw::draw::attdef::Justify::from_keyword(v)
+                            .ok_or_else(|| failure("invalid_value", "Unknown justification"))?,
+                    )),
+                    "mode" => {
+                        let (bit, state) = v.split_once(':').unwrap_or((v, "1"));
+                        let bit = bit
+                            .parse::<u8>()
+                            .map_err(|_| failure("invalid_value", "mode=<bit>:0|1"))?;
+                        M::Mode(bit, state == "1")
+                    }
+                    _ => return Err(failure("invalid_value", "Unknown attdef dialog field")),
+                })
+            }
             "ribbon_dropdown" => Message::ToggleRibbonDropdown(string(req, "value")?.into()),
             "pdf_dialog_ok" => {
                 use crate::ui::window::pdf_dialogs::PdfDialogMsg;
@@ -808,6 +850,12 @@ impl OpenCADStudio {
                     crate::ui::window::xref_attach::XrefAttachMsg::Apply,
                 ),
                 Some(crate::app::ModalKind::BlockDefinition) => Message::BlockDefApply,
+                Some(crate::app::ModalKind::AttDef) => Message::AttdefDialog(
+                    crate::ui::window::attdef_dialog::AttdefDialogMsg::Ok,
+                ),
+                Some(crate::app::ModalKind::AttDefEdit) => Message::AttdefDialog(
+                    crate::ui::window::attdef_dialog::AttdefDialogMsg::EditOk,
+                ),
                 _ => return Err(failure("no_dialog", "No dialog with an OK button is open")),
             },
             "close_document" => Message::TabClose(self.tabs[self.active_tab].id),

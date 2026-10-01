@@ -3627,6 +3627,14 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                 return Task::none();
                             }
                         }
+                        if field.starts_with("att_") {
+                            if let Err(message) =
+                                crate::entities::attribute::validate_definition_property(field, &val)
+                            {
+                                self.command_line.push_error(message);
+                                return Task::none();
+                            }
+                        }
                         if field.starts_with("ul_") {
                             if let Err(message) =
                                 crate::entities::underlay::validate_property(field, &val)

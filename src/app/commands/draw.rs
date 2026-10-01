@@ -79,21 +79,6 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
-            "ATTDEF" => {
-                use crate::modules::draw::draw::attdef::AttdefCommand;
-                let defaults = crate::scene::creation_style::current_text_defaults(
-                    &self.tabs[i].scene.document,
-                );
-                let cmd = AttdefCommand::with_text_defaults(
-                    defaults.height,
-                    defaults.style_name,
-                    defaults.width_factor,
-                    defaults.oblique_angle,
-                );
-                self.command_line.push_info(&cmd.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(cmd));
-            }
-
             // Command-line attribute editing on selected Insert entities. Bare
             // ATTEDIT and the ATE alias launch the interactive editor instead
             // (see the ATTEDIT arm in the inquiry family); the dash form is the

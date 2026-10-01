@@ -94,6 +94,10 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 
+# ATTDEF/ATTRIB DXF output and the R2013+ solid wire cache (cadcodec PR pending).
+[patch."https://github.com/HakanSeven12/opencadcodec.git"]
+opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "282b130" }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"
 ocs_plugin_api = { path = "crates/ocs_plugin_api", features = ["host"] }
