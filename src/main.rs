@@ -67,6 +67,16 @@ fn main() -> iced::Result {
             std::process::exit(if ok { 0 } else { 1 });
         }
 
+        if args.sync_mcp_schemas {
+            let synced = mcp::sync_agent_tool_schemas();
+            if synced {
+                println!("Successfully synchronized OpenCADStudio MCP schemas to ~/.gemini/antigravity/mcp/opencadstudio/");
+            } else {
+                eprintln!("Antigravity MCP directory ~/.gemini/antigravity/mcp/ not found; skipped sync.");
+            }
+            return Ok(());
+        }
+
         // MCP is a client-neutral local entry point. It uses only stdin,
         // stdout and the authenticated GUI bridge, so it must run before any
         // logging or graphics setup can write to the protocol stream.

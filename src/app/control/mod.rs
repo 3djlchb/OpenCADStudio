@@ -464,6 +464,7 @@ impl OpenCADStudio {
                 | "records"
                 | "record_schema"
                 | "capabilities"
+                | "tools"
                 | "entities"
                 | "layers"
                 | "header"
@@ -524,6 +525,17 @@ impl OpenCADStudio {
             let cursor = req["after"].as_u64().unwrap_or(0);
             return (
                 json!({"ok":true,"cursor":self.control.serial,"resync":self.control.events.front().is_some_and(|e|cursor+1<e["sequence"].as_u64().unwrap_or(0)),"events":self.control.events.iter().filter(|e|e["sequence"].as_u64().unwrap_or(0)>cursor).collect::<Vec<_>>()}),
+                Task::none(),
+            );
+        }
+        if op == "tools" {
+            return (
+                json!({
+                    "ok": true,
+                    "status": "completed",
+                    "tools": crate::mcp::tool_definitions(),
+                    "instructions": crate::mcp::INSTRUCTIONS
+                }),
                 Task::none(),
             );
         }

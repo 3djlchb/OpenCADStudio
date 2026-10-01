@@ -24,7 +24,7 @@ const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
 const TASK_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, supports diff: true for streaming dirty visual regions, and provides multiscale DeepZoom pyramidal tiling via tile: {level, x, y} or cad://session/{session_id}/pyramid/manifest.json and cad://session/{session_id}/tile/{level}/{x}/{y}.png. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
+pub(crate) const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, supports diff: true for streaming dirty visual regions, and provides multiscale DeepZoom pyramidal tiling via tile: {level, x, y} or cad://session/{session_id}/pyramid/manifest.json and cad://session/{session_id}/tile/{level}/{x}/{y}.png. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -32,6 +32,7 @@ const READ_OPS: &[&str] = &[
     "records",
     "record_schema",
     "capabilities",
+    "tools",
     "entities",
     "layers",
     "header",
@@ -1259,6 +1260,14 @@ fn call_tool(
             if !READ_OPS.contains(&op) {
                 return Err("Use ocs_execute for mutations".into());
             }
+            if op == "tools" {
+                return Ok(json!({
+                    "ok": true,
+                    "status": "completed",
+                    "tools": tool_definitions(),
+                    "instructions": INSTRUCTIONS
+                }));
+            }
             let mut request = arguments["parameters"]
                 .as_object()
                 .cloned()
@@ -1638,7 +1647,7 @@ fn execute_output_schema() -> Value {
     })
 }
 
-fn tool_definitions() -> Value {
+pub(crate) fn tool_definitions() -> Value {
     json!([
         {
             "name":"ocs_sessions",
@@ -1683,7 +1692,7 @@ fn tool_definitions() -> Value {
                     "pyramid_manifest":{"type":"boolean","default":false,"description":"If true, generates and returns the complete multiscale pyramid manifest (levels, grid dimensions, tile world spans and resource URIs) in the response metadata."}
                 },
                 "required":["ocs_session_id"],
-                "additionalProperties":false
+                "additionalProperties":true
             },
             "annotations":{"title":"Capture OCS window","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
@@ -2025,8 +2034,53 @@ fn handle_message(
     })
 }
 
+/// Synchronize agent tool schemas and instructions to ~/.gemini/antigravity/mcp/opencadstudio/.
+/// Returns true if the target directory was found or created and schemas were written.
+pub fn sync_agent_tool_schemas() -> bool {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    if home.is_empty() {
+        return false;
+    }
+    let mcp_root = std::path::PathBuf::from(home)
+        .join(".gemini")
+        .join("antigravity")
+        .join("mcp");
+    if !mcp_root.exists() {
+        return false;
+    }
+    let base_dir = mcp_root.join("opencadstudio");
+    if let Err(_) = std::fs::create_dir_all(&base_dir) {
+        return false;
+    }
+
+    let tools = tool_definitions();
+    let Some(tool_arr) = tools.as_array() else {
+        return false;
+    };
+    for tool in tool_arr {
+        let Some(name) = tool["name"].as_str() else {
+            continue;
+        };
+        let schema = json!({
+            "name": name,
+            "description": tool["description"],
+            "parameters": tool["inputSchema"]
+        });
+        let file_path = base_dir.join(format!("{name}.json"));
+        if let Ok(pretty) = serde_json::to_string_pretty(&schema) {
+            let _ = std::fs::write(&file_path, pretty);
+        }
+    }
+    let instructions_path = base_dir.join("instructions.md");
+    let _ = std::fs::write(instructions_path, INSTRUCTIONS);
+    true
+}
+
 /// Run the MCP stdio loop until the client closes stdin.
 pub fn run() {
+    let _ = sync_agent_tool_schemas();
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut output = stdout.lock();
@@ -2823,7 +2877,7 @@ mod tests {
 
     #[test]
     fn export_agent_tool_schemas() {
-        let tools = tool_definitions();
+        let synced = sync_agent_tool_schemas();
         let home = std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
             .unwrap_or_default();
@@ -2833,17 +2887,34 @@ mod tests {
             .join("mcp")
             .join("opencadstudio");
         if base_dir.exists() {
-            for tool in tools.as_array().unwrap() {
-                let name = tool["name"].as_str().unwrap();
-                let schema = json!({
-                    "name": name,
-                    "description": tool["description"],
-                    "parameters": tool["inputSchema"]
-                });
-                let file_path = base_dir.join(format!("{name}.json"));
-                let pretty = serde_json::to_string_pretty(&schema).unwrap();
-                let _ = std::fs::write(&file_path, pretty);
-            }
+            assert!(synced, "sync_agent_tool_schemas must succeed when directory exists");
+            assert!(base_dir.join("ocs_capture.json").exists());
+            assert!(base_dir.join("ocs_execute.json").exists());
+            assert!(base_dir.join("ocs_read.json").exists());
+            assert!(base_dir.join("ocs_sessions.json").exists());
+            assert!(base_dir.join("instructions.md").exists());
         }
+    }
+
+    #[test]
+    fn read_op_tools_returns_current_schemas_and_instructions() {
+        let mut clients = HashMap::new();
+        let mut resources = ResourceStore::default();
+        let req = json!({
+            "name": "ocs_read",
+            "arguments": {
+                "ocs_session_id": "test_session",
+                "op": "tools"
+            }
+        });
+        let result = call_tool(
+            "ocs_read",
+            &req["arguments"],
+            &mut clients,
+            &mut resources,
+        ).expect("ocs_read op: tools must succeed");
+        assert_eq!(result["ok"], true);
+        assert!(result["tools"].is_array());
+        assert!(result["instructions"].is_string());
     }
 }
