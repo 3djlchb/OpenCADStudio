@@ -792,7 +792,7 @@ impl OpenCADStudio {
             // One field of the open attribute definition dialog: `tag=…`,
             // `prompt=…`, `default=…`, `justify=MC`, `style=…`, `height=…`,
             // `rotation=…`, `width=…`, `on_screen=0|1`, `x=…` / `y=…` / `z=…`,
-            // `mode=<bit>:0|1`, `annotative=0|1`, `align_below=0|1`.
+            // `mode=<bit>:0|1`, `annotative=0|1`, `align_below=0|1`, `edit_value`, `dismiss`.
             "attdef_dialog" => {
                 use crate::ui::window::attdef_dialog::{AttdefDialogMsg as M, JustifyChoice};
                 let value = string(req, "value")?;
@@ -813,6 +813,8 @@ impl OpenCADStudio {
                     "on_screen" => M::OnScreen(on),
                     "annotative" => M::Annotative(on),
                     "align_below" => M::AlignBelow(on),
+                    "edit_value" => M::EditValue,
+                    "dismiss" => M::DismissError,
                     "x" => M::Coord(0, v.into()),
                     "y" => M::Coord(1, v.into()),
                     "z" => M::Coord(2, v.into()),
