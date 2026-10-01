@@ -587,7 +587,7 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
         row![
             text(crate::t!("Options").to_uppercase()).size(10).style(accent_text),
             Space::new().width(Fill),
-            text(if palette.options_collapsed { "▸" } else { "▾" }).size(11),
+            text(if palette.options_collapsed { "▸" } else { "▾" }).size(22),
         ]
         .align_y(iced::Center),
     )
