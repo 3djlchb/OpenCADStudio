@@ -24,7 +24,7 @@ const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
 const TASK_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
+const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, and supports diff: true for streaming dirty visual regions. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -222,6 +222,7 @@ struct ResourceStore {
     snapshots: HashMap<String, CachedSnapshot>,
     order: VecDeque<String>,
     latest: HashMap<String, String>,
+    last_captures: HashMap<String, (image::RgbaImage, String)>,
 }
 
 const MAX_STORED_SNAPSHOTS: usize = 32;
@@ -1051,6 +1052,14 @@ fn call_tool(
             let scope = arguments["scope"].as_str().unwrap_or("viewport");
             let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
             let delivery = arguments["delivery"].as_str().unwrap_or("inline");
+            let diff = arguments["diff"].as_bool().unwrap_or(false);
+            let diff_mode = arguments["diff_mode"].as_str().unwrap_or("highlight");
+            let reset_baseline = arguments["reset_diff_baseline"].as_bool().unwrap_or(false);
+
+            if reset_baseline {
+                resources.last_captures.remove(session_id);
+            }
+
             let mut req = json!({
                 "op": "capture",
                 "path": path.to_string_lossy(),
@@ -1086,11 +1095,83 @@ fn call_tool(
                 obj.remove("path");
             }
 
+            let mut final_bytes = bytes;
+            if diff {
+                let current_img = image::load_from_memory(&final_bytes)
+                    .map_err(|e| format!("Failed to decode capture for visual diff: {e}"))?
+                    .to_rgba8();
+
+                let mut p2w = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+                if let Some(arr) = meta
+                    .get("_spatial")
+                    .and_then(|s| s.get("pixel_to_world_matrix"))
+                    .and_then(Value::as_array)
+                {
+                    if arr.len() == 6 {
+                        for (i, v) in arr.iter().enumerate() {
+                            if let Some(num) = v.as_f64() {
+                                p2w[i] = num;
+                            }
+                        }
+                    }
+                }
+
+                if let Some((prev_img, prev_hash)) = resources.last_captures.get(session_id) {
+                    let diff_res = crate::app::control::vision::compute_visual_diff(prev_img, &current_img, &p2w);
+                    let diff_info = json!({
+                        "is_baseline": false,
+                        "baseline_hash": prev_hash,
+                        "changed": diff_res.changed,
+                        "change_percentage": (diff_res.change_percentage * 100.0).round() / 100.0,
+                        "changed_pixels": diff_res.changed_pixels,
+                        "dirty_pixel_bounds": diff_res.dirty_pixel_bounds,
+                        "dirty_world_bounds": diff_res.dirty_world_bounds,
+                        "patch_resolution": diff_res.patch_resolution,
+                        "mode": diff_mode,
+                    });
+                    if let Some(obj) = meta.as_object_mut() {
+                        obj.insert("diff".into(), diff_info);
+                    }
+
+                    if diff_res.changed {
+                        match diff_mode {
+                            "crop" => {
+                                if let Some(crop) = &diff_res.cropped_patch {
+                                    final_bytes = crate::app::control::vision::encode_image_png(crop)?;
+                                }
+                            }
+                            "highlight" => {
+                                final_bytes = crate::app::control::vision::encode_image_png(&diff_res.diff_overlay)?;
+                            }
+                            _ => {}
+                        }
+                    }
+                } else {
+                    let diff_info = json!({
+                        "is_baseline": true,
+                        "changed": false,
+                        "change_percentage": 0.0,
+                        "changed_pixels": 0,
+                        "message": "Baseline capture established; subsequent captures with diff: true will report dirty regions.",
+                        "mode": diff_mode,
+                    });
+                    if let Some(obj) = meta.as_object_mut() {
+                        obj.insert("diff".into(), diff_info);
+                    }
+                }
+
+                let mut base_hasher = Sha256::new();
+                let full_png = crate::app::control::vision::encode_image_png(&current_img)?;
+                base_hasher.update(&full_png);
+                let current_full_hash = format!("{:x}", base_hasher.finalize());
+                resources.last_captures.insert(session_id.to_string(), (current_img, current_full_hash));
+            }
+
             let mut hasher = Sha256::new();
-            hasher.update(&bytes);
+            hasher.update(&final_bytes);
             let hash = format!("{:x}", hasher.finalize());
-            let b64 = BASE64.encode(&bytes);
-            let bytes_len = bytes.len();
+            let b64 = BASE64.encode(&final_bytes);
+            let bytes_len = final_bytes.len();
 
             let uri = resources.insert(session_id, &hash, b64.clone(), bytes_len, meta.clone());
             if let Some(obj) = meta.as_object_mut() {
@@ -1198,6 +1279,9 @@ fn tool_definitions() -> Value {
                     "scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},
                     "max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."},
                     "delivery":{"type":"string","enum":["inline","resource","both"],"default":"inline","description":"Image delivery method: 'inline' embeds base64 in tool content, 'resource' returns an MCP cad:// URI reference without inlining image bytes, 'both' returns both inline image and cad:// URI."},
+                    "diff":{"type":"boolean","default":false,"description":"If true, calculates visual differential compared to the previous capture of this session, returning dirty bounds and changed areas."},
+                    "diff_mode":{"type":"string","enum":["highlight","crop","metadata_only"],"default":"highlight","description":"Visual diff representation: 'highlight' returns full image with changed areas highlighted in vibrant green and unchanged background dimmed; 'crop' returns only the cropped dirty bounding box (saving maximum bandwidth/tokens); 'metadata_only' leaves image untouched but populates the diff metadata."},
+                    "reset_diff_baseline":{"type":"boolean","default":false,"description":"If true, discards any previous diff baseline for this session and establishes this capture as the new baseline."},
                     "view":{"type":"string","enum":["current","extents","selection","region"],"default":"current","description":"Frame the camera before capture: extents fits all entities, selection fits selected entities, region fits explicit world bounds."},
                     "bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"World XY bounding box [min_x, min_y, max_x, max_y] to zoom and fit in view before capturing (used with view: 'region')."},
                     "focus_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to zoom and fit in view before capturing."},
@@ -1908,10 +1992,25 @@ mod tests {
                 "hash": "hash123",
                 "bytes": 1024
             },
-            "metadata": {"width": 800, "height": 600}
+            "metadata": {
+                "width": 800,
+                "height": 600,
+                "_spatial": {
+                    "crs": "CAD_WCS",
+                    "unit": "Millimeters",
+                    "pixel_to_world_matrix": [0.05, 0.0, 0.0, -0.05, -20.0, 15.0],
+                    "world_to_pixel_matrix": [20.0, 0.0, 0.0, -20.0, 400.0, 300.0]
+                }
+            }
         });
         let res_res = tool_result(res_value);
         assert_eq!(res_res["isError"], false);
+        assert_eq!(res_res["structuredContent"]["_spatial"]["crs"], "CAD_WCS");
+        assert_eq!(res_res["structuredContent"]["_spatial"]["unit"], "Millimeters");
+        assert_eq!(
+            res_res["structuredContent"]["_spatial"]["pixel_to_world_matrix"],
+            json!([0.05, 0.0, 0.0, -0.05, -20.0, 15.0])
+        );
         let content = res_res["content"].as_array().unwrap();
         assert_eq!(content[0]["type"], "text");
         assert!(content[0]["text"].as_str().unwrap().contains("cad://session/s1/snapshot/hash123.png"));
@@ -1935,6 +2034,84 @@ mod tests {
         let both_content = both_res["content"].as_array().unwrap();
         assert!(both_content.iter().any(|c| c["type"] == "resource"));
         assert!(both_content.iter().any(|c| c["type"] == "image"));
+    }
+
+    #[test]
+    fn capture_tool_schema_and_diff_metadata_handling() {
+        // 1. Verify ocs_capture schema has diff parameters
+        let tools = tool_definitions();
+        let capture_tool = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "ocs_capture")
+            .expect("ocs_capture tool exists");
+        let props = &capture_tool["inputSchema"]["properties"];
+        assert_eq!(props["diff"]["type"], "boolean");
+        assert_eq!(props["diff"]["default"], false);
+        assert_eq!(props["diff_mode"]["type"], "string");
+        assert_eq!(props["diff_mode"]["default"], "highlight");
+        let diff_modes = props["diff_mode"]["enum"].as_array().unwrap();
+        assert!(diff_modes.iter().any(|v| v == "highlight"));
+        assert!(diff_modes.iter().any(|v| v == "crop"));
+        assert!(diff_modes.iter().any(|v| v == "metadata_only"));
+        assert_eq!(props["reset_diff_baseline"]["type"], "boolean");
+        assert_eq!(props["delivery"]["type"], "string");
+
+        // 2. Test tool_result with diff metadata
+        let diff_capture_res = json!({
+            "$resource": {
+                "uri": "cad://session/s1/snapshot/diffhash789.png",
+                "mimeType": "image/png",
+                "hash": "diffhash789",
+                "bytes": 512
+            },
+            "metadata": {
+                "width": 800,
+                "height": 600,
+                "_spatial": {
+                    "crs": "CAD_WCS",
+                    "unit": "Millimeters",
+                    "pixel_to_world_matrix": [0.05, 0.0, 0.0, -0.05, -20.0, 15.0],
+                    "world_to_pixel_matrix": [20.0, 0.0, 0.0, -20.0, 400.0, 300.0]
+                },
+                "diff": {
+                    "is_baseline": false,
+                    "baseline_hash": "basehash123",
+                    "changed": true,
+                    "change_percentage": 2.5,
+                    "changed_pixels": 12000,
+                    "dirty_pixel_bounds": [100, 150, 300, 350],
+                    "dirty_world_bounds": [-15.0, -2.5, -5.0, 7.5],
+                    "patch_resolution": [201, 201],
+                    "mode": "crop"
+                }
+            }
+        });
+
+        let structured = tool_result(diff_capture_res);
+        assert_eq!(structured["isError"], false);
+        assert_eq!(structured["structuredContent"]["diff"]["changed"], true);
+        assert_eq!(structured["structuredContent"]["diff"]["mode"], "crop");
+        assert_eq!(
+            structured["structuredContent"]["diff"]["dirty_pixel_bounds"],
+            json!([100, 150, 300, 350])
+        );
+        assert_eq!(
+            structured["structuredContent"]["diff"]["dirty_world_bounds"],
+            json!([-15.0, -2.5, -5.0, 7.5])
+        );
+        assert_eq!(structured["structuredContent"]["_spatial"]["crs"], "CAD_WCS");
+
+        let content = structured["content"].as_array().unwrap();
+        let text_block = content.iter().find(|c| {
+            c["type"] == "text"
+                && c["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("\"dirty_pixel_bounds\"")
+        });
+        assert!(text_block.is_some(), "Metadata text block must format diff parameters");
     }
 
     #[test]

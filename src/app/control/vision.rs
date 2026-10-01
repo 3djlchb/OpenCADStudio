@@ -109,6 +109,9 @@ pub(crate) fn draw_som_badge(
 pub(crate) struct VisionGrounding {
     pub viewport_world_bounds: Value,
     pub camera: Value,
+    pub target_plane: Value,
+    pub pixel_to_world_matrix: [f64; 6],
+    pub world_to_pixel_matrix: [f64; 6],
     pub visible_entities: Vec<Value>,
 }
 
@@ -145,12 +148,55 @@ pub(crate) fn compute_grounding(
 
     let eye = c.eye();
     let target = c.target;
+
+    let normal = (c.rotation * glam::Vec3::NEG_Z).normalize_or(glam::Vec3::Z);
+    let target_plane = json!({
+        "normal": [normal.x, normal.y, normal.z],
+        "origin": [target.x, target.y, target.z],
+    });
+
+    let proj_name = match c.projection {
+        crate::scene::view::camera::Projection::Orthographic => "Orthographic",
+        crate::scene::view::camera::Projection::Perspective => "Perspective",
+    };
     let camera_info = json!({
         "eye": [eye.x, eye.y, eye.z],
         "target": [target.x, target.y, target.z],
         "distance": c.distance,
         "ortho_size": c.ortho_size(),
+        "projection": proj_name,
+        "fov_y": c.fov_y,
     });
+
+    let p_origin = p_tl;
+    let p_right = p_tr;
+    let p_bottom = p_bl;
+
+    let d_x = (p_right - p_origin) / (image_width as f64).max(1.0);
+    let d_y = (p_bottom - p_origin) / (image_height as f64).max(1.0);
+
+    let m00 = d_x.x;
+    let m01 = d_y.x;
+    let tx = p_origin.x;
+    let m10 = d_x.y;
+    let m11 = d_y.y;
+    let ty = p_origin.y;
+
+    let det = m00 * m11 - m01 * m10;
+    let (inv_m00, inv_m01, inv_m10, inv_m11, inv_tx, inv_ty) = if det.abs() > 1e-12 {
+        let inv_m00 = m11 / det;
+        let inv_m01 = -m01 / det;
+        let inv_m10 = -m10 / det;
+        let inv_m11 = m00 / det;
+        let inv_tx = -(inv_m00 * tx + inv_m01 * ty);
+        let inv_ty = -(inv_m10 * tx + inv_m11 * ty);
+        (inv_m00, inv_m01, inv_m10, inv_m11, inv_tx, inv_ty)
+    } else {
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    };
+
+    let pixel_to_world_matrix = [m00, m01, m10, m11, tx, ty];
+    let world_to_pixel_matrix = [inv_m00, inv_m01, inv_m10, inv_m11, inv_tx, inv_ty];
 
     let img_w = image_width as f32;
     let img_h = image_height as f32;
@@ -254,8 +300,150 @@ pub(crate) fn compute_grounding(
     VisionGrounding {
         viewport_world_bounds,
         camera: camera_info,
+        target_plane,
+        pixel_to_world_matrix,
+        world_to_pixel_matrix,
         visible_entities,
     }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VisualDiffResult {
+    pub changed: bool,
+    pub change_percentage: f64,
+    pub changed_pixels: usize,
+    pub dirty_pixel_bounds: Option<[u32; 4]>, // [min_x, min_y, max_x, max_y]
+    pub dirty_world_bounds: Option<[f64; 4]>, // [min_wx, min_wy, max_wx, max_wy]
+    pub patch_resolution: Option<[u32; 2]>,
+    pub cropped_patch: Option<image::RgbaImage>,
+    pub diff_overlay: image::RgbaImage,
+}
+
+pub(crate) fn compute_visual_diff(
+    baseline: &image::RgbaImage,
+    current: &image::RgbaImage,
+    pixel_to_world_matrix: &[f64; 6],
+) -> VisualDiffResult {
+    let (w, h) = (current.width(), current.height());
+    let mut diff_overlay = image::RgbaImage::new(w, h);
+
+    if baseline.width() != w || baseline.height() != h {
+        return VisualDiffResult {
+            changed: true,
+            change_percentage: 100.0,
+            changed_pixels: (w * h) as usize,
+            dirty_pixel_bounds: Some([0, 0, w.saturating_sub(1), h.saturating_sub(1)]),
+            dirty_world_bounds: None,
+            patch_resolution: Some([w, h]),
+            cropped_patch: Some(current.clone()),
+            diff_overlay: current.clone(),
+        };
+    }
+
+    let mut min_x = u32::MAX;
+    let mut min_y = u32::MAX;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+    let mut changed_pixels = 0usize;
+
+    for y in 0..h {
+        for x in 0..w {
+            let p1 = baseline.get_pixel(x, y);
+            let p2 = current.get_pixel(x, y);
+
+            let dr = (p1[0] as i32 - p2[0] as i32).abs();
+            let dg = (p1[1] as i32 - p2[1] as i32).abs();
+            let db = (p1[2] as i32 - p2[2] as i32).abs();
+            let da = (p1[3] as i32 - p2[3] as i32).abs();
+
+            let is_diff = (dr + dg + db + da) > 20;
+
+            if is_diff {
+                changed_pixels += 1;
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+
+                // Highlight changed pixel in vibrant green
+                diff_overlay.put_pixel(x, y, image::Rgba([0, 255, 128, 255]));
+            } else {
+                // Dim unchanged background: grayscale attenuated to 35%
+                let gray = ((p2[0] as f32 * 0.299 + p2[1] as f32 * 0.587 + p2[2] as f32 * 0.114) * 0.35) as u8;
+                diff_overlay.put_pixel(x, y, image::Rgba([gray, gray, gray, 200]));
+            }
+        }
+    }
+
+    let total_pixels = (w * h) as f64;
+    let change_percentage = if total_pixels > 0.0 {
+        (changed_pixels as f64 / total_pixels) * 100.0
+    } else {
+        0.0
+    };
+
+    if changed_pixels == 0 {
+        return VisualDiffResult {
+            changed: false,
+            change_percentage: 0.0,
+            changed_pixels: 0,
+            dirty_pixel_bounds: None,
+            dirty_world_bounds: None,
+            patch_resolution: None,
+            cropped_patch: None,
+            diff_overlay,
+        };
+    }
+
+    let pad = 16u32;
+    let b_min_x = min_x.saturating_sub(pad);
+    let b_min_y = min_y.saturating_sub(pad);
+    let b_max_x = (max_x + pad).min(w.saturating_sub(1));
+    let b_max_y = (max_y + pad).min(h.saturating_sub(1));
+
+    let patch_w = (b_max_x - b_min_x + 1).max(1);
+    let patch_h = (b_max_y - b_min_y + 1).max(1);
+
+    let m = pixel_to_world_matrix;
+    let px0 = b_min_x as f64;
+    let py0 = b_min_y as f64;
+    let px1 = b_max_x as f64;
+    let py1 = b_max_y as f64;
+
+    let p00_x = m[0] * px0 + m[1] * py0 + m[4];
+    let p00_y = m[2] * px0 + m[3] * py0 + m[5];
+    let p10_x = m[0] * px1 + m[1] * py0 + m[4];
+    let p10_y = m[2] * px1 + m[3] * py0 + m[5];
+    let p01_x = m[0] * px0 + m[1] * py1 + m[4];
+    let p01_y = m[2] * px0 + m[3] * py1 + m[5];
+    let p11_x = m[0] * px1 + m[1] * py1 + m[4];
+    let p11_y = m[2] * px1 + m[3] * py1 + m[5];
+
+    let w_min_x = p00_x.min(p10_x).min(p01_x).min(p11_x);
+    let w_max_x = p00_x.max(p10_x).max(p01_x).max(p11_x);
+    let w_min_y = p00_y.min(p10_y).min(p01_y).min(p11_y);
+    let w_max_y = p00_y.max(p10_y).max(p01_y).max(p11_y);
+
+    let cropped = image::imageops::crop_imm(current, b_min_x, b_min_y, patch_w, patch_h).to_image();
+
+    VisualDiffResult {
+        changed: true,
+        change_percentage,
+        changed_pixels,
+        dirty_pixel_bounds: Some([b_min_x, b_min_y, b_max_x, b_max_y]),
+        dirty_world_bounds: Some([w_min_x, w_min_y, w_max_x, w_max_y]),
+        patch_resolution: Some([patch_w, patch_h]),
+        cropped_patch: Some(cropped),
+        diff_overlay,
+    }
+}
+
+pub(crate) fn encode_image_png(img: &image::RgbaImage) -> Result<Vec<u8>, String> {
+    use std::io::Cursor;
+    let mut buf = Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode PNG: {e}"))?;
+    Ok(buf.into_inner())
 }
 
 #[cfg(test)]
@@ -299,9 +487,34 @@ mod tests {
         assert!(grounding.viewport_world_bounds["min"].is_array());
         assert!(grounding.viewport_world_bounds["max"].is_array());
 
-        // Camera info should be populated
+        // Camera info should be populated with projection
         assert!(grounding.camera["eye"].is_array());
         assert!(grounding.camera["target"].is_array());
+        assert_eq!(grounding.camera["projection"], "Orthographic");
+
+        // Target plane normal and origin
+        assert!(grounding.target_plane["normal"].is_array());
+        assert!(grounding.target_plane["origin"].is_array());
+
+        // Affine matrices: test forward and inverse round-trip
+        let p2w = grounding.pixel_to_world_matrix;
+        let w2p = grounding.world_to_pixel_matrix;
+
+        // Center pixel (400, 300) should project to camera target (within 1e-4)
+        let cx = 400.0;
+        let cy = 300.0;
+        let wx = p2w[0] * cx + p2w[1] * cy + p2w[4];
+        let wy = p2w[2] * cx + p2w[3] * cy + p2w[5];
+        let target_x = grounding.camera["target"][0].as_f64().unwrap();
+        let target_y = grounding.camera["target"][1].as_f64().unwrap();
+        assert!((wx - target_x).abs() < 1e-3, "wx={wx}, target_x={target_x}");
+        assert!((wy - target_y).abs() < 1e-3, "wy={wy}, target_y={target_y}");
+
+        // Inverse mapping of (wx, wy) should return (400, 300)
+        let inv_px = w2p[0] * wx + w2p[1] * wy + w2p[4];
+        let inv_py = w2p[2] * wx + w2p[3] * wy + w2p[5];
+        assert!((inv_px - cx).abs() < 1e-3, "inv_px={inv_px}, cx={cx}");
+        assert!((inv_py - cy).abs() < 1e-3, "inv_py={inv_py}, cy={cy}");
 
         // Both entities should be visible and tagged
         assert_eq!(grounding.visible_entities.len(), 2);
@@ -316,5 +529,57 @@ mod tests {
 
         let second = &grounding.visible_entities[1];
         assert_eq!(second["tag"], 2);
+    }
+
+    #[test]
+    fn test_compute_visual_diff() {
+        let w = 200;
+        let h = 150;
+        let base = image::RgbaImage::from_pixel(w, h, image::Rgba([30, 30, 30, 255]));
+        let p2w = [0.1, 0.0, 0.0, -0.1, -10.0, 7.5];
+
+        // 1. Identical images -> changed: false
+        let diff_same = compute_visual_diff(&base, &base, &p2w);
+        assert_eq!(diff_same.changed, false);
+        assert_eq!(diff_same.change_percentage, 0.0);
+        assert_eq!(diff_same.changed_pixels, 0);
+        assert!(diff_same.dirty_pixel_bounds.is_none());
+
+        // 2. Modify a 20x20 block from (50, 40) to (69, 59)
+        let mut curr = base.clone();
+        for y in 40..60 {
+            for x in 50..70 {
+                curr.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+            }
+        }
+
+        let diff_mod = compute_visual_diff(&base, &curr, &p2w);
+        assert_eq!(diff_mod.changed, true);
+        assert_eq!(diff_mod.changed_pixels, 400);
+        assert!(diff_mod.change_percentage > 1.0);
+
+        let bounds = diff_mod.dirty_pixel_bounds.unwrap();
+        // With 16px pad: min_x <= 50, max_x >= 69, min_y <= 40, max_y >= 59
+        assert!(bounds[0] <= 50);
+        assert!(bounds[1] <= 40);
+        assert!(bounds[2] >= 69);
+        assert!(bounds[3] >= 59);
+
+        // World bounds should be populated
+        assert!(diff_mod.dirty_world_bounds.is_some());
+        let wb = diff_mod.dirty_world_bounds.unwrap();
+        assert!(wb[0] < wb[2]); // min_x < max_x
+        assert!(wb[1] < wb[3]); // min_y < max_y
+
+        // Cropped patch and overlay
+        assert!(diff_mod.cropped_patch.is_some());
+        let patch = diff_mod.cropped_patch.unwrap();
+        assert!(patch.width() >= 20);
+        assert!(patch.height() >= 20);
+
+        // PNG encoding roundtrip
+        let png_bytes = encode_image_png(&patch).expect("png encode succeeds");
+        assert!(!png_bytes.is_empty());
+        assert_eq!(&png_bytes[1..4], b"PNG");
     }
 }

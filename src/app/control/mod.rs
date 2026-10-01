@@ -1422,6 +1422,22 @@ impl OpenCADStudio {
                 .save_with_format(&path, image::ImageFormat::Png)
                 .map_err(|e| e.to_string())?;
 
+            let doc_unit = crate::app::properties::insunits_name(
+                self.tabs[self.active_tab].scene.document.header.insertion_units,
+            );
+
+            let spatial_obj = json!({
+                "crs": "CAD_WCS",
+                "unit": doc_unit,
+                "pixel_resolution": [image.width(), image.height()],
+                "world_bounds": grounding.viewport_world_bounds,
+                "pixel_to_world_matrix": grounding.pixel_to_world_matrix,
+                "world_to_pixel_matrix": grounding.world_to_pixel_matrix,
+                "camera": grounding.camera,
+                "target_plane": grounding.target_plane,
+                "annotations": grounding.visible_entities.clone(),
+            });
+
             Ok(json!({
                 "path": path,
                 "scope": actual_scope,
@@ -1431,6 +1447,9 @@ impl OpenCADStudio {
                 "document_id": self.tabs[self.active_tab].id,
                 "revision": self.tabs[self.active_tab].edit_revision,
                 "camera_revision": self.tabs[self.active_tab].scene.camera_generation,
+                "_spatial": spatial_obj,
+                "pixel_to_world_matrix": grounding.pixel_to_world_matrix,
+                "world_to_pixel_matrix": grounding.world_to_pixel_matrix,
                 "viewport_world_bounds": grounding.viewport_world_bounds,
                 "camera": grounding.camera,
                 "annotated": annotate,
