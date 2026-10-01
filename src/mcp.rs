@@ -45,6 +45,7 @@ const READ_OPS: &[&str] = &[
     "audit",
     "text_search",
     "text_audit",
+    "capture",
 ];
 const EXECUTE_OPS: &[&str] = &[
     "new",
@@ -849,8 +850,29 @@ fn call_tool(
             let path = std::env::temp_dir().join(format!("ocs-capture-{}.png", random_id()?));
             let scope = arguments["scope"].as_str().unwrap_or("viewport");
             let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
+            let mut req = json!({
+                "op": "capture",
+                "path": path.to_string_lossy(),
+                "scope": scope,
+                "max_dimension": max_dimension,
+            });
+            if let Some(view) = arguments.get("view").and_then(Value::as_str) {
+                req["view"] = json!(view);
+            }
+            if let Some(bounds) = arguments.get("bounds").and_then(Value::as_array) {
+                req["bounds"] = json!(bounds);
+            }
+            if let Some(focus) = arguments.get("focus_handles").and_then(Value::as_array) {
+                req["focus_handles"] = json!(focus);
+            }
+            if let Some(hl) = arguments.get("highlight_handles").and_then(Value::as_array) {
+                req["highlight_handles"] = json!(hl);
+            }
+            if let Some(annotate) = arguments.get("annotate").and_then(Value::as_bool) {
+                req["annotate"] = json!(annotate);
+            }
             let result = client(clients, session_id)?
-                .request(json!({"op":"capture","path":path.to_string_lossy(),"scope":scope,"max_dimension":max_dimension}), 30.0)?;
+                .request(req, 30.0)?;
             if result["ok"].as_bool() != Some(true)
                 || result["status"].as_str() != Some("completed")
             {
@@ -858,7 +880,14 @@ fn call_tool(
             }
             let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
             let _ = std::fs::remove_file(path);
-            Ok(json!({"$image":BASE64.encode(bytes)}))
+            let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
+            if let Some(obj) = meta.as_object_mut() {
+                obj.remove("path");
+            }
+            Ok(json!({
+                "$image": BASE64.encode(bytes),
+                "metadata": meta,
+            }))
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
@@ -924,8 +953,22 @@ fn tool_definitions() -> Value {
         },
         {
             "name":"ocs_capture",
-            "description":"Capture the actual current OCS drawing viewport or window as a bounded PNG for visual verification.",
-            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},"max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."}},"required":["ocs_session_id"],"additionalProperties":false},
+            "description":"Capture the actual current OCS drawing viewport or window as a bounded PNG with optional camera framing, entity highlighting, spatial coordinates and Set-of-Marks annotations.",
+            "inputSchema":{
+                "type":"object",
+                "properties":{
+                    "ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},
+                    "scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},
+                    "max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."},
+                    "view":{"type":"string","enum":["current","extents","selection","region"],"default":"current","description":"Frame the camera before capture: extents fits all entities, selection fits selected entities, region fits explicit world bounds."},
+                    "bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"World XY bounding box [min_x, min_y, max_x, max_y] to zoom and fit in view before capturing (used with view: 'region')."},
+                    "focus_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to zoom and fit in view before capturing."},
+                    "highlight_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to select/highlight before capturing."},
+                    "annotate":{"type":"boolean","default":false,"description":"Overlay Set-of-Marks numbered tags on visible entities for visual grounding."}
+                },
+                "required":["ocs_session_id"],
+                "additionalProperties":false
+            },
             "annotations":{"title":"Capture OCS window","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
     ])
@@ -933,7 +976,18 @@ fn tool_definitions() -> Value {
 
 fn tool_result(value: Value) -> Value {
     if let Some(image) = value.get("$image").and_then(Value::as_str) {
-        return json!({"content":[{"type":"image","data":image,"mimeType":"image/png"}]});
+        let mut content = Vec::new();
+        if let Some(meta) = value.get("metadata") {
+            let meta_text = serde_json::to_string_pretty(meta).unwrap_or_else(|_| meta.to_string());
+            content.push(json!({"type":"text","text":meta_text}));
+        }
+        content.push(json!({"type":"image","data":image,"mimeType":"image/png"}));
+        let structured = value.get("metadata").cloned().unwrap_or_else(|| json!({}));
+        return json!({
+            "content": content,
+            "structuredContent": structured,
+            "isError": false
+        });
     }
     let structured = if value.is_object() {
         value.clone()

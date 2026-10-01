@@ -1058,6 +1058,57 @@ impl OpenCADStudio {
                     .main_window
                     .ok_or_else(|| failure("gui_required", "Capture requires a GUI window"))?;
                 let path = string(req, "path")?.to_owned();
+
+                // Optional framing / selection adjustments prior to snapshot:
+                if let Some(handles) = req.get("highlight_handles").and_then(Value::as_array) {
+                    let hex_handles: Vec<codec::Handle> = handles
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .filter_map(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+                        .map(codec::Handle::new)
+                        .collect();
+                    if !hex_handles.is_empty() {
+                        let scene = &mut self.tabs[self.active_tab].scene;
+                        scene.deselect_all();
+                        for h in hex_handles {
+                            scene.select_entity(h, false);
+                        }
+                    }
+                }
+                if let Some(focus) = req.get("focus_handles").and_then(Value::as_array) {
+                    let hex_handles: Vec<codec::Handle> = focus
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .filter_map(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+                        .map(codec::Handle::new)
+                        .collect();
+                    if !hex_handles.is_empty() {
+                        self.tabs[self.active_tab].scene.zoom_to_entities(&hex_handles);
+                    }
+                } else if let Some(bounds) = req.get("bounds").and_then(Value::as_array) {
+                    if bounds.len() >= 4 {
+                        if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                            bounds[0].as_f64(),
+                            bounds[1].as_f64(),
+                            bounds[2].as_f64(),
+                            bounds[3].as_f64(),
+                        ) {
+                            let p1 = glam::Vec3::new(x0 as f32, y0 as f32, 0.0);
+                            let p2 = glam::Vec3::new(x1 as f32, y1 as f32, 0.0);
+                            self.tabs[self.active_tab].scene.zoom_to_window(p1, p2);
+                        }
+                    }
+                } else if let Some(view) = req.get("view").and_then(Value::as_str) {
+                    if view == "extents" {
+                        self.tabs[self.active_tab].scene.fit_all();
+                    } else if view == "selection" {
+                        let selected = self.tabs[self.active_tab].scene.selected_handles_in_order();
+                        if !selected.is_empty() {
+                            self.tabs[self.active_tab].scene.zoom_to_entities(&selected);
+                        }
+                    }
+                }
+
                 // A minimized window has a 0x0 surface and the renderer
                 // panics reading it back, so report instead of capturing.
                 iced::window::size(window).then(move |size| {
@@ -1270,7 +1321,7 @@ impl OpenCADStudio {
                 .pending
                 .as_ref()
                 .and_then(|pending| pending.request["scope"].as_str())
-                .unwrap_or("window");
+                .unwrap_or("viewport");
             let max_dimension = self
                 .control
                 .pending
@@ -1278,10 +1329,22 @@ impl OpenCADStudio {
                 .and_then(|pending| pending.request["max_dimension"].as_u64())
                 .unwrap_or(1600)
                 .clamp(256, 4096) as u32;
+            let annotate = self
+                .control
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.request["annotate"].as_bool())
+                .unwrap_or(false);
+
             let mut image =
                 image::RgbaImage::from_raw(s.size.width, s.size.height, s.rgba.to_vec())
                     .ok_or("Renderer returned malformed image data")?;
             let mut actual_scope = "window";
+
+            let (vp_w, vp_h) = self.tabs[self.active_tab].scene.selection.borrow().vp_size;
+            let mut vp_logical_width = if vp_w > 0.0 { vp_w } else { image.width() as f32 / s.scale_factor };
+            let mut vp_logical_height = if vp_h > 0.0 { vp_h } else { image.height() as f32 / s.scale_factor };
+
             if requested_scope == "viewport" {
                 if let Some(bounds) = crate::ui::wrap_bar::dropdown_bounds(
                     crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID,
@@ -1305,6 +1368,8 @@ impl OpenCADStudio {
                         )
                         .to_image();
                         actual_scope = "viewport";
+                        vp_logical_width = bounds.width;
+                        vp_logical_height = bounds.height;
                     }
                 }
             }
@@ -1320,12 +1385,58 @@ impl OpenCADStudio {
                     image::imageops::FilterType::Triangle,
                 );
             }
+
+            // Spatial grounding: camera, world bounds, and visible entity centroids
+            let grounding = vision::compute_grounding(
+                self,
+                vp_logical_width,
+                vp_logical_height,
+                image.width(),
+                image.height(),
+            );
+
+            // Optional Set-of-Marks visual overlay badges
+            if annotate {
+                for ent_val in &grounding.visible_entities {
+                    if let (Some(tag), Some(px_arr), Some(selected)) = (
+                        ent_val["tag"].as_u64(),
+                        ent_val["screen_pixel"].as_array(),
+                        ent_val["selected"].as_bool(),
+                    ) {
+                        if px_arr.len() == 2 {
+                            if let (Some(x), Some(y)) = (px_arr[0].as_i64(), px_arr[1].as_i64()) {
+                                vision::draw_som_badge(
+                                    &mut image,
+                                    x as i32,
+                                    y as i32,
+                                    tag as usize,
+                                    selected,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
             image
                 .save_with_format(&path, image::ImageFormat::Png)
                 .map_err(|e| e.to_string())?;
-            Ok(
-                json!({"path":path,"scope":actual_scope,"width":image.width(),"height":image.height(),"scale_factor":s.scale_factor,"document_id":self.tabs[self.active_tab].id,"revision":self.tabs[self.active_tab].edit_revision,"camera_revision":self.tabs[self.active_tab].scene.camera_generation}),
-            )
+
+            Ok(json!({
+                "path": path,
+                "scope": actual_scope,
+                "width": image.width(),
+                "height": image.height(),
+                "scale_factor": s.scale_factor,
+                "document_id": self.tabs[self.active_tab].id,
+                "revision": self.tabs[self.active_tab].edit_revision,
+                "camera_revision": self.tabs[self.active_tab].scene.camera_generation,
+                "viewport_world_bounds": grounding.viewport_world_bounds,
+                "camera": grounding.camera,
+                "annotated": annotate,
+                "annotations": grounding.visible_entities.clone(),
+                "visible_entities": grounding.visible_entities,
+            }))
         })();
         match result {
             Ok(v) => {
@@ -1337,6 +1448,7 @@ impl OpenCADStudio {
         }
     }
 }
+pub(crate) mod vision;
 mod actions;
 pub(crate) use actions::property_json;
 mod entities;
@@ -1761,6 +1873,36 @@ mod tests {
         assert_eq!(ole_count(&app), 0);
         let _ = std::fs::remove_file(path);
         let _ = handle;
+    }
+
+    #[test]
+    fn embed_image_calibrates_from_source_and_target_points() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        let img = image::RgbaImage::from_pixel(100, 100, image::Rgba([12, 12, 12, 255]));
+        let path = std::env::temp_dir().join(format!("ocs-embed-calib-{}.png", session_id()));
+        img.save(&path).unwrap();
+
+        // 2 points on image: bottom-left (0, 100) and bottom-right (100, 100)
+        // Target CAD points: (10.0, 20.0) and (210.0, 20.0) -> scale = 200/100 = 2.0
+        let response = request(
+            &mut app,
+            json!({
+                "op": "embed_image",
+                "path": path.to_string_lossy(),
+                "linked": true,
+                "source_points": [[0, 100], [100, 100]],
+                "target_points": [[10.0, 20.0], [210.0, 20.0]]
+            }),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        assert_eq!(response["result"]["kind"], "RasterImage");
+        assert_eq!(response["result"]["width"], 200.0);
+        assert_eq!(response["result"]["height"], 200.0);
+        let at = response["result"]["at"].as_array().unwrap();
+        assert_eq!(at[0], 10.0);
+        assert_eq!(at[1], 20.0);
+        let _ = std::fs::remove_file(path);
     }
 
     fn user_select_pick(app: &mut OpenCADStudio, kind: &str) -> String {

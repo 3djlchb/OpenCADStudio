@@ -245,6 +245,8 @@ pub static EMBED_IMAGE: OpDef = OpDef {
         opt("at", Ty::Point, "Lower-left corner [x, y] or [x, y, z]."),
         opt("width", Ty::Num, "World width of the image."),
         opt("linked", Ty::Bool, "Store as path-linked RasterImage instead of embedded OLE2FRAME."),
+        opt("source_points", Ty::ArrayOf(&Ty::Point), "Pixel points in image [[px1,py1],[px2,py2]] for 2-point alignment."),
+        opt("target_points", Ty::ArrayOf(&Ty::Point), "CAD world points [[x1,y1],[x2,y2]] for 2-point alignment."),
     ],
     rules: &[],
     example: r#"{"op":"embed_image","path":"logo.png","at":[0,0]}"#,
