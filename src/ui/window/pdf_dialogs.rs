@@ -233,13 +233,13 @@ pub fn click_page(selected: &mut Vec<usize>, anchor: &mut usize, page: usize, ct
 // accent-coloured card titles, segmented choices and toggle chips, with the
 // help button on the left of the footer and the named action on the right.
 
-fn accent_text(theme: &Theme) -> text::Style {
+pub(crate) fn accent_text(theme: &Theme) -> text::Style {
     text::Style {
         color: Some(theme.palette().primary.base.color),
     }
 }
 
-fn card_style(theme: &Theme) -> container::Style {
+pub(crate) fn card_style(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(theme.palette().background.weak.color)),
         border: Border {
@@ -251,7 +251,7 @@ fn card_style(theme: &Theme) -> container::Style {
     }
 }
 
-fn well_style(theme: &Theme) -> container::Style {
+pub(crate) fn well_style(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(theme.palette().background.base.color)),
         border: Border {

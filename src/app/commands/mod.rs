@@ -20,6 +20,7 @@ mod pc_extract;
 mod pdf_underlay;
 mod pdf_dialogs;
 mod xclip;
+mod blockvars;
 mod plotvars;
 mod styleprops;
 mod view;
@@ -296,6 +297,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_plotvars(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_blockvars(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_styleprops(cmd, i) {
             return Some(t);
         }
@@ -473,6 +477,14 @@ inventory::submit!(crate::command::CommandRegistration {
         // Block list + block-attribute list (command-line forms).
         "BLOCKPALETTE",
         "BLOCKSPALETTE",
+        "BLOCKSPALETTECLOSE",
+        "-INSERT",
+        "BLOCKMRULIST",
+        "BLOCKREDEFINEMODE",
+        "BLOCKNAVIGATE",
+        "BLOCKSTATE",
+        "EXPLMODE",
+        "INSNAME",
         "ATTMAN",
         "BATTMAN",
         // Drawing-content overview.

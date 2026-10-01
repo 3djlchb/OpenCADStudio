@@ -92,6 +92,7 @@ fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> O
 
 mod command;
 mod context_menu;
+mod blocks_palette;
 mod dialog;
 mod dynamic;
 mod file;
@@ -5768,6 +5769,9 @@ impl OpenCADStudio {
                 if self.tabs[self.active_tab].is_start {
                     self.ribbon.close_dropdown();
                 } else {
+                    if id == crate::modules::insert::insert_block::GALLERY_ID {
+                        self.refresh_block_palette();
+                    }
                     self.ribbon.toggle_dropdown(&id);
                 }
                 Task::none()

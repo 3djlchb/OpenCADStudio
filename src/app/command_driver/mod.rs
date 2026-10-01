@@ -767,6 +767,32 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::CommitExplodedInsert { insert, keep_going } => {
+                let i = self.active_tab;
+                if let codec::EntityType::Insert(ins) = &insert {
+                    let name = ins.block_name.clone();
+                    self.record_block_insert(&name);
+                }
+                let pieces = crate::modules::draw::modify::explode::explode_entity(
+                    &insert,
+                    &self.tabs[i].scene.document,
+                );
+                if keep_going {
+                    if let Some(task) = self.handle_commit_entities(
+                        pieces,
+                        preserve_commit_style,
+                        preserve_commit_layer,
+                    ) {
+                        return task;
+                    }
+                } else {
+                    self.handle_commit_entities_and_exit(
+                        pieces,
+                        preserve_commit_style,
+                        preserve_commit_layer,
+                    );
+                }
+            }
             CmdResult::AttreqNeeded { block_name } => {
                 if let Some(task) = self.handle_attreq_needed(block_name) {
                     return task;

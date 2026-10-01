@@ -734,6 +734,14 @@ impl OpenCADStudio {
             grid_beyond_limits: self.grid_beyond_limits,
             block_mru: self.block_mru.clone(),
             block_freq: self.block_freq.clone(),
+            block_recent: self.block_palette.recent.clone(),
+            block_favorites: self.block_palette.favorites.clone(),
+            block_libraries: self.block_palette.libraries.clone(),
+            block_palette_view: self.block_palette.view as u8,
+            block_insert: self.block_palette.options.clone(),
+            block_mru_list: self.block_mru_list,
+            block_redefine_mode: self.block_redefine_mode,
+            block_navigate: self.block_navigate.clone(),
         }
     }
 
@@ -854,6 +862,15 @@ impl OpenCADStudio {
             .take(200)
             .map(|(k, v)| (k.clone(), *v))
             .collect();
+        self.block_mru_list = s.block_mru_list.min(100);
+        self.block_redefine_mode = s.block_redefine_mode.min(2);
+        self.block_navigate = s.block_navigate.clone();
+        self.block_palette.recent = s.block_recent.clone();
+        self.block_palette.favorites = s.block_favorites.clone();
+        self.block_palette.libraries = s.block_libraries.clone();
+        self.block_palette.view = crate::ui::window::block_palette::ViewMode::from_u8(s.block_palette_view);
+        self.block_palette.set_options(s.block_insert.clone());
+        self.trim_recent_blocks();
         // Push restored display defaults onto every drawing tab that exists now.
         // Tabs created later pick them up at their construction site.
         for idx in 0..self.tabs.len() {
@@ -863,6 +880,8 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn record_block_insert(&mut self, name: &str) {
+        self.insname = name.to_string();
+        self.note_recent_block(name);
         let key = name.to_ascii_uppercase();
         *self.block_freq.entry(key).or_insert(0) += 1;
         self.block_mru.retain(|n| !n.eq_ignore_ascii_case(name));

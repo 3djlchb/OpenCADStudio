@@ -671,6 +671,14 @@ pub(super) struct OpenCADStudio {
     block_mru: Vec<String>,
     /// Insertion frequency per block name (uppercase key → count), capped.
     block_freq: std::collections::HashMap<String, u32>,
+    /// BLOCKMRULIST: how many recent blocks the palette keeps (0–100).
+    pub(crate) block_mru_list: u8,
+    /// BLOCKREDEFINEMODE (0–2).
+    pub(crate) block_redefine_mode: u8,
+    /// BLOCKNAVIGATE: the Libraries tab's start folder ("." for none).
+    pub(crate) block_navigate: String,
+    /// INSNAME: the default block name for -INSERT (session only).
+    pub(crate) insname: String,
     /// Last time block-usage was flushed to disk (debounce per 2.4).
     #[cfg(not(target_arch = "wasm32"))]
     block_usage_last_persist: Option<std::time::Instant>,
@@ -4142,6 +4150,10 @@ impl OpenCADStudio {
             commandline_fade_ms: 3000,
             block_mru: Vec::new(),
             block_freq: std::collections::HashMap::new(),
+            block_mru_list: 50,
+            block_redefine_mode: 1,
+            block_navigate: ".".to_string(),
+            insname: String::new(),
             #[cfg(not(target_arch = "wasm32"))]
             block_usage_last_persist: None,
             awaiting_vports: false,

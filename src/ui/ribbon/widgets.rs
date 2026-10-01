@@ -446,7 +446,7 @@ pub(super) fn combo_btn_style(
     }
 }
 
-pub(super) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
+pub(crate) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
     let palette = theme.palette();
     let pair = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
         palette.background.weak
@@ -460,7 +460,7 @@ pub(super) fn popup_row_style(theme: &Theme, status: button::Status) -> button::
     }
 }
 
-pub(super) fn popup_panel_style(theme: &Theme) -> container::Style {
+pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
     let palette = theme.palette();
     container::Style {
         background: Some(Background::Color(palette.background.base.color)),

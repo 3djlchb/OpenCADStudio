@@ -489,25 +489,50 @@ impl OpenCADStudio {
                 self.active_modal = Some(crate::app::ModalKind::WriteBlock);
             }
 
+            // INSERT opens the Blocks palette on the drawing's blocks;
+            // -INSERT runs on the command line.
             "INSERT" => {
+                self.command_line.push_output("*Insert a block from the Blocks palette");
+                self.open_blocks_palette(Some(crate::ui::window::block_palette::Tab::Current));
+            }
+
+            "-INSERT" => {
+                use crate::command::CadCommand;
+                use crate::modules::insert::insert_block::InsertBlockCommand;
                 let blocks = self.tabs[i].scene.custom_block_names();
-                if blocks.is_empty() {
-                    self.command_line.push_error(
-                        crate::t!("No user-defined blocks found in this drawing.").as_ref(),
-                    );
-                } else {
-                    use crate::modules::insert::insert_block::InsertBlockCommand;
-                    let ranked = self.ranked_block_names(&blocks);
-                    let snapshot = self.block_usage_snapshot();
-                    let cmd = InsertBlockCommand::new_with_usage(
-                        ranked,
-                        snapshot,
-                        self.cliprompt_lines.clamp(0, 50) as u8,
-                    );
-                    self.command_line.push_info(&cmd.prompt());
-                    let opts = cmd.options();
-                    self.command_line.set_step_options(opts.clone());
-                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                let ranked = self.ranked_block_names(&blocks);
+                let snapshot = self.block_usage_snapshot();
+                let cmd = InsertBlockCommand::classic(
+                    ranked,
+                    snapshot,
+                    self.cliprompt_lines.clamp(0, 50) as u8,
+                    self.block_catalog(),
+                    self.insname.clone(),
+                );
+                self.command_line.push_info(&cmd.prompt());
+                self.command_line.set_step_options(cmd.options());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // A drawing named at -INSERT's block prompt: brought in as a
+            // block, then placed.
+            cmd if cmd.starts_with("_-INSERTFILE ") => {
+                use crate::command::CadCommand;
+                use crate::modules::insert::insert_block::InsertBlockCommand;
+                let path = std::path::PathBuf::from(cmd["_-INSERTFILE ".len()..].trim().trim_matches('"'));
+                match self.import_file_as_block(path) {
+                    Ok(name) => {
+                        let units = self
+                            .block_catalog()
+                            .units
+                            .remove(&name.to_ascii_uppercase())
+                            .unwrap_or_default();
+                        let preview = self.tabs[i].scene.block_preview_wires(&name);
+                        let cmd = InsertBlockCommand::classic_for_block(name, preview, units);
+                        self.command_line.push_info(&cmd.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    }
+                    Err(e) => self.command_line.push_error(e.as_str()),
                 }
             }
 
@@ -667,15 +692,27 @@ impl OpenCADStudio {
                 );
             }
 
-            // BLOCKPALETTE / BLOCKSPALETTE — toggle the docked Insert Block panel.
-            "BLOCKPALETTE" | "BLOCKSPALETTE" => {
-                self.show_block_palette ^= true;
-                if self.show_block_palette {
-                    // Always open expanded so the panel is immediately usable;
-                    // the user can still collapse it via the pin (Auto) button.
-                    self.dock_expanded = Some(crate::ui::dock::PanelId::BlockPalette);
-                    self.refresh_block_palette();
-                }
+            // BLOCKSPALETTE opens the Blocks palette; BLOCKSPALETTECLOSE
+            // closes it. `_BLOCKSPALETTE <tab>` opens it on a tab.
+            "BLOCKPALETTE" | "BLOCKSPALETTE" => self.open_blocks_palette(None),
+            "BLOCKSPALETTECLOSE" => {
+                self.show_block_palette = false;
+                self.block_palette.placing = None;
+            }
+            // A block picked in the ribbon gallery.
+            cmd if cmd.starts_with("_BLOCKINSERT ") => {
+                let name = cmd["_BLOCKINSERT ".len()..].trim().to_string();
+                return Some(self.palette_insert(crate::ui::window::block_palette::Item::Current(name), None));
+            }
+            cmd if cmd.starts_with("_BLOCKSPALETTE ") => {
+                use crate::ui::window::block_palette::Tab;
+                let tab = match cmd["_BLOCKSPALETTE ".len()..].trim() {
+                    "RECENT" => Tab::Recent,
+                    "FAVORITES" => Tab::Favorites,
+                    "LIBRARIES" => Tab::Libraries,
+                    _ => Tab::Current,
+                };
+                self.open_blocks_palette(Some(tab));
             }
 
             // ATTMAN / BATTMAN — the Block Attribute Manager. Rather than a
