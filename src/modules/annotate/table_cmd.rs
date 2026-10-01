@@ -271,7 +271,7 @@ impl TableCommand {
                 row.style = Some(styles[row_index.min(2)].clone());
             }
         }
-        self.plane.place_entity(EntityType::Table(table))
+        self.plane.place_entity(EntityType::Table(Box::new(table)))
     }
 
     fn preview_grid(
@@ -795,7 +795,7 @@ impl CadCommand for TableCellEditCommand {
         cell.set_text(&formatted);
         self.table.block_record_handle = None;
         Some(CmdResult::ReplaceMany(
-            vec![(self.handle, vec![EntityType::Table(self.table.clone())])],
+            vec![(self.handle, vec![EntityType::Table(Box::new(self.table.clone()))])],
             Vec::new(),
         ))
     }

@@ -10922,7 +10922,7 @@ mod free_text_entry_tests {
         let handle = app.tabs[0]
             .scene
             .document
-            .add_entity(EntityType::Table(table.clone()))
+            .add_entity(EntityType::Table(Box::new(table.clone())))
             .unwrap();
         app.set_active_command(0, Box::new(TableCellEditCommand::new(handle, &table, 0, 0)));
         (app, handle)

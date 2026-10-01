@@ -140,7 +140,7 @@ impl super::OpenCADStudio {
                                 surface.surface_data = solid_history::extrusion_surface_data(record)
                                     .ok_or("PRESSPULL: the surface parameters could not be retained.")?;
                             }
-                            EntityType::Surface(surface)
+                            EntityType::Surface(Box::new(surface))
                         };
                         (body, history, entity)
                     }

@@ -685,15 +685,15 @@ impl OpenCADStudio {
     /// Add is delta-safe when its layer and XData application IDs already exist
     /// and it creates no block records.
     pub(super) fn delta_add_safe(&self, i: usize, entity: &EntityType) -> bool {
-        if matches!(
-            entity,
-            EntityType::Block(_)
-                | EntityType::BlockEnd(_)
-                | EntityType::Extended(codec::entities::ExtendedEntity {
-                    data: codec::entities::ExtendedEntityData::SectionObject(_),
-                    ..
-                })
-        ) {
+        if matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_))
+            || matches!(
+                entity,
+                EntityType::Extended(extended) if matches!(
+                    extended.data,
+                    codec::entities::ExtendedEntityData::SectionObject(_)
+                )
+            )
+        {
             return false;
         }
         let layer = entity.common().layer.clone();

@@ -1002,10 +1002,14 @@ impl Scene {
                 continue;
             }
             let settings_handle = self.document.get_entity(h).and_then(|entity| match entity {
-                EntityType::Extended(codec::entities::ExtendedEntity {
-                    data: codec::entities::ExtendedEntityData::SectionObject(data),
-                    ..
-                }) if !data.settings_handle.is_null() => Some(data.settings_handle),
+                EntityType::Extended(extended) => match &extended.data {
+                    codec::entities::ExtendedEntityData::SectionObject(data)
+                        if !data.settings_handle.is_null() =>
+                    {
+                        Some(data.settings_handle)
+                    }
+                    _ => None,
+                },
                 _ => None,
             });
             let section_managers: Vec<Handle> = managers_by_section

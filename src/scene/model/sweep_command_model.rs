@@ -109,5 +109,5 @@ pub fn swept_surface_entity(record: &SolidHistorySweep) -> EntityType {
             ..SurfaceSweepOptions::default()
         },
     };
-    EntityType::Surface(surface)
+    EntityType::Surface(Box::new(surface))
 }

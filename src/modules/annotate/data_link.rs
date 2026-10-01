@@ -160,7 +160,7 @@ impl CadCommand for DataLinkPlaceCommand {
         self.table.insertion_point = codec::types::Vector3::new(point.x, point.y, point.z);
         CmdResult::CommitAndExit(
             self.plane
-                .place_entity(EntityType::Table(self.table.clone())),
+                .place_entity(EntityType::Table(Box::new(self.table.clone()))),
         )
     }
 

@@ -2108,7 +2108,7 @@ impl MultiLeaderTess for MultiLeader {
             fill_tris_low: Vec::new(),
         });
 
-        let host = codec::EntityType::MultiLeader(ml.clone());
+        let host = codec::EntityType::MultiLeader(Box::new(ml.clone()));
         for block_use in crate::scene::render_graph::entity_render_block_uses(document, &host, 1.0)
             .into_iter()
             .filter(|block_use| {

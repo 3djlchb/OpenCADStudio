@@ -139,7 +139,7 @@ impl HelixCommand {
         helix.turn_height = if curve.turns == 0.0 { 0.0 } else { height / curve.turns };
         helix.handedness = self.counter_clockwise;
         helix.constraint = self.constraint;
-        Some(EntityType::Helix(helix))
+        Some(EntityType::Helix(Box::new(helix)))
     }
 
     fn commit(&mut self, height: f64, axis: DVec3) -> CmdResult {

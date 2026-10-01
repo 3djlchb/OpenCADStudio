@@ -2793,7 +2793,7 @@ pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType 
         options.is_solid = false;
         *sweep_vector = Vector3::new(direction.x, direction.y, direction.z);
     }
-    EntityType::Surface(surface)
+    EntityType::Surface(Box::new(surface))
 }
 
 pub fn empty_revolved_surface(
@@ -2832,7 +2832,7 @@ pub fn empty_revolved_surface(
         *stored_start = start_angle;
         *solid = false;
     }
-    EntityType::Surface(surface)
+    EntityType::Surface(Box::new(surface))
 }
 
 // ── Autocomplete registry ─────────────────────────────────
@@ -2909,7 +2909,7 @@ mod thicken_command_tests {
         let handle = Handle::new(42);
         let mut command = ThickenCommand::new(vec![
             (Handle::new(1), EntityType::Line(codec::entities::Line::default())),
-            (handle, EntityType::Surface(codec::entities::Surface::new(codec::entities::SurfaceKind::Plane))),
+            (handle, EntityType::Surface(Box::new(codec::entities::Surface::new(codec::entities::SurfaceKind::Plane)))),
         ]);
         assert!(!command.is_selection_gathering());
         assert_eq!(command.handles, vec![handle]);

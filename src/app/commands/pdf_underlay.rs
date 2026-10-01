@@ -322,7 +322,7 @@ impl OpenCADStudio {
                     "_PCCROPCIRC" => "C",
                     _ => "",
                 };
-                let command = crate::modules::insert::pc_crop::PointCloudCropCommand::for_cloud(handle, cloud, option);
+                let command = crate::modules::insert::pc_crop::PointCloudCropCommand::for_cloud(handle, *cloud, option);
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }

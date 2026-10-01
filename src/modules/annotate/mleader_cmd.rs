@@ -269,7 +269,7 @@ impl MLeaderCommand {
             ml.text_style_handle = style_handle;
             ml.context.text_style_handle = style_handle;
         }
-        let entity = self.plane.place_entity(EntityType::MultiLeader(ml));
+        let entity = self.plane.place_entity(EntityType::MultiLeader(Box::new(ml)));
         if self.content_type == LeaderContentType::MText && self.text.is_empty() {
             CmdResult::CommitAndEditText(entity)
         } else {
