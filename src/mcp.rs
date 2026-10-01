@@ -6,6 +6,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
     fs::{File, OpenOptions},
@@ -23,7 +24,7 @@ const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
 const TASK_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
+const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -202,6 +203,109 @@ impl TaskStore {
 
     fn evict_expired_at(&mut self, now: Instant) {
         self.tasks.retain(|stored| stored.expires_at > now);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CachedSnapshot {
+    session_id: String,
+    hash: String,
+    created_at: String,
+    mime_type: String,
+    data_base64: String,
+    bytes_len: usize,
+    metadata: Value,
+}
+
+#[derive(Default)]
+struct ResourceStore {
+    snapshots: HashMap<String, CachedSnapshot>,
+    order: VecDeque<String>,
+    latest: HashMap<String, String>,
+}
+
+const MAX_STORED_SNAPSHOTS: usize = 32;
+
+impl ResourceStore {
+    fn insert(
+        &mut self,
+        session_id: &str,
+        hash: &str,
+        data_base64: String,
+        bytes_len: usize,
+        metadata: Value,
+    ) -> String {
+        let uri = format!("cad://session/{session_id}/snapshot/{hash}.png");
+        let now = iso8601_now();
+        let snapshot = CachedSnapshot {
+            session_id: session_id.to_string(),
+            hash: hash.to_string(),
+            created_at: now,
+            mime_type: "image/png".to_string(),
+            data_base64,
+            bytes_len,
+            metadata,
+        };
+
+        if !self.snapshots.contains_key(&uri) {
+            if self.order.len() >= MAX_STORED_SNAPSHOTS {
+                if let Some(oldest) = self.order.pop_front() {
+                    self.snapshots.remove(&oldest);
+                }
+            }
+            self.order.push_back(uri.clone());
+        }
+        self.snapshots.insert(uri.clone(), snapshot);
+        self.latest.insert(session_id.to_string(), uri.clone());
+        uri
+    }
+
+    fn get_by_uri(&self, uri: &str) -> Option<&CachedSnapshot> {
+        if uri.ends_with("/snapshot/latest.png") {
+            if let Some(session_id) = uri
+                .strip_prefix("cad://session/")
+                .and_then(|s| s.strip_suffix("/snapshot/latest.png"))
+            {
+                if let Some(target_uri) = self.latest.get(session_id) {
+                    return self.snapshots.get(target_uri);
+                }
+            }
+            return None;
+        }
+        self.snapshots.get(uri)
+    }
+
+    fn list_resources(&self, active_session_ids: &[String]) -> Vec<Value> {
+        let mut list = Vec::new();
+        for session_id in active_session_ids {
+            list.push(json!({
+                "uri": format!("cad://session/{session_id}/viewport.png"),
+                "name": format!("Active Viewport ({session_id})"),
+                "description": format!("Live render of the active drawing viewport for session {session_id}."),
+                "mimeType": "image/png"
+            }));
+            if let Some(latest_uri) = self.latest.get(session_id) {
+                if let Some(snap) = self.snapshots.get(latest_uri) {
+                    list.push(json!({
+                        "uri": format!("cad://session/{session_id}/snapshot/latest.png"),
+                        "name": format!("Latest Capture ({session_id})"),
+                        "description": format!("Most recent viewport capture ({} bytes, captured at {})", snap.bytes_len, snap.created_at),
+                        "mimeType": "image/png"
+                    }));
+                }
+            }
+        }
+        for uri in &self.order {
+            if let Some(snap) = self.snapshots.get(uri) {
+                list.push(json!({
+                    "uri": uri,
+                    "name": format!("Snapshot {}", &snap.hash[..snap.hash.len().min(8)]),
+                    "description": format!("Captured frame for session {} ({} bytes, captured at {})", snap.session_id, snap.bytes_len, snap.created_at),
+                    "mimeType": "image/png"
+                }));
+            }
+        }
+        list
     }
 }
 
@@ -788,10 +892,106 @@ fn shape_execute_response(
     Ok(response)
 }
 
+fn read_resource(
+    uri: &str,
+    clients: &mut HashMap<String, GuiClient>,
+    resources: &mut ResourceStore,
+) -> Result<Value, String> {
+    if !uri.starts_with("cad://") {
+        return Err(format!("Unsupported resource URI scheme: {uri}"));
+    }
+    // Check cached snapshot image: cad://session/{session_id}/snapshot/{hash}.png or latest.png
+    if let Some(snapshot) = resources.get_by_uri(uri) {
+        return Ok(json!({
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": snapshot.mime_type,
+                    "blob": snapshot.data_base64
+                }
+            ]
+        }));
+    }
+    // Check snapshot metadata json: cad://session/{session_id}/snapshot/{hash}.json
+    if uri.ends_with(".json") {
+        let png_uri = format!("{}.png", uri.trim_end_matches(".json"));
+        if let Some(snapshot) = resources.get_by_uri(&png_uri) {
+            return Ok(json!({
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": serde_json::to_string_pretty(&snapshot.metadata)
+                            .unwrap_or_else(|_| snapshot.metadata.to_string())
+                    }
+                ]
+            }));
+        }
+    }
+    // Live viewport capture: cad://session/{session_id}/viewport.png or live state: cad://session/{session_id}/state.json
+    if let Some(rest) = uri.strip_prefix("cad://session/") {
+        if let Some((session_id, subpath)) = rest.split_once('/') {
+            if subpath == "viewport.png" {
+                let path = std::env::temp_dir().join(format!("ocs-resource-{}.png", random_id()?));
+                let req = json!({
+                    "op": "capture",
+                    "path": path.to_string_lossy(),
+                    "scope": "viewport",
+                    "max_dimension": 1600,
+                });
+                let result = client(clients, session_id)?
+                    .request(req, 15.0)?;
+                if result["ok"].as_bool() != Some(true)
+                    || result["status"].as_str() != Some("completed")
+                {
+                    return Err(result.to_string());
+                }
+                let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+                let _ = std::fs::remove_file(path);
+
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                let hash = format!("{:x}", hasher.finalize());
+                let b64 = BASE64.encode(&bytes);
+                let bytes_len = bytes.len();
+                let meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
+
+                resources.insert(session_id, &hash, b64.clone(), bytes_len, meta);
+
+                return Ok(json!({
+                    "contents": [
+                        {
+                            "uri": uri,
+                            "mimeType": "image/png",
+                            "blob": b64
+                        }
+                    ]
+                }));
+            } else if subpath == "state.json" {
+                let cli = client(clients, session_id)?;
+                let state_text = serde_json::to_string_pretty(&cli.state)
+                    .unwrap_or_else(|_| cli.state.to_string());
+                return Ok(json!({
+                    "contents": [
+                        {
+                            "uri": uri,
+                            "mimeType": "application/json",
+                            "text": state_text
+                        }
+                    ]
+                }));
+            }
+        }
+    }
+
+    Err(format!("Resource not found: {uri}"))
+}
+
 fn call_tool(
     name: &str,
     arguments: &Value,
     clients: &mut HashMap<String, GuiClient>,
+    resources: &mut ResourceStore,
 ) -> Result<Value, String> {
     match name {
         "ocs_sessions" => {
@@ -850,6 +1050,7 @@ fn call_tool(
             let path = std::env::temp_dir().join(format!("ocs-capture-{}.png", random_id()?));
             let scope = arguments["scope"].as_str().unwrap_or("viewport");
             let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
+            let delivery = arguments["delivery"].as_str().unwrap_or("inline");
             let mut req = json!({
                 "op": "capture",
                 "path": path.to_string_lossy(),
@@ -884,10 +1085,46 @@ fn call_tool(
             if let Some(obj) = meta.as_object_mut() {
                 obj.remove("path");
             }
-            Ok(json!({
-                "$image": BASE64.encode(bytes),
-                "metadata": meta,
-            }))
+
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            let hash = format!("{:x}", hasher.finalize());
+            let b64 = BASE64.encode(&bytes);
+            let bytes_len = bytes.len();
+
+            let uri = resources.insert(session_id, &hash, b64.clone(), bytes_len, meta.clone());
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert("uri".into(), Value::String(uri.clone()));
+                obj.insert("latest_uri".into(), Value::String(format!("cad://session/{session_id}/snapshot/latest.png")));
+                obj.insert("hash".into(), Value::String(hash.clone()));
+                obj.insert("bytes".into(), Value::from(bytes_len));
+            }
+
+            match delivery {
+                "resource" => Ok(json!({
+                    "$resource": {
+                        "uri": uri,
+                        "mimeType": "image/png",
+                        "hash": hash,
+                        "bytes": bytes_len,
+                    },
+                    "metadata": meta,
+                })),
+                "both" => Ok(json!({
+                    "$image": b64,
+                    "$resource": {
+                        "uri": uri,
+                        "mimeType": "image/png",
+                        "hash": hash,
+                        "bytes": bytes_len,
+                    },
+                    "metadata": meta,
+                })),
+                _ => Ok(json!({
+                    "$image": b64,
+                    "metadata": meta,
+                })),
+            }
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
@@ -960,6 +1197,7 @@ fn tool_definitions() -> Value {
                     "ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},
                     "scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},
                     "max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."},
+                    "delivery":{"type":"string","enum":["inline","resource","both"],"default":"inline","description":"Image delivery method: 'inline' embeds base64 in tool content, 'resource' returns an MCP cad:// URI reference without inlining image bytes, 'both' returns both inline image and cad:// URI."},
                     "view":{"type":"string","enum":["current","extents","selection","region"],"default":"current","description":"Frame the camera before capture: extents fits all entities, selection fits selected entities, region fits explicit world bounds."},
                     "bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"World XY bounding box [min_x, min_y, max_x, max_y] to zoom and fit in view before capturing (used with view: 'region')."},
                     "focus_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to zoom and fit in view before capturing."},
@@ -975,13 +1213,29 @@ fn tool_definitions() -> Value {
 }
 
 fn tool_result(value: Value) -> Value {
-    if let Some(image) = value.get("$image").and_then(Value::as_str) {
+    if value.get("$resource").is_some() || value.get("$image").is_some() {
         let mut content = Vec::new();
+        if let Some(res) = value.get("$resource") {
+            let uri = res["uri"].as_str().unwrap_or("");
+            content.push(json!({
+                "type": "text",
+                "text": format!("Captured viewport to MCP resource: {uri}")
+            }));
+            content.push(json!({
+                "type": "resource",
+                "resource": {
+                    "uri": uri,
+                    "mimeType": res["mimeType"].as_str().unwrap_or("image/png")
+                }
+            }));
+        }
         if let Some(meta) = value.get("metadata") {
             let meta_text = serde_json::to_string_pretty(meta).unwrap_or_else(|_| meta.to_string());
             content.push(json!({"type":"text","text":meta_text}));
         }
-        content.push(json!({"type":"image","data":image,"mimeType":"image/png"}));
+        if let Some(image) = value.get("$image").and_then(Value::as_str) {
+            content.push(json!({"type":"image","data":image,"mimeType":"image/png"}));
+        }
         let structured = value.get("metadata").cloned().unwrap_or_else(|| json!({}));
         return json!({
             "content": content,
@@ -1048,7 +1302,11 @@ fn task_value(task: &McpTask, status: &str) -> Value {
     value
 }
 
-fn poll_task(task: &mut McpTask, clients: &mut HashMap<String, GuiClient>) -> Value {
+fn poll_task(
+    task: &mut McpTask,
+    clients: &mut HashMap<String, GuiClient>,
+    resources: &mut ResourceStore,
+) -> Value {
     if task.result.is_some() {
         return task_value(task, "completed");
     }
@@ -1058,7 +1316,7 @@ fn poll_task(task: &mut McpTask, clients: &mut HashMap<String, GuiClient>) -> Va
     task.last_updated_at = iso8601_now();
     let mut arguments = task.arguments.clone();
     arguments["wait_seconds"] = Value::from(0);
-    match call_tool(&task.name, &arguments, clients) {
+    match call_tool(&task.name, &arguments, clients, resources) {
         Ok(value) if matches!(value["status"].as_str(), Some("accepted" | "running")) => {
             task_value(task, "working")
         }
@@ -1113,6 +1371,7 @@ fn handle_message(
     message: Value,
     clients: &mut HashMap<String, GuiClient>,
     tasks: &mut TaskStore,
+    resources: &mut ResourceStore,
 ) -> Option<Value> {
     let id = message.get("id").cloned();
     let method = message.get("method").and_then(Value::as_str)?;
@@ -1143,7 +1402,10 @@ fn handle_message(
                 id,
                 json!({
                     "protocolVersion":protocol,
-                    "capabilities":{"tools":{"listChanged":false}},
+                    "capabilities":{
+                        "tools":{"listChanged":false},
+                        "resources":{"subscribe":false,"listChanged":false}
+                    },
                     "serverInfo":server_info(),
                     "instructions":INSTRUCTIONS
                 }),
@@ -1154,7 +1416,11 @@ fn handle_message(
             protocol_result(
                 json!({
                     "supportedVersions":[MODERN_PROTOCOL_VERSION,PROTOCOL_VERSION],
-                    "capabilities":{"tools":{},"extensions":{"io.modelcontextprotocol/tasks":{}}},
+                    "capabilities":{
+                        "tools":{},
+                        "resources":{},
+                        "extensions":{"io.modelcontextprotocol/tasks":{}}
+                    },
                     "instructions":INSTRUCTIONS
                 }),
                 true,
@@ -1162,6 +1428,38 @@ fn handle_message(
             ),
         ),
         "ping" => response(id, protocol_result(json!({}), modern, false)),
+        "resources/list" => {
+            let mut session_ids = Vec::new();
+            if let Ok(available) = descriptors() {
+                for (desc, _) in available {
+                    session_ids.push(desc.session_id);
+                }
+            }
+            for k in clients.keys() {
+                if !session_ids.contains(k) {
+                    session_ids.push(k.clone());
+                }
+            }
+            for k in resources.latest.keys() {
+                if !session_ids.contains(k) {
+                    session_ids.push(k.clone());
+                }
+            }
+            let list = resources.list_resources(&session_ids);
+            response(
+                id,
+                protocol_result(json!({ "resources": list }), modern, true),
+            )
+        }
+        "resources/read" => {
+            let Some(uri) = params["uri"].as_str() else {
+                return Some(rpc_error(id, -32602, "Missing resource uri"));
+            };
+            match read_resource(uri, clients, resources) {
+                Ok(contents) => response(id, protocol_result(contents, modern, true)),
+                Err(err) => rpc_error(id, -32002, err),
+            }
+        }
         "tools/list" => response(
             id,
             protocol_result(json!({"tools":tool_definitions()}), modern, true),
@@ -1174,7 +1472,7 @@ fn handle_message(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let called = call_tool(name, &arguments, clients);
+            let called = call_tool(name, &arguments, clients, resources);
             if modern && supports_tasks(&params) {
                 if let Ok(value) = &called {
                     if matches!(value["status"].as_str(), Some("accepted" | "running")) {
@@ -1220,7 +1518,7 @@ fn handle_message(
             let Some(task) = tasks.get_mut(task_id) else {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
             };
-            response(id, protocol_result(poll_task(task, clients), true, false))
+            response(id, protocol_result(poll_task(task, clients, resources), true, false))
         }
         "tasks/update" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -1251,13 +1549,14 @@ pub fn run() {
     let mut output = stdout.lock();
     let mut clients = HashMap::new();
     let mut tasks = TaskStore::default();
+    let mut resources = ResourceStore::default();
     for line in crate::io::line_read::lines_capped(
         stdin.lock(),
         crate::io::line_read::MAX_LINE_BYTES,
     ) {
         let response = match line {
             Ok(line) if !line.trim().is_empty() => match serde_json::from_str::<Value>(&line) {
-                Ok(message) => handle_message(message, &mut clients, &mut tasks),
+                Ok(message) => handle_message(message, &mut clients, &mut tasks, &mut resources),
                 Err(error) => Some(rpc_error(Value::Null, -32700, error)),
             },
             Ok(_) => None,
@@ -1328,6 +1627,10 @@ mod tests {
             tools[3]["inputSchema"]["properties"]["scope"]["default"],
             "viewport"
         );
+        assert_eq!(
+            tools[3]["inputSchema"]["properties"]["delivery"]["default"],
+            "inline"
+        );
         let find_variant = |op_name: &str| {
             request_variants
                 .iter()
@@ -1387,9 +1690,14 @@ mod tests {
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
+        assert_eq!(
+            initialized["result"]["capabilities"]["resources"]["subscribe"],
+            false
+        );
         assert!(
             initialized["result"]["instructions"]
                 .as_str()
@@ -1401,6 +1709,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 4);
@@ -1415,12 +1724,14 @@ mod tests {
             json!({"jsonrpc":"2.0","id":"discover","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(discovered["result"]["resultType"], "complete");
         assert_eq!(discovered["result"]["ttlMs"], CACHE_TTL_MS);
         assert_eq!(discovered["result"]["cacheScope"], "public");
         assert_eq!(discovered["result"]["supportedVersions"][0], "2026-07-28");
+        assert!(discovered["result"]["capabilities"]["resources"].is_object());
         assert!(
             discovered["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/tasks"]
                 .is_object()
@@ -1434,6 +1745,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(listed["result"]["resultType"], "complete");
@@ -1448,6 +1760,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ocs_read","arguments":{"ocs_session_id":"missing","op":"save"}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -1460,6 +1773,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":4,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01"}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(rejected["error"]["code"], -32022);
@@ -1477,6 +1791,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"ocs_session_id":"missing","request":{"op":"undo"}}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -1495,6 +1810,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"ocs_session_id":"missing","request":{"op":"run","request_id":"run-1"}}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -1507,6 +1823,118 @@ mod tests {
             .unwrap();
         assert!(error.contains("Missing cmd"), "{error}");
         assert!(error.contains("LINE 0,0 10,10"), "{error}");
+    }
+
+    #[test]
+    fn resources_list_and_read_snapshots() {
+        let mut clients = HashMap::new();
+        let mut tasks = TaskStore::default();
+        let mut resources = ResourceStore::default();
+
+        let dummy_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        let dummy_hash = "abcdef0123456789";
+        let uri = resources.insert(
+            "sess1",
+            dummy_hash,
+            dummy_data.to_string(),
+            68,
+            json!({"width": 100, "height": 100, "annotations": []}),
+        );
+        assert_eq!(uri, "cad://session/sess1/snapshot/abcdef0123456789.png");
+
+        // Test resources/list
+        let listed = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-list","method":"resources/list"}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let res_arr = listed["result"]["resources"].as_array().unwrap();
+        assert!(res_arr.iter().any(|r| r["uri"] == uri));
+        assert!(res_arr.iter().any(|r| r["uri"] == "cad://session/sess1/snapshot/latest.png"));
+
+        // Test resources/read with png
+        let read_png = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-read","method":"resources/read","params":{"uri":uri}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let contents = read_png["result"]["contents"].as_array().unwrap();
+        assert_eq!(contents[0]["mimeType"], "image/png");
+        assert_eq!(contents[0]["blob"], dummy_data);
+
+        // Test resources/read with latest
+        let read_latest = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-read-lat","method":"resources/read","params":{"uri":"cad://session/sess1/snapshot/latest.png"}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        assert_eq!(read_latest["result"]["contents"][0]["blob"], dummy_data);
+
+        // Test resources/read with json metadata
+        let read_meta = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-read-meta","method":"resources/read","params":{"uri":"cad://session/sess1/snapshot/abcdef0123456789.json"}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let text = read_meta["result"]["contents"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"width\": 100"));
+
+        // Test resources/read on non-existent resource returns -32002 error
+        let read_err = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-err","method":"resources/read","params":{"uri":"cad://session/sess1/snapshot/nonexistent.png"}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        assert_eq!(read_err["error"]["code"], -32002);
+    }
+
+    #[test]
+    fn tool_result_handles_resource_and_both_modes() {
+        // Resource-only delivery mode
+        let res_value = json!({
+            "$resource": {
+                "uri": "cad://session/s1/snapshot/hash123.png",
+                "mimeType": "image/png",
+                "hash": "hash123",
+                "bytes": 1024
+            },
+            "metadata": {"width": 800, "height": 600}
+        });
+        let res_res = tool_result(res_value);
+        assert_eq!(res_res["isError"], false);
+        let content = res_res["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "text");
+        assert!(content[0]["text"].as_str().unwrap().contains("cad://session/s1/snapshot/hash123.png"));
+        assert_eq!(content[1]["type"], "resource");
+        assert_eq!(content[1]["resource"]["uri"], "cad://session/s1/snapshot/hash123.png");
+        // Ensure no image block was sent
+        assert!(!content.iter().any(|c| c["type"] == "image"));
+
+        // Both mode
+        let both_value = json!({
+            "$image": "base64data",
+            "$resource": {
+                "uri": "cad://session/s1/snapshot/hash123.png",
+                "mimeType": "image/png",
+                "hash": "hash123",
+                "bytes": 1024
+            },
+            "metadata": {"width": 800}
+        });
+        let both_res = tool_result(both_value);
+        let both_content = both_res["content"].as_array().unwrap();
+        assert!(both_content.iter().any(|c| c["type"] == "resource"));
+        assert!(both_content.iter().any(|c| c["type"] == "image"));
     }
 
     #[test]
