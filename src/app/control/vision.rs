@@ -1,4 +1,5 @@
 use crate::app::OpenCADStudio;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// 5x7 bitmapped font glyphs for digits '0' through '9'
@@ -446,6 +447,128 @@ pub(crate) fn encode_image_png(img: &image::RgbaImage) -> Result<Vec<u8>, String
     Ok(buf.into_inner())
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PyramidLevelInfo {
+    pub level: u32,
+    pub grid: [u32; 2],
+    pub tile_world_span: [f64; 2],
+    pub tiles_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PyramidManifest {
+    pub crs: String,
+    pub unit: String,
+    pub world_bounds: [f64; 4],
+    pub max_level: u32,
+    pub tile_size: u32,
+    pub tile_uri_template: String,
+    pub levels: Vec<PyramidLevelInfo>,
+}
+
+pub fn compute_pyramid_manifest(
+    session_id: &str,
+    unit: &str,
+    world_bounds: [f64; 4],
+    max_level: u32,
+    tile_size: u32,
+) -> PyramidManifest {
+    let min_x = world_bounds[0];
+    let min_y = world_bounds[1];
+    let max_x = world_bounds[2];
+    let max_y = world_bounds[3];
+
+    let w = (max_x - min_x).abs().max(1e-4);
+    let h = (max_y - min_y).abs().max(1e-4);
+
+    let max_lvl = max_level.clamp(1, 6);
+    let mut levels = Vec::new();
+
+    for level in 0..=max_lvl {
+        let cols = 1u32 << level;
+        let rows = 1u32 << level;
+        let tile_w = w / cols as f64;
+        let tile_h = h / rows as f64;
+        levels.push(PyramidLevelInfo {
+            level,
+            grid: [cols, rows],
+            tile_world_span: [tile_w, tile_h],
+            tiles_count: cols * rows,
+        });
+    }
+
+    PyramidManifest {
+        crs: "CAD_WCS".to_string(),
+        unit: unit.to_string(),
+        world_bounds: [min_x, min_y, max_x, max_y],
+        max_level: max_lvl,
+        tile_size,
+        tile_uri_template: format!("cad://session/{session_id}/tile/{{level}}/{{x}}/{{y}}.png"),
+        levels,
+    }
+}
+
+pub fn compute_tile_bounds(
+    manifest_world_bounds: [f64; 4],
+    level: u32,
+    x: u32,
+    y: u32,
+) -> Result<[f64; 4], String> {
+    let cols = 1u32 << level;
+    let rows = 1u32 << level;
+
+    if x >= cols || y >= rows {
+        return Err(format!(
+            "Tile coordinates ({x}, {y}) out of range for level {level} (grid is {cols}x{rows})"
+        ));
+    }
+
+    let min_x = manifest_world_bounds[0];
+    let min_y = manifest_world_bounds[1];
+    let max_x = manifest_world_bounds[2];
+    let max_y = manifest_world_bounds[3];
+
+    let w = (max_x - min_x).abs().max(1e-4);
+    let h = (max_y - min_y).abs().max(1e-4);
+
+    let tile_w = w / cols as f64;
+    let tile_h = h / rows as f64;
+
+    let t_min_x = min_x + (x as f64) * tile_w;
+    let t_max_x = t_min_x + tile_w;
+    let t_max_y = max_y - (y as f64) * tile_h;
+    let t_min_y = t_max_y - tile_h;
+
+    Ok([t_min_x, t_min_y, t_max_x, t_max_y])
+}
+
+#[allow(dead_code)]
+pub fn point_to_tile(
+    manifest_world_bounds: [f64; 4],
+    level: u32,
+    point_x: f64,
+    point_y: f64,
+) -> (u32, u32) {
+    let cols = 1u32 << level;
+    let rows = 1u32 << level;
+
+    let min_x = manifest_world_bounds[0];
+    let min_y = manifest_world_bounds[1];
+    let max_x = manifest_world_bounds[2];
+    let max_y = manifest_world_bounds[3];
+
+    let w = (max_x - min_x).abs().max(1e-4);
+    let h = (max_y - min_y).abs().max(1e-4);
+
+    let tile_w = w / cols as f64;
+    let tile_h = h / rows as f64;
+
+    let tx = (((point_x - min_x) / tile_w).floor() as i64).clamp(0, (cols - 1) as i64) as u32;
+    let ty = (((max_y - point_y) / tile_h).floor() as i64).clamp(0, (rows - 1) as i64) as u32;
+
+    (tx, ty)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,5 +704,56 @@ mod tests {
         let png_bytes = encode_image_png(&patch).expect("png encode succeeds");
         assert!(!png_bytes.is_empty());
         assert_eq!(&png_bytes[1..4], b"PNG");
+    }
+
+    #[test]
+    fn test_pyramid_tiling_manifest_and_bounds() {
+        let wb = [0.0, 0.0, 200.0, 100.0];
+        let manifest = compute_pyramid_manifest("sess_test", "Millimeters", wb, 3, 512);
+
+        assert_eq!(manifest.crs, "CAD_WCS");
+        assert_eq!(manifest.unit, "Millimeters");
+        assert_eq!(manifest.world_bounds, wb);
+        assert_eq!(manifest.max_level, 3);
+        assert_eq!(manifest.tile_size, 512);
+        assert_eq!(manifest.levels.len(), 4); // 0, 1, 2, 3
+
+        // Level 0: 1x1 tile covering full world bounds
+        assert_eq!(manifest.levels[0].grid, [1, 1]);
+        assert_eq!(manifest.levels[0].tiles_count, 1);
+        assert_eq!(manifest.levels[0].tile_world_span, [200.0, 100.0]);
+        let t00 = compute_tile_bounds(wb, 0, 0, 0).unwrap();
+        assert_eq!(t00, [0.0, 0.0, 200.0, 100.0]);
+
+        // Level 1: 2x2 grid (4 tiles, 100x50 span each)
+        assert_eq!(manifest.levels[1].grid, [2, 2]);
+        assert_eq!(manifest.levels[1].tiles_count, 4);
+        assert_eq!(manifest.levels[1].tile_world_span, [100.0, 50.0]);
+
+        // (0, 0): top-left
+        let t1_00 = compute_tile_bounds(wb, 1, 0, 0).unwrap();
+        assert_eq!(t1_00, [0.0, 50.0, 100.0, 100.0]);
+
+        // (1, 0): top-right
+        let t1_10 = compute_tile_bounds(wb, 1, 1, 0).unwrap();
+        assert_eq!(t1_10, [100.0, 50.0, 200.0, 100.0]);
+
+        // (0, 1): bottom-left
+        let t1_01 = compute_tile_bounds(wb, 1, 0, 1).unwrap();
+        assert_eq!(t1_01, [0.0, 0.0, 100.0, 50.0]);
+
+        // (1, 1): bottom-right
+        let t1_11 = compute_tile_bounds(wb, 1, 1, 1).unwrap();
+        assert_eq!(t1_11, [100.0, 0.0, 200.0, 50.0]);
+
+        // Out-of-range checks
+        assert!(compute_tile_bounds(wb, 1, 2, 0).is_err());
+        assert!(compute_tile_bounds(wb, 1, 0, 2).is_err());
+
+        // Point-to-tile mapping
+        assert_eq!(point_to_tile(wb, 1, 25.0, 75.0), (0, 0));
+        assert_eq!(point_to_tile(wb, 1, 175.0, 75.0), (1, 0));
+        assert_eq!(point_to_tile(wb, 1, 25.0, 25.0), (0, 1));
+        assert_eq!(point_to_tile(wb, 1, 175.0, 25.0), (1, 1));
     }
 }
