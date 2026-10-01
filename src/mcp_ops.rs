@@ -116,6 +116,17 @@ pub static ACTIVATE: OpDef = OpDef {
     example: r#"{"op":"activate","document_id":1}"#,
 };
 
+pub static SWITCH_DOCUMENT: OpDef = OpDef {
+    name: "switch_document",
+    doc: "Alias for activate. Switch the active drawing tab to another open document.",
+    batchable: true,
+    params: &[
+        req("document_id", Ty::Int, "Target document ID to activate."),
+    ],
+    rules: &[],
+    example: r#"{"op":"switch_document","document_id":1}"#,
+};
+
 pub static RUN: OpDef = OpDef {
     name: "run",
     doc: "Execute a command string with prompt answers separated by spaces (e.g. 'LINE 0,0 10,10').",
@@ -612,6 +623,7 @@ pub static OPS: &[&OpDef] = &[
     &NEW,
     &OPEN,
     &ACTIVATE,
+    &SWITCH_DOCUMENT,
     &RUN,
     &START,
     &INPUT,

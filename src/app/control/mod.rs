@@ -665,7 +665,7 @@ impl OpenCADStudio {
                 );
             }
             if self.tabs[self.active_tab].id != id
-                && !matches!(op, "activate" | "close" | "entities_copy_to")
+                && !matches!(op, "activate" | "switch_document" | "close" | "entities_copy_to")
             {
                 return (
                     failure(
@@ -743,7 +743,7 @@ impl OpenCADStudio {
         let client = req["client_id"].as_str().unwrap_or("default").to_owned();
         if tab.active_cmd.is_some()
             && (self.control.owner.as_ref() != Some(&(tab.id, client.clone()))
-                || matches!(op, "run" | "start" | "new" | "open" | "activate"))
+                || matches!(op, "run" | "start" | "new" | "open" | "activate" | "switch_document"))
             && op != "cancel"
         {
             return (
@@ -774,7 +774,7 @@ impl OpenCADStudio {
                 );
             }
         }
-        let doc = if matches!(op, "new" | "open" | "activate") {
+        let doc = if matches!(op, "new" | "open" | "activate" | "switch_document") {
             None
         } else {
             Some(tab.id)
@@ -803,7 +803,7 @@ impl OpenCADStudio {
         if self.tabs[self.active_tab].active_cmd.is_some() {
             self.control.owner = Some((self.tabs[self.active_tab].id, client));
         }
-        if matches!(op, "new" | "activate")
+        if matches!(op, "new" | "activate" | "switch_document")
             && self
                 .control
                 .pending
@@ -876,7 +876,7 @@ impl OpenCADStudio {
             "open" => self.update(Message::OpenExternal(std::path::PathBuf::from(string(
                 req, "path",
             )?))),
-            "activate" => {
+            "activate" | "switch_document" => {
                 let i = self
                     .tabs
                     .iter()
@@ -1058,6 +1058,7 @@ impl OpenCADStudio {
                     .main_window
                     .ok_or_else(|| failure("gui_required", "Capture requires a GUI window"))?;
                 let path = string(req, "path")?.to_owned();
+                crate::sys::restore_window_if_minimized();
 
                 // Optional framing / selection adjustments prior to snapshot:
                 if let Some(handles) = req.get("highlight_handles").and_then(Value::as_array) {
@@ -1169,7 +1170,7 @@ impl OpenCADStudio {
             if pending.document_id.is_none()
                 && matches!(
                     pending.request["op"].as_str(),
-                    Some("new" | "open" | "activate")
+                    Some("new" | "open" | "activate" | "switch_document")
                 )
                 && pending.origin_document != self.tabs[self.active_tab].id
             {

@@ -52,6 +52,7 @@ const EXECUTE_OPS: &[&str] = &[
     "new",
     "open",
     "activate",
+    "switch_document",
     "run",
     "start",
     "input",
@@ -93,6 +94,7 @@ const BATCH_STEP_OPS: &[&str] = &[
     "new",
     "open",
     "activate",
+    "switch_document",
     "run",
     "start",
     "input",
@@ -2815,7 +2817,33 @@ mod tests {
         assert!(schema["$defs"]["window"].is_object());
         assert!(schema["$defs"]["batch_step"].is_object());
         let json_str = schema.to_string();
-        // Generates cleanly without exponential blowup: compact ~15KB to 30KB
-        assert!(json_str.len() < 40_000, "schema size is {} bytes", json_str.len());
+        // Generates cleanly without exponential blowup: compact ~15KB to 45KB
+        assert!(json_str.len() < 45_000, "schema size is {} bytes", json_str.len());
+    }
+
+    #[test]
+    fn export_agent_tool_schemas() {
+        let tools = tool_definitions();
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        let base_dir = std::path::PathBuf::from(home)
+            .join(".gemini")
+            .join("antigravity")
+            .join("mcp")
+            .join("opencadstudio");
+        if base_dir.exists() {
+            for tool in tools.as_array().unwrap() {
+                let name = tool["name"].as_str().unwrap();
+                let schema = json!({
+                    "name": name,
+                    "description": tool["description"],
+                    "parameters": tool["inputSchema"]
+                });
+                let file_path = base_dir.join(format!("{name}.json"));
+                let pretty = serde_json::to_string_pretty(&schema).unwrap();
+                let _ = std::fs::write(&file_path, pretty);
+            }
+        }
     }
 }
