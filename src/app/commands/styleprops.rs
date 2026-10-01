@@ -1688,11 +1688,11 @@ impl OpenCADStudio {
                             },
                             "ZOOMFACTOR" => match &value {
                                 Some(v) => match v.parse::<i32>() {
-                                    Ok(factor) if (3..=100).contains(&factor) => {
+                                    Ok(factor) if (3..=500).contains(&factor) => {
                                         self.zoom_factor = factor;
                                         Ok((format!("ZOOMFACTOR = {factor}"), true))
                                     }
-                                    _ => Err("SETVAR: integer from 3 to 100 required.".into()),
+                                    _ => Err("SETVAR: integer from 3 to 500 required.".into()),
                                 },
                                 None => {
                                     Ok((format!("ZOOMFACTOR = {}", self.zoom_factor), false))

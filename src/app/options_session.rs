@@ -222,4 +222,15 @@ mod tests {
         assert_eq!(h.display_silhouette, silhouette);
         assert!(!app.tabs[i].dirty, "the drawing is as unmodified as it was");
     }
+
+    #[test]
+    fn zoom_factor_supports_values_above_100() {
+        let mut app = app();
+        let _ = app.update(Message::ZoomFactorChanged(250));
+        assert_eq!(app.zoom_factor, 250);
+        let _ = app.update(Message::ZoomFactorChanged(500));
+        assert_eq!(app.zoom_factor, 500);
+        let _ = app.update(Message::ZoomFactorChanged(600));
+        assert_eq!(app.zoom_factor, 500, "clamped to new upper limit of 500");
+    }
 }

@@ -8239,7 +8239,7 @@ impl OpenCADStudio {
             }
 
             Message::ZoomFactorChanged(factor) => {
-                self.zoom_factor = factor.clamp(3, 100);
+                self.zoom_factor = factor.clamp(3, 500);
                 self.persist_settings_if_changed();
                 Task::none()
             }
