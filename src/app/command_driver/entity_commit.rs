@@ -220,6 +220,12 @@ impl OpenCADStudio {
         // Record where this draw ended so ARC_CONT can continue from it
         // (before `entity` is moved into commit_entity).
         self.update_cont_anchor(&entity);
+        // ATTDEF's height becomes the next text height (TEXTSIZE), as TEXT's does.
+        if let codec::EntityType::AttributeDefinition(attribute) = &entity {
+            if self.tabs[i].active_cmd.as_ref().is_some_and(|cmd| cmd.name().ends_with("ATTDEF")) {
+                self.tabs[i].scene.document.header.text_height = attribute.height;
+            }
+        }
         let label = self.history_label_from_active_cmd(i, "ENTITY");
         let delta_safe = self.delta_add_safe(i, &entity);
         let pending = self.begin_undo(i, label, 1, delta_safe);

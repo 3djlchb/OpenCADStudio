@@ -101,7 +101,7 @@ fn mtext_flag_str(f: MTextFlag) -> &'static str {
 /// Render text strokes for an attribute, honouring alignment, oblique angle,
 /// width factor, generation flags (backward / upside-down), text-style
 /// resolution, and basic multiline splitting on `\n` / `\\P`.
-fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::CadDocument) -> RenderEntity {
+fn build_attr_render(mut input: AttrTextInputs<'_>, document: &codec::CadDocument) -> RenderEntity {
     let normal = (input.normal.x, input.normal.y, input.normal.z);
     let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
         (
@@ -146,6 +146,37 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::CadDocument) -
     } else {
         resolved.oblique_angle
     };
+
+    // Align / Fit run the text along the baseline between the two points:
+    // Fit stretches its width, Align scales its height too.
+    let (mut rotation, mut width_factor) = (rotation, width_factor);
+    let span = (
+        input.alignment_point.x - input.insertion_point.x,
+        input.alignment_point.y - input.insertion_point.y,
+    );
+    let length = span.0.hypot(span.1);
+    if matches!(input.horizontal_alignment, AHA::Aligned | AHA::Fit)
+        && length > 1.0e-9
+        && !input.value.contains("\\P")
+    {
+        if let Some(b) = text_local_bounds(
+            &resolved.font_name,
+            &resolve_dxf_special_chars(input.value),
+            input.height as f32,
+            width_factor.abs(),
+            oblique_angle,
+        )
+        .filter(|b| b.advance > 1.0e-6)
+        {
+            let scale = length / b.advance as f64;
+            rotation = span.1.atan2(span.0) as f32;
+            if matches!(input.horizontal_alignment, AHA::Aligned) {
+                input.height *= scale;
+            } else {
+                width_factor *= scale as f32;
+            }
+        }
+    }
 
     // Anchor selection mirrors Text: only Left/Baseline uses insertion_point;
     // every other alignment uses alignment_point.

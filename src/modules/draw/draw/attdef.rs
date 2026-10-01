@@ -498,9 +498,11 @@ impl AttdefCommand {
 }
 
 /// Keep AFLAGS / Annotative and the placed definition for the next ATTDEF.
+/// Multiple lines is not kept: the reference starts the next definition
+/// single-line again.
 pub fn remember(spec: &AttdefSpec, entity: &EntityType) {
     let mut s = session();
-    s.aflags = spec.aflags;
+    s.aflags = spec.aflags & !AFLAG_MULTILINE;
     s.annotative = spec.annotative;
     if let EntityType::AttributeDefinition(a) = entity {
         s.last = Some(a.clone());
