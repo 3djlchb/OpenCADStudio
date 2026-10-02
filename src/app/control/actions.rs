@@ -987,30 +987,38 @@ impl OpenCADStudio {
                 use crate::ui::window::field_dialog::{self as fd, FieldDialogMsg as F};
                 let value = string(req, "value")?;
                 let (key, v) = value.split_once('=').unwrap_or((value, ""));
-                let index = || v.parse::<usize>().map_err(|_| failure("invalid_value", "index expected"));
+                // The dialog indexes its lists with these, so one out of range
+                // would panic while it draws.
+                let index = |len: usize| {
+                    v.parse::<usize>()
+                        .ok()
+                        .filter(|i| *i < len)
+                        .ok_or_else(|| failure("invalid_value", "index out of range"))
+                };
+                let named_len = self.field_dialog.as_ref().map_or(0, |d| d.named_names.len());
                 let known = |list: &[&'static str]| {
                     list.iter().copied().find(|n| n.eq_ignore_ascii_case(v)).ok_or_else(|| failure("invalid_value", "unknown name"))
                 };
                 Message::FieldDialog(match key {
-                    "category" => F::Category(index()?),
+                    "category" => F::Category(index(fd::CATEGORIES.len())?),
                     "name" => F::Name(known(&fd::fields_of(0))?),
                     "date" => F::DateFormat(v.into()),
-                    "case" => F::TextCase(index()?),
+                    "case" => F::TextCase(index(fd::TEXT_CASES.len())?),
                     "file" => F::FileParts(v.parse::<u8>().map_err(|_| failure("invalid_value", "1|2|3"))?),
                     "ext" => F::FileExtension(v == "1"),
-                    "size" => F::SizeUnit(index()?),
+                    "size" => F::SizeUnit(index(fd::SIZE_UNITS.len())?),
                     "sysvar" => F::SysVar(v.into()),
                     "diesel" => F::Diesel(v.into()),
-                    "named_type" => F::NamedType(index()?),
-                    "named" => F::Named(index()?),
+                    "named_type" => F::NamedType(index(fd::NAMED_TYPES.len())?),
+                    "named" => F::Named(index(named_len)?),
                     "prop" => F::ObjectProp(known(&["Area", "Center", "Circumference", "Diameter", "EndPoint", "Length", "Radius", "StartPoint"])?),
                     "select_object" => F::SelectObject,
                     "formula" => F::Formula(v.into()),
-                    "formula_format" => F::FormulaFormat(index()?),
-                    "precision" => F::FormulaPrecision(index()?),
+                    "formula_format" => F::FormulaFormat(index(codec::fields::FORMULA_FORMATS.len())?),
+                    "precision" => F::FormulaPrecision(index(fd::FORMULA_PRECISIONS.len())?),
                     "link_text" => F::HyperlinkText(v.into()),
                     "link_url" => F::HyperlinkUrl(v.into()),
-                    "plot_scale" => F::PlotScale(index()?),
+                    "plot_scale" => F::PlotScale(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
                     _ => return Err(failure("invalid_value", "Unknown field dialog key")),
                 })
             }

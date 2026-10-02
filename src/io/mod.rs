@@ -765,7 +765,7 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
                 .map_err(|e| e.to_string())?;
             fix_viewport_status_flags(&mut doc);
             fix_current_style_names(&mut doc);
-    crate::entities::field::local_header_dates(&mut doc);
+            crate::entities::field::local_header_dates(&mut doc);
             Ok(doc)
         }
         "dxf" => {
@@ -777,7 +777,7 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
             fix_dxf_layout_plot_settings(&mut doc);
             fix_viewport_status_flags(&mut doc);
             fix_current_style_names(&mut doc);
-    crate::entities::field::local_header_dates(&mut doc);
+            crate::entities::field::local_header_dates(&mut doc);
             Ok(doc)
         }
         _ => Err(format!("Unsupported file format: .{ext}")),

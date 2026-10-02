@@ -519,7 +519,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                     .font(iced::Font::MONOSPACE)
                     .style(field_style)
                     .on_input(|v| msg(FieldDialogMsg::HyperlinkUrl(v))),
-                button(text("…").size(12))
+                button(text("...").size(12))
                     .on_press(msg(FieldDialogMsg::BrowseHyperlink))
                     .style(button_style(false))
                     .padding([5, 10]),
