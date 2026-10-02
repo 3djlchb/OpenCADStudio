@@ -1294,6 +1294,7 @@ pub(super) struct OpenCADStudio {
     /// drawings in a file manager produces exactly that (one process per file,
     /// all arriving at once), which makes this queue load-bearing, not polish.
     pub(super) pending_opens: std::collections::VecDeque<PathBuf>,
+    pub(super) pending_startup_script_lines: Vec<String>,
     /// One global interaction-index build at a time. Large drawings can each
     /// hold millions of entries, so file-open bursts must not multiply peak
     /// CPU and memory by the number of tabs.
@@ -4278,6 +4279,7 @@ impl OpenCADStudio {
             missing_fonts_downloading: false,
             suppressed_missing_fonts: rustc_hash::FxHashSet::default(),
             pending_opens: std::collections::VecDeque::new(),
+            pending_startup_script_lines: Vec::new(),
             active_interaction_index: None,
             queued_interaction_indices: std::collections::VecDeque::new(),
             pending_close: None,
@@ -4624,20 +4626,25 @@ impl OpenCADStudio {
             s.command_line.push_warning(&notice);
             crate::scene::pipeline::report_gpu_line(&format!("[gpu] {notice}"));
         }
-        let cli_open: Task<Message> = if !cfg.files.is_empty() {
+        let has_files = !cfg.files.is_empty();
+        let cli_open: Task<Message> = if has_files {
             Task::batch(
                 cfg.files
                     .into_iter()
                     .map(|p| Task::done(Message::OpenExternal(p))),
             )
-        } else if cfg.new {
+        } else if cfg.new || !cfg.script_lines.is_empty() {
             Task::done(Message::TabNew)
         } else {
             Task::none()
         };
-        // Startup command script: each line dispatched as if typed at the
-        // command line, in order, after any file open is requested.
+        // Startup command script: if files were passed to open, defer the
+        // script lines until the document finishes opening. Otherwise, dispatch
+        // them on the newly created drawing tab.
         let script: Task<Message> = if cfg.script_lines.is_empty() {
+            Task::none()
+        } else if has_files {
+            s.pending_startup_script_lines = cfg.script_lines;
             Task::none()
         } else {
             Task::batch(

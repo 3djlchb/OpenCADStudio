@@ -982,6 +982,9 @@ impl OpenCADStudio {
                     .extension()
                     .map(|e| e.to_string_lossy().to_lowercase())
                     .unwrap_or_default();
+                if ext == "scr" {
+                    return self.dispatch_command(&format!("SCRIPT \"{}\"", path.display()));
+                }
                 if !matches!(ext.as_str(), "dwg" | "dxf" | "bak" | "sv$") {
                     self.command_line.push_error(
                         crate::tf!("Unsupported file type: {}", path.display()).as_ref(),
@@ -2506,13 +2509,7 @@ impl OpenCADStudio {
                 self.dispatch_command(&cmd)
             }
 
-            Message::ScriptLine(line) => {
-                if line.trim().is_empty() {
-                    self.feed_command(crate::command::StepInput::Enter)
-                } else {
-                    self.run_command_line(&line)
-                }
-            }
+            Message::ScriptLine(line) => self.feed_script_line(&line),
 
             Message::ToggleLayers => {
                 if self.active_modal == Some(super::ModalKind::Layers) {

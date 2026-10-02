@@ -1976,7 +1976,13 @@ impl OpenCADStudio {
             }
             self.drain_pending_open()
         };
-        Task::batch([thumbs_task, pending_open_task, interaction_task])
+        let startup_script_task = if !self.pending_startup_script_lines.is_empty() {
+            let lines = std::mem::take(&mut self.pending_startup_script_lines);
+            Task::batch(lines.into_iter().map(|l| Task::done(Message::ScriptLine(l))))
+        } else {
+            Task::none()
+        };
+        Task::batch([thumbs_task, pending_open_task, interaction_task, startup_script_task])
     }
 
     pub(super) fn on_wblock_save_result_some(
