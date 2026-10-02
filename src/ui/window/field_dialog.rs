@@ -146,7 +146,12 @@ impl FieldDialogState {
             FieldKind::Text => (case(format!("\\AcVar {}", self.name)), vec![]),
             FieldKind::Filename => {
                 let bits = self.file_parts + if self.file_extension && self.file_parts & 2 != 0 { 4 } else { 0 };
-                (case(format!("\\AcVar Filename \\f \"%fn{bits}\"")), vec![])
+                // The text case goes first in the same format: "%tc1%fn6".
+                let case = match self.text_case {
+                    0 => String::new(),
+                    n => format!("%tc{n}"),
+                };
+                (format!("\\AcVar Filename \\f \"{case}%fn{bits}\""), vec![])
             }
             FieldKind::Filesize => (format!("\\AcVar Filesize \\f \"%ld%by{}\"", self.size_unit + 1), vec![]),
             FieldKind::SystemVariable => (format!("\\AcVar {}", self.sysvar), vec![]),
