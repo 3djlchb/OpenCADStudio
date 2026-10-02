@@ -362,6 +362,7 @@ impl OpenCADStudio {
         if !path.to_ascii_lowercase().ends_with(".pdf") {
             return Err(failure("invalid_path", "plot writes .pdf files"));
         }
+        self.stamp_plot_fields();
         let i = self.active_tab;
         let names = self.tabs[i].scene.layout_names();
         let requested = req["layout"].as_str().unwrap_or("Model").to_owned();
@@ -1019,6 +1020,13 @@ impl OpenCADStudio {
                     "link_text" => F::HyperlinkText(v.into()),
                     "link_url" => F::HyperlinkUrl(v.into()),
                     "plot_scale" => F::PlotScale(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
+                    "placeholder" => F::PlaceholderProperty(index(codec::fields::BLOCK_PLACEHOLDER_PROPERTIES.len())?),
+                    "table_function" => F::TableFunction(
+                        ["Average", "Sum", "Count", "Cell"]
+                            .into_iter()
+                            .find(|f| f.eq_ignore_ascii_case(v))
+                            .ok_or_else(|| failure("invalid_value", "Average|Sum|Count|Cell"))?,
+                    ),
                     _ => return Err(failure("invalid_value", "Unknown field dialog key")),
                 })
             }
