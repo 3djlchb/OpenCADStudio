@@ -676,7 +676,7 @@ impl OpenCADStudio {
 /// Silent no-op for an unknown name (callers validate first);
 /// `*`-prefixed layout records are rejected by the callers. Returns the
 /// number of entities erased.
-fn erase_block_definition(scene: &mut crate::scene::Scene, name: &str) -> usize {
+pub(crate) fn erase_block_definition(scene: &mut crate::scene::Scene, name: &str) -> usize {
     let Some(record) = scene.document.block_records.get(name) else {
         return 0;
     };

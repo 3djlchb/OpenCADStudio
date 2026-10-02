@@ -1217,6 +1217,27 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
+                    // EXPLMODE 0 keeps references that are not uniformly and
+                    // positively scaled whole.
+                    let selected: Vec<_> = if super::blockvars::explmode(&self.tabs[i].scene.document) == 0 {
+                        selected
+                            .into_iter()
+                            .filter(|(_, entity)| match entity {
+                                codec::EntityType::Insert(ins) => {
+                                    let (x, y, z) = (ins.x_scale(), ins.y_scale(), ins.z_scale());
+                                    let uniform = x > 0.0 && (x - y).abs() <= 1e-10 && (x - z).abs() <= 1e-10;
+                                    if !uniform {
+                                        self.command_line
+                                            .push_output("The object is not uniformly and positively scaled.");
+                                    }
+                                    uniform
+                                }
+                                _ => true,
+                            })
+                            .collect()
+                    } else {
+                        selected
+                    };
                     let replacements = plan_explode(&selected, &self.tabs[i].scene.document);
                     let exploded = replacements.len();
                     if exploded > 0 {

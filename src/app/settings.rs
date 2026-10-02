@@ -548,6 +548,96 @@ pub struct UserSettings {
     /// Insertion frequency per block name (uppercase key → count).
     #[serde(default)]
     pub block_freq: std::collections::HashMap<String, u32>,
+    /// Blocks palette: the recent list (newest first, BLOCKMRULIST long).
+    #[serde(default)]
+    pub block_recent: Vec<PaletteBlockRef>,
+    /// Blocks palette: favorites, kept locally.
+    #[serde(default)]
+    pub block_favorites: Vec<PaletteBlockRef>,
+    /// Blocks palette: library folders or drawings, last used first.
+    #[serde(default)]
+    pub block_libraries: Vec<String>,
+    /// Blocks palette view: 0 extra large, 1 large, 2 medium, 3 small icons,
+    /// 4 details, 5 list.
+    #[serde(default = "default_block_view")]
+    pub block_palette_view: u8,
+    /// Blocks palette insertion options.
+    #[serde(default)]
+    pub block_insert: BlockInsertOptions,
+    /// BLOCKMRULIST (0–100, default 50).
+    #[serde(default = "default_block_mru_list")]
+    pub block_mru_list: u8,
+    /// BLOCKREDEFINEMODE (0–2, default 1).
+    #[serde(default = "default_one_u8")]
+    pub block_redefine_mode: u8,
+    /// BLOCKNAVIGATE (default ".").
+    #[serde(default = "default_block_navigate")]
+    pub block_navigate: String,
+}
+
+/// A block the Blocks palette lists from outside the current drawing (a
+/// recent or favorite entry): its name, the drawing it came from (empty for
+/// an unsaved drawing), when it was last used (Unix seconds), and whether it
+/// stands for a whole drawing inserted as a block.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PaletteBlockRef {
+    pub name: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub time: u64,
+    #[serde(default)]
+    pub drawing: bool,
+}
+
+/// The Blocks palette's insertion options.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BlockInsertOptions {
+    pub insertion_point: bool,
+    pub scale: bool,
+    pub uniform: bool,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub rotation: bool,
+    pub angle: f64,
+    pub auto_placement: bool,
+    pub repeat: bool,
+    pub explode: bool,
+}
+
+impl Default for BlockInsertOptions {
+    fn default() -> Self {
+        Self {
+            insertion_point: true,
+            scale: false,
+            uniform: false,
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+            rotation: false,
+            angle: 0.0,
+            auto_placement: true,
+            repeat: false,
+            explode: false,
+        }
+    }
+}
+
+fn default_block_view() -> u8 {
+    1
+}
+
+fn default_block_mru_list() -> u8 {
+    50
+}
+
+fn default_one_u8() -> u8 {
+    1
+}
+
+fn default_block_navigate() -> String {
+    ".".to_string()
 }
 
 fn default_clipromptlines() -> i32 {
@@ -713,6 +803,14 @@ impl Default for UserSettings {
             grid_beyond_limits: true,
             block_mru: Vec::new(),
             block_freq: std::collections::HashMap::new(),
+            block_recent: Vec::new(),
+            block_favorites: Vec::new(),
+            block_libraries: Vec::new(),
+            block_palette_view: 1,
+            block_insert: BlockInsertOptions::default(),
+            block_mru_list: 50,
+            block_redefine_mode: 1,
+            block_navigate: ".".to_string(),
         }
     }
 }

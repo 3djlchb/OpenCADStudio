@@ -125,8 +125,12 @@ fn input<'a>(value: &str, enabled: bool, on: fn(String) -> AttdefDialogMsg) -> E
 }
 
 /// The small button beside a field that takes the value from the drawing.
-fn pick<'a>(glyph: &'static str, tip: String, message: Option<AttdefDialogMsg>) -> Element<'a, Message> {
-    let b = button(text(glyph).size(13).align_x(iced::Center).width(Fill))
+fn pick<'a>(
+    face: Element<'a, Message>,
+    tip: String,
+    message: Option<AttdefDialogMsg>,
+) -> Element<'a, Message> {
+    let b = button(container(face).center_x(Fill))
         .style(button_style(false))
         .padding([4, 0])
         .width(Length::Fixed(28.0));
@@ -155,7 +159,7 @@ fn error_band<'a>(error: &Option<String>) -> Option<Element<'a, Message>> {
                 crate::ui::icons::semantic(ICON_WARN, 14.0),
                 text(error).size(11),
                 Space::new().width(Fill),
-                button(text("×").size(12))
+                button(crate::ui::icons::themed(crate::ui::icons::CLOSE, 10.0))
                     .on_press(msg(AttdefDialogMsg::DismissError))
                     .style(button_style(false))
                     .padding([1, 6]),
@@ -172,6 +176,11 @@ fn error_band<'a>(error: &Option<String>) -> Option<Element<'a, Message>> {
         })
         .into(),
     )
+}
+
+/// The face of the buttons that take a value from the drawing.
+fn screen_pick<'a>() -> Element<'a, Message> {
+    crate::ui::icons::themed(crate::ui::icons::SNAP, 14.0)
 }
 
 static ICON_WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
@@ -243,12 +252,12 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
                     let mut value = row![input(&state.default, true, AttdefDialogMsg::Default)].spacing(6);
                     if multiline {
                         value = value.push(pick(
-                            "…",
+                            text("...").size(13).into(),
                             t!("Multiline editor").into_owned(),
                             Some(AttdefDialogMsg::EditValue),
                         ));
                     }
-                    value.push(pick("ƒ", t!("Insert field").into_owned(), Some(AttdefDialogMsg::InsertField)))
+                    value.push(pick(text("fx").size(12).into(), t!("Insert field").into_owned(), Some(AttdefDialogMsg::InsertField)))
                 }
                 .spacing(6)
                 .into(),
@@ -301,7 +310,7 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
                 t!("Text height").into_owned(),
                 row![
                     input(&state.height, size_on, AttdefDialogMsg::Height),
-                    pick("⌖", t!("Specify on-screen").into_owned(), size_on.then_some(AttdefDialogMsg::PickHeight)),
+                    pick(screen_pick(), t!("Specify on-screen").into_owned(), size_on.then_some(AttdefDialogMsg::PickHeight)),
                 ]
                 .spacing(6)
                 .into(),
@@ -311,7 +320,7 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
                 t!("Rotation").into_owned(),
                 row![
                     input(&state.rotation, rot_on, AttdefDialogMsg::Rotation),
-                    pick("⌖", t!("Specify on-screen").into_owned(), rot_on.then_some(AttdefDialogMsg::PickRotation)),
+                    pick(screen_pick(), t!("Specify on-screen").into_owned(), rot_on.then_some(AttdefDialogMsg::PickRotation)),
                 ]
                 .spacing(6)
                 .into(),
@@ -322,7 +331,7 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
                 row![
                     input(&state.width, text_on && multiline, AttdefDialogMsg::Width),
                     pick(
-                        "⌖",
+                        screen_pick(),
                         t!("Specify on-screen").into_owned(),
                         (text_on && multiline).then_some(AttdefDialogMsg::PickWidth)
                     ),
@@ -380,7 +389,7 @@ pub fn view_edit<'a>(state: &'a AttdefEditState, sizing: crate::ui::modal::Modal
                     true,
                     AttdefDialogMsg::EditDefault
                 ),
-                pick("ƒ", t!("Insert field").into_owned(), Some(AttdefDialogMsg::EditInsertField)),
+                pick(text("fx").size(12).into(), t!("Insert field").into_owned(), Some(AttdefDialogMsg::EditInsertField)),
             ]
             .spacing(6)
             .align_y(iced::Center),

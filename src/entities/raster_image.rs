@@ -142,9 +142,11 @@ impl RenderConvertible for RasterImage {
 
         // Diagonals are the BROKEN-reference placeholder; a resolvable image
         // draws its pixels inside the frame, so the X would scribble over it.
-        let path_probe = self.file_path.trim();
-        let resolvable = path_probe.is_empty()
-            || crate::scene::model::image_model::resolve_image(path_probe).is_some();
+        // One probe for the whole conversion: the outline below and the
+        // placeholder branch further down must agree on a single answer.
+        let path = self.file_path.trim();
+        let resolvable =
+            path.is_empty() || crate::scene::model::image_model::resolve_image(path).is_some();
         // Outline: the clip boundary, or — when it hides its inside — the
         // frame with the boundary as a hole. Must match the raster's own clip
         // triangulation in `ImageModel` so outline and pixels align.
@@ -166,16 +168,15 @@ impl RenderConvertible for RasterImage {
 
         // A raster OCS can display renders its pixels (built separately) inside
         // this frame — just draw the frame/clip outline. A reference it cannot
-        // resolve (an offline/broken URL, a missing or renamed file) gets
-        // AutoCAD's broken-reference treatment: the frame plus the saved path
-        // drawn as text, so the user sees WHICH reference is unresolved instead
-        // of an empty box. `resolve_image` is memoised and shared with the
-        // raster loader, so a URL that fetches online is treated as resolvable
-        // (no placeholder — the image shows) while an offline one falls back to
-        // the path text, and neither is fetched twice.
-        let path = self.file_path.trim();
-        let resolvable =
-            path.is_empty() || crate::scene::model::image_model::resolve_image(path).is_some();
+        // resolve (an offline/broken URL, a missing or renamed file) gets the
+        // usual broken-reference treatment: the frame plus the saved path drawn
+        // as text, so the user sees WHICH reference is unresolved instead of an
+        // empty box. `resolve_image` is memoised and shared with the raster
+        // loader, so a URL that fetches online is treated as resolvable (no
+        // placeholder — the image shows) while an offline one falls back to the
+        // path text, and neither is fetched twice. The scene's text-cache
+        // classifier runs the same probe, so erasing this placeholder drops its
+        // glyphs from the text buffer instead of leaving them on screen.
         if resolvable {
             return Some(RenderEntity {
                 // Picked on its frame only (shown or hidden), like the other

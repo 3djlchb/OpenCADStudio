@@ -771,6 +771,7 @@ impl OpenCADStudio {
                 self.command_line
                     .push_output(crate::tf!("Block \"{name}\" created.").as_ref());
                 self.refresh_properties();
+                self.note_recent_block(&name);
                 self.refresh_block_palette();
             }
             Err(err) => {
@@ -1008,7 +1009,16 @@ impl OpenCADStudio {
                 self.commit_entity(entity);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.clear_preview_wire();
-                self.tabs[i].active_cmd = None;
+                // A repeating insertion keeps its command for the next block.
+                let keep = self.tabs[i].active_cmd.as_ref().is_some_and(|c| c.attreq_continue());
+                if keep {
+                    let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                    if let Some(p) = prompt {
+                        self.command_line.push_info(&p);
+                    }
+                } else {
+                    self.tabs[i].active_cmd = None;
+                }
                 self.tabs[i].snap_result = None;
                 if let Some(n) = insert_name {
                     self.record_block_insert(&n);
@@ -1024,7 +1034,16 @@ impl OpenCADStudio {
                 .as_mut()
                 .and_then(|cmd| cmd.attreq_set_attdefs(attdefs));
             if let Some(entity) = completed {
-                return Some(self.apply_cmd_result(CmdResult::CommitAndExit(entity)));
+                if let codec::EntityType::Insert(ins) = &entity {
+                    let name = ins.block_name.clone();
+                    self.record_block_insert(&name);
+                }
+                let keep = self.tabs[i].active_cmd.as_ref().is_some_and(|c| c.attreq_continue());
+                return Some(self.apply_cmd_result(if keep {
+                    CmdResult::CommitEntity(entity)
+                } else {
+                    CmdResult::CommitAndExit(entity)
+                }));
             }
             let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
             if let Some(p) = prompt {

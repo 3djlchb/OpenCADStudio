@@ -55,7 +55,7 @@ pub struct AppPrefs {
     pub commandline_fade_ms: i32,
     /// ZOOMWHEEL: reverse the mouse-wheel zoom direction.
     pub zoom_wheel_reversed: bool,
-    /// ZOOMFACTOR, 3..=100.
+    /// ZOOMFACTOR, 3..=500.
     pub zoom_factor: i32,
     /// TEXTEDITMODE: TEXTEDIT keeps prompting for the next object.
     pub texteditmode: bool,
@@ -1181,10 +1181,10 @@ pub fn view_window<'a>(
         Space::new().height(12),
         row![
             text(crate::t!("Zoom factor")).size(12).width(150),
-            slider(3..=100, prefs.zoom_factor.clamp(3, 100), Message::ZoomFactorChanged)
+            slider(3..=500, prefs.zoom_factor.clamp(3, 500), Message::ZoomFactorChanged)
                 .step(1)
                 .width(Fill),
-            text(prefs.zoom_factor.clamp(3, 100).to_string()).size(11).width(44),
+            text(prefs.zoom_factor.clamp(3, 500).to_string()).size(11).width(44),
         ]
         .spacing(10)
         .align_y(iced::Center),

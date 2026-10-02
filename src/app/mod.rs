@@ -559,7 +559,7 @@ pub(super) struct OpenCADStudio {
     polar_increment_deg: f32,
     /// Reverse the mouse-wheel zoom direction when true (ZOOMWHEEL = 1).
     zoom_wheel_reversed: bool,
-    /// Mouse-wheel zoom sensitivity, clamped to 3..=100 (ZOOMFACTOR).
+    /// Mouse-wheel zoom sensitivity, clamped to 3..=500 (ZOOMFACTOR).
     zoom_factor: i32,
     /// Crosshair size setting (CURSORSIZE, 1..=100).
     cursor_size: i32,
@@ -676,6 +676,14 @@ pub(super) struct OpenCADStudio {
     block_mru: Vec<String>,
     /// Insertion frequency per block name (uppercase key → count), capped.
     block_freq: std::collections::HashMap<String, u32>,
+    /// BLOCKMRULIST: how many recent blocks the palette keeps (0–100).
+    pub(crate) block_mru_list: u8,
+    /// BLOCKREDEFINEMODE (0–2).
+    pub(crate) block_redefine_mode: u8,
+    /// BLOCKNAVIGATE: the Libraries tab's start folder ("." for none).
+    pub(crate) block_navigate: String,
+    /// INSNAME: the default block name for -INSERT (session only).
+    pub(crate) insname: String,
     /// Last time block-usage was flushed to disk (debounce per 2.4).
     #[cfg(not(target_arch = "wasm32"))]
     block_usage_last_persist: Option<std::time::Instant>,
@@ -1304,6 +1312,7 @@ pub(super) struct OpenCADStudio {
     /// drawings in a file manager produces exactly that (one process per file,
     /// all arriving at once), which makes this queue load-bearing, not polish.
     pub(super) pending_opens: std::collections::VecDeque<PathBuf>,
+    pub(super) pending_startup_script_lines: Vec<String>,
     /// One global interaction-index build at a time. Large drawings can each
     /// hold millions of entries, so file-open bursts must not multiply peak
     /// CPU and memory by the number of tabs.
@@ -2316,7 +2325,7 @@ pub enum Message {
     CommandLineFadeChanged(i32),
     /// Toggle reversing the mouse-wheel zoom direction (ZOOMWHEEL).
     ZoomWheelReversedChanged(bool),
-    /// Change how far one wheel notch zooms (ZOOMFACTOR, 3..=100).
+    /// Change how far one wheel notch zooms (ZOOMFACTOR, 3..=500).
     ZoomFactorChanged(i32),
     /// Options → User Preferences: right-click behaviour (SHORTCUTMENU).
     RightClickModeChanged(settings::RightClickMode),
@@ -4155,6 +4164,10 @@ impl OpenCADStudio {
             commandline_fade_ms: 3000,
             block_mru: Vec::new(),
             block_freq: std::collections::HashMap::new(),
+            block_mru_list: 50,
+            block_redefine_mode: 1,
+            block_navigate: ".".to_string(),
+            insname: String::new(),
             #[cfg(not(target_arch = "wasm32"))]
             block_usage_last_persist: None,
             awaiting_vports: false,
@@ -4323,6 +4336,7 @@ impl OpenCADStudio {
             missing_fonts_downloading: false,
             suppressed_missing_fonts: rustc_hash::FxHashSet::default(),
             pending_opens: std::collections::VecDeque::new(),
+            pending_startup_script_lines: Vec::new(),
             active_interaction_index: None,
             queued_interaction_indices: std::collections::VecDeque::new(),
             pending_close: None,
@@ -4669,20 +4683,25 @@ impl OpenCADStudio {
             s.command_line.push_warning(&notice);
             crate::scene::pipeline::report_gpu_line(&format!("[gpu] {notice}"));
         }
-        let cli_open: Task<Message> = if !cfg.files.is_empty() {
+        let has_files = !cfg.files.is_empty();
+        let cli_open: Task<Message> = if has_files {
             Task::batch(
                 cfg.files
                     .into_iter()
                     .map(|p| Task::done(Message::OpenExternal(p))),
             )
-        } else if cfg.new {
+        } else if cfg.new || !cfg.script_lines.is_empty() {
             Task::done(Message::TabNew)
         } else {
             Task::none()
         };
-        // Startup command script: each line dispatched as if typed at the
-        // command line, in order, after any file open is requested.
+        // Startup command script: if files were passed to open, defer the
+        // script lines until the document finishes opening. Otherwise, dispatch
+        // them on the newly created drawing tab.
         let script: Task<Message> = if cfg.script_lines.is_empty() {
+            Task::none()
+        } else if has_files {
+            s.pending_startup_script_lines = cfg.script_lines;
             Task::none()
         } else {
             Task::batch(

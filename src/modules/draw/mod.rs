@@ -203,7 +203,7 @@ impl CadModule for DrawModule {
                     // Slide-out: Define / Manage / Synchronize Attributes and
                     // Set Base Point.
                     tools: vec![
-                        RibbonItem::LargeTool(insert_block::tool()),
+                        insert_block::gallery(),
                         RibbonItem::Tool(create_block::tool()),
                         RibbonItem::Tool(edit_block::tool()),
                         RibbonItem::Tool(attedit::tool()),

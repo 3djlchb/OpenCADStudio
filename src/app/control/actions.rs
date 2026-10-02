@@ -73,6 +73,7 @@ pub(super) const NAMES: &[&str] = &[
     "pdf_layer_toggle",
     "pc_manager_toggle",
     "pc_manager",
+    "blocks_palette",
     "pdf_page_select",
     "pc_colormap",
     "pc_section",
@@ -824,6 +825,93 @@ impl OpenCADStudio {
                     "select" => M::Select(arg.into()),
                     _ => return Err(failure("invalid_value", "Unknown point cloud manager edit")),
                 })
+            }
+            // Blocks palette: "tab=recent", "search=D*", "view=2",
+            // "option=x:2", "options", "library=<dir>", "insert=<item>",
+            // "drop=<item>@x,y", "menu=<action>:<item>". An item is
+            // "current:NAME", "recent:N", "fav:N", "lib:N" or "file:<path>".
+            "blocks_palette" => {
+                use crate::ui::window::block_palette::{BlockPaletteMsg as M, Item, MenuAction, OptionMsg, Tab, ViewMode};
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                let item = |app: &Self, spec: &str| -> Result<Item, Value> {
+                    let (kind, rest) = spec.split_once(':').unwrap_or((spec, ""));
+                    let index = || rest.parse::<usize>().map_err(|_| failure("invalid_value", "Bad item index"));
+                    let missing = || failure("invalid_value", "No such palette item");
+                    Ok(match kind {
+                        "current" => Item::Current(rest.to_string()),
+                        "recent" => Item::Ref(app.block_palette.recent.get(index()?).cloned().ok_or_else(missing)?),
+                        "fav" => Item::Ref(app.block_palette.favorites.get(index()?).cloned().ok_or_else(missing)?),
+                        "lib" => {
+                            let e = app.block_palette.library_entries.get(index()?).ok_or_else(missing)?;
+                            if e.folder { Item::Folder(e.path.clone()) } else { Item::File(e.path.clone()) }
+                        }
+                        "file" => Item::File(std::path::PathBuf::from(rest)),
+                        _ => return Err(missing()),
+                    })
+                };
+                match key {
+                    "tab" => Message::BlockPalette(M::Tab(match arg {
+                        "recent" => Tab::Recent,
+                        "favorites" => Tab::Favorites,
+                        "libraries" => Tab::Libraries,
+                        _ => Tab::Current,
+                    })),
+                    "search" => Message::BlockPalette(M::Search(arg.into())),
+                    "view" => Message::BlockPalette(M::View(ViewMode::from_u8(arg.parse().unwrap_or(1)))),
+                    "options" => Message::BlockPalette(M::ToggleOptions),
+                    "library" => Message::BlockPalette(M::LibraryPicked(Ok(arg.into()))),
+                    "up" => Message::BlockPalette(M::LibraryUp),
+                    "option" => {
+                        let (name, v) = arg.split_once(':').unwrap_or((arg, "1"));
+                        let on = v == "1";
+                        Message::BlockPalette(M::Option(match name {
+                            "insertion_point" => OptionMsg::InsertionPoint(on),
+                            "scale" => OptionMsg::Scale(on),
+                            "uniform" => OptionMsg::Uniform(on),
+                            "rotation" => OptionMsg::Rotation(on),
+                            "auto" => OptionMsg::AutoPlacement(on),
+                            "repeat" => OptionMsg::Repeat(on),
+                            "explode" => OptionMsg::Explode(on),
+                            "x" => OptionMsg::X(v.into()),
+                            "y" => OptionMsg::Y(v.into()),
+                            "z" => OptionMsg::Z(v.into()),
+                            "angle" => OptionMsg::Angle(v.into()),
+                            _ => return Err(failure("invalid_value", "Unknown palette option")),
+                        }))
+                    }
+                    "insert" => {
+                        let it = item(self, arg)?;
+                        self.block_palette.pressed = Some(it.clone());
+                        Message::BlockPalette(M::Release(it))
+                    }
+                    "drop" => {
+                        let (spec, at) = arg.rsplit_once('@').ok_or_else(|| failure("invalid_value", "drop needs @x,y"))?;
+                        let xy: Vec<f64> = at.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                        if xy.len() < 2 {
+                            return Err(failure("invalid_value", "drop needs @x,y"));
+                        }
+                        let it = item(self, spec)?;
+                        let i = self.active_tab;
+                        self.tabs[i].last_cursor_world = glam::DVec3::new(xy[0], xy[1], xy.get(2).copied().unwrap_or(0.0));
+                        self.block_palette.pressed = Some(it);
+                        Message::ViewportLeftRelease
+                    }
+                    "menu" => {
+                        let (action, spec) = arg.split_once(':').ok_or_else(|| failure("invalid_value", "menu needs action:item"))?;
+                        let action = match action {
+                            "insert" => MenuAction::Insert,
+                            "redefine" => MenuAction::Redefine,
+                            "favorite" => MenuAction::Favorite,
+                            "unfavorite" => MenuAction::Unfavorite,
+                            "edit" => MenuAction::Edit,
+                            "remove" => MenuAction::Remove,
+                            _ => return Err(failure("invalid_value", "Unknown menu action")),
+                        };
+                        Message::BlockPalette(M::Menu(item(self, spec)?, action))
+                    }
+                    _ => return Err(failure("invalid_value", "Unknown blocks palette edit")),
+                }
             }
             // Attach dialog: choose pages by index ("0,2").
             "pdf_page_select" => {

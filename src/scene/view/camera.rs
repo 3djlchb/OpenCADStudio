@@ -492,7 +492,7 @@ impl Camera {
     }
 
     pub fn zoom(&mut self, delta: f32) {
-        self.distance = (self.distance * (1.0 - delta * 0.1)).max(0.001);
+        self.distance = (self.distance * 0.9f32.powf(delta)).max(0.001);
     }
 
     /// World-space offset from `target` to the point under `screen` on the

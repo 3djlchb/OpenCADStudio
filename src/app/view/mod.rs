@@ -45,6 +45,23 @@ fn crosshair_background(tab: &DocumentTab, is_paper: bool) -> [f32; 4] {
     tab.scene.paper_bg_color
 }
 
+/// Which navigation tool the viewport cursor should advertise. The three flags
+/// are mutually exclusive — every command entry point clears all of them before
+/// arming one (`crate::app::commands`) — so the order here only settles a state
+/// that cannot occur.
+pub(in crate::app) fn nav_cursor(tab: &DocumentTab) -> crate::ui::overlay::NavCursor {
+    use crate::ui::overlay::NavCursor;
+    if tab.pan_mode {
+        NavCursor::Pan
+    } else if tab.orbit_mode {
+        NavCursor::Orbit
+    } else if tab.zoom_dynamic_mode {
+        NavCursor::Zoom
+    } else {
+        NavCursor::None
+    }
+}
+
 /// Clear gap (px) kept between the render-mode bar (top-left) and the ViewCube
 /// (top-right) before the cube is judged to collide and hides.
 const VIEWCUBE_GAP: f32 = 12.0;
@@ -894,7 +911,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 dividers,
                 pane_move_rect,
                 pane_drop_rect,
-                tab.pan_mode || tab.orbit_mode || tab.zoom_dynamic_mode,
+                nav_cursor(tab),
                 self.ribbon.open_dropdown.is_some(),
                 hover_locked,
                 crosshair_background(tab, is_paper),
@@ -2316,7 +2333,17 @@ bg={bg_ms:.1}ms n={view_count}"
             } else {
                 Vec::new()
             };
-        let dropdown_layer: Element<'_, Message> = self
+        let gallery_open = open_dropdown == Some(crate::modules::insert::insert_block::GALLERY_ID)
+            && !self.tabs[self.active_tab].is_start;
+        let dropdown_layer: Element<'_, Message> = if gallery_open {
+            self.ribbon.place_dropdown(
+                crate::modules::insert::insert_block::GALLERY_ID,
+                crate::ui::window::block_palette::gallery(&self.block_palette),
+                crate::ui::window::block_palette::GALLERY_W,
+                self.win_size.0,
+            )
+        } else {
+            self
             .ribbon
             .dropdown_overlay(
                 &undo_labels,
@@ -2325,7 +2352,8 @@ bg={bg_ms:.1}ms n={view_count}"
                 self.tabs[self.active_tab].is_start,
                 &self.recent_colors,
             )
-            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into())
+        };
 
         let snap_override_layer: Element<'_, Message> = if let Some(pos) = self.snap_override_popup
         {

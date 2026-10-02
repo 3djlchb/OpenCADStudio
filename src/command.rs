@@ -1888,6 +1888,12 @@ pub enum CmdResult {
     ReportError(String),
     /// Reports an error and ends the command (`Lines are parallel.`).
     CancelWithMessage(String),
+    /// Explode this block reference and commit its pieces; end the command
+    /// unless `keep_going` (repeated placement).
+    CommitExplodedInsert {
+        insert: EntityType,
+        keep_going: bool,
+    },
     /// Print a measurement result, clear the current selection, and keep the command active.
     ReportMeasurementAndDeselect(String),
     /// Clear the current selection and keep the command active at its updated step.
@@ -2930,6 +2936,12 @@ pub trait CadCommand: Send {
         _attdefs: Vec<codec::entities::AttributeDefinition>,
     ) -> Option<codec::EntityType> {
         None
+    }
+
+    /// After the host commits an ATTREQ insert: keep the command running
+    /// (repeated placement) instead of ending it.
+    fn attreq_continue(&self) -> bool {
+        false
     }
 
     /// Returns the INSERT entity built so far (pending attr fill) if this is an

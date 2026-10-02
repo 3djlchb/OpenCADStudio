@@ -104,7 +104,7 @@ impl CadModule for InsertModule {
                     title: "Block",
                     tools: vec![
                         RibbonItem::LargeTool(mview_block::tool()),
-                        RibbonItem::LargeTool(insert_block::tool()),
+                        insert_block::gallery(),
                         RibbonItem::LabeledDropdown {
                             id: "ATTEDIT_DROPDOWN",
                             label: "Edit Attribute",

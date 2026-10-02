@@ -3008,6 +3008,10 @@ impl Scene {
         Some(state.into_iter().collect())
     }
 
+    /// Whether this entity contributes glyphs to the SDF text buffer, so a
+    /// change to it must invalidate the cached text vertices. Every entity whose
+    /// `to_render` can emit a `GlyphRun` belongs here — miss one and its glyphs
+    /// linger after an erase and fail to appear after an add.
     fn entity_affects_text_cache(&self, entity: &EntityType) -> bool {
         if matches!(
             entity,
@@ -3023,6 +3027,21 @@ impl Scene {
                 | EntityType::Insert(_)
         ) {
             return true;
+        }
+        // A raster reference it cannot resolve draws the saved path as a glyph
+        // run in place of the picture (`RasterImage::to_render`), so its
+        // broken-reference placeholder lives in the text buffer; a resolvable
+        // one contributes only its frame. Same memoised probe the converter
+        // uses, so the two cannot disagree — and keeping it a probe rather than
+        // a blanket type match keeps a working image's grip-drag from
+        // rebuilding every glyph in the drawing on each mouse move.
+        if let EntityType::RasterImage(image) = entity {
+            let path = image.file_path.trim();
+            if !path.is_empty()
+                && crate::scene::model::image_model::resolve_image(path).is_none()
+            {
+                return true;
+            }
         }
         // Complex-linetype glyphs ride the host entity's wire.
         let lt = crate::scene::view::render::linetype_name_for(&self.document, entity);
@@ -3117,12 +3136,6 @@ impl Scene {
         true
     }
 
-    /// True when no text-bearing entity changed since `last_epoch`, so cached SDF
-    /// glyphs stay valid. Text comes from Text / MText / Dimension / MultiLeader /
-    /// Leader / Table / Tolerance / attributes (incl. ATTDEF) and from block
-    /// references (their baked text moves with the instance) — an edit to any of
-    /// those, or any removal, invalidates it; a plain line / arc / polyline edit
-    /// does not.
     /// Whether the per-entity draw-order labels can be replayed since
     /// `last_epoch`. Add/Remove keep every existing label stable; only a full
     /// structural delta (DRAWORDER, file/layout/block rebuild, journal overflow)
@@ -3131,6 +3144,15 @@ impl Scene {
         self.replay_since(last_epoch).is_some()
     }
 
+    /// True when no text-bearing entity changed since `last_epoch`, so cached SDF
+    /// glyphs stay valid. Text comes from Text / MText / Dimension / MultiLeader /
+    /// Leader / Table / Tolerance / attributes (incl. ATTDEF), from block
+    /// references (their baked text moves with the instance), and from a raster
+    /// image whose reference cannot be resolved (it draws the saved path in place
+    /// of the picture) — an edit or removal of any of those invalidates it; a
+    /// plain line / arc / polyline edit does not. See
+    /// [`Scene::entity_affects_text_cache`], which classifies both directions:
+    /// live entities for an add/edit, the pre-erase category mask for a removal.
     fn text_unchanged(&self, last_epoch: u64) -> bool {
         self.category_cache_valid(last_epoch, CACHE_CATEGORY_TEXT, |handle| {
             self.document
@@ -11931,78 +11953,15 @@ vis_index={:.1} visible_probe={:.1}",
 
     fn compute_model_space_extents(&self) -> Option<(glam::Vec3, glam::Vec3)> {
         let model_block = self.model_space_block_handle();
-        if model_block.is_null() {
-            return None;
-        }
-        // Reuse the full resident source in every layout. The kernel bounds
-        // its world-space key vertices; camera fitting never tessellates a
-        // second copy or reads the current paper sheet's wire cache.
-        let scale = crate::scene::annotative::scale_handle_by_name(
-            &self.document,
-            &self.document.header.current_annotation_scale,
-        );
-        let wires =
-            self.resident_wires_for(model_block, Some(self.annotation_scale), scale, None, None);
-        let mut min = [f64::INFINITY; 3];
-        let mut max = [f64::NEG_INFINITY; 3];
-        let mut has_points = false;
-
-        for wire in wires.iter() {
-            for &[x, y, z] in &wire.key_vertices {
-                if (x as f32).is_finite() && (y as f32).is_finite() && (z as f32).is_finite() {
-                    min[0] = min[0].min(x);
-                    min[1] = min[1].min(y);
-                    min[2] = min[2].min(z);
-                    max[0] = max[0].max(x);
-                    max[1] = max[1].max(y);
-                    max[2] = max[2].max(z);
-                    has_points = true;
-                }
-            }
-        }
-
-        if !self.meshes.is_empty() {
-            for (&handle, set) in &self.meshes {
-                let Some(entity) = self.document.get_entity(handle) else {
-                    continue;
-                };
-                if !self.mesh_entity_visible(handle)
-                    || !self.belongs_to_visible_block(
-                        handle,
-                        entity.common().owner_handle,
-                        model_block,
-                    )
-                {
-                    continue;
-                }
-                let [ax, ay, bx, by] = set.world_aabb;
-                let [az, bz] = set.z_aabb;
-                let (ax, ay, bx, by, az, bz) = (
-                    ax as f64, ay as f64, bx as f64, by as f64, az as f64, bz as f64,
-                );
-                if (ax as f32).is_finite()
-                    && (ay as f32).is_finite()
-                    && (az as f32).is_finite()
-                    && (bx as f32).is_finite()
-                    && (by as f32).is_finite()
-                    && (bz as f32).is_finite()
-                {
-                    min[0] = min[0].min(ax.min(bx));
-                    min[1] = min[1].min(ay.min(by));
-                    min[2] = min[2].min(az.min(bz));
-                    max[0] = max[0].max(ax.max(bx));
-                    max[1] = max[1].max(ay.max(by));
-                    max[2] = max[2].max(az.max(bz));
-                    has_points = true;
-                }
-            }
-        }
-
-        if has_points {
-            return Some((
-                glam::Vec3::new(min[0] as f32, min[1] as f32, min[2] as f32),
-                glam::Vec3::new(max[0] as f32, max[1] as f32, max[2] as f32),
-            ));
+        // Shared with ZOOM EXTENTS so the two never disagree about what the
+        // drawing covers. The previous walk here read only `key_vertices`,
+        // which is empty for every tessellated curve (see `WireModel`) — so
+        // circles, arcs, ellipses and splines contributed nothing, and
+        // neither did hatches or images. Everything that reads drawing
+        // extents (plot Extents, sheet-set framing, viewport auto-fit,
+        // SpaceMouse model bounds) inherited that blind spot.
+        if let Some((min, max)) = self.visible_block_bounds(model_block) {
+            return Some((min.as_vec3(), max.as_vec3()));
         }
         // Last resort: saved EXTMIN/EXTMAX before the wire cache is built.
         const SANE_EXTENT: f64 = 1.0e16;
@@ -13058,6 +13017,108 @@ mod journal_tests {
         );
         assert!(s.text_unchanged(cached_epoch));
     }
+
+    /// A raster image whose file cannot be resolved draws the saved path as a
+    /// glyph run instead of the picture, so erasing it MUST invalidate the SDF
+    /// text buffer — otherwise `gather_text_verts` reuses the previous vertex
+    /// list and the path text keeps drawing over the now-empty frame.
+    #[test]
+    fn erasing_broken_raster_reference_invalidates_text_cache() {
+        let mut s = Scene::new();
+        let image = s.add_entity(EntityType::RasterImage(broken_raster("erase")));
+        let cached_epoch = s.geometry_epoch;
+        s.erase_entities(&[image]);
+
+        assert!(
+            !s.text_unchanged(cached_epoch),
+            "erasing a broken raster reference must drop its placeholder glyphs"
+        );
+    }
+
+    /// The same classification in the other direction: attaching (and, through
+    /// the identical Added/Modified path, moving or undoing the erase of) a
+    /// broken reference must invalidate the text buffer so its path text appears.
+    #[test]
+    fn attaching_broken_raster_reference_invalidates_text_cache() {
+        let mut s = Scene::new();
+        let cached_epoch = s.geometry_epoch;
+        s.add_entity(EntityType::RasterImage(broken_raster("attach")));
+
+        assert!(
+            !s.text_unchanged(cached_epoch),
+            "attaching a broken raster reference must build its placeholder glyphs"
+        );
+    }
+
+    /// The converse perf property: a raster that resolves contributes no glyphs,
+    /// so editing or erasing it must leave the text buffer warm — a grip-drag of
+    /// a working image cannot re-walk every glyph in the drawing per mouse move.
+    /// An empty path counts as resolvable to both the converter and the
+    /// classifier, so this needs no picture on disk.
+    #[test]
+    fn erasing_resolvable_raster_keeps_text_cache_warm() {
+        use codec::entities::RasterImage;
+        use codec::types::Vector3;
+
+        let mut s = Scene::new();
+        let image = s.add_entity(EntityType::RasterImage(RasterImage::with_size(
+            "",
+            Vector3::new(0.0, 0.0, 0.0),
+            16.0,
+            16.0,
+            10.0,
+            10.0,
+        )));
+        let cached_epoch = s.geometry_epoch;
+        s.erase_entities(&[image]);
+
+        assert!(s.text_unchanged(cached_epoch));
+    }
+
+    /// End-to-end on the buffer the GPU actually draws: the placeholder's path
+    /// glyphs must be gone from the gathered SDF vertices after the erase. This
+    /// is the shape of the reported bug — `gather_text_verts` misses its content-
+    /// id cache on every geometry edit and then reuses the previous vertex list
+    /// whenever `text_unchanged` says the text is untouched.
+    #[test]
+    fn erasing_broken_raster_reference_drops_its_glyphs_from_the_text_buffer() {
+        let depth_map = rustc_hash::FxHashMap::default();
+        let mut s = Scene::new();
+        let image = s.add_entity(EntityType::RasterImage(broken_raster("gather")));
+
+        let wires = s.entity_wires();
+        let before = s.gather_text_verts(&wires, 1, 7, &depth_map);
+        assert!(
+            !before.is_empty(),
+            "a broken raster reference must contribute its path glyphs"
+        );
+
+        s.erase_entities(&[image]);
+        let wires = s.entity_wires();
+        let after = s.gather_text_verts(&wires, 2, 7, &depth_map);
+        assert!(
+            after.is_empty(),
+            "the erased placeholder left {} glyph vertices on screen",
+            after.len()
+        );
+    }
+
+    /// A raster pointing at a path that cannot exist. `resolve_image` memoises
+    /// per path for the life of the process, so each test uses its own path and
+    /// cannot inherit another's cached answer.
+    fn broken_raster(tag: &str) -> codec::entities::RasterImage {
+        use codec::entities::RasterImage;
+        use codec::types::Vector3;
+
+        RasterImage::with_size(
+            &format!("/nonexistent-ocs-test/{tag}/missing-reference.png"),
+            Vector3::new(0.0, 0.0, 0.0),
+            16.0,
+            16.0,
+            10.0,
+            10.0,
+        )
+    }
 }
 
 /// Delta-undo round-trips: a recorded entity-only edit must be exactly
@@ -13539,42 +13600,27 @@ mod layout_cache_tests {
         s.add_entity(EntityType::LwPolyline(pl));
 
         let bounds = s.model_space_extents().expect("Extents must exist");
-        // Key vertices come from entities with distinct vertex positions (Line, LwPolyline).
-        // Line vertices: (0, 0, 10), (50, 100, 20)
-        // LwPolyline vertices: (300, -200, 0), (400, -100, 0)
-        // Min X = 0.0, Max X = 400.0
-        // Min Y = -200.0, Max Y = 100.0
-        // Min Z = 0.0, Max Z = 20.0
-        assert!(
-            (bounds.0.x - 0.0).abs() < 1e-3,
-            "min.x mismatch: {}",
-            bounds.0.x
-        );
-        assert!(
-            (bounds.1.x - 400.0).abs() < 1e-3,
-            "max.x mismatch: {}",
-            bounds.1.x
-        );
-        assert!(
-            (bounds.0.y - (-200.0)).abs() < 1e-3,
-            "min.y mismatch: {}",
-            bounds.0.y
-        );
-        assert!(
-            (bounds.1.y - 100.0).abs() < 1e-3,
-            "max.y mismatch: {}",
-            bounds.1.y
-        );
-        assert!(
-            (bounds.0.z - 0.0).abs() < 1e-3,
-            "min.z mismatch: {}",
-            bounds.0.z
-        );
-        assert!(
-            (bounds.1.z - 20.0).abs() < 1e-3,
-            "max.z mismatch: {}",
-            bounds.1.z
-        );
+        // Every entity counts, curves included. The circle and the arc used to
+        // contribute nothing at all: the walk read only `key_vertices`, which
+        // is empty for anything tessellated, so the drawing looked 275 units
+        // narrower and 150 shorter than it is.
+        //   Line:       (0, 0, 10) .. (50, 100, 20)
+        //   Circle:     (150, 150, 0) .. (250, 250, 0)      centre 200,200 r50
+        //   Arc:        (-125, -50, -5) .. (-75, -25, -5)   centre -100,-50 r25, 0..PI
+        //   LwPolyline: (300, -200, 0) .. (400, -100, 0)
+        for (got, want, axis) in [
+            (bounds.0.x, -125.0, "min.x"),
+            (bounds.1.x, 400.0, "max.x"),
+            (bounds.0.y, -200.0, "min.y"),
+            (bounds.1.y, 250.0, "max.y"),
+            (bounds.0.z, -5.0, "min.z"),
+            (bounds.1.z, 20.0, "max.z"),
+        ] {
+            assert!(
+                (got - want).abs() < 1e-3,
+                "{axis} mismatch: got {got}, want {want}"
+            );
+        }
     }
 
     #[test]

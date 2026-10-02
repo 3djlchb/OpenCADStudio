@@ -251,7 +251,7 @@ pub(crate) fn card_style(theme: &Theme) -> container::Style {
     }
 }
 
-fn well_style(theme: &Theme) -> container::Style {
+pub(crate) fn well_style(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(theme.palette().background.base.color)),
         border: Border {
