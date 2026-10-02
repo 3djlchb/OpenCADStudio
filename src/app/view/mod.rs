@@ -2333,7 +2333,17 @@ bg={bg_ms:.1}ms n={view_count}"
             } else {
                 Vec::new()
             };
-        let dropdown_layer: Element<'_, Message> = self
+        let gallery_open = open_dropdown == Some(crate::modules::insert::insert_block::GALLERY_ID)
+            && !self.tabs[self.active_tab].is_start;
+        let dropdown_layer: Element<'_, Message> = if gallery_open {
+            self.ribbon.place_dropdown(
+                crate::modules::insert::insert_block::GALLERY_ID,
+                crate::ui::window::block_palette::gallery(&self.block_palette),
+                crate::ui::window::block_palette::GALLERY_W,
+                self.win_size.0,
+            )
+        } else {
+            self
             .ribbon
             .dropdown_overlay(
                 &undo_labels,
@@ -2342,7 +2352,8 @@ bg={bg_ms:.1}ms n={view_count}"
                 self.tabs[self.active_tab].is_start,
                 &self.recent_colors,
             )
-            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
+            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into())
+        };
 
         let snap_override_layer: Element<'_, Message> = if let Some(pos) = self.snap_override_popup
         {

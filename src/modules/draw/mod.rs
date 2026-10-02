@@ -202,7 +202,7 @@ impl CadModule for DrawModule {
                     title: "Block",
                     tools: vec![
                         RibbonItem::LargeTool(create_block::tool()),
-                        RibbonItem::LargeTool(insert_block::tool()),
+                        insert_block::gallery(),
                     ],
                 },
                 RibbonGroup {

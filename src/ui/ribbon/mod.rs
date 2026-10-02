@@ -20,7 +20,7 @@ use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 use crate::plugin::all_ribbon_modules;
 use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
-mod widgets;
+pub(crate) mod widgets;
 mod draw_panel;
 pub(crate) use draw_panel::tools as panel_tools;
 mod modify_panel;
@@ -744,6 +744,19 @@ impl Ribbon {
     }
 
     // ── Dropdown overlay ──────────────────────────────────────────────────
+
+    /// Place `panel` (`w` wide) under dropdown `id`, closing on a click
+    /// outside it.
+    pub fn place_dropdown<'a>(
+        &self,
+        id: &str,
+        panel: Element<'a, Message>,
+        w: f32,
+        win_w: f32,
+    ) -> Element<'a, Message> {
+        let (align_right, h_pad, top) = self.dd_anchor(id, w, win_w);
+        dropdown_backdrop(position_ribbon_dropdown(panel, align_right, h_pad, top))
+    }
 
     pub fn dropdown_overlay(
         &self,

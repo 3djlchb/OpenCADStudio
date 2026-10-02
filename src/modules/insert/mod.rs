@@ -105,7 +105,7 @@ impl CadModule for InsertModule {
                     title: "Block",
                     tools: vec![
                         RibbonItem::LargeTool(mview_block::tool()),
-                        RibbonItem::LargeTool(insert_block::tool()),
+                        insert_block::gallery(),
                         RibbonItem::Tool(create_block::tool()),
                         RibbonItem::Tool(edit_block::tool()),
                         RibbonItem::Tool(base_point::tool()),

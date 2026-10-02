@@ -2,7 +2,6 @@
 
 #![allow(unused_imports)]
 use super::util::*;
-use crate::ui::window::block_palette::BlockPaletteMsg;
 use super::{format_size, VIEWCUBE_HIT_SIZE};
 use crate::app::helpers::{
     parse_coord, polar_constrain_near, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis,
@@ -373,21 +372,41 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
     /// one new block in the active drawing. Returns the new block's name, or an
     /// error message. Nested block definitions are imported first so nested
     /// INSERTs render (AutoCAD's "inserting a drawing imports its block defs").
-    fn import_file_as_block(&mut self, path: std::path::PathBuf) -> Result<String, String> {
+    pub(in crate::app) fn import_file_as_block(&mut self, path: std::path::PathBuf) -> Result<String, String> {
+        self.import_drawing_block(path, false)
+    }
+
+    /// [`Self::import_file_as_block`]; with `redefine` a block already named
+    /// after the file takes the file's contents instead of a new name.
+    pub(super) fn import_drawing_block(
+        &mut self,
+        path: std::path::PathBuf,
+        redefine: bool,
+    ) -> Result<String, String> {
         let doc = crate::io::load_file(&path).map_err(|e| e.to_string())?;
         let stem = path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Block".to_string());
-        self.import_document_as_block(doc, stem)
+        self.import_document_block(doc, stem, redefine)
     }
 
     /// Define one block in the active drawing from a loaded `CadDocument`'s
     /// model-space entities (base = the file's model-space insertion base).
+    #[cfg(test)]
     fn import_document_as_block(
         &mut self,
         doc: codec::CadDocument,
         stem: String,
+    ) -> Result<String, String> {
+        self.import_document_block(doc, stem, false)
+    }
+
+    fn import_document_block(
+        &mut self,
+        doc: codec::CadDocument,
+        stem: String,
+        redefine: bool,
     ) -> Result<String, String> {
         let i = self.active_tab;
         // Model-space block record handle (Layout object first, name fallback).
@@ -441,7 +460,13 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
             doc.header.model_space_insertion_base.y,
             doc.header.model_space_insertion_base.z,
         );
-        let name = self.block_name_from_file(&stem);
+        let redefine = redefine
+            && self.tabs[i].scene.document.block_records.get(stem.trim()).is_some();
+        let name = if redefine {
+            stem.trim().to_string()
+        } else {
+            self.block_name_from_file(&stem)
+        };
         // Capture every table record needed by the top-level entities and their
         // nested block definitions. Importing only the definitions leaves
         // source-only layers, linetypes, and text/dimension styles dangling.
@@ -513,72 +538,20 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 .scene
                 .define_block_raw(&def.name, def.base_point, def.entities);
         }
-        self.tabs[i]
-            .scene
-            .define_block_from_owned_entities(entities, &name, base)?;
+        if redefine {
+            self.tabs[i].scene.redefine_block_raw(
+                &name,
+                codec::types::Vector3::new(base.x, base.y, base.z),
+                entities,
+            );
+        } else {
+            self.tabs[i]
+                .scene
+                .define_block_from_owned_entities(entities, &name, base)?;
+        }
         self.tabs[i].scene.populate_meshes_from_document();
         self.tabs[i].dirty = true;
         Ok(name)
-    }
-
-    pub(super) fn on_block_palette(&mut self, m: crate::ui::window::block_palette::BlockPaletteMsg) -> iced::Task<Message> {
-        use crate::ui::window::block_palette::{BlockEntry, BlockPaletteMsg};
-        match m {
-            BlockPaletteMsg::Search(s) => {
-                self.block_palette.search = s;
-                iced::Task::none()
-            }
-            BlockPaletteMsg::CyclePreviewSize => {
-                self.block_palette.preview_size =
-                    crate::ui::window::block_palette::cycle_preview_size(
-                        self.block_palette.preview_size,
-                    );
-                iced::Task::none()
-            }
-            BlockPaletteMsg::Refresh => {
-                self.refresh_block_palette();
-                iced::Task::none()
-            }
-            BlockPaletteMsg::PickFile => iced::Task::perform(
-                async {
-                    let handle = rfd::AsyncFileDialog::new()
-                        .set_title(crate::t!("Select Drawing to Insert as Block").as_ref())
-                        .add_filter(crate::t!("DWG/DXF Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
-                        .pick_file()
-                        .await;
-                    match handle {
-                        Some(h) => Ok(crate::sys::handle_path(&h)),
-                        None => Err("Cancelled".to_string()),
-                    }
-                },
-                |r| Message::BlockPalette(BlockPaletteMsg::FilePicked(r)),
-            ),
-            BlockPaletteMsg::FilePicked(Ok(path)) => {
-                match self.import_file_as_block(path) {
-                    Ok(name) => {
-                        self.command_line
-                            .push_output(&crate::tf!("Inserting \"{name}\" from file."));
-                        self.refresh_block_palette();
-                        self.start_block_placement(&name);
-                    }
-                    Err(e) if e != "Cancelled" => {
-                        self.command_line.push_error(&crate::tf!("INSERT FILE: {e}"));
-                    }
-                    Err(_) => {}
-                }
-                iced::Task::none()
-            }
-            BlockPaletteMsg::FilePicked(Err(e)) => {
-                if e != "Cancelled" {
-                    self.command_line.push_error(&e);
-                }
-                iced::Task::none()
-            }
-            BlockPaletteMsg::Insert(name) => {
-                self.start_block_placement(&name);
-                iced::Task::none()
-            }
-        }
     }
 
     /// Dock chrome interaction (grab / pin / resize / hover / move) applied to
@@ -752,57 +725,6 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
         ids.iter()
             .filter(|id| self.dock_panel_visible(**id))
             .count()
-    }
-
-    /// Start placing `name` through the INSERT command, skipping the name prompt.
-    fn start_block_placement(&mut self, name: &str) {
-        let i = self.active_tab;
-        let wires = self
-            .block_palette
-            .blocks
-            .iter()
-            .find(|b| b.name == name)
-            .map(|b| b.wires.clone())
-            .unwrap_or_else(|| self.tabs[i].scene.block_preview_wires(name));
-        use crate::modules::insert::insert_block::InsertBlockCommand;
-        let cmd = InsertBlockCommand::new_for_block(name.to_string(), wires, glam::Vec3::ZERO);
-        use crate::command::CadCommand;
-        self.reset_command_start_state(i);
-        self.command_line.push_info(&cmd.prompt());
-        self.tabs[i].active_cmd = Some(Box::new(cmd));
-        self.block_palette.placing = Some(name.to_string());
-    }
-
-    /// Rebuild the panel's block list + cached wires from the active drawing.
-    pub(crate) fn refresh_block_palette(&mut self) {
-        let i = self.active_tab;
-        let names = self.tabs[i].scene.custom_block_names();
-        self.block_palette.cached_names = names.clone();
-        self.block_palette.source_tab_id = Some(self.tabs[i].id);
-        self.block_palette.source_block_epoch = self.tabs[i].scene.block_epoch;
-        self.block_palette.blocks = names
-            .into_iter()
-            .map(|name| {
-                let wires = self.tabs[i].scene.block_preview_wires(&name);
-                crate::ui::window::block_palette::BlockEntry { name, wires }
-            })
-            .collect();
-    }
-
-    /// Cheap per-update check: rebuild when the active drawing's definitions
-    /// changed, even when their names happen to stay the same.
-    pub(crate) fn refresh_block_palette_if_stale(&mut self) {
-        if !self.show_block_palette {
-            return;
-        }
-        let i = self.active_tab;
-        // `block_epoch` advances for every block-definition change, so it
-        // avoids re-scanning every block name on unrelated application updates.
-        if self.block_palette.source_tab_id != Some(self.tabs[i].id)
-            || self.block_palette.source_block_epoch != self.tabs[i].scene.block_epoch
-        {
-            self.refresh_block_palette();
-        }
     }
 
     /// Rebuild the Reference Manager's entry list from the active drawing.
@@ -1626,7 +1548,7 @@ mod tests {
         assert!(app.block_palette.blocks.iter().any(|b| b.name == "Fixture"));
         app.start_block_placement(&name);
         let cmd = app.tabs[app.active_tab].active_cmd.as_ref().expect("INSERT running");
-        assert_eq!(cmd.name(), "INSERT");
+        assert_eq!(cmd.name(), "-INSERT");
         assert_eq!(app.block_palette.placing.as_deref(), Some("Fixture"));
     }
 

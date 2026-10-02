@@ -3370,6 +3370,7 @@ impl OpenCADStudio {
 
     pub(super) fn on_viewport_left_press(&mut self) -> Task<Message> {
         let i = self.active_tab;
+        self.block_palette.pressed = None;
         if let Some(command) = self.tabs[i].active_cmd.as_mut() {
             command.set_ctrl(self.ctrl_down);
             command.set_shift(self.shift_down);
@@ -3741,6 +3742,10 @@ impl OpenCADStudio {
 
     pub(super) fn on_viewport_left_release(&mut self) -> Task<Message> {
         let i = self.active_tab;
+        // A block dragged from the Blocks palette lands here.
+        if let Some(item) = self.take_block_drop() {
+            return self.drop_block(item);
+        }
         if let Some(command) = self.tabs[i].active_cmd.as_mut() {
             command.set_ctrl(self.ctrl_down);
             command.set_shift(self.shift_down);

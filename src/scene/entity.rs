@@ -1234,6 +1234,46 @@ impl Scene {
         self.bump_geometry();
     }
 
+    /// Replace the contents and base point of block `name`, defining it when
+    /// absent. References keep pointing at it and show the new contents.
+    pub fn redefine_block_raw(
+        &mut self,
+        name: &str,
+        base_point: codec::types::Vector3,
+        entities: Vec<EntityType>,
+    ) {
+        let Some((br_handle, block_handle)) = self
+            .document
+            .block_records
+            .get(name)
+            .map(|br| (br.handle, br.block_entity_handle))
+        else {
+            return self.define_block_raw(name, base_point, entities);
+        };
+        let owned: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|e| {
+                e.common().owner_handle == br_handle
+                    && !matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_))
+            })
+            .map(|e| e.common().handle)
+            .collect();
+        for h in owned {
+            self.document.remove_entity(h);
+        }
+        if let Some(EntityType::Block(block)) = self.document.get_entity_mut(block_handle) {
+            block.base_point = base_point;
+        }
+        for mut entity in entities {
+            Self::reset_clone_subhandles(&mut self.document, &mut entity);
+            entity.common_mut().handle = Handle::NULL;
+            entity.common_mut().owner_handle = br_handle;
+            let _ = self.document.add_entity(entity);
+        }
+        self.bump_geometry();
+    }
+
     pub(super) fn synced_hatch_models(
         &self,
         target_block: Handle,
