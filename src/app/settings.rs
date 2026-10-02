@@ -612,6 +612,15 @@ pub struct UserSettings {
     /// BLOCKNAVIGATE (default ".").
     #[serde(default = "default_block_navigate")]
     pub block_navigate: String,
+    /// COUNTCOLOR (default 3).
+    #[serde(default = "default_count_color")]
+    pub count_color: i16,
+    /// COUNTERRORCOLOR (default 1).
+    #[serde(default = "default_count_error_color")]
+    pub count_error_color: i16,
+    /// COUNTSERVICE (default on).
+    #[serde(default = "default_true")]
+    pub count_service: bool,
 }
 
 /// A block the Blocks palette lists from outside the current drawing (a
@@ -672,6 +681,14 @@ fn default_block_mru_list() -> u8 {
 }
 
 fn default_one_u8() -> u8 {
+    1
+}
+
+fn default_count_color() -> i16 {
+    3
+}
+
+fn default_count_error_color() -> i16 {
     1
 }
 
@@ -851,6 +868,9 @@ impl Default for UserSettings {
             block_mru_list: 50,
             block_redefine_mode: 1,
             block_navigate: ".".to_string(),
+            count_color: 3,
+            count_error_color: 1,
+            count_service: true,
         }
     }
 }

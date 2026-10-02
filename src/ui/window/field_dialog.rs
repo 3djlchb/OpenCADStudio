@@ -32,7 +32,7 @@ pub const CATEGORIES: &[(&str, &[&str])] = &[
         &["Author", "Comments", "Filename", "Filesize", "HyperlinkBase", "Keywords", "LastSavedBy", "Subject", "Title"],
     ),
     ("Linked", &["Hyperlink"]),
-    ("Objects", &["Formula", "NamedObject", "Object"]),
+    ("Objects", &["Count", "CountInArea", "Formula", "NamedObject", "Object"]),
     ("Other", &["DieselExpression", "SystemVariable"]),
     (
         "Plot",
@@ -77,6 +77,8 @@ pub enum FieldKind {
     Formula,
     Hyperlink,
     PlotScale,
+    /// Count / CountInArea: a JSON expression.
+    Count,
 }
 
 /// Formula precisions: the current one, then 0 to 8 decimals.
@@ -95,6 +97,7 @@ pub fn kind_of(name: &str) -> FieldKind {
         "Formula" => FieldKind::Formula,
         "Hyperlink" => FieldKind::Hyperlink,
         "PlotScale" => FieldKind::PlotScale,
+        "Count" | "CountInArea" => FieldKind::Count,
         _ => FieldKind::Text,
     }
 }
@@ -128,6 +131,8 @@ pub struct FieldDialogState {
     pub hyperlink_url: String,
     /// Index into codec PLOT_SCALE_FORMATS.
     pub plot_scale: usize,
+    /// The JSON expression of a Count / CountInArea field.
+    pub count_expression: String,
     pub preview: String,
     /// Today in each of DATE_FORMATS, for the Examples list.
     pub examples: Vec<String>,
@@ -158,6 +163,7 @@ impl FieldDialogState {
             hyperlink_text: String::new(),
             hyperlink_url: String::new(),
             plot_scale: 0,
+            count_expression: String::new(),
             preview: String::new(),
             examples: Vec::new(),
         }
@@ -211,6 +217,13 @@ impl FieldDialogState {
                     .map_or_else(|| "\\AcVar PlotScale".to_string(), |f| f.1.to_string()),
                 vec![],
             ),
+            FieldKind::Count => {
+                let evaluator = if self.name == "CountInArea" { "AcCount2" } else { "AcCount" };
+                match self.count_expression.trim() {
+                    "" => (format!("\\{evaluator}"), vec![]),
+                    json => (format!("\\{evaluator} {json}"), vec![]),
+                }
+            }
             FieldKind::SystemVariable => (format!("\\AcVar {}", self.sysvar), vec![]),
             FieldKind::Diesel => (format!("\\AcDiesel {}", self.diesel), vec![]),
             FieldKind::NamedObject => match self.named.and_then(|i| self.named_names.get(i)) {
@@ -278,6 +291,8 @@ pub enum FieldDialogMsg {
     HyperlinkUrl(String),
     BrowseHyperlink,
     PlotScale(usize),
+    CountExpression(String),
+    ShowCountInstances,
     Help,
     Ok,
 }
@@ -542,6 +557,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         ]
         .spacing(8)
         .into(),
+        FieldKind::Count => column![].into(),
         FieldKind::Object => column![
             row![
                 text(t!("Object type")).size(12).width(Length::Fixed(96.0)),
@@ -629,6 +645,33 @@ pub fn view<'a>(
         ]
         .spacing(10),
         FieldKind::Hyperlink => column![card(t!("Hyperlink").into_owned(), format_panel(state)), preview].spacing(10),
+        FieldKind::Count => column![
+            card(
+                t!("Expression").into_owned(),
+                column![
+                    text_input("", &state.count_expression)
+                        .size(12)
+                        .padding([8, 8])
+                        .font(iced::Font::MONOSPACE)
+                        .style(field_style)
+                        .on_input(|v| msg(FieldDialogMsg::CountExpression(v))),
+                    row![
+                        button(text(t!("Evaluate")).size(12))
+                            .on_press(msg(FieldDialogMsg::Evaluate))
+                            .style(button_style(false))
+                            .padding([5, 14]),
+                        button(text(t!("Show Count Instances")).size(12))
+                            .on_press(msg(FieldDialogMsg::ShowCountInstances))
+                            .style(button_style(false))
+                            .padding([5, 14]),
+                    ]
+                    .spacing(8),
+                ]
+                .spacing(8),
+            ),
+            preview,
+        ]
+        .spacing(10),
         _ => column![card(t!("Format").into_owned(), format_panel(state)), preview].spacing(10),
     };
     let (code, _) = state.code();

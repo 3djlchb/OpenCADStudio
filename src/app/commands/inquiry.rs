@@ -1216,45 +1216,6 @@ impl OpenCADStudio {
                 }
             }
 
-            // ── COUNT — entity statistics ─────────────────────────────────────
-            "COUNT" => {
-                use crate::command::KeywordCommand;
-                let c = KeywordCommand::new(
-                    "COUNT",
-                    "COUNT  tally  [All (by type) / by Layer]:",
-                    vec![("All", "TYPE", None), ("By layer", "LAYER", None)],
-                );
-                self.command_line.push_info(&c.prompt());
-                self.tabs[self.active_tab].active_cmd = Some(Box::new(c));
-            }
-            cmd if cmd.starts_with("COUNT ") => {
-                let filter = cmd.split_once(' ').map(|(_, r)| r.trim().to_uppercase());
-                let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
-                for e in self.tabs[i].scene.document.entities() {
-                    let layer = &e.common().layer;
-                    let type_name = crate::entities::names::dxf_name(e);
-                    let key = match &filter {
-                        Some(f) if f == "LAYER" => layer.clone(),
-                        Some(f) if f == "TYPE" => type_name.to_string(),
-                        Some(f) => {
-                            // Filter by layer name
-                            if layer.to_uppercase() != *f {
-                                continue;
-                            }
-                            type_name.to_string()
-                        }
-                        None => type_name.to_string(),
-                    };
-                    *counts.entry(key).or_default() += 1;
-                }
-                let total: usize = counts.values().sum();
-                for (k, n) in &counts {
-                    self.command_line.push_output(crate::tf!("  {k}: {n}").as_ref());
-                }
-                self.command_line
-                    .push_output(crate::tf!("COUNT: {total} entity(ies) total.").as_ref());
-            }
-
             "DATAEXTRACTION" | "EATTEXT" | "ATTEXT" => {
                 self.open_data_extraction();
             }

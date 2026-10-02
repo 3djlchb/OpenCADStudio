@@ -1,0 +1,728 @@
+//! COUNT and its family: count mode (COUNT, COUNTAREA, COUNTCLOSE), the
+//! Count palette (COUNTLIST, COUNTLISTCLOSE), count fields (COUNTFIELD,
+//! UPDATEFIELD), count tables (COUNTTABLE) and the COUNT* variables.
+
+use crate::app::{Message, OpenCADStudio};
+use crate::command::CadCommand;
+use crate::modules::annotate::count_cmd::{CountCommand, CountTableCommand, UpdateFieldCommand};
+use crate::modules::annotate::field_cmd::FieldPlaceCommand;
+use crate::ui::window::count_palette::{aci_rgba, CountMode, CountMsg, CountTarget, RowAction, AREA_LAYER};
+use codec::count::{area_json, block_json, single_json, CountKey};
+use codec::{EntityType, Handle};
+use iced::Task;
+
+/// The variables this family answers for.
+pub(super) const COUNT_SYSVARS: &[&str] =
+    &["COUNTNUMBER", "COUNTSERVICE", "COUNTPALETTESTATE", "COUNTCOLOR", "COUNTERRORCOLOR"];
+
+fn hex(h: Handle) -> String {
+    format!("{:X}", h.value())
+}
+
+fn parse_handle(s: &str) -> Option<Handle> {
+    u64::from_str_radix(s.trim(), 16).ok().map(Handle::new)
+}
+
+fn parse_xy(s: &str) -> Option<[f64; 2]> {
+    let (x, y) = s.split_once(',')?;
+    Some([x.trim().parse().ok()?, y.trim().parse().ok()?])
+}
+
+/// A field referring to `boundary` keeps the count area's polyline.
+fn boundary_in_use(doc: &codec::CadDocument, boundary: Handle) -> bool {
+    let needle = format!("\"boundaryObjectHandle\":\"{}\"", hex(boundary));
+    doc.fields.values().any(|f| f.code.contains(&needle))
+}
+
+impl OpenCADStudio {
+    pub(super) fn dispatch_count(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+        let cmd = cmd.trim();
+        let (verb, rest) = cmd.split_once(char::is_whitespace).unwrap_or((cmd, ""));
+        let verb = verb.to_ascii_uppercase();
+        let rest = rest.trim();
+        if verb == "SETVAR" {
+            let (name, value) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            let name = name.to_ascii_uppercase();
+            if !COUNT_SYSVARS.contains(&name.as_str()) {
+                return None;
+            }
+            self.count_sysvar(i, &name, Some(value.trim()).filter(|v| !v.is_empty()));
+            return Some(Task::none());
+        }
+        if COUNT_SYSVARS.contains(&verb.as_str()) {
+            self.count_sysvar(i, &verb, Some(rest).filter(|v| !v.is_empty()));
+            return Some(Task::none());
+        }
+        match verb.as_str() {
+            "COUNT" => {
+                let preselected = self.tabs[i].scene.selected_handles_in_order();
+                let current = matches!(rest.trim_start_matches('_').to_ascii_uppercase().as_str(), "C");
+                if current && !preselected.is_empty() {
+                    // Count Selection: the selection is the target.
+                    self.command_line.push_output(&format!("{} found", preselected.len()));
+                    let handles: Vec<String> = preselected.iter().map(|h| hex(*h)).collect();
+                    self.tabs[i].scene.deselect_all();
+                    return Some(self.dispatch_command(&format!("_COUNTRUN C T {}", handles.join(","))));
+                }
+                // Plain COUNT asks for its targets itself.
+                self.tabs[i].scene.deselect_all();
+                let command = if current { CountCommand::with_area("C") } else { CountCommand::new(false) };
+                Some(self.start_count_command(i, Box::new(command), "COUNT"))
+            }
+            "COUNTAREA" => Some(self.start_count_command(i, Box::new(CountCommand::new(true)), "COUNTAREA")),
+            "COUNTCLOSE" => {
+                self.close_count(i);
+                Some(Task::none())
+            }
+            "COUNTLIST" => {
+                self.set_count_palette(true);
+                Some(Task::none())
+            }
+            "COUNTLISTCLOSE" => {
+                self.set_count_palette(false);
+                Some(Task::none())
+            }
+            "_COUNTLISTTOGGLE" => {
+                let open = !self.count_palette.show;
+                self.set_count_palette(open);
+                Some(Task::none())
+            }
+            "COUNTFIELD" => {
+                match self.count_field_code(i) {
+                    Some(code) => return Some(self.start_count_field(i, code)),
+                    None if self.tabs[i].count.is_some() => {}
+                    None => self.command_line.push_error("** COUNTFIELD command only available during Count. **"),
+                }
+                Some(Task::none())
+            }
+            "COUNTTABLE" => {
+                let doc = &self.tabs[i].scene.document;
+                let mut blocks = Vec::new();
+                let mut others = [0usize; 3];
+                for br in doc.block_records.iter() {
+                    let upper = br.name.to_ascii_uppercase();
+                    if upper == "*MODEL_SPACE" || upper.starts_with("*PAPER_SPACE") {
+                        continue;
+                    }
+                    if br.flags.is_xref || br.flags.is_xref_overlay {
+                        others[0] += 1;
+                    } else if br.name.contains('|') {
+                        others[1] += 1;
+                    } else if br.name.starts_with('*') {
+                        others[2] += 1;
+                    } else {
+                        blocks.push(br.name.clone());
+                    }
+                }
+                blocks.sort_by_key(|b| b.to_ascii_uppercase());
+                Some(self.start_count_command(i, Box::new(CountTableCommand::new(blocks, others)), "COUNTTABLE"))
+            }
+            "UPDATEFIELD" => {
+                let preselected = self.tabs[i].scene.selected_handles_in_order();
+                if !preselected.is_empty() {
+                    self.update_fields(i, &preselected);
+                    return Some(Task::none());
+                }
+                Some(self.start_count_command(i, Box::new(UpdateFieldCommand::new()), "UPDATEFIELD"))
+            }
+            "_UPDATEFIELDRUN" => {
+                let handles: Vec<Handle> = rest.split(',').filter_map(parse_handle).collect();
+                self.tabs[i].scene.deselect_all();
+                self.update_fields(i, &handles);
+                Some(Task::none())
+            }
+            "_COUNTRUN" => {
+                self.count_run(i, rest);
+                Some(Task::none())
+            }
+            "_COUNTAREASET" => {
+                let tokens: Vec<&str> = rest.split_whitespace().collect();
+                if let Some((area, boundary)) = self.resolve_count_area(i, &tokens) {
+                    let mut mode = self.tabs[i].count.take().unwrap_or_default();
+                    if mode.boundary != boundary {
+                        self.drop_count_boundary(i, mode.boundary);
+                    }
+                    mode.area = area;
+                    mode.boundary = boundary;
+                    mode.cursor = None;
+                    self.tabs[i].count = Some(mode);
+                    self.apply_count_display(i);
+                    self.command_line.push_output("count area is active.");
+                }
+                Some(Task::none())
+            }
+            "_COUNTTABLEPLACE" => {
+                let (point, names) = rest.split_once(' ').unwrap_or((rest, ""));
+                let p: Vec<f64> = point.split(',').filter_map(|v| v.parse().ok()).collect();
+                if p.len() == 3 {
+                    let names: Vec<String> = names.split('|').filter(|n| !n.is_empty()).map(str::to_string).collect();
+                    self.place_count_table(i, [p[0], p[1], p[2]], names);
+                }
+                Some(Task::none())
+            }
+            _ => None,
+        }
+    }
+
+    fn start_count_command(&mut self, i: usize, command: Box<dyn CadCommand>, _name: &str) -> Task<Message> {
+        self.reset_command_start_state(i);
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].active_cmd = Some(command);
+        self.push_ucs_to_cmd(i);
+        self.sync_dyn_fields();
+        self.focus_cmd_input()
+    }
+
+    /// COUNTNUMBER / COUNTPALETTESTATE are read-only; COUNTSERVICE,
+    /// COUNTCOLOR and COUNTERRORCOLOR take a value (asked for when none is
+    /// given).
+    fn count_sysvar(&mut self, i: usize, name: &str, value: Option<&str>) {
+        let read_only = match name {
+            "COUNTNUMBER" => Some(
+                self.tabs[i]
+                    .count
+                    .as_ref()
+                    .filter(|m| m.target.is_some())
+                    .map(|m| m.result(&self.tabs[i].scene.document).counted.len())
+                    .unwrap_or(0),
+            ),
+            "COUNTPALETTESTATE" => Some(self.count_palette.show as usize),
+            _ => None,
+        };
+        if let Some(v) = read_only {
+            self.command_line.push_output(&format!("{name} = {v} (read only)"));
+            return;
+        }
+        let (current, min, max) = match name {
+            "COUNTSERVICE" => (self.count_palette.service as i32, 0, 1),
+            "COUNTCOLOR" => (self.count_palette.color as i32, 1, 255),
+            _ => (self.count_palette.error_color as i32, 1, 255),
+        };
+        let ask = |app: &mut Self| {
+            app.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+            app.pending_setvar = Some(name.to_string());
+        };
+        let Some(value) = value else {
+            ask(self);
+            return;
+        };
+        match value.parse::<i32>() {
+            Ok(n) if (min..=max).contains(&n) => {
+                match name {
+                    "COUNTSERVICE" => self.count_palette.service = n == 1,
+                    "COUNTCOLOR" => self.count_palette.color = n as i16,
+                    _ => self.count_palette.error_color = n as i16,
+                }
+                self.persist_settings_if_changed();
+                self.apply_count_display(i);
+            }
+            Ok(_) => {
+                self.command_line.push_error(&if max == 1 {
+                    "Requires 0 or 1 only.".to_string()
+                } else {
+                    format!("Requires an integer between {min} and {max}.")
+                });
+                ask(self);
+            }
+            Err(_) => {
+                self.command_line.push_error("Requires an integer value.");
+                ask(self);
+            }
+        }
+    }
+
+    /// Open or close the Count palette (docked on the right, expanded).
+    pub(in crate::app) fn set_count_palette(&mut self, open: bool) {
+        let id = crate::ui::dock::PanelId::Count;
+        self.count_palette.show = open;
+        self.ribbon.set_count_palette(open);
+        if open {
+            if self.dock.location(id).is_none() {
+                self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
+            }
+            self.dock_expanded = Some(id);
+        } else if self.dock_expanded == Some(id) {
+            self.dock_expanded = None;
+        }
+    }
+
+    /// Recolour the drawing for count mode: counted references, duplicates,
+    /// the rest faded (nothing changes without a target).
+    pub(in crate::app) fn apply_count_display(&mut self, i: usize) {
+        let display = self.tabs[i].count.as_ref().filter(|m| m.target.is_some()).map(|m| {
+            let r = m.result(&self.tabs[i].scene.document);
+            crate::scene::CountDisplay {
+                counted: r.counted.into_iter().collect(),
+                errors: r.errors.into_iter().collect(),
+                color: aci_rgba(self.count_palette.color),
+                error_color: aci_rgba(self.count_palette.error_color),
+            }
+        });
+        self.tabs[i].scene.set_count_display(display);
+        let epoch = self.tabs[i].scene.geometry_epoch;
+        if let Some(mode) = self.tabs[i].count.as_mut() {
+            mode.epoch = epoch;
+        }
+    }
+
+    /// After the drawing changes, count mode colours its references again.
+    pub(in crate::app) fn refresh_count_if_stale(&mut self) {
+        let i = self.active_tab;
+        if self.tabs[i].count.as_ref().is_some_and(|m| m.epoch != self.tabs[i].scene.geometry_epoch) {
+            self.apply_count_display(i);
+        }
+    }
+
+    /// COUNTCLOSE: leave count mode; the area polyline count mode drew goes
+    /// unless a field counts in it.
+    pub(in crate::app) fn close_count(&mut self, i: usize) {
+        if let Some(mode) = self.tabs[i].count.take() {
+            self.drop_count_boundary(i, mode.boundary);
+        }
+        self.tabs[i].scene.set_count_display(None);
+    }
+
+    fn drop_count_boundary(&mut self, i: usize, boundary: Option<(Handle, bool)>) {
+        if let Some((h, true)) = boundary {
+            let doc = &self.tabs[i].scene.document;
+            if doc.get_entity(h).is_some() && !boundary_in_use(doc, h) {
+                self.push_undo_snapshot(i, "COUNT");
+                self.tabs[i].scene.erase_entities(&[h]);
+                self.tabs[i].dirty = true;
+            }
+        }
+    }
+
+    /// The count area of `C`, `E`, `K`, `R a b`, `P a b c …` or `O h`, and
+    /// its boundary polyline (rectangles and polygons are drawn on the
+    /// `0-CountArea` layer). `None` when the area cannot be had.
+    fn resolve_count_area(
+        &mut self,
+        i: usize,
+        tokens: &[&str],
+    ) -> Option<(Option<Vec<[f64; 2]>>, Option<(Handle, bool)>)> {
+        let kind = tokens.first().copied().unwrap_or("E");
+        let points = || tokens[1..].iter().map_while(|t| parse_xy(t)).collect::<Vec<_>>();
+        match kind {
+            "E" => Some((None, None)),
+            "K" => {
+                let mode = self.tabs[i].count.as_ref();
+                Some((mode.and_then(|m| m.area.clone()), mode.and_then(|m| m.boundary)))
+            }
+            "C" => {
+                let (x0, y0, x1, y1) = self.display_plot_window()?;
+                Some((Some(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]), None))
+            }
+            "R" => {
+                let p = points();
+                let (a, b) = (p.first()?, p.get(1)?);
+                let ring = vec![[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]];
+                let h = self.draw_count_area(i, &ring)?;
+                Some((Some(ring), Some((h, true))))
+            }
+            "P" => {
+                let ring = points();
+                (ring.len() >= 3).then_some(())?;
+                let h = self.draw_count_area(i, &ring)?;
+                Some((Some(ring), Some((h, true))))
+            }
+            "O" => {
+                let h = parse_handle(tokens.get(1)?)?;
+                let ring = codec::count::boundary_polygon(&self.tabs[i].scene.document, h)?;
+                Some((Some(ring), Some((h, false))))
+            }
+            _ => None,
+        }
+    }
+
+    /// A closed polyline on `0-CountArea` (colour 152, not plotted,
+    /// Continuous), whatever the current layer.
+    fn draw_count_area(&mut self, i: usize, ring: &[[f64; 2]]) -> Option<Handle> {
+        self.push_undo_snapshot(i, "COUNT");
+        let doc = &mut self.tabs[i].scene.document;
+        if !doc.layers.contains(AREA_LAYER) {
+            let mut layer = codec::tables::Layer::new(AREA_LAYER);
+            layer.handle = doc.allocate_handle();
+            layer.color = codec::types::Color::from_index(152);
+            layer.is_plottable = false;
+            layer.line_type = "Continuous".into();
+            let _ = doc.layers.add(layer);
+        }
+        let mut pl = codec::entities::LwPolyline::new();
+        pl.vertices = ring
+            .iter()
+            .map(|p| codec::entities::LwVertex::new(codec::types::Vector2::new(p[0], p[1])))
+            .collect();
+        pl.is_closed = true;
+        pl.common.layer = AREA_LAYER.into();
+        let h = self.commit_entity_handle_preserve_layer(EntityType::LwPolyline(pl));
+        self.tabs[i].dirty = true;
+        h
+    }
+
+    /// `_COUNTRUN <area> L` opens the palette; `_COUNTRUN <area> T <handles>`
+    /// counts the targets and enters count mode.
+    fn count_run(&mut self, i: usize, rest: &str) {
+        let tokens: Vec<&str> = rest.split_whitespace().collect();
+        let split = tokens.iter().position(|t| *t == "L" || *t == "T").unwrap_or(tokens.len());
+        let (area_tokens, tail) = tokens.split_at(split);
+        let targets: Vec<Handle> = match tail {
+            ["T", handles, ..] => handles
+                .split(',')
+                .filter_map(parse_handle)
+                .filter(|h| self.tabs[i].scene.document.get_entity(*h).is_some())
+                .collect(),
+            _ => Vec::new(),
+        };
+        if targets.is_empty() && matches!(area_tokens.first(), Some(&"C") | Some(&"E") | None) {
+            self.set_count_palette(true);
+            return;
+        }
+        let Some((area, boundary)) = self.resolve_count_area(i, area_tokens) else {
+            return;
+        };
+        let doc = &self.tabs[i].scene.document;
+        let blocks: Vec<&str> = targets
+            .iter()
+            .filter_map(|h| match doc.get_entity(*h) {
+                Some(EntityType::Insert(ins)) => Some(ins.block_name.as_str()),
+                _ => None,
+            })
+            .collect();
+        let target = match blocks.first() {
+            Some(first) if blocks.len() == targets.len() && blocks.iter().all(|b| b.eq_ignore_ascii_case(first)) => {
+                let name = doc.block_records.get(first).map(|b| b.name.clone()).unwrap_or_else(|| first.to_string());
+                Some(CountTarget::Block { name, reference: targets.first().copied(), matching: [false; 3], picked: true })
+            }
+            None if targets.is_empty() => None,
+            _ => Some(CountTarget::Group(targets.clone())),
+        };
+        let old = self.tabs[i].count.take();
+        if let Some(old) = old.as_ref().filter(|o| o.boundary != boundary) {
+            self.drop_count_boundary(i, old.boundary);
+        }
+        let mode = CountMode { area, boundary, target, cursor: None, epoch: 0 };
+        if let Some(name) = mode.target_name() {
+            let n = mode.result(&self.tabs[i].scene.document).counted.len();
+            self.command_line.push_output(&format!("{name} ...... {n}"));
+        }
+        self.tabs[i].count = Some(mode);
+        self.apply_count_display(i);
+    }
+
+    /// The field COUNTFIELD places for the current count: the picked
+    /// reference (`single`), or the block with the match options (in the
+    /// area's polyline when there is one).
+    fn count_field_code(&self, i: usize) -> Option<String> {
+        let mode = self.tabs[i].count.as_ref()?;
+        match mode.target.as_ref()? {
+            CountTarget::Group(handles) => Some(format!("\\AcCount {}", single_json(handles))),
+            CountTarget::Block { reference: Some(r), matching: [false, false, false], picked: true, .. }
+                if mode.boundary.is_none() =>
+            {
+                Some(format!("\\AcCount {}", single_json(&[*r])))
+            }
+            CountTarget::Block { name, .. } => {
+                let instances = mode.instances(&self.tabs[i].scene.document);
+                Some(self.block_field_code(i, name, &mode.key(&instances)))
+            }
+        }
+    }
+
+    /// `\AcCount` of a block and key, `\AcCount2` inside count mode's area polyline.
+    fn block_field_code(&self, i: usize, name: &str, key: &CountKey) -> String {
+        match self.tabs[i].count.as_ref().and_then(|m| m.boundary) {
+            Some((boundary, _)) => format!("\\AcCount2 {}", area_json(name, key, boundary)),
+            None => format!("\\AcCount {}", block_json(name, key)),
+        }
+    }
+
+    /// Place a count field as multi-line text (`Specify start point or [Height/Justify]:`).
+    pub(in crate::app) fn start_count_field(&mut self, i: usize, code: String) -> Task<Message> {
+        let doc = &self.tabs[i].scene.document;
+        let value = crate::entities::field::evaluate(doc, &code, &[], None).unwrap_or_else(|| "####".into());
+        let defaults = crate::scene::creation_style::current_text_defaults(doc);
+        self.command_line.push_output(&format!(
+            "MTEXT Current text style:  \"{}\"  Text height:  {:.4}",
+            defaults.style_name, defaults.height
+        ));
+        let command = FieldPlaceCommand::new(value, (code, Vec::new()), defaults.style_name, defaults.height).named("MTEXT");
+        self.start_count_command(i, Box::new(command), "COUNTFIELD")
+    }
+
+    /// UPDATEFIELD: every field the objects host is evaluated again and its
+    /// text written back.
+    fn update_fields(&mut self, i: usize, handles: &[Handle]) {
+        let doc = &self.tabs[i].scene.document;
+        let mut updates: Vec<(Handle, String)> = Vec::new();
+        let mut found = 0;
+        for h in handles {
+            let Some(entity) = doc.get_entity(*h) else { continue };
+            if matches!(entity, EntityType::Table(_)) {
+                // Table cells evaluate their fields when drawn.
+                if let EntityType::Table(t) = entity {
+                    found += t.field_handles.len();
+                }
+                continue;
+            }
+            if !crate::entities::field::hosts_field(doc, entity) {
+                continue;
+            }
+            found += 1;
+            if let Some(text) = crate::entities::field::resolve(doc, *h) {
+                updates.push((*h, text));
+            }
+        }
+        self.command_line.push_output(&format!("{found} field(s) found."));
+        if found == 0 {
+            return;
+        }
+        self.push_undo_snapshot(i, "UPDATEFIELD");
+        let mut changed = Vec::new();
+        for (h, text) in updates {
+            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(h) {
+                match entity {
+                    EntityType::MText(m) => m.value = text,
+                    EntityType::Text(t) => t.value = text,
+                    EntityType::AttributeDefinition(a) => a.default_value = text,
+                    _ => continue,
+                }
+                changed.push((h, crate::scene::ChangeKind::Modified));
+            }
+        }
+        let table_handles: Vec<(Handle, crate::scene::ChangeKind)> = handles
+            .iter()
+            .filter(|h| matches!(self.tabs[i].scene.document.get_entity(**h), Some(EntityType::Table(_))))
+            .map(|h| (*h, crate::scene::ChangeKind::Modified))
+            .collect();
+        changed.extend(table_handles);
+        self.tabs[i].scene.bump_entities(&changed);
+        self.tabs[i].dirty = true;
+        self.command_line.push_output(&format!("{found} field(s) updated."));
+    }
+
+    /// A count table at `point`: `Item` | `Count`, one row per block (all
+    /// counted blocks when `names` is empty), sorted by name; the counts are
+    /// fields.
+    fn place_count_table(&mut self, i: usize, point: [f64; 3], names: Vec<String>) {
+        let doc = &self.tabs[i].scene.document;
+        let area = self.tabs[i].count.as_ref().and_then(|m| m.area.clone());
+        let instances = codec::count::block_instances(doc, area.as_deref());
+        let mut names: Vec<String> = if names.is_empty() {
+            codec::count::block_counts(&instances).into_iter().map(|c| c.name).collect()
+        } else {
+            names
+                .iter()
+                .map(|n| doc.block_records.get(n).map(|b| b.name.clone()).unwrap_or_else(|| n.clone()))
+                .collect()
+        };
+        names.sort_by_key(|n| n.to_ascii_uppercase());
+        names.dedup_by_key(|n| n.to_ascii_uppercase());
+        let mut table = codec::entities::TableBuilder::new(names.len() + 1, 2)
+            .at(codec::types::Vector3::new(point[0], point[1], point[2]))
+            .row_height(0.36)
+            .column_width(3.6)
+            .build();
+        table.set_column_width(1, 1.08);
+        table.set_cell_text(0, 0, "Item");
+        table.set_cell_text(0, 1, "Count");
+        for (r, name) in names.iter().enumerate() {
+            table.set_cell_text(r + 1, 0, name);
+        }
+        let codes: Vec<String> =
+            names.iter().map(|n| self.block_field_code(i, n, &CountKey::default())).collect();
+        self.push_undo_snapshot(i, "COUNTTABLE");
+        let Some(handle) = self.commit_entity_handle(EntityType::Table(Box::new(table))) else {
+            return;
+        };
+        let doc = &mut self.tabs[i].scene.document;
+        let mut fields = Vec::new();
+        for code in &codes {
+            let value = crate::entities::field::evaluate(doc, code, &[], None).unwrap_or_else(|| "####".into());
+            let field = doc.new_table_cell_field(handle, "%<\\_FldIdx 0>%", vec![codec::fields::NewField::new(code.clone(), value.clone())]);
+            fields.push((field, value));
+        }
+        if let Some(EntityType::Table(table)) = doc.get_entity_mut(handle) {
+            for (r, (field, value)) in fields.into_iter().enumerate() {
+                let Some(field) = field else { continue };
+                if let Some(cell) = table.cell_mut(r + 1, 1) {
+                    let mut content = codec::entities::table::CellContent::text(&value);
+                    content.field_handle = Some(field);
+                    cell.contents.clear();
+                    cell.contents.push(content);
+                    cell.cell_type = codec::entities::table::CellType::Text;
+                }
+                table.field_handles.push(field);
+            }
+        }
+        self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+        self.tabs[i].dirty = true;
+    }
+
+    /// Zoom to a reference (← / →, an error of the report).
+    fn zoom_to_insert(&mut self, i: usize, h: Handle) {
+        let doc = &self.tabs[i].scene.document;
+        let Some(EntityType::Insert(ins)) = doc.get_entity(h) else { return };
+        let Some(corners) = codec::count::insert_corners(doc, ins, 0) else { return };
+        let (mut lo, mut hi) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
+        for c in corners {
+            let p = glam::Vec3::new(c.x as f32, c.y as f32, c.z as f32);
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+        let pad = (hi - lo) * 1.5;
+        self.tabs[i].scene.remember_current_view();
+        self.tabs[i].scene.zoom_to_window(lo - pad, hi + pad);
+    }
+
+    fn open_count_target(&mut self, i: usize, name: String, key: CountKey) {
+        let mut mode = self.tabs[i].count.take().unwrap_or_default();
+        let instances = mode.instances(&self.tabs[i].scene.document);
+        let reference = instances
+            .iter()
+            .find(|inst| inst.duplicate_of.is_none() && inst.name.eq_ignore_ascii_case(&name) && key.matches(inst))
+            .map(|inst| inst.handle);
+        mode.target = Some(CountTarget::Block {
+            name,
+            reference,
+            matching: [key.layer.is_some(), key.scale.is_some(), key.mirror_state.is_some()],
+            picked: false,
+        });
+        mode.cursor = None;
+        self.tabs[i].count = Some(mode);
+        self.apply_count_display(i);
+    }
+
+    /// The Field dialog's Show Count Instances: count mode on what the
+    /// expression counts.
+    pub(in crate::app) fn show_count_instances(&mut self, i: usize, json: &str) {
+        match codec::count::parse_query(json) {
+            Some(codec::count::CountQuery::Block { name, key, boundary }) => {
+                if let Some(b) = boundary {
+                    if let Some(ring) = codec::count::boundary_polygon(&self.tabs[i].scene.document, b) {
+                        let mut mode = self.tabs[i].count.take().unwrap_or_default();
+                        if mode.boundary.map(|(h, _)| h) != Some(b) {
+                            self.drop_count_boundary(i, mode.boundary);
+                            mode.boundary = Some((b, false));
+                        }
+                        mode.area = Some(ring);
+                        self.tabs[i].count = Some(mode);
+                    }
+                }
+                self.open_count_target(i, name, key);
+            }
+            Some(codec::count::CountQuery::Single(handles)) if !handles.is_empty() => {
+                let hexes: Vec<String> = handles.iter().map(|h| hex(*h)).collect();
+                let area = if self.tabs[i].count.is_some() { "K" } else { "E" };
+                self.count_run(i, &format!("{area} T {}", hexes.join(",")));
+            }
+            _ => {}
+        }
+    }
+
+    pub(in crate::app) fn on_count(&mut self, m: CountMsg) -> Task<Message> {
+        let i = self.active_tab;
+        if self.tabs[i].is_start {
+            return Task::none();
+        }
+        match m {
+            CountMsg::Search(s) => self.count_palette.search = s,
+            CountMsg::Sort(by_count) => {
+                if self.count_palette.by_count == by_count {
+                    self.count_palette.descending = !self.count_palette.descending;
+                } else {
+                    self.count_palette.by_count = by_count;
+                    self.count_palette.descending = false;
+                }
+            }
+            CountMsg::Open(name, key) | CountMsg::Menu(name, key, RowAction::Review) => {
+                if self.count_palette.table.is_none() {
+                    self.open_count_target(i, name, key);
+                }
+            }
+            CountMsg::Menu(name, key, RowAction::Field) => {
+                let code = self.block_field_code(i, &name, &key);
+                return self.start_count_field(i, code);
+            }
+            CountMsg::Menu(name, _, RowAction::Expand(k)) => {
+                let upper = name.to_ascii_uppercase();
+                let list = &mut self.count_palette.expanded;
+                match list.iter_mut().find(|(n, _)| *n == upper) {
+                    Some((_, e)) => e[k] = !e[k],
+                    None => {
+                        let mut e = [false; 3];
+                        e[k] = true;
+                        list.push((upper, e));
+                    }
+                }
+            }
+            CountMsg::CreateTable => self.count_palette.table = Some(Vec::new()),
+            CountMsg::TableCheck(name, on) => {
+                if let Some(checked) = self.count_palette.table.as_mut() {
+                    let upper = name.to_ascii_uppercase();
+                    checked.retain(|n| *n != upper);
+                    if on {
+                        checked.push(upper);
+                    }
+                }
+            }
+            CountMsg::TableAll(on) => {
+                let names: Vec<String> = if on {
+                    let area = self.tabs[i].count.as_ref().and_then(|m| m.area.clone());
+                    let instances = codec::count::block_instances(&self.tabs[i].scene.document, area.as_deref());
+                    crate::ui::window::count_palette::rows(&instances, &self.count_palette)
+                        .into_iter()
+                        .map(|r| r.name.to_ascii_uppercase())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                self.count_palette.table = Some(names);
+            }
+            CountMsg::TableCancel => self.count_palette.table = None,
+            CountMsg::TableInsert => {
+                let names = self.count_palette.table.take().unwrap_or_default();
+                if names.is_empty() {
+                    return Task::none();
+                }
+                return self.start_count_command(i, Box::new(CountTableCommand::placing(names)), "COUNTTABLE");
+            }
+            CountMsg::Back | CountMsg::Close => self.close_count(i),
+            CountMsg::Match(k, on) => {
+                if let Some(CountMode { target: Some(CountTarget::Block { matching, .. }), .. }) = self.tabs[i].count.as_mut() {
+                    matching[k] = on;
+                }
+                self.apply_count_display(i);
+            }
+            CountMsg::ToggleDetails => self.count_palette.details_closed = !self.count_palette.details_closed,
+            CountMsg::ToggleErrors => self.count_palette.errors_closed = !self.count_palette.errors_closed,
+            CountMsg::ShowError(h) => self.zoom_to_insert(i, h),
+            CountMsg::Prev | CountMsg::Next => {
+                let Some(mode) = self.tabs[i].count.as_ref() else { return Task::none() };
+                let counted = mode.result(&self.tabs[i].scene.document).counted;
+                if counted.is_empty() {
+                    return Task::none();
+                }
+                let n = counted.len();
+                let next = match (mode.cursor, matches!(m, CountMsg::Next)) {
+                    (None, true) => 0,
+                    (None, false) => n - 1,
+                    (Some(c), true) => (c + 1) % n,
+                    (Some(c), false) => (c + n - 1) % n,
+                };
+                if let Some(mode) = self.tabs[i].count.as_mut() {
+                    mode.cursor = Some(next);
+                }
+                self.zoom_to_insert(i, counted[next]);
+            }
+            CountMsg::Area => return self.dispatch_command("COUNTAREA"),
+            CountMsg::Select => {
+                self.tabs[i].scene.deselect_all();
+                let command = CountCommand::with_area(if self.tabs[i].count.is_some() { "K" } else { "C" });
+                return self.start_count_command(i, Box::new(command), "COUNT");
+            }
+            CountMsg::Field => return self.dispatch_command("COUNTFIELD"),
+        }
+        Task::none()
+    }
+}

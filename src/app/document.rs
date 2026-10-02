@@ -221,6 +221,8 @@ pub(super) struct DocumentTab {
     pub(super) paper_bg_color: Option<[f32; 4]>,
     /// Active REFEDIT session, if any.
     pub(super) refedit_session: Option<RefEditSession>,
+    /// COUNT mode, while it is on.
+    pub(crate) count: Option<crate::ui::window::count_palette::CountMode>,
     /// Open BEDIT block tabs. Definitions are edited live; each tab owns its
     /// entry snapshot and camera so nested blocks can remain open independently.
     pub(super) block_edits: Vec<BlockEditSession>,
@@ -651,6 +653,7 @@ impl DocumentTab {
             bg_color: None,
             paper_bg_color: None,
             refedit_session: None,
+            count: None,
             block_edits: Vec::new(),
             active_block_edit: None,
             active_mleader_style: "Standard".to_string(),

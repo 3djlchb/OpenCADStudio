@@ -493,6 +493,8 @@ impl OpenCADStudio {
         // The Reference Manager watches the active drawing and re-scans when
         // the palette is open on another tab's entries.
         self.refresh_xref_manager_if_stale();
+        // Count mode recolours its references after the drawing changes.
+        self.refresh_count_if_stale();
         // Let V4 plugins observe selection changes that happened while handling
         // this message (picking, window select, QSELECT, SELECTALL, grip edits,
         // and plugin request draining).
@@ -1819,6 +1821,7 @@ impl OpenCADStudio {
             Message::AttdefDialog(message) => self.on_attdef_dialog(message),
             Message::FieldDialog(message) => self.on_field_dialog(message),
             Message::PcManager(message) => self.update_pc_manager(message),
+            Message::Count(message) => self.on_count(message),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);
                 Task::none()

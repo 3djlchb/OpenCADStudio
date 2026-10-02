@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 mod attdef;
 mod field;
+mod count;
 mod blocks;
 mod xref_attach;
 mod dim;
@@ -294,6 +295,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_field(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_count(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_draw(cmd, i) {
