@@ -92,7 +92,12 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 
 # Solid history evaluation graphs and history node layouts (opencadcodec PR pending).
 [patch."https://github.com/HakanSeven12/opencadcodec.git"]
-opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "25227f5" }
+opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "3ffd8aa" }
+
+# Sweep history with a placed profile (opencadkernel PR pending).
+[patch."https://github.com/HakanSeven12/opencadkernel.git"]
+opencadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "04843b5" }
+opencadkernel-constraints = { git = "https://github.com/ramox81/cadkernel.git", rev = "04843b5" }
 
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }

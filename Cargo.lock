@@ -4206,7 +4206,7 @@ dependencies = [
 [[package]]
 name = "opencadcodec"
 version = "0.5.5"
-source = "git+https://github.com/ramox81/cadcodec.git?rev=25227f5#25227f504006d62373c44d5064116607865b813a"
+source = "git+https://github.com/ramox81/cadcodec.git?rev=3ffd8aa#3ffd8aad6b675da103a7feb586816dfc387686f5"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -4238,7 +4238,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=a03e4f0#a03e4f094331949c8b27fb659e6891b84eeaa813"
+source = "git+https://github.com/ramox81/cadkernel.git?rev=04843b5#04843b583afb06d427d3ebdeab09e7e34bce77f0"
 dependencies = [
  "cavalier_contours",
  "opencadcodec",
@@ -4249,7 +4249,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=a03e4f0#a03e4f094331949c8b27fb659e6891b84eeaa813"
+source = "git+https://github.com/ramox81/cadkernel.git?rev=04843b5#04843b583afb06d427d3ebdeab09e7e34bce77f0"
 dependencies = [
  "nalgebra",
 ]
