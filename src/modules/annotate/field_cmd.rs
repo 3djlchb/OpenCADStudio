@@ -189,4 +189,71 @@ impl CadCommand for FieldObjectPickCommand {
     }
 }
 
+/// The Field dialog's Average / Sum / Count / Cell buttons: a cell range (or
+/// one cell) is picked in a table and handed back as
+/// `_FIELD_CELL <function> <table> <x> <y> <z> [<table> <x> <y> <z>]`.
+pub struct FieldTablePickCommand {
+    pub function: &'static str,
+    first: Option<(Handle, DVec3)>,
+}
+
+impl FieldTablePickCommand {
+    pub fn new(function: &'static str) -> Self {
+        Self { function, first: None }
+    }
+}
+
+impl CadCommand for FieldTablePickCommand {
+    fn name(&self) -> &'static str {
+        "FIELD"
+    }
+
+    fn prompt(&self) -> String {
+        match (self.function, self.first) {
+            ("Cell", _) => "Select table cell:".into(),
+            (_, None) => "Select first corner of table cell range:".into(),
+            _ => "Select second corner of table cell range:".into(),
+        }
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        let at = |h: Handle, p: DVec3| format!("{:X} {} {} {}", h.value(), p.x, p.y, p.z);
+        match (self.function, self.first) {
+            ("Cell", _) => CmdResult::Dispatch(format!("_FIELD_CELL Cell {}", at(handle, pt))),
+            (_, None) => {
+                self.first = Some((handle, pt));
+                CmdResult::NeedPoint
+            }
+            (function, Some((first, first_pt))) => CmdResult::Dispatch(format!(
+                "_FIELD_CELL {function} {} {}",
+                at(first, first_pt),
+                at(handle, pt)
+            )),
+        }
+    }
+
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Dispatch("_FIELD_CELL".into())
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Dispatch("_FIELD_CELL".into())
+    }
+}
+
 inventory::submit!(crate::command::CommandRegistration { names: &["FIELD"] });
