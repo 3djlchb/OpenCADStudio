@@ -18,10 +18,10 @@ use crate::scene::model::image_model::ImageModel;
 use crate::scene::model::wire_model::SearchableTextRun;
 #[cfg(not(target_arch = "wasm32"))]
 use printpdf::{
-    BlendMode, BuiltinFont, Color, ExtendedGraphicsState, ExtendedGraphicsStateId, Line,
-    LineCapStyle, LineDashPattern, LineJoinStyle, LinePoint, Mm, Op, PaintMode, PdfDocument,
-    PdfFontHandle, PdfPage, PdfSaveOptions, Point, Polygon, PolygonRing, Pt, Rgb, TextItem,
-    TextRenderingMode, WindingOrder,
+    BlendMode, BuiltinFont, Codepoint, Color, ExtendedGraphicsState, ExtendedGraphicsStateId,
+    FontId, Line, LineCapStyle, LineDashPattern, LineJoinStyle, LinePoint, Mm, Op, PaintMode,
+    ParsedFont, PdfDocument, PdfFont, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Polygon,
+    PolygonRing, Pt, Rgb, TextItem, TextMatrix, TextRenderingMode, WindingOrder,
 };
 use std::path::Path;
 
@@ -433,10 +433,21 @@ fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) 
     // Borrowing all pages keeps their pixel Arcs alive until this cache is dropped.
     // Allocation addresses cannot be reused by another source during this export.
     let mut image_resources = std::collections::HashMap::new();
+    let mut text_fonts = TextFonts::default();
     for (index, page) in pages.iter().enumerate() {
-        append_pdf_page(&mut doc, &mut image_resources, page, plot_style, &fonts)
-            .map_err(|error| format!("Page {}: {error}", index + 1))?;
+        append_pdf_page(
+            &mut doc,
+            &mut image_resources,
+            &mut text_fonts,
+            page,
+            plot_style,
+            &fonts,
+        )
+        .map_err(|error| format!("Page {}: {error}", index + 1))?;
     }
+    // Subset and embed the TrueType faces the text was drawn with, now that
+    // every page has recorded which glyphs it uses.
+    text_fonts.install(&mut doc);
     let mut warnings = Vec::new();
     // printpdf 0.9's `optimize` is a no-op (its `doc.compress()` is commented
     // out), so every page's content stream — megabytes of vector operators
@@ -454,6 +465,7 @@ fn build_pdf_pages(pages: &[PdfPageInput], plot_style: Option<&PlotStyleTable>) 
 fn append_pdf_page(
     doc: &mut PdfDocument,
     image_resources: &mut std::collections::HashMap<(usize, u32, u32), printpdf::XObjectId>,
+    text_fonts: &mut TextFonts,
     page: &PdfPageInput,
     fallback_plot_style: Option<&PlotStyleTable>,
     fonts: &SearchableFontSet,
@@ -659,15 +671,14 @@ fn append_pdf_page(
                 continue;
             }
             DrawItem::Text(wire) => {
-                // Searchable layer + outlines coexist: the vector outlines
-                // always draw (pixel-identical plots, decorations, stroke
-                // fonts, shaped/mixed scripts all keep working) and the
-                // preserved runs add an *invisible* (`Tr 3`) text layer on
-                // top for searching, copying and screen readers. Zero
-                // visual change by construction — a gap in the text path
-                // can only affect extractability, never the rendered sheet.
-                emit_text(
+                // Outlined runs (stroke fonts, shaped/mixed scripts) keep
+                // their vector outlines and add an *invisible* (`Tr 3`) text
+                // layer on top for searching, copying and screen readers.
+                // A run that went out as embedded-font text is already
+                // searchable; only outlined runs need the invisible layer.
+                let embedded = emit_text(
                     &mut ops,
+                    text_fonts,
                     std::slice::from_ref(&wire.wire),
                     ox,
                     oy,
@@ -675,16 +686,18 @@ fn append_pdf_page(
                     plot_style,
                     options,
                 );
-                emit_searchable_text(
-                    &mut ops,
-                    std::slice::from_ref(&wire.wire),
-                    ox,
-                    oy,
-                    clip,
-                    plot_style,
-                    options,
-                    fonts,
-                );
+                if !embedded {
+                    emit_searchable_text(
+                        &mut ops,
+                        std::slice::from_ref(&wire.wire),
+                        ox,
+                        oy,
+                        clip,
+                        plot_style,
+                        options,
+                        fonts,
+                    );
+                }
                 last_color = None;
                 last_lw = None;
                 last_dash = None;
@@ -1916,25 +1929,24 @@ fn subset_family(
 #[cfg(not(target_arch = "wasm32"))]
 fn emit_text(
     ops: &mut Vec<Op>,
+    fonts: &mut TextFonts,
     wires: &[WireModel],
     ox: f64,
     oy: f64,
     scale: f32,
     plot_style: Option<&PlotStyleTable>,
     options: PdfPlotOptions,
-) {
+) -> bool {
     use crate::scene::text::sdf_atlas;
 
     if wires.iter().all(|w| w.text_verts.is_empty()) {
-        return;
+        return false;
     }
-    // Snapshot the atlas' baked-glyph geometry once; drop the lock before use.
-    let (table, solid_key) = {
-        let Ok(atlas) = sdf_atlas::text_atlas().lock() else {
-            return;
-        };
-        (atlas.export_table(), sdf_atlas::uv_key(atlas.solid_uv()))
+    // The atlas' baked-glyph geometry, snapshotted once per export.
+    let Some(snapshot) = fonts.glyph_table() else {
+        return false;
     };
+    let (table, solid_key) = (&snapshot.0, snapshot.1);
 
     // `Op::SetLineDashPattern` is persistent graphics state and the wire pass
     // above only re-emits it on change, so whatever the last wire needed is
@@ -1944,11 +1956,18 @@ fn emit_text(
         dash: LineDashPattern::default(),
     });
 
+    let mut embedded = true;
     for wire in wires {
         let verts = &wire.text_verts;
         if verts.is_empty() {
+            embedded = false;
             continue;
         }
+        // A run drawn wholly in faces the PDF can embed goes out as real text
+        // and is its own searchable layer. Any other run keeps its outlines and
+        // the invisible layer carries its text: one copy of the text either way.
+        let embed = fonts.embeds_all(verts, table, solid_key);
+        embedded &= embed;
         // Mirror the wire pass: indexed style color, screening, and pen width.
         let mut ctb_color: Option<[f32; 3]> = None;
         let mut lw_override: Option<f32> = None;
@@ -2016,10 +2035,22 @@ fn emit_text(
                 };
 
                 if !ge.fill_tris.is_empty() {
-                    // Filled TrueType glyph: one filled triangle per triple.
                     ops.push(Op::SetFillColor {
                         col: Color::Rgb(Rgb { r, g, b, icc_profile: None }),
                     });
+                    // Filled TrueType glyph from a face we can embed: draw it as
+                    // text in that font. Its outline tessellates into hundreds
+                    // of triangles for a CJK face, which made text-heavy sheets
+                    // export at hundreds of MB and crawl in viewers.
+                    if let Some(source) = ge.source.as_ref().filter(|_| embed) {
+                        if let Some(font) = fonts.font_for(source, ge.ch) {
+                            let matrix =
+                                glyph_text_matrix(source, pmin, [sx, sy], bl, br, tl, ox, oy);
+                            push_glyph_text(ops, font, source.gid, ge.ch, matrix);
+                            continue;
+                        }
+                    }
+                    // Otherwise one filled triangle per triple.
                     for tri in ge.fill_tris.chunks_exact(3) {
                         ops.push(Op::DrawPolygon {
                             polygon: Polygon {
@@ -2099,6 +2130,281 @@ fn emit_text(
             }
         }
     }
+    embedded
+}
+
+// ── Embedded TrueType text ─────────────────────────────────────────────────
+
+/// The atlas export table plus its solid-tile key.
+#[cfg(not(target_arch = "wasm32"))]
+type GlyphTable = std::sync::Arc<(
+    std::collections::HashMap<u64, crate::scene::text::sdf_atlas::GlyphExport>,
+    u64,
+)>;
+
+/// The TrueType faces a PDF export draws text with, and the glyphs each uses.
+///
+/// Pages register glyphs as they are drawn (each under a font id fixed up
+/// front); once every page is done, [`TextFonts::install`] subsets each face to
+/// the glyphs actually used, renumbers them in the page streams, and adds the
+/// subset fonts to the document. printpdf 0.9 would otherwise embed whole
+/// fonts (its own subsetting is disabled), and a CJK face is megabytes.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct TextFonts {
+    /// The atlas export table, snapshotted once: every page's text quads are
+    /// laid out before the export starts, so one snapshot serves the whole
+    /// document. Re-walking the atlas per text wire made a 28-sheet set with
+    /// ~4 000 text entities take over nine minutes.
+    glyphs: Option<GlyphTable>,
+    fonts: Vec<EmbeddedFont>,
+    /// Font file identity → index into `fonts`; `None` = printpdf can't parse
+    /// the face, so its glyphs keep the outline fill.
+    by_blob: std::collections::HashMap<(usize, u32, u32), Option<usize>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct EmbeddedFont {
+    blob: std::sync::Arc<crate::scene::text::ttf_glyph::FontBlob>,
+    id: FontId,
+    /// Original glyph id → the character it draws (for ToUnicode).
+    used: std::collections::BTreeMap<u16, char>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TextFonts {
+    /// The atlas' glyph export table (and solid-tile key), built on first use.
+    fn glyph_table(&mut self) -> Option<GlyphTable> {
+        use crate::scene::text::sdf_atlas;
+        if self.glyphs.is_none() {
+            let atlas = sdf_atlas::text_atlas().lock().ok()?;
+            self.glyphs = Some(std::sync::Arc::new((
+                atlas.export_table(),
+                sdf_atlas::uv_key(atlas.solid_uv()),
+            )));
+        }
+        self.glyphs.clone()
+    }
+
+    /// The font id to draw `source`'s glyph with, recording the glyph as used.
+    /// `None` when the face can't be embedded.
+    fn font_for(
+        &mut self,
+        source: &crate::scene::text::ttf_glyph::GlyphSource,
+        ch: char,
+    ) -> Option<FontId> {
+        let slot = self.slot(source)?;
+        let font = &mut self.fonts[slot];
+        font.used.entry(source.gid).or_insert(ch);
+        Some(font.id.clone())
+    }
+
+    /// The `fonts` slot of `source`'s face; `None` when printpdf can't parse it.
+    fn slot(&mut self, source: &crate::scene::text::ttf_glyph::GlyphSource) -> Option<usize> {
+        match self.by_blob.get(&source.font.id) {
+            Some(slot) => *slot,
+            None => {
+                let parses =
+                    ParsedFont::from_bytes(&source.font.data, source.font.index, &mut Vec::new())
+                        .is_some();
+                let slot = parses.then(|| {
+                    self.fonts.push(EmbeddedFont {
+                        blob: source.font.clone(),
+                        id: FontId::new(),
+                        used: std::collections::BTreeMap::new(),
+                    });
+                    self.fonts.len() - 1
+                });
+                self.by_blob.insert(source.font.id, slot);
+                slot
+            }
+        }
+    }
+
+    /// Whether every glyph of `verts` is a filled glyph of a face the PDF can
+    /// embed, so the whole run can go out as real text.
+    fn embeds_all(
+        &mut self,
+        verts: &[crate::scene::pipeline::text_gpu::TextVertex],
+        table: &std::collections::HashMap<u64, crate::scene::text::sdf_atlas::GlyphExport>,
+        solid_key: u64,
+    ) -> bool {
+        use crate::scene::text::sdf_atlas;
+        let mut any = false;
+        for quad in verts.chunks_exact(6) {
+            if quad[0].color[3] < 0.01 {
+                continue;
+            }
+            let key = sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]]);
+            if key == solid_key {
+                continue;
+            }
+            let Some(ge) = table.get(&key) else {
+                continue;
+            };
+            let Some(source) = ge.source.as_ref().filter(|_| !ge.fill_tris.is_empty()) else {
+                return false;
+            };
+            if self.slot(source).is_none() {
+                return false;
+            }
+            any = true;
+        }
+        any
+    }
+
+    /// Subset each face to its used glyphs, renumber those glyphs in the page
+    /// streams, and register the fonts under the ids the pages already use.
+    /// A face that fails to subset is embedded whole, ids unchanged.
+    fn install(self, doc: &mut PdfDocument) {
+        // A face only probed by `embeds_all` for a run that kept its outlines
+        // draws nothing.
+        for font in self.fonts.into_iter().filter(|font| !font.used.is_empty()) {
+            // `.notdef` must stay glyph 0; the subset numbers glyphs in list order.
+            let gids: Vec<u16> = std::iter::once(0)
+                .chain(font.used.keys().copied().filter(|&gid| gid != 0))
+                .collect();
+            let subset = subset_font(&font.blob, &gids)
+                .and_then(|bytes| ParsedFont::from_bytes(&bytes, 0, &mut Vec::new()));
+            let parsed = match subset {
+                Some(parsed) => {
+                    let remap: std::collections::HashMap<u16, u16> = gids
+                        .iter()
+                        .enumerate()
+                        .map(|(new, &old)| (old, new as u16))
+                        .collect();
+                    renumber_glyphs(&mut doc.pages, &font.id, &remap);
+                    parsed
+                }
+                None => {
+                    log::warn!("PDF export: font subsetting failed; embedding the whole face");
+                    let whole =
+                        ParsedFont::from_bytes(&font.blob.data, font.blob.index, &mut Vec::new());
+                    match whole {
+                        Some(parsed) => parsed,
+                        None => continue, // `font_for` already checked it parses
+                    }
+                }
+            };
+            doc.resources
+                .fonts
+                .map
+                .insert(font.id, PdfFont::new(parsed));
+        }
+    }
+}
+
+/// `blob`'s face reduced to `gids` (glyph 0 first), keeping the hinting tables
+/// a tricky CJK face (DFKai-SB, MingLiU) needs to draw its strokes in place.
+#[cfg(not(target_arch = "wasm32"))]
+fn subset_font(blob: &crate::scene::text::ttf_glyph::FontBlob, gids: &[u16]) -> Option<Vec<u8>> {
+    use allsorts::binary::read::ReadScope;
+    use allsorts::font_data::FontData;
+    use allsorts::subset::{subset, CmapTarget, SubsetProfile};
+
+    let font = ReadScope::new(&blob.data).read::<FontData<'_>>().ok()?;
+    let provider = font.table_provider(blob.index as usize).ok()?;
+    subset(
+        &provider,
+        gids,
+        &SubsetProfile::Pdf,
+        CmapTarget::Unrestricted,
+    )
+    .ok()
+}
+
+/// Rewrite the glyph ids shown in font `id` through `remap` (original → subset).
+#[cfg(not(target_arch = "wasm32"))]
+fn renumber_glyphs(
+    pages: &mut [PdfPage],
+    id: &FontId,
+    remap: &std::collections::HashMap<u16, u16>,
+) {
+    for page in pages {
+        let mut in_font = false;
+        for op in &mut page.ops {
+            match op {
+                Op::SetFont { font, .. } => {
+                    in_font = matches!(font, PdfFontHandle::External(fid) if fid == id);
+                }
+                Op::ShowText { items } if in_font => {
+                    for item in items {
+                        if let TextItem::GlyphIds(codepoints) = item {
+                            for codepoint in codepoints {
+                                if let Some(&gid) = remap.get(&codepoint.gid) {
+                                    codepoint.gid = gid;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Text matrix that lays the embedded glyph exactly over its SDF quad.
+///
+/// The quad maps the glyph's 9-unit tile rect `pmin .. pmin + size` onto the
+/// world corners `bl`/`br`/`tl`; the outline was normalised font-unit × `k`,
+/// so one em (`units_per_em` font units) spans `k · units_per_em` 9-units.
+/// With `Tf` size 1 a text-space unit is one em, which this matrix carries to
+/// sheet points under the page's CTM — the same space the wire pass draws in.
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+fn glyph_text_matrix(
+    source: &crate::scene::text::ttf_glyph::GlyphSource,
+    pmin: [f32; 2],
+    size: [f32; 2],
+    bl: [f64; 2],
+    br: [f64; 2],
+    tl: [f64; 2],
+    ox: f64,
+    oy: f64,
+) -> [f32; 6] {
+    let em = source.k as f64 * source.units_per_em.max(1) as f64;
+    let (sx, sy) = (size[0] as f64, size[1] as f64);
+    // World displacement per 9-unit along the glyph's x and y axes.
+    let ex = [(br[0] - bl[0]) / sx, (br[1] - bl[1]) / sx];
+    let ey = [(tl[0] - bl[0]) / sy, (tl[1] - bl[1]) / sy];
+    // Glyph origin (9-unit 0,0 = pen position on the baseline) in world space.
+    let (px, py) = (pmin[0] as f64, pmin[1] as f64);
+    let origin = [
+        bl[0] - px * ex[0] - py * ey[0],
+        bl[1] - px * ex[1] - py * ey[1],
+    ];
+    let pt = MM_TO_PT as f64;
+    [
+        (ex[0] * em * pt) as f32,
+        (ex[1] * em * pt) as f32,
+        (ey[0] * em * pt) as f32,
+        (ey[1] * em * pt) as f32,
+        ((origin[0] + ox) * pt) as f32,
+        ((origin[1] + oy) * pt) as f32,
+    ]
+}
+
+/// One glyph as a text object: font `font` at size 1, positioned by `matrix`.
+/// The character rides along as the glyph's Unicode so the text is searchable.
+#[cfg(not(target_arch = "wasm32"))]
+fn push_glyph_text(ops: &mut Vec<Op>, font: FontId, gid: u16, ch: char, matrix: [f32; 6]) {
+    ops.push(Op::StartTextSection);
+    ops.push(Op::SetFont {
+        font: PdfFontHandle::External(font),
+        size: Pt(1.0),
+    });
+    ops.push(Op::SetTextMatrix {
+        matrix: TextMatrix::Raw(matrix),
+    });
+    ops.push(Op::ShowText {
+        items: vec![TextItem::GlyphIds(vec![Codepoint {
+            gid,
+            offset: 0.0,
+            cid: Some(ch.to_string()),
+        }])],
+    });
+    ops.push(Op::EndTextSection);
 }
 
 /// Everything searchable in an exported file: the raw bytes (printpdf
@@ -2569,5 +2875,83 @@ mod tests {
         let stream = pdf_stream_text(&build_pdf_pages(&[page], None).unwrap());
         assert!(stream.contains("IN"), "inside run must survive the clip");
         assert!(!stream.contains("OUT"), "outside run must be culled by the clip");
+    }
+    // A filled TrueType glyph exports as text in an embedded subset of its
+    // face — not as its tessellated outline, which for a CJK face is hundreds
+    // of triangles per glyph (a 28-sheet DFKai-SB set came out at 320 MB).
+    #[test]
+    fn truetype_text_embeds_a_subset_font() {
+        use crate::scene::pipeline::text_gpu::push_glyph_vertices;
+        use crate::scene::text::font_face::Face;
+        use crate::scene::text::{glyph_quads::layout_glyph_quads, sdf_atlas, sysfont};
+
+        // Any installed TrueType family that draws 'H'; hosts without fonts skip.
+        let Some((family, source)) = sysfont::families().iter().find_map(|family| {
+            let face = Face::resolve(family);
+            matches!(face, Face::Ttf { .. })
+                .then(|| face.glyph_source('H'))
+                .flatten()
+                .map(|source| (family.clone(), source))
+        }) else {
+            eprintln!("no TrueType font installed; skipped");
+            return;
+        };
+        // The atlas and TEXTFILL are process-wide and other tests reset, grow
+        // or unfill them concurrently; a change between laying the quads out
+        // and exporting them invalidates their tile keys, so retry until one
+        // export runs against a stable, filled atlas.
+        let (bytes, text) = (0..20)
+            .find_map(|_| {
+                let generation = sdf_atlas::generation();
+                if !sdf_atlas::textfill() {
+                    std::thread::yield_now();
+                    return None;
+                }
+                let (quads, _) = {
+                    let mut atlas = sdf_atlas::text_atlas().lock().unwrap();
+                    layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, &family, false, "HHH")
+                };
+                assert_eq!(quads.len(), 3, "three glyphs laid out in {family}");
+                let mut verts = Vec::new();
+                push_glyph_vertices(
+                    &mut verts,
+                    &quads,
+                    [20.0, 20.0, 0.0],
+                    1.0,
+                    [0.0, 0.0, 0.0, 1.0],
+                    0.0,
+                );
+                let wire = PlotWire {
+                    wire: WireModel {
+                        text_verts: verts,
+                        ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
+                    },
+                    draw_depth: 0.0,
+                };
+                let bytes = build_pdf_pages(&[test_page(vec![wire])], None).unwrap();
+                let stable = sdf_atlas::generation() == generation && sdf_atlas::textfill();
+                stable.then(|| {
+                    let text = pdf_stream_text(&bytes);
+                    (bytes, text)
+                })
+            })
+            .expect("the shared glyph atlas never held still for one export");
+        assert!(text.contains(" Tf"), "glyphs drawn as text in a font");
+        assert_eq!(
+            text.matches(" Tm").count(),
+            3,
+            "one positioned text object per glyph"
+        );
+        assert!(
+            String::from_utf8_lossy(&bytes).contains("/FontFile2"),
+            "the TrueType program is embedded"
+        );
+        // A subset of a handful of glyphs, not the whole face.
+        assert!(
+            bytes.len() < source.font.data.len().max(200_000) / 2,
+            "PDF {} bytes vs font file {} bytes",
+            bytes.len(),
+            source.font.data.len()
+        );
     }
 }

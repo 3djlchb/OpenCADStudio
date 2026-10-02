@@ -446,6 +446,122 @@ fn triangulate_contours(contours: &[Vec<[f32; 2]>]) -> Vec<[f32; 2]> {
     tris
 }
 
+// ── Glyph source (for exporters that embed the font) ─────────────────────────
+
+/// One font file's bytes, shared by every glyph taken from it.
+#[derive(Debug)]
+pub struct FontBlob {
+    /// The whole font file (a collection keeps all its faces).
+    pub data: Vec<u8>,
+    /// Face index within `data` (0 for a plain .ttf/.otf).
+    pub index: u32,
+    /// Stable identity: byte length, face index, `head.checkSumAdjustment`.
+    pub id: (usize, u32, u32),
+}
+
+/// The TrueType face and glyph a filled glyph was outlined from.
+///
+/// The PDF exporter embeds `font` and draws the glyph as text instead of
+/// filling the tessellated outline: a glyph of a stroke-heavy CJK face
+/// (DFKai-SB) tessellates into hundreds of triangles, so a text-heavy sheet
+/// exported as hundreds of megabytes that viewers crawl through.
+#[derive(Clone, Debug)]
+pub struct GlyphSource {
+    pub font: Arc<FontBlob>,
+    pub gid: u16,
+    /// Font-unit -> 9-unit factor the outline was normalised with
+    /// ([`cap_scale`] or [`em_scale`]) -- the exporter needs it to place the
+    /// embedded glyph exactly over the outline's tile.
+    pub k: f32,
+    pub units_per_em: u16,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn face_key(data: &[u8], index: u32) -> Option<FaceKey> {
+    use skrifa::raw::TableProvider;
+    let font = skrifa::FontRef::from_index(data, index).ok()?;
+    let head = font.head().ok()?;
+    Some(FaceKey {
+        len: data.len(),
+        index,
+        checksum_adjustment: head.checksum_adjustment(),
+    })
+}
+
+/// Copy each font file once per process, however many glyphs come from it.
+#[cfg(not(target_arch = "wasm32"))]
+fn blob_for(data: &[u8], index: u32) -> Option<Arc<FontBlob>> {
+    static BLOBS: OnceLock<Mutex<HashMap<FaceKey, Arc<FontBlob>>>> = OnceLock::new();
+    let key = face_key(data, index)?;
+    let mut blobs = BLOBS
+        .get_or_init(|| Mutex::new(HashMap::default()))
+        .lock()
+        .unwrap();
+    Some(
+        blobs
+            .entry(key)
+            .or_insert_with(|| {
+                Arc::new(FontBlob {
+                    data: data.to_vec(),
+                    index,
+                    id: (key.len, key.index, key.checksum_adjustment),
+                })
+            })
+            .clone(),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn source_for(
+    data: &[u8],
+    index: u32,
+    face: &ttf_parser::Face,
+    gid: ttf_parser::GlyphId,
+    k: f32,
+) -> Option<GlyphSource> {
+    Some(GlyphSource {
+        font: blob_for(data, index)?,
+        gid: gid.0,
+        k,
+        units_per_em: face.units_per_em(),
+    })
+}
+
+/// Source of [`glyph`]`(family, ch)`: same face, same glyph, same scale.
+/// Cached per `(family, char)`, like the glyph itself.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn glyph_source(family: &str, ch: char) -> Option<GlyphSource> {
+    type SourceCache = HashMap<(String, char), Option<GlyphSource>>;
+    static CACHE: OnceLock<Mutex<SourceCache>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::default()));
+    let key = (family.to_string(), ch);
+    if let Some(hit) = cache.lock().unwrap().get(&key) {
+        return hit.clone();
+    }
+    let built = sysfont::with_face_data(family, |data, index| {
+        let face = ttf_parser::Face::parse(data, index).ok()?;
+        let gid = face.glyph_index(ch)?;
+        source_for(data, index, &face, gid, cap_scale(&face))
+    })
+    .flatten();
+    cache.lock().unwrap().insert(key, built.clone());
+    built
+}
+
+/// Source of [`fallback_glyph`]`(ch)`: the face the fallback search settles on.
+/// Cached per character, like the glyph itself.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn fallback_source(ch: char) -> Option<GlyphSource> {
+    static CACHE: OnceLock<Mutex<HashMap<char, Option<GlyphSource>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::default()));
+    if let Some(hit) = cache.lock().unwrap().get(&ch) {
+        return hit.clone();
+    }
+    let built = pick_fallback(ch).and_then(|(_, source)| source);
+    cache.lock().unwrap().insert(ch, built.clone());
+    built
+}
+
 // ── Shaping ────────────────────────────────────────────────────────────────
 
 /// One shaped glyph, positioned within its run. Strokes are in 9-unit space and
@@ -572,6 +688,14 @@ mod fallback_tests {
 /// no stroke font provides.
 #[cfg(not(target_arch = "wasm32"))]
 fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
+    pick_fallback(ch).map(|(glyph, _)| glyph)
+}
+
+/// The fallback glyph for `ch` together with the face it came from -- one
+/// search, so the glyph drawn on screen and the font an exporter embeds can
+/// never disagree.
+#[cfg(not(target_arch = "wasm32"))]
+fn pick_fallback(ch: char) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
     outline_from_fallback_face(ch).or_else(|| installed_family_glyph(ch))
 }
 
@@ -582,7 +706,12 @@ fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
 /// text height — so size the substitute by its em box. Everything else keeps the
 /// cap-height normalisation that lines it up with the Latin stroke glyphs.
 #[cfg(not(target_arch = "wasm32"))]
-fn outline_char(data: &[u8], index: u32, face: &ttf_parser::Face, ch: char) -> Option<Glyph> {
+fn outline_char(
+    data: &[u8],
+    index: u32,
+    face: &ttf_parser::Face,
+    ch: char,
+) -> Option<(Glyph, Option<GlyphSource>)> {
     let gid = face.glyph_index(ch)?;
     let k = if is_full_width(ch) {
         em_scale(face)
@@ -594,11 +723,12 @@ fn outline_char(data: &[u8], index: u32, face: &ttf_parser::Face, ch: char) -> O
     outline_glyph_into(data, index, face, gid, &mut fl);
     fl.flush();
     let fill_tris = triangulate_contours(&fl.contours);
-    Some(Glyph {
+    let glyph = Glyph {
         strokes: fl.contours,
         advance,
         fill_tris,
-    })
+    };
+    Some((glyph, source_for(data, index, face, gid, k)))
 }
 
 /// Outline `ch` from the face cosmic-text picks for it: it knows the platform's
@@ -608,7 +738,7 @@ fn outline_char(data: &[u8], index: u32, face: &ttf_parser::Face, ch: char) -> O
 /// does, for every character, because ttf-parser reads no contours out of it —
 /// so an empty outline is not an answer and the caller has to keep looking.
 #[cfg(not(target_arch = "wasm32"))]
-fn outline_from_fallback_face(ch: char) -> Option<Arc<Glyph>> {
+fn outline_from_fallback_face(ch: char) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
     use cosmic_text::{Attrs, Buffer, Metrics, Shaping};
     let mut fs = font_system().lock().unwrap();
     // Default family → cosmic's own fallback search chooses a covering font.
@@ -627,13 +757,13 @@ fn outline_from_fallback_face(ch: char) -> Option<Arc<Glyph>> {
             let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
             let font = fs.get_font(g.font_id, g.font_weight)?;
             let face = ttf_parser::Face::parse(font.data(), face_index).ok()?;
-            let Some(glyph) = outline_char(font.data(), face_index, &face, ch) else {
+            let Some((glyph, source)) = outline_char(font.data(), face_index, &face, ch) else {
                 continue;
             };
             if glyph.strokes.is_empty() && glyph.fill_tris.is_empty() {
                 continue;
             }
-            return Some(Arc::new(glyph));
+            return Some((Arc::new(glyph), source));
         }
     }
     None
@@ -645,11 +775,11 @@ fn outline_from_fallback_face(ch: char) -> Option<Arc<Glyph>> {
 /// and covers neither Cyrillic nor Greek, however many fonts the machine has
 /// that do.
 #[cfg(not(target_arch = "wasm32"))]
-fn installed_family_glyph(ch: char) -> Option<Arc<Glyph>> {
+fn installed_family_glyph(ch: char) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
     crate::scene::text::sysfont::families()
         .iter()
         .find_map(|family| {
-            let glyph = sysfont::with_face_data(family, |data, index| {
+            let (glyph, source) = sysfont::with_face_data(family, |data, index| {
                 let face = ttf_parser::Face::parse(data, index).ok()?;
                 outline_char(data, index, &face, ch)
             })
@@ -657,7 +787,7 @@ fn installed_family_glyph(ch: char) -> Option<Arc<Glyph>> {
             // A face that yields no outline (the system font, a space) is not a
             // font that draws this character.
             (!glyph.strokes.is_empty() || !glyph.fill_tris.is_empty())
-                .then(|| Arc::new(glyph))
+                .then(|| (Arc::new(glyph), source))
         })
 }
 
