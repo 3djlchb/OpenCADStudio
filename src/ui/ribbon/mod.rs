@@ -521,8 +521,9 @@ impl Ribbon {
         // The quick-access flow and the tabs flow each flex-wrap; WrapBar stacks
         // them so a wrapped tab never shares a row with a quick-access button.
 
-        // A running command whose button is on another tab lights that tab's
-        // header in the button's own blue, pointing at where the button lives.
+        // A running command whose button is on another tab tints that tab's
+        // header with a faint wash of the button's blue, pointing at where the
+        // button lives without competing with the selected tab's outline.
         let holding_tab = self.tab_holding_active_tool();
         let tab_items = self.modules.iter().enumerate().fold(
             Vec::<Element<'_, Message>>::new(),
@@ -562,9 +563,15 @@ impl Ribbon {
                             background: (is_active
                                 || holds_tool
                                 || matches!(status, button::Status::Hovered))
-                                .then_some(Background::Color(pair.color)),
-                            text_color: if is_active || holds_tool {
+                                .then_some(Background::Color(if holds_tool && !is_active {
+                                    pair.color.scale_alpha(0.35)
+                                } else {
+                                    pair.color
+                                })),
+                            text_color: if is_active {
                                 pair.text
+                            } else if holds_tool {
+                                palette.background.base.text
                             } else if is_contextual {
                                 accent.color
                             } else {
