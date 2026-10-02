@@ -4,7 +4,7 @@ pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/d
 pub fn tool() -> ToolDef {
     ToolDef {
         id: "COUNTLIST",
-        label: "Count",
+        label: "Count palette",
         icon: ICON,
         event: ModuleEvent::Command("_COUNTLISTTOGGLE".to_string()),
     }

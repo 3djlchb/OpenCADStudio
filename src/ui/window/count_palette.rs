@@ -334,7 +334,7 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
     let header = row![
         header_button(crate::t!("Name").into_owned(), !palette.by_count, palette.descending, CountMsg::Sort(false)),
         Space::new().width(Fill),
-        header_button(crate::t!("Count column").into_owned(), palette.by_count, palette.descending, CountMsg::Sort(true)),
+        header_button(crate::t!("Count").into_owned(), palette.by_count, palette.descending, CountMsg::Sort(true)),
     ]
     .align_y(iced::Center);
     let mut list = column![].spacing(1);
@@ -478,7 +478,7 @@ pub fn view<'a>(
     width: f32,
     auto_collapse: bool,
 ) -> Element<'a, Message> {
-    let title_bar = crate::ui::dock::title_bar(PanelId::Count, crate::t!("Count").into_owned(), auto_collapse);
+    let title_bar = crate::ui::dock::title_bar(PanelId::Count, crate::t!("Count palette").into_owned(), auto_collapse);
     // ponytail: the list is recounted on every view; cache by geometry epoch
     // if very large drawings make the palette slow.
     let body = match mode {
