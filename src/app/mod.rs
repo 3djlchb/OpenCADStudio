@@ -554,7 +554,7 @@ pub(super) struct OpenCADStudio {
     polar_increment_deg: f32,
     /// Reverse the mouse-wheel zoom direction when true (ZOOMWHEEL = 1).
     zoom_wheel_reversed: bool,
-    /// Mouse-wheel zoom sensitivity, clamped to 3..=100 (ZOOMFACTOR).
+    /// Mouse-wheel zoom sensitivity, clamped to 3..=500 (ZOOMFACTOR).
     zoom_factor: i32,
     /// Crosshair size setting (CURSORSIZE, 1..=100).
     cursor_size: i32,
@@ -2308,7 +2308,7 @@ pub enum Message {
     CommandLineFadeChanged(i32),
     /// Toggle reversing the mouse-wheel zoom direction (ZOOMWHEEL).
     ZoomWheelReversedChanged(bool),
-    /// Change how far one wheel notch zooms (ZOOMFACTOR, 3..=100).
+    /// Change how far one wheel notch zooms (ZOOMFACTOR, 3..=500).
     ZoomFactorChanged(i32),
     /// Options → User Preferences: right-click behaviour (SHORTCUTMENU).
     RightClickModeChanged(settings::RightClickMode),
