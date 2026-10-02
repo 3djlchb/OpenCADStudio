@@ -676,6 +676,8 @@ impl OpenCADStudio {
             right_click_hold_ms: self.right_click_hold_ms,
             grip_object_limit: self.grip_object_limit,
             image_frame: crate::scene::frame::profile_image_mode(),
+            attdef_on_screen: crate::modules::draw::draw::attdef::session().on_screen,
+            field_display: crate::entities::field::display(),
             ncopy_bind: self.ncopy_bind,
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
@@ -774,6 +776,8 @@ impl OpenCADStudio {
         self.right_click_hold_ms = super::super::settings::clamp_right_click_hold_ms(s.right_click_hold_ms);
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
         crate::scene::frame::set_profile_image_mode(s.image_frame);
+        crate::modules::draw::draw::attdef::session().on_screen = s.attdef_on_screen;
+        crate::entities::field::set_display(s.field_display);
         self.ncopy_bind = s.ncopy_bind;
         self.cursor_type = s.cursor_type;
         self.crosshair_color = s.crosshair_color;

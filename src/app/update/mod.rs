@@ -1817,6 +1817,7 @@ impl OpenCADStudio {
 
             Message::PdfDialog(message) => self.update_pdf_dialog(message),
             Message::AttdefDialog(message) => self.on_attdef_dialog(message),
+            Message::FieldDialog(message) => self.on_field_dialog(message),
             Message::PcManager(message) => self.update_pc_manager(message),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);
@@ -8520,6 +8521,10 @@ impl OpenCADStudio {
             }
 
             Message::CloseModal => {
+                if self.active_modal == Some(super::ModalKind::Field) {
+                    self.close_field_dialog();
+                    return Task::none();
+                }
                 if matches!(
                     self.active_modal,
                     Some(super::ModalKind::AttDef | super::ModalKind::AttDefEdit)

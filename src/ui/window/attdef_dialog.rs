@@ -34,6 +34,9 @@ pub enum AttdefDialogMsg {
     PickHeight,
     PickRotation,
     PickWidth,
+    /// The ƒ button: pick a field for the Default value.
+    InsertField,
+    EditInsertField,
     /// Edit the default value in the multi-line text editor.
     EditValue,
     DismissError,
@@ -76,6 +79,8 @@ pub struct AttdefDialogState {
     pub can_align_below: bool,
     /// Validation message shown above the buttons.
     pub error: Option<String>,
+    /// The field the Default value shows, when one was inserted.
+    pub field: Option<(String, Vec<codec::Handle>)>,
 }
 
 /// The Edit Attribute Definition dialog's fields.
@@ -87,6 +92,10 @@ pub struct AttdefEditState {
     pub default: String,
     pub constant: bool,
     pub error: Option<String>,
+    pub field: Option<(String, Vec<codec::Handle>)>,
+    /// The Default was retyped or a field inserted: the stored field is
+    /// replaced on Apply.
+    pub field_changed: bool,
 }
 
 fn msg(m: AttdefDialogMsg) -> Message {
@@ -248,8 +257,7 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
                             Some(AttdefDialogMsg::EditValue),
                         ));
                     }
-                    // No field picker in this application yet.
-                    value.push(pick(text("fx").size(12).into(), t!("Insert field").into_owned(), None))
+                    value.push(pick(text("fx").size(12).into(), t!("Insert field").into_owned(), Some(AttdefDialogMsg::InsertField)))
                 }
                 .spacing(6)
                 .into(),
@@ -381,7 +389,7 @@ pub fn view_edit<'a>(state: &'a AttdefEditState, sizing: crate::ui::modal::Modal
                     true,
                     AttdefDialogMsg::EditDefault
                 ),
-                pick(text("fx").size(12).into(), t!("Insert field").into_owned(), None),
+                pick(text("fx").size(12).into(), t!("Insert field").into_owned(), Some(AttdefDialogMsg::EditInsertField)),
             ]
             .spacing(6)
             .align_y(iced::Center),

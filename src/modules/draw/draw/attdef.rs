@@ -218,6 +218,8 @@ pub struct AttdefSpec {
     /// Multi-line boundary width (0 = none).
     pub boundary_width: f64,
     pub line_spacing: f64,
+    /// A field the default value comes from: its code and referenced objects.
+    pub field: Option<(String, Vec<codec::Handle>)>,
 }
 
 impl AttdefSpec {
@@ -447,6 +449,7 @@ impl AttdefCommand {
                 oblique_angle,
                 boundary_width: 0.0,
                 line_spacing: 1.0,
+                field: None,
             },
             lines: Vec::new(),
             styles,
@@ -951,6 +954,10 @@ impl CadCommand for AttdefPlaceCommand {
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         Some(cross_preview(pt, self.plane))
+    }
+
+    fn text_field(&self) -> Option<(String, Vec<codec::Handle>)> {
+        self.spec.field.clone()
     }
 }
 

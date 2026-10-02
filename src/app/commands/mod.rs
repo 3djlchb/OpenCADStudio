@@ -5,6 +5,7 @@ use iced::Task;
 use std::path::PathBuf;
 
 mod attdef;
+mod field;
 mod blocks;
 mod xref_attach;
 mod dim;
@@ -290,6 +291,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_attdef(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_field(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_draw(cmd, i) {
@@ -664,6 +668,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "DGNFRAME",
         "PDFOSNAP",
         "UOSNAP",
+        "FIELDDISPLAY",
         "PDFIMPORTMODE",
         "PDFIMPORTFILTER",
         "PDFIMPORTLAYERS",

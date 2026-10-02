@@ -54,6 +54,7 @@ impl OpenCADStudio {
                 if let Some(state) = self.attdef_dialog.as_mut() {
                     if let Some(value) = value {
                         state.default = value;
+                        state.field = None;
                     }
                     self.active_modal = Some(crate::app::ModalKind::AttDef);
                 }
@@ -134,6 +135,7 @@ impl OpenCADStudio {
             align_below: false,
             can_align_below: session.last.is_some(),
             error: None,
+            field: None,
         });
         drop(session);
         self.tabs[i].active_cmd = None;
@@ -154,6 +156,8 @@ impl OpenCADStudio {
             default: a.default_value.clone(),
             constant: a.flags.constant,
             error: None,
+            field: None,
+            field_changed: false,
         });
         self.active_modal = Some(crate::app::ModalKind::AttDefEdit);
     }
@@ -164,7 +168,15 @@ impl OpenCADStudio {
             match m {
                 AttdefDialogMsg::EditTag(v) => edit.tag = v,
                 AttdefDialogMsg::EditPrompt(v) => edit.prompt = v,
-                AttdefDialogMsg::EditDefault(v) => edit.default = v,
+                AttdefDialogMsg::EditDefault(v) => {
+                    edit.default = v;
+                    edit.field = None;
+                    edit.field_changed = true;
+                }
+                AttdefDialogMsg::EditInsertField => {
+                    self.active_modal = None;
+                    self.open_field_dialog(crate::ui::window::field_dialog::FieldTarget::AttdefEdit);
+                }
                 AttdefDialogMsg::Help => self.command_line.push_info(
                     crate::t!("Changes the tag, prompt and default value of an attribute definition.")
                         .as_ref(),
@@ -189,7 +201,15 @@ impl OpenCADStudio {
             AttdefDialogMsg::Annotative(v) => state.annotative = v,
             AttdefDialogMsg::Tag(v) => state.tag = v,
             AttdefDialogMsg::Prompt(v) => state.prompt = v,
-            AttdefDialogMsg::Default(v) => state.default = v,
+            AttdefDialogMsg::Default(v) => {
+                state.default = v;
+                state.field = None;
+            }
+            AttdefDialogMsg::InsertField => {
+                self.active_modal = None;
+                self.open_field_dialog(crate::ui::window::field_dialog::FieldTarget::AttdefDefault);
+                return Task::none();
+            }
             AttdefDialogMsg::Justify(c) => state.justify = c.0,
             AttdefDialogMsg::Style(v) => state.style = v,
             AttdefDialogMsg::Height(v) => state.height = v,
@@ -279,6 +299,7 @@ impl OpenCADStudio {
             oblique_angle: defaults.oblique_angle,
             boundary_width: width,
             line_spacing: 1.0,
+            field: state.field.clone(),
         };
         self.attdef_dialog = None;
         self.close_active_modal();
@@ -288,6 +309,8 @@ impl OpenCADStudio {
             session.annotative = spec.annotative;
             session.on_screen = state.on_screen;
         }
+        // The choice is kept with the user settings, as the reference keeps it.
+        self.persist_settings_if_changed();
         self.reset_command_start_state(i);
         if state.align_below {
             let previous = attdef::session().last.clone();
@@ -336,7 +359,7 @@ impl OpenCADStudio {
             self.tabs[i].scene.document.get_entity(state.handle),
             Some(codec::EntityType::AttributeDefinition(a))
                 if a.tag != attdef::normalize_tag(&state.tag) || a.prompt != state.prompt || a.default_value != state.default
-        );
+        ) || state.field_changed;
         if changed && !self.reject_locked_edit(i, state.handle) {
             self.push_undo_snapshot(i, "DDEDIT");
             if let Some(codec::EntityType::AttributeDefinition(a)) =
@@ -347,6 +370,14 @@ impl OpenCADStudio {
                     a.prompt = state.prompt.clone();
                 }
                 a.default_value = state.default.clone();
+            }
+            if state.field_changed {
+                crate::entities::field::set_text_field(
+                    &mut self.tabs[i].scene.document,
+                    state.handle,
+                    state.field.clone(),
+                    &state.default,
+                );
             }
             self.tabs[i]
                 .scene

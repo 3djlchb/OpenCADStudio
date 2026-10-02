@@ -1025,6 +1025,7 @@ impl OpenCADStudio {
                     | "DWFOSNAP"
                     | "DGNOSNAP"
                     | "UOSNAP"
+                    | "FIELDDISPLAY"
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
                     | "PDFIMPORTLAYERS"
@@ -1227,6 +1228,40 @@ impl OpenCADStudio {
                                     "Enter new value for PDFIMPORTIMAGEPATH, or . for none <\"{}\">:",
                                     image_path()
                                 ));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "FIELDDISPLAY" {
+                        let current = i16::from(crate::entities::field::display());
+                        match value.as_deref().map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v))) {
+                            Some(Some(mode)) => {
+                                if current != mode {
+                                    crate::entities::field::set_display(mode == 1);
+                                    // A profile setting: redraw the fields of every open drawing.
+                                    for tab in &mut self.tabs {
+                                        let changes: Vec<_> = tab
+                                            .scene
+                                            .document
+                                            .entities()
+                                            .filter(|e| crate::entities::field::hosts_field(&tab.scene.document, e))
+                                            .map(|e| (e.common().handle, crate::scene::ChangeKind::Modified))
+                                            .collect();
+                                        if !changes.is_empty() {
+                                            tab.scene.bump_entities(&changes);
+                                        }
+                                    }
+                                    self.save_config();
+                                }
+                            }
+                            Some(None) => {
+                                self.command_line.push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                self.command_line.push_output(&format!("Enter new value for FIELDDISPLAY <{current}>:"));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                            None => {
+                                self.command_line.push_output(&format!("Enter new value for FIELDDISPLAY <{current}>:"));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
