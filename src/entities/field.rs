@@ -249,3 +249,29 @@ fn os_date_locale() -> codec::fields::DateLocale {
     #[cfg(not(target_os = "windows"))]
     codec::fields::DateLocale::default()
 }
+
+/// FIELDDISPLAY: whether fields show on a gray background (not plotted).
+/// A profile setting, so one value for every drawing.
+static FIELD_DISPLAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn display() -> bool {
+    FIELD_DISPLAY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_display(on: bool) {
+    FIELD_DISPLAY.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The gray the reference draws behind a field.
+pub const BACKGROUND: [f32; 4] = [203.0 / 255.0, 203.0 / 255.0, 203.0 / 255.0, 1.0];
+
+/// Whether `entity` hosts a field: its extension dictionary has ACAD_FIELD.
+pub fn hosts_field(document: &CadDocument, entity: &codec::entities::EntityType) -> bool {
+    let Some(xdict) = entity.common().xdictionary_handle else {
+        return false;
+    };
+    matches!(
+        document.objects.get(&xdict),
+        Some(codec::objects::ObjectType::Dictionary(d)) if d.get("ACAD_FIELD").is_some()
+    )
+}

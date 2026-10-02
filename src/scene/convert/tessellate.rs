@@ -1408,6 +1408,59 @@ pub fn tessellate(
                 // also carries the glyph quads built above.
                 if bins.is_empty() {
                     let mut wires: Vec<WireModel> = Vec::new();
+                    // FIELDDISPLAY: a field shows on a gray box behind its
+                    // glyphs, on screen only.
+                    if text_aabb != WireModel::UNBOUNDED_AABB
+                        && crate::entities::field::display()
+                        && crate::entities::field::hosts_field(document, entity)
+                    {
+                        let corner_groups = match entity {
+                            EntityType::MText(m) => {
+                                let rotation = stroke_groups
+                                    .iter()
+                                    .find_map(|group| group.run.as_ref().map(|run| run.rotation as f64))
+                                    .unwrap_or(m.rotation);
+                                oriented_mtext_corner_groups(&sdf_verts, m, rotation, 0.0, anno)
+                            }
+                            EntityType::Text(t) => vec![oriented_text_corners(
+                                &sdf_verts,
+                                [t.insertion_point.x, t.insertion_point.y],
+                                t.rotation,
+                                0.0,
+                            )],
+                            EntityType::AttributeEntity(a) => vec![oriented_text_corners(
+                                &sdf_verts,
+                                [a.insertion_point.x, a.insertion_point.y],
+                                a.rotation,
+                                0.0,
+                            )],
+                            _ => Vec::new(),
+                        };
+                        let mut ft = Vec::with_capacity(6 * corner_groups.len());
+                        let mut ftl = Vec::with_capacity(6 * corner_groups.len());
+                        for corners in &corner_groups {
+                            for &k in &[0usize, 1, 2, 0, 2, 3] {
+                                let (h, lo) = split_ds_xyz(corners[k][0], corners[k][1], elev_v);
+                                ft.push(h);
+                                ftl.push(lo);
+                            }
+                        }
+                        if !ft.is_empty() {
+                            wires.push(WireModel {
+                                display_visible: true,
+                                plot_visible: false,
+                                name: name.clone(),
+                                color: crate::entities::field::BACKGROUND,
+                                selected,
+                                line_weight_px,
+                                aabb: WireModel::UNBOUNDED_AABB,
+                                plinegen: true,
+                                fill_tris: ft,
+                                fill_tris_low: ftl,
+                                ..Default::default()
+                            });
+                        }
+                    }
                     // MTEXT background and frame follow the glyph bounds.
                     if text_aabb != WireModel::UNBOUNDED_AABB {
                         if let EntityType::MText(m) = entity {

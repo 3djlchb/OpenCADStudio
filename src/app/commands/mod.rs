@@ -668,6 +668,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "DGNFRAME",
         "PDFOSNAP",
         "UOSNAP",
+        "FIELDDISPLAY",
         "PDFIMPORTMODE",
         "PDFIMPORTFILTER",
         "PDFIMPORTLAYERS",
