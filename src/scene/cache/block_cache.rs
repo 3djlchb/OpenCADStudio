@@ -618,6 +618,18 @@ fn build_defn(
                 continue
             }
             _ => {
+                // A standalone definition draws its tag; as block content a
+                // constant one draws its value.
+                let shown;
+                let entity = match entity {
+                    EntityType::AttributeDefinition(ad) => {
+                        let mut value = ad.clone();
+                        value.tag = ad.default_value.clone();
+                        shown = EntityType::AttributeDefinition(value);
+                        &shown
+                    }
+                    other => other,
+                };
                 // A wide polyline inside a block carries its `world_width` on
                 // the LocalWire; `emit_wire` scales it by the insert transform
                 // so the shader band matches the scaled geometry (same band the

@@ -1,14 +1,13 @@
 // Insert module — references, point clouds, blocks, attributes, import, content.
 
 mod attdef;
-mod attedit;
+pub(crate) mod attedit;
 mod attman;
-mod attsync;
 pub mod base_point;
 mod content_browser;
 pub(crate) mod create_block;
 mod design_center;
-mod edit_block;
+pub(crate) mod edit_block;
 pub(crate) mod image_transparency;
 pub(crate) mod insert_block;
 mod landxml;
@@ -106,19 +105,38 @@ impl CadModule for InsertModule {
                     tools: vec![
                         RibbonItem::LargeTool(mview_block::tool()),
                         insert_block::gallery(),
-                        RibbonItem::Tool(create_block::tool()),
-                        RibbonItem::Tool(edit_block::tool()),
-                        RibbonItem::Tool(base_point::tool()),
+                        RibbonItem::LabeledDropdown {
+                            id: "ATTEDIT_DROPDOWN",
+                            label: "Edit Attribute",
+                            icon: attedit::ICON,
+                            items: vec![
+                                ("ATTEDIT", "Single", attedit::ICON),
+                                ("-ATTEDIT", "Multiple", attedit::ICON),
+                            ],
+                            default: "ATTEDIT",
+                        },
+                        // ATTMODE: the face shows the drawing's current setting.
+                        RibbonItem::LabeledDropdown {
+                            id: "ATTMODE_DROPDOWN",
+                            label: "",
+                            icon: attedit::ICON,
+                            items: vec![
+                                ("ATTMODE1", "Retain Attribute Display", attedit::ICON),
+                                ("ATTMODE2", "Display All Attributes", attedit::ICON),
+                                ("ATTMODE0", "Hide All Attributes", attedit::ICON),
+                            ],
+                            default: "ATTMODE1",
+                        },
                     ],
                 },
-                // ── Attributes ────────────────────────────────────────────────────
+                // ── Block Definition (slide-out: Set Base Point, Synchronize) ─────
                 RibbonGroup {
-                    title: "Attributes",
+                    title: "Block Definition",
                     tools: vec![
+                        RibbonItem::LargeTool(create_block::tool()),
                         RibbonItem::LargeTool(attdef::tool()),
-                        RibbonItem::LargeTool(attedit::tool()),
-                        RibbonItem::Tool(attman::tool()),
-                        RibbonItem::Tool(attsync::tool()),
+                        RibbonItem::LargeTool(attman::tool()),
+                        RibbonItem::LargeTool(edit_block::tool()),
                     ],
                 },
                 // ── Import ────────────────────────────────────────────────────────

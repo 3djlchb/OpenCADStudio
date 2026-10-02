@@ -4,6 +4,7 @@ use crate::scene::Scene;
 use iced::Task;
 use std::path::PathBuf;
 
+mod attdef;
 mod blocks;
 mod xref_attach;
 mod dim;
@@ -286,6 +287,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_pc_extract(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_attdef(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_draw(cmd, i) {
@@ -683,6 +687,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "POINTCLOUDPOINTMAXLEGACY",
         "XCLIPFRAME",
         "WIPEOUTFRAME",
+        "ATTMODE0",
+        "ATTMODE1",
+        "ATTMODE2",
         "FRAMES0",
         "FRAMES1",
         "FRAMES3",

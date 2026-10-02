@@ -38,6 +38,8 @@ impl OpenCADStudio {
             Some(K::XrefAttach) => crate::t!("Attach External Reference").into_owned(),
             Some(K::WriteBlock) => crate::t!("Write Block").into_owned(),
             Some(K::GeometricTolerance) => crate::t!("Geometric Tolerance").into_owned(),
+            Some(K::AttDef) => crate::t!("Attribute Definition").into_owned(),
+            Some(K::AttDefEdit) => crate::t!("Edit Attribute Definition").into_owned(),
             Some(K::DraftingSettings) => crate::t!("Drafting Settings").into_owned(),
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
             Some(K::LayerStateEditor) => crate::tr!("modal", "edit-layer-state"),
@@ -571,6 +573,14 @@ impl OpenCADStudio {
                 sized_flow(ex, 440, 395, |flow| {
                     crate::ui::window::wblock::view_window(state, flow)
                 })
+            }
+            super::super::ModalKind::AttDef => {
+                let state = self.attdef_dialog.as_ref()?;
+                sized_flow(ex, 720, 520, |flow| crate::ui::window::attdef_dialog::view(state, flow))
+            }
+            super::super::ModalKind::AttDefEdit => {
+                let state = self.attdef_edit.as_ref()?;
+                sized_flow(ex, 460, 220, |flow| crate::ui::window::attdef_dialog::view_edit(state, flow))
             }
             super::super::ModalKind::GeometricTolerance => {
                 let state = self.geometric_tolerance.as_ref()?;

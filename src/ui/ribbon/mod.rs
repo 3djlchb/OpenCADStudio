@@ -1410,7 +1410,11 @@ fn render_group<'a>(
 
     column![
         tools_el,
-        draw_panel::group_title(group.title, open_dd),
+        draw_panel::group_title(
+            group.title,
+            &group.tools.iter().filter_map(item_id).collect::<Vec<_>>(),
+            open_dd,
+        ),
     ]
     .align_x(iced::Center)
     .spacing(0)

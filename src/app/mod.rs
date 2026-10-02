@@ -498,6 +498,9 @@ pub(super) struct OpenCADStudio {
     /// PDF dialogs' working copies; `None` while closed.
     pdf_attach: Option<crate::ui::window::pdf_dialogs::PdfAttachState>,
     point_cloud_attach: Option<crate::ui::window::pdf_dialogs::PointCloudAttachState>,
+    /// ATTDEF dialog and Edit Attribute Definition dialog; `None` while closed.
+    attdef_dialog: Option<crate::ui::window::attdef_dialog::AttdefDialogState>,
+    attdef_edit: Option<crate::ui::window::attdef_dialog::AttdefEditState>,
     point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
     pc_section: Option<crate::ui::window::pdf_dialogs::PcSectionState>,
     underlay_layers: Option<crate::ui::window::pdf_dialogs::UnderlayLayersState>,
@@ -1926,6 +1929,8 @@ pub enum ModalKind {
     XrefAttach,
     WriteBlock,
     GeometricTolerance,
+    AttDef,
+    AttDefEdit,
     DraftingSettings,
     AutoConstrainSettings,
     LayerStateEditor,
@@ -3873,6 +3878,7 @@ pub enum Message {
     PdfImportPick,
     /// An edit in one of the PDF dialogs.
     PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg),
+    AttdefDialog(crate::ui::window::attdef_dialog::AttdefDialogMsg),
     /// A click or search in the Point Cloud Manager.
     PcManager(crate::ui::window::pc_manager::PcManagerMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -4066,6 +4072,8 @@ impl OpenCADStudio {
             block_definition: None,
             pdf_attach: None,
             point_cloud_attach: None,
+            attdef_dialog: None,
+            attdef_edit: None,
             point_cloud_color_map: None,
             pc_section: None,
             underlay_layers: None,

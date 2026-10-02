@@ -68,6 +68,10 @@ thread_local! {
     /// the same place.
     static FIXED_TEXT_HEIGHTS: std::cell::RefCell<rustc_hash::FxHashMap<String, f64>> =
         std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+    /// Resolved font of every text style, for text measured without the
+    /// document at hand (justification changes, attribute placement).
+    static STYLE_FONTS: std::cell::RefCell<rustc_hash::FxHashMap<String, String>> =
+        std::cell::RefCell::new(rustc_hash::FxHashMap::default());
 }
 
 /// Record which text styles fix their height, from the drawing's style table.
@@ -81,6 +85,23 @@ pub fn set_fixed_text_heights(document: &codec::CadDocument) {
             }
         }
     });
+    STYLE_FONTS.with(|cell| {
+        let mut map = cell.borrow_mut();
+        map.clear();
+        for style in document.text_styles.iter() {
+            let font = crate::entities::text_support::resolve_text_style(&style.name, document).font_name;
+            map.insert(style.name.to_ascii_lowercase(), font);
+        }
+    });
+}
+
+/// The resolved font of `style` (Standard when unnamed); empty when unknown.
+pub fn style_font(style: &str) -> String {
+    let key = match style.trim() {
+        "" => "standard".to_string(),
+        name => name.to_ascii_lowercase(),
+    };
+    STYLE_FONTS.with(|cell| cell.borrow().get(&key).cloned().unwrap_or_default())
 }
 
 /// The height `style` fixes, or `None` when it leaves the height to the entity.
