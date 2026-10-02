@@ -1108,6 +1108,161 @@ fn extract_sub_polyline(poly: &LwPolyline, s0: f64, s1: f64) -> Option<LwPolylin
     Some(new_poly)
 }
 
+/// Kernel curve for one LwPolyline segment.
+///
+/// The boolean tells whether the kernel curve runs opposite to the polyline's
+/// own segment direction. Negative-bulge arcs are represented by the kernel as
+/// a positive-sweep arc, so their intersection parameter has to be reversed
+/// back to the polyline's local 0..1 parameter.
+fn lwpoly_segment_curve(
+    poly: &LwPolyline,
+    segment: usize,
+) -> Option<(Curve, bool)> {
+    let n = poly.vertices.len();
+    if n < 2 {
+        return None;
+    }
+
+    let a = &poly.vertices[segment % n];
+    let b = &poly.vertices[(segment + 1) % n];
+
+    let p0 = [a.location.x, a.location.y];
+    let p1 = [b.location.x, b.location.y];
+
+    if (p1[0] - p0[0]).hypot(p1[1] - p0[1]) < 1e-12 {
+        return None;
+    }
+
+    if let Some(arc) = BulgeArc::from_bulge(p0, p1, a.bulge) {
+        if arc.sweep >= 0.0 {
+            Some((
+                Curve::Arc(KernelArc {
+                    centre: arc.center,
+                    radius: arc.radius,
+                    start_angle: arc.start_angle,
+                    end_angle: arc.start_angle + arc.sweep,
+                }),
+                false,
+            ))
+        } else {
+            Some((
+                Curve::Arc(KernelArc {
+                    centre: arc.center,
+                    radius: arc.radius,
+                    start_angle: arc.end_angle,
+                    end_angle: arc.end_angle - arc.sweep,
+                }),
+                true,
+            ))
+        }
+    } else {
+        Some((
+            Curve::Line(KernelLine {
+                start: p0,
+                end: p1,
+            }),
+            false,
+        ))
+    }
+}
+
+/// Global polyline parameters at which non-adjacent segments of the same
+/// polyline intersect.
+///
+/// Segment neighbours are deliberately excluded: their common vertex is a
+/// normal polyline vertex, not a self-intersection.
+fn lwpoly_self_cut_params(poly: &LwPolyline) -> Vec<f64> {
+    let n = poly.vertices.len();
+    if n < 3 {
+        return Vec::new();
+    }
+
+    let closed = poly.is_closed;
+    let segment_count = if closed { n } else { n - 1 };
+    let total = segment_count as f64;
+
+    let mut cuts = Vec::new();
+
+    for i in 0..segment_count {
+        let Some((curve_a, reverse_a)) = lwpoly_segment_curve(poly, i) else {
+            continue;
+        };
+
+        for j in (i + 1)..segment_count {
+            // Ordinary neighbouring segments meet at their common vertex.
+            let adjacent = j == i + 1
+                || (closed && i == 0 && j + 1 == segment_count);
+
+            if adjacent {
+                continue;
+            }
+
+            let Some((curve_b, reverse_b)) = lwpoly_segment_curve(poly, j) else {
+                continue;
+            };
+
+            let hits = kernel_intersect(
+                &curve_a,
+                &curve_b,
+                KernelTolerance::new(CUT_TOLERANCE),
+            );
+
+            for hit in hits {
+                let mut ua = hit.t_a;
+                let mut ub = hit.t_b;
+
+                if reverse_a {
+                    ua = 1.0 - ua;
+                }
+                if reverse_b {
+                    ub = 1.0 - ub;
+                }
+
+                if !ua.is_finite()
+                    || !ub.is_finite()
+                    || ua < -1e-7
+                    || ua > 1.0 + 1e-7
+                    || ub < -1e-7
+                    || ub > 1.0 + 1e-7
+                {
+                    continue;
+                }
+
+                ua = ua.clamp(0.0, 1.0);
+                ub = ub.clamp(0.0, 1.0);
+
+                // If both sides only touch at existing vertices, those
+                // vertices already act as trim limits below.
+                let a_endpoint = ua <= 1e-7 || ua >= 1.0 - 1e-7;
+                let b_endpoint = ub <= 1e-7 || ub >= 1.0 - 1e-7;
+
+                if a_endpoint && b_endpoint {
+                    continue;
+                }
+
+                let pa = i as f64 + ua;
+                let pb = j as f64 + ub;
+
+                cuts.push(if closed {
+                    pa.rem_euclid(total)
+                } else {
+                    pa
+                });
+
+                cuts.push(if closed {
+                    pb.rem_euclid(total)
+                } else {
+                    pb
+                });
+            }
+        }
+    }
+
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    cuts
+}
+
 /// Trim a clicked LwPolyline: remove the portion containing the click, bounded
 /// by the nearest boundary intersections on each side. A closed polyline needs
 /// ≥2 cuts and becomes an open polyline (the surviving arc); an open one yields
@@ -1132,21 +1287,45 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
     };
 
     // Boundary cuts as global params (segment index + local u).
+    // External boundary cuts as global params (segment index + local u).
     let mut cuts: Vec<f64> = Vec::new();
+
     for i in 0..seg_count {
         let p0 = vx(i);
         let p1 = vx(i + 1);
         let b = seg_bulge(i);
+
         for u in polyline_seg_ts(p0, p1, b, handle, geos) {
             let param = i as f64 + u.clamp(0.0, 1.0);
-            cuts.push(if closed { param.rem_euclid(total) } else { param });
+
+            cuts.push(if closed {
+                param.rem_euclid(total)
+            } else {
+                param
+            });
         }
     }
-    cuts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-    if cuts.is_empty() {
-        return None;
+
+    // A polyline can also cut itself. These are intersections between
+    // non-adjacent segments belonging to this same LwPolyline.
+    cuts.extend(lwpoly_self_cut_params(poly));
+
+    // Every polyline vertex is also a valid trim boundary. This allows an entire
+    // segment between two vertices to be removed even when no external entity
+    // crosses that particular segment.
+    if closed {
+        for i in 0..seg_count {
+            cuts.push(i as f64);
+        }
+    } else {
+        // 0 and `total` are added explicitly below as the open polyline ends.
+        for i in 1..seg_count {
+            cuts.push(i as f64);
+        }
     }
+
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
 
     // Click param: nearest point on the polyline.
     let mut best = (f64::INFINITY, 0.0_f64);
@@ -1251,11 +1430,7 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
         }
     }
 
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    Some(out)
 }
 
 // ── Extend helpers ────────────────────────────────────────────────────────
@@ -1650,6 +1825,11 @@ fn crossing_trim_lwpolyline(
     };
 
     let mut removed = Vec::<(f64, f64)>::new();
+
+    // Compute the polyline's own non-adjacent segment intersections once.
+    // These global parameters will later be mapped back into each source segment.
+    let self_cuts = lwpoly_self_cut_params(poly);
+
     for i in 0..seg_count {
         let a = vertex_xy(i);
         let b = vertex_xy(i + 1);
@@ -1678,42 +1858,55 @@ fn crossing_trim_lwpolyline(
         let Some((inside_lo, inside_hi)) = window_range else {
             continue;
         };
-        let cuts = polyline_seg_ts(a, b, bulge, handle, geos);
-        if cuts.is_empty() {
-            continue;
+        // External intersections on this segment.
+        // External intersections on this segment.
+        let mut cuts = polyline_seg_ts(a, b, bulge, handle, geos);
+
+        // Also include self-intersections belonging to this source segment.
+        // `lwpoly_self_cut_params()` stores them as global polyline parameters:
+        //     segment_index + local_parameter
+        //
+        // Convert the ones belonging to segment `i` back to local 0..1.
+        let seg_start = i as f64;
+        let seg_end = seg_start + 1.0;
+
+        for global_t in self_cuts.iter().copied() {
+            if global_t > seg_start + 1e-6
+                && global_t < seg_end - 1e-6
+            {
+                cuts.push(global_t - seg_start);
+            }
         }
 
-        let pick_t = if let Some(ba) = BulgeArc::from_bulge(a, b, bulge) {
-            let angle = (window.pick[1] - ba.center[1]).atan2(window.pick[0] - ba.center[0]);
-            let travelled = if ba.sweep >= 0.0 {
-                (angle - ba.start_angle).rem_euclid(TAU)
-            } else {
-                -((ba.start_angle - angle).rem_euclid(TAU))
-            };
-            (travelled / ba.sweep).clamp(inside_lo, inside_hi)
-        } else {
-            let dx = b[0] - a[0];
-            let dy = b[1] - a[1];
-            let len2 = dx * dx + dy * dy;
-            let projected = if len2 > 1e-12 {
-                ((window.pick[0] - a[0]) * dx + (window.pick[1] - a[1]) * dy) / len2
-            } else {
-                (inside_lo + inside_hi) * 0.5
-            };
-            projected.clamp(inside_lo, inside_hi)
-        };
+        // The source segment endpoints are also valid trim limits.
+        cuts.push(0.0);
+        cuts.push(1.0);
 
-        let mut bounds = vec![0.0];
-        bounds.extend(cuts);
-        bounds.push(1.0);
-        bounds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        bounds.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-        if let Some(span) = bounds
-            .windows(2)
-            .find(|span| pick_t >= span[0] - 1e-6 && pick_t <= span[1] + 1e-6)
-        {
-            if span[1] - span[0] > 1e-6 {
-                removed.push((i as f64 + span[0], i as f64 + span[1]));
+        cuts.sort_by(f64::total_cmp);
+        cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+
+        // Remove every trim span that is actually touched by the selection box.
+        //
+        // A single source segment may contain several sub-spans when external
+        // boundaries cross it. Only the sub-spans overlapping the window are removed.
+        for span in cuts.windows(2) {
+            let lo = span[0].clamp(0.0, 1.0);
+            let hi = span[1].clamp(0.0, 1.0);
+
+            if hi - lo <= 1e-6 {
+                continue;
+            }
+
+            // This trim span participates when its parameter interval overlaps the
+            // portion of the source segment lying inside the crossing rectangle.
+            let overlaps_window =
+                hi >= inside_lo - 1e-6 && lo <= inside_hi + 1e-6;
+
+            if overlaps_window {
+                removed.push((
+                    i as f64 + lo,
+                    i as f64 + hi,
+                ));
             }
         }
     }
