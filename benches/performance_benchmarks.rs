@@ -58,7 +58,7 @@ use OpenCADStudio::snap::Snapper;
 use OpenCADStudio::ui::icons::{self, CHECK};
 use OpenCADStudio::ui::overlay::{
     grid_segments, selection_overlay, should_reuse, CrosshairOptions, GridCanvasState,
-    GridKey, GridParams, GridStyle, GripMarker, OstTrackPoint, SelectionVisualOptions,
+    GridKey, GridParams, GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions,
     UcsIconParams,
 };
 use OpenCADStudio::ui::properties::LinetypeItem;
@@ -1512,7 +1512,7 @@ fn build_selection_overlay_element(
         vec![],
         None,
         None,
-        false,
+        NavCursor::None,
         false,
         false,
         [0.1, 0.1, 0.1, 1.0],
