@@ -841,6 +841,7 @@ impl Scene {
         };
         std::iter::once(graph.root)
             .chain(graph.nodes)
+            .chain(graph.evaluation_graph)
             .filter_map(|object_handle| {
                 self.document
                     .objects
@@ -869,7 +870,7 @@ impl Scene {
             return false;
         };
         self.record_undo_object_before(graph.root, None);
-        for node in graph.nodes {
+        for node in graph.nodes.into_iter().chain(graph.evaluation_graph) {
             self.record_undo_object_before(node, None);
         }
         self.sync_solid_reference_point(handle);
@@ -881,16 +882,17 @@ impl Scene {
         handle: Handle,
         operation: codec::objects::SolidHistoryOperation,
     ) -> bool {
-        let previous = self
+        let previous: Vec<Handle> = self
             .document
             .solid_history_graph(handle)
-            .map(|graph| graph.nodes)
+            .map(|graph| graph.nodes.into_iter().chain(graph.evaluation_graph).collect())
             .unwrap_or_default();
         self.record_solid_history_before(handle);
         let Some(graph) = self.document.append_solid_history(handle, operation) else {
             return false;
         };
-        for node in graph.nodes {
+        // A history saved without an evaluation graph gets one on append.
+        for node in graph.nodes.into_iter().chain(graph.evaluation_graph) {
             if !previous.contains(&node) {
                 self.record_undo_object_before(node, None);
             }
