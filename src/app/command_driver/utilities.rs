@@ -1139,4 +1139,62 @@ impl OpenCADStudio {
             return task;
         }
     }
+
+    /// Feed one line from a command script (.scr) into the command pipeline.
+    ///
+    /// If an interactive command is active, the line (or its tokens) is routed to
+    /// the active command's prompts (e.g. coordinates or options). If no command
+    /// is active, the line starts a new command (supporting both bare verbs and
+    /// inline single-line commands).
+    pub(in crate::app) fn feed_script_line(&mut self, line: &str) -> Task<Message> {
+        let i = self.active_tab;
+        let trimmed = line.trim();
+
+        // 1. Text editor currently open (e.g. TEXT command content step).
+        if self.text_inline.is_some() {
+            if let Some(editor) = self.text_inline.as_mut() {
+                editor.value = line.to_string();
+            }
+            let committed = self.text_inline_commit();
+            let task = self.post_editor_closed(committed);
+            return if committed {
+                Task::batch([task, Task::done(Message::CommandEscape)])
+            } else {
+                task
+            };
+        }
+
+        // 2. Blank line submits Enter to the active command (or repeats last).
+        if trimmed.is_empty() {
+            return self.feed_command(StepInput::Enter);
+        }
+
+        // 3. A command is currently active: route to its prompt handlers.
+        if self.tabs[i].active_cmd.is_some() {
+            if self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.input_kind().is_free_text())
+                .unwrap_or(false)
+            {
+                return self.feed_command(StepInput::Text(trimmed.to_string()));
+            }
+
+            let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+            let mut tasks = Vec::new();
+            for tok in tokens {
+                if self.tabs[i].active_cmd.is_none() {
+                    // Preceding token finished the active command; remaining tokens start a new one.
+                    tasks.push(self.run_command_line(tok));
+                } else {
+                    tasks.push(self.feed_active_cmd(tok));
+                }
+            }
+            return Task::batch(tasks);
+        }
+
+        // 4. No command is active: run as top-level command.
+        self.run_command_line(trimmed)
+    }
 }
+

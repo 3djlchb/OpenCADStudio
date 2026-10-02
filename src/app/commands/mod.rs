@@ -116,6 +116,11 @@ impl OpenCADStudio {
             Some(rest) => (rest.trim(), true),
             None => (cmd, false),
         };
+        let cmd = cmd.trim();
+        // AutoCAD command prefixes: '_' (international name), '.' (built-in name bypass)
+        let cmd = cmd.strip_prefix('.').unwrap_or(cmd);
+        let cmd = cmd.strip_prefix('_').unwrap_or(cmd);
+        let cmd = cmd.strip_prefix('.').unwrap_or(cmd);
         let resolved = self.resolve_alias(cmd);
         let cmd = resolved.as_deref().unwrap_or(cmd);
         if is_spacemouse_command(cmd) {
