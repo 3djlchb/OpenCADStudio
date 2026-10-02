@@ -382,6 +382,15 @@ pub fn block_has_attribute_fields(document: &CadDocument, block: &str) -> bool {
 /// Give plot-time fields (PlotDate) the plot's time; returns the hosts whose
 /// text changed.
 pub fn stamp_plot_fields(document: &mut CadDocument) -> Vec<Handle> {
+    // The context reads a snapshot of the whole drawing; most drawings hold
+    // no field, and a large one should not be copied for every plot.
+    let has_fields = document
+        .objects
+        .values()
+        .any(|object| matches!(object, codec::objects::ObjectType::Field(_)));
+    if !has_fields {
+        return Vec::new();
+    }
     let snapshot = document.clone();
     let context = PlotContext(OcsFieldContext(Some(&snapshot)));
     document.stamp_plot_fields(&context)
