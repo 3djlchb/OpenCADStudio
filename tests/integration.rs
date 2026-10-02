@@ -72,5 +72,8 @@ mod viewport_wide_polyline_plot_width;
 #[path = "xclip_plot_test.rs"]
 mod xclip_plot_test;
 
+#[path = "zoom_extents_coverage.rs"]
+mod zoom_extents_coverage;
+
 #[path = "zoom_extents_xline.rs"]
 mod zoom_extents_xline;
