@@ -655,16 +655,9 @@ impl super::OpenCADStudio {
         };
 
         self.push_undo_snapshot(i, "FILLETEDGE");
-        if self.tabs[i].scene.document.solid_history_graph(handle).is_none()
-            && !self.tabs[i]
-                .scene
-                .create_solid_history(handle, solid_history::brep_op(source))
-        {
-            self.command_line
-                .push_error(crate::t!("The edge body history could not be created.").as_ref());
-            return false;
-        }
-        if !self.tabs[i].scene.append_solid_history(
+        // A solid without history stays without one, as in the reference.
+        let has_history = self.tabs[i].scene.document.solid_history_graph(handle).is_some();
+        if has_history && !self.tabs[i].scene.append_solid_history(
             handle,
             solid_history::fillet_op(history_edges, radius),
         ) {
@@ -672,11 +665,13 @@ impl super::OpenCADStudio {
                 .push_error(crate::t!("The fillet history could not be recorded.").as_ref());
             return false;
         }
-        let _ = self.tabs[i].scene.apply_solid_history_choice(
-            handle,
-            solid_history::PROP_HISTORY,
-            "Record",
-        );
+        if has_history {
+            let _ = self.tabs[i].scene.apply_solid_history_choice(
+                handle,
+                solid_history::PROP_HISTORY,
+                "Record",
+            );
+        }
         let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
             return false;
         };
@@ -743,16 +738,8 @@ impl super::OpenCADStudio {
         };
 
         self.push_undo_snapshot(i, "CHAMFEREDGE");
-        if self.tabs[i].scene.document.solid_history_graph(handle).is_none()
-            && !self.tabs[i]
-                .scene
-                .create_solid_history(handle, solid_history::brep_op(source))
-        {
-            self.command_line
-                .push_error(crate::t!("The edge body history could not be created.").as_ref());
-            return false;
-        }
-        if !self.tabs[i].scene.append_solid_history(
+        let has_history = self.tabs[i].scene.document.solid_history_graph(handle).is_some();
+        if has_history && !self.tabs[i].scene.append_solid_history(
             handle,
             solid_history::chamfer_op(
                 history_edges,
@@ -765,11 +752,13 @@ impl super::OpenCADStudio {
                 .push_error(crate::t!("The chamfer history could not be recorded.").as_ref());
             return false;
         }
-        let _ = self.tabs[i].scene.apply_solid_history_choice(
-            handle,
-            solid_history::PROP_HISTORY,
-            "Record",
-        );
+        if has_history {
+            let _ = self.tabs[i].scene.apply_solid_history_choice(
+                handle,
+                solid_history::PROP_HISTORY,
+                "Record",
+            );
+        }
         let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
             return false;
         };

@@ -60,7 +60,7 @@ pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptio
     };
     let mut base = SolidHistoryNodeBase::new(1);
     base.transform = glam::DMat4::IDENTITY.to_cols_array();
-    Some(SolidHistorySweep {
+    let record = SolidHistorySweep {
         base,
         operation_major: 1,
         sweep_entity: Some(sweep_entity),
@@ -74,7 +74,40 @@ pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptio
         path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
         reference_point: Vector3::new(base_point[0], base_point[1], base_point[2]),
         ..SolidHistorySweep::default()
-    })
+    };
+    placed_sweep_record(profile, record)
+}
+
+/// The record the reference reads: the profile stored already placed at the
+/// path start (base point, alignment and profile rotation applied) with flag
+/// 295 set, and no reference point.
+fn placed_sweep_record(profile: &EntityType, mut record: SolidHistorySweep) -> Option<SolidHistorySweep> {
+    let (placed, _) = kernel::acis::sweep_history_placements(&record).ok()?;
+    let embedded_to_world = glam::DMat4::from_cols(
+        glam::DVec4::new(placed.x_axis[0], placed.x_axis[1], placed.x_axis[2], 0.0),
+        glam::DVec4::new(placed.y_axis[0], placed.y_axis[1], placed.y_axis[2], 0.0),
+        glam::DVec4::new(placed.z_axis[0], placed.z_axis[1], placed.z_axis[2], 0.0),
+        glam::DVec4::new(placed.origin[0], placed.origin[1], placed.origin[2], 1.0),
+    );
+    // Source world geometry -> placed world geometry.
+    let map = embedded_to_world * glam::DMat4::from_cols_array(&record.sweep_entity_transform).inverse();
+    let m = map.to_cols_array_2d();
+    let transform = codec::types::Transform::from_matrix(codec::types::Matrix4 {
+        m: [
+            [m[0][0], m[1][0], m[2][0], m[3][0]],
+            [m[0][1], m[1][1], m[2][1], m[3][1]],
+            [m[0][2], m[1][2], m[2][2], m[3][2]],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    });
+    let mut moved = profile.clone();
+    crate::scene::view::dispatch::apply_transform(&mut moved, &crate::command::EntityTransform::Affine(transform));
+    let (sweep_entity, sweep_entity_transform) = embedded_sweep_profile(&moved)?;
+    record.sweep_entity = Some(sweep_entity);
+    record.sweep_entity_transform = sweep_entity_transform;
+    record.flags_294_296 = [false, true, true];
+    record.reference_point = Vector3::new(0.0, 0.0, 0.0);
+    Some(record)
 }
 
 pub fn swept_with_options(profile: &EntityType, path: &EntityType, mode: ExtrudeMode, options: SweepOptions) -> Option<Body> {
