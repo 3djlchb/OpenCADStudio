@@ -4206,7 +4206,7 @@ dependencies = [
 [[package]]
 name = "opencadcodec"
 version = "0.5.5"
-source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=d96e3fa#d96e3fa2fe5acbeac966f1db4c01142618bf9c79"
+source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=8d23408#8d2340876caef34f68436f62e2c9402be0aabb28"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -4229,7 +4229,7 @@ dependencies = [
 [[package]]
 name = "opencadgraph"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadgraph.git?rev=10d0858#10d0858a7252f85df07be4dfa00946658b6979e6"
+source = "git+https://github.com/HakanSeven12/opencadgraph.git?rev=9b5ae39#9b5ae39ea35567e67faf8bc8d20b40e2bbab1177"
 dependencies = [
  "opencadkernel",
  "serde_json",
@@ -4238,7 +4238,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=9cdd36d#9cdd36dc527216ba7929d8cfcdc1b7712a2d4cb8"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=d22a270#d22a270a0af79db9f10428a2d941152f6bb28158"
 dependencies = [
  "cavalier_contours",
  "opencadcodec",
@@ -4249,7 +4249,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=9cdd36d#9cdd36dc527216ba7929d8cfcdc1b7712a2d4cb8"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=d22a270#d22a270a0af79db9f10428a2d941152f6bb28158"
 dependencies = [
  "nalgebra",
 ]

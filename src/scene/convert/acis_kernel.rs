@@ -31,23 +31,14 @@ pub fn tessellate_sat(
     if bodies.is_empty() {
         return None;
     }
+    // The kernel's lift already applies each body's transform record; its
+    // scale still sets the tessellation tolerance.
     let mut placed_bodies = Vec::with_capacity(bodies.len());
     for body in bodies {
         let source = body.provenance.source()?;
         let transform = body_transform(document, source.index() as usize).ok()?;
         let placement_scale = transform.map_or(1.0, |(_, _, scale)| scale.abs());
-        let placed = if let Some((matrix, translation, scale)) = transform {
-            let placement = brep::Placement {
-                x_axis: [scale * matrix[0], scale * matrix[1], scale * matrix[2]],
-                y_axis: [scale * matrix[3], scale * matrix[4], scale * matrix[5]],
-                z_axis: [scale * matrix[6], scale * matrix[7], scale * matrix[8]],
-                origin: translation,
-            };
-            brep::transform(&body, &placement)?
-        } else {
-            body
-        };
-        placed_bodies.push((placed, placement_scale));
+        placed_bodies.push((body, placement_scale));
     }
     let bodies = placed_bodies;
     let resolution = if facet_res.is_finite() && facet_res > 0.0 {

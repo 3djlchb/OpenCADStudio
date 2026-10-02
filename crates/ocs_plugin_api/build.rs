@@ -163,6 +163,10 @@ fn generate_type_registry(out_dir: &Path) {
             trace_simple::<codec::objects::AssocConstraintNodeData>,
         ),
         (
+            "AssocCurveValue",
+            trace_simple::<codec::objects::AssocCurveValue>,
+        ),
+        (
             "AssocEvalValue",
             trace_simple::<codec::objects::AssocEvalValue>,
         ),
