@@ -1,5 +1,6 @@
 pub(crate) mod spacemouse;
 use crate::app::config::UiThemeConfig;
+use crate::app::settings;
 use crate::app::settings::{CursorType, RightClickMode};
 use crate::app::Message;
 use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
@@ -55,7 +56,8 @@ pub struct AppPrefs {
     pub commandline_fade_ms: i32,
     /// ZOOMWHEEL: reverse the mouse-wheel zoom direction.
     pub zoom_wheel_reversed: bool,
-    /// ZOOMFACTOR, 3..=500.
+    /// ZOOMFACTOR. The slider sets the range the system variable has; the
+    /// field beside it reaches `settings::ZOOM_FACTOR_MAX`.
     pub zoom_factor: i32,
     /// TEXTEDITMODE: TEXTEDIT keeps prompting for the next object.
     pub texteditmode: bool,
@@ -200,6 +202,7 @@ pub fn view_window<'a>(
     prefs: AppPrefs,
     spacemouse: Element<'a, Message>,
     snap_angle_input: &'a str,
+    zoom_factor_input: &'a str,
     drawing_prefs: DrawingPrefs,
     folders: Folders,
     double_click_block_refedit: bool,
@@ -1181,10 +1184,24 @@ pub fn view_window<'a>(
         Space::new().height(12),
         row![
             text(crate::t!("Zoom factor")).size(12).width(150),
-            slider(3..=500, prefs.zoom_factor.clamp(3, 500), Message::ZoomFactorChanged)
-                .step(1)
-                .width(Fill),
-            text(prefs.zoom_factor.clamp(3, 500).to_string()).size(11).width(44),
+            slider(
+                settings::ZOOM_FACTOR_MIN..=settings::ZOOM_FACTOR_SYSVAR_MAX,
+                prefs
+                    .zoom_factor
+                    .clamp(settings::ZOOM_FACTOR_MIN, settings::ZOOM_FACTOR_SYSVAR_MAX),
+                Message::ZoomFactorChanged,
+            )
+            .step(1)
+            .width(Fill),
+            text_input("60", zoom_factor_input)
+                .on_input(Message::ZoomFactorInputChanged)
+                .width(52),
+            text(crate::tf!(
+                "{:.1}% a notch",
+                settings::zoom_notch_percent(prefs.zoom_factor)
+            ))
+            .size(11)
+            .width(76),
         ]
         .spacing(10)
         .align_y(iced::Center),
@@ -1192,6 +1209,15 @@ pub fn view_window<'a>(
         text(crate::t!("How far one wheel notch zooms (ZOOMFACTOR)."))
             .size(11)
             .width(sizing.width),
+        Space::new().height(4),
+        text(crate::tf!(
+            "The slider covers the system variable's {} to {}; the field takes up to {} for a faster wheel.",
+            settings::ZOOM_FACTOR_MIN,
+            settings::ZOOM_FACTOR_SYSVAR_MAX,
+            settings::ZOOM_FACTOR_MAX
+        ))
+        .size(11)
+        .width(sizing.width),
         Space::new().height(24),
         text(crate::t!("Text and Dimensions")).size(15),
         Space::new().height(10),

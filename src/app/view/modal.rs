@@ -330,6 +330,7 @@ impl OpenCADStudio {
                             self.spacemouse_paused, self.spacemouse_details,
                         ),
                         &self.snap_angle_input,
+                        &self.zoom_factor_input,
                         {
                             let header = self
                                 .tabs

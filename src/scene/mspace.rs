@@ -214,6 +214,94 @@ impl Scene {
     }
 }
 
+/// What one zoom step does to a floating viewport's `view_height`: zooming
+/// in shrinks it, so the scale rises and the model inside appears larger.
+///
+/// Exponential for the same reason [`crate::scene::view::camera::Camera::zoom`]
+/// is. The subtraction this replaced (`1 - 0.15 * steps`) reached zero at
+/// 6.67 steps and went negative past it, so from ZOOMFACTOR 360 up every
+/// notch inside a viewport bottomed out on the clamp — a tenfold jump a
+/// notch, and a sensitivity setting that stopped doing anything over the top
+/// third of its range.
+///
+/// The base is 0.85 where the camera's is 0.9 only because 15% is what a
+/// notch has always moved a viewport: each surface keeps the feel it has
+/// rather than inheriting the other's. The clamp stays to bound what a
+/// single step can do.
+fn viewport_zoom_factor(steps: f64) -> f64 {
+    0.85_f64.powf(steps).clamp(0.1, 10.0)
+}
+
+#[cfg(test)]
+mod viewport_zoom_tests {
+    use super::*;
+
+    /// One notch, at each ZOOMFACTOR the application can hold (the step is
+    /// the factor over the default 60). Every one of them has to shrink the
+    /// view, and a higher setting has to shrink it further — which is exactly
+    /// what stopped being true above 360 while the factor was a subtraction.
+    #[test]
+    fn a_notch_shrinks_the_view_further_at_every_zoom_factor() {
+        let mut previous = 1.0;
+        for factor in [3.0, 60.0, 100.0, 250.0, 500.0] {
+            let f = viewport_zoom_factor(factor / 60.0);
+            assert!(f > 0.0 && f < 1.0, "ZOOMFACTOR {factor} gave {f}");
+            assert!(f < previous, "ZOOMFACTOR {factor} did not reach further");
+            previous = f;
+        }
+    }
+
+    /// The default notch still moves a viewport the 15% it always has.
+    #[test]
+    fn the_default_notch_is_what_it_always_was() {
+        assert!((viewport_zoom_factor(1.0) - 0.85).abs() < 1e-12);
+        // And no step at all leaves the viewport exactly where it is.
+        assert_eq!(viewport_zoom_factor(0.0), 1.0);
+    }
+
+    /// In and out cancel exactly, as they now do for the model-space camera.
+    #[test]
+    fn a_notch_in_and_a_notch_out_cancel() {
+        for factor in [3.0, 60.0, 500.0] {
+            let steps = factor / 60.0;
+            let round_trip = viewport_zoom_factor(steps) * viewport_zoom_factor(-steps);
+            assert!((round_trip - 1.0).abs() < 1e-12, "ZOOMFACTOR {factor}: {round_trip}");
+        }
+    }
+
+    /// The same thing through the viewport the user is really zooming: at the
+    /// top of the range each notch keeps shrinking the view by the same
+    /// ratio, instead of every notch alike bottoming out on the clamp.
+    #[test]
+    fn a_hard_notch_keeps_shrinking_the_active_viewport() {
+        let mut scene = Scene::new();
+        let mut viewport = codec::entities::Viewport::new();
+        viewport.center = codec::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.width = 100.0;
+        viewport.height = 100.0;
+        viewport.view_height = 200.0;
+        let handle = scene.add_entity(EntityType::Viewport(viewport));
+        scene.active_viewport = Some(handle);
+
+        let view_height = |scene: &Scene| match scene.document.get_entity(handle) {
+            Some(EntityType::Viewport(vp)) => vp.view_height,
+            _ => panic!("the viewport is still there"),
+        };
+        let steps = 500.0 / 60.0; // one notch at ZOOMFACTOR 500
+        let mut heights = vec![view_height(&scene)];
+        for _ in 0..3 {
+            scene.zoom_active_viewport(steps, None);
+            heights.push(view_height(&scene));
+        }
+        for step in heights.windows(2) {
+            assert!(step[1] > 0.0 && step[1] < step[0], "{heights:?}");
+        }
+        let first = heights[1] / heights[0];
+        let last = heights[3] / heights[2];
+        assert!((first - last).abs() < 1e-9, "the notch saturated: {heights:?}");
+    }
+}
+
 #[cfg(test)]
 mod clip_tests {
     use super::*;
@@ -378,8 +466,7 @@ impl Scene {
             if vp.status.locked {
                 return;
             }
-            // Zoom in = shrink view_height → higher scale → objects appear larger.
-            let factor = (1.0_f64 - 0.15 * steps as f64).clamp(0.1, 10.0);
+            let factor = viewport_zoom_factor(steps as f64);
 
             if let Some(cp) = cursor_paper {
                 // Compute the model-space point under the cursor before zoom.

@@ -751,7 +751,12 @@ impl OpenCADStudio {
         self.polar_mode = s.polar;
         self.polar_increment_deg = s.polar_increment_deg;
         self.zoom_wheel_reversed = s.zoom_wheel_reversed;
-        self.zoom_factor = s.zoom_factor.clamp(3, 500);
+        self.zoom_factor = crate::app::settings::clamp_zoom_factor(s.zoom_factor);
+        // Like the drafting-rotation field below, the Options field edits a
+        // buffer rather than the value, so it is reseeded whenever the value
+        // is restored from behind it — a start-up, or the Options window's
+        // own Close putting a change back.
+        self.zoom_factor_input = self.zoom_factor.to_string();
         self.cursor_size = s.cursor_size.clamp(1, 100);
         self.pick_box = s.pick_box.clamp(0, 50);
         self.options_tab = s.options_tab;

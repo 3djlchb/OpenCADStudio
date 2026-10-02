@@ -8247,8 +8247,24 @@ impl OpenCADStudio {
             }
 
             Message::ZoomFactorChanged(factor) => {
-                self.zoom_factor = factor.clamp(3, 500);
+                self.zoom_factor = crate::app::settings::clamp_zoom_factor(factor);
+                // The field beside the slider reads the same value, so the
+                // two never disagree about what the wheel is set to.
+                self.zoom_factor_input = self.zoom_factor.to_string();
                 self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            // Typed into freely; only committed when it parses, so clearing
+            // the field to retype does not drop the wheel to its minimum.
+            // This is the surface that reaches past the range the system
+            // variable has.
+            Message::ZoomFactorInputChanged(value) => {
+                self.zoom_factor_input = value;
+                if let Ok(factor) = self.zoom_factor_input.trim().parse::<i32>() {
+                    self.zoom_factor = crate::app::settings::clamp_zoom_factor(factor);
+                    self.persist_settings_if_changed();
+                }
                 Task::none()
             }
 
