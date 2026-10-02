@@ -557,8 +557,15 @@ pub(super) struct OpenCADStudio {
     polar_increment_deg: f32,
     /// Reverse the mouse-wheel zoom direction when true (ZOOMWHEEL = 1).
     zoom_wheel_reversed: bool,
-    /// Mouse-wheel zoom sensitivity, clamped to 3..=500 (ZOOMFACTOR).
+    /// Mouse-wheel zoom sensitivity (ZOOMFACTOR), held inside
+    /// `settings::ZOOM_FACTOR_MIN..=settings::ZOOM_FACTOR_MAX`. `SETVAR`
+    /// only sets the range the system variable itself has; the Options
+    /// window reaches the rest.
     zoom_factor: i32,
+    /// The Options field behind `zoom_factor`. A text field is edited as
+    /// text — cleared, half-typed — so the buffer is what the user sees and
+    /// the value follows only once it parses.
+    zoom_factor_input: String,
     /// Crosshair size setting (CURSORSIZE, 1..=100).
     cursor_size: i32,
     /// Selection-box size setting (PICKBOX, 0..=50).
@@ -2322,8 +2329,13 @@ pub enum Message {
     CommandLineFadeChanged(i32),
     /// Toggle reversing the mouse-wheel zoom direction (ZOOMWHEEL).
     ZoomWheelReversedChanged(bool),
-    /// Change how far one wheel notch zooms (ZOOMFACTOR, 3..=500).
+    /// Change how far one wheel notch zooms, from the Options slider
+    /// (ZOOMFACTOR).
     ZoomFactorChanged(i32),
+    /// Edit the Options zoom-factor field; committed when it holds a number,
+    /// which is how a value above the system variable's own range is set
+    /// (ZOOMFACTOR).
+    ZoomFactorInputChanged(String),
     /// Options → User Preferences: right-click behaviour (SHORTCUTMENU).
     RightClickModeChanged(settings::RightClickMode),
     /// Options → User Preferences: time-sensitive hold threshold, ms.
@@ -4094,6 +4106,7 @@ impl OpenCADStudio {
             polar_increment_deg: 45.0,
             zoom_wheel_reversed: false,
             zoom_factor: 60,
+            zoom_factor_input: 60.to_string(),
             cursor_size: 5,
             pick_box: 3,
             double_click_block_refedit: false,

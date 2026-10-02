@@ -169,6 +169,43 @@ pub fn clamp_right_click_hold_ms(v: i32) -> i32 {
     v.clamp(100, 1000)
 }
 
+/// ZOOMFACTOR bounds.
+///
+/// `ZOOM_FACTOR_SYSVAR_MAX` is the range the system variable has: `SETVAR
+/// ZOOMFACTOR` accepts 3 to 100 and nothing else, so a drawing session set
+/// up on the command line stays within the range the variable has everywhere
+/// else. The Options window is the app's own surface and reaches
+/// `ZOOM_FACTOR_MAX` for anyone who wants a faster wheel than the variable
+/// can express; that value lives only in this application's own
+/// configuration file, so it is nobody else's to read.
+pub const ZOOM_FACTOR_MIN: i32 = 3;
+pub const ZOOM_FACTOR_SYSVAR_MAX: i32 = 100;
+pub const ZOOM_FACTOR_MAX: i32 = 500;
+
+/// Hold a ZOOMFACTOR inside the range the application can store, wherever it
+/// arrives from — the slider, the Options field, or a configuration file
+/// written by hand or by an older build.
+pub fn clamp_zoom_factor(v: i32) -> i32 {
+    v.clamp(ZOOM_FACTOR_MIN, ZOOM_FACTOR_MAX)
+}
+
+/// The `Camera::zoom` step one wheel notch means at `factor`. The default 60
+/// is one whole step, which is what makes 60 the setting that leaves the
+/// camera's own `ZOOM_STEP` untouched.
+pub fn zoom_notch_steps(factor: i32) -> f32 {
+    factor as f32 / 60.0
+}
+
+/// How much nearer one wheel notch brings the view at `factor`, as a
+/// percentage — the number the Options window shows, so that what the slider
+/// and the field are setting is readable instead of implied. Derived from the
+/// camera's own law, never from a second copy of it.
+pub fn zoom_notch_percent(factor: i32) -> f32 {
+    let ratio = crate::scene::view::camera::Camera::ZOOM_STEP
+        .powf(zoom_notch_steps(clamp_zoom_factor(factor)));
+    (1.0 - ratio) * 100.0
+}
+
 /// Active pair of axes while isometric drafting is enabled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IsoPlane {
@@ -815,6 +852,33 @@ impl Default for UserSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Options read-out has to say what a notch really does, or it is
+    /// worse than no read-out. These are the percentages of the law in
+    /// `Camera::zoom`, which is where the number comes from: the default a
+    /// tenth of the distance, the top of the system variable's range a
+    /// sixth, and the top of the application's range a little over half.
+    #[test]
+    fn the_zoom_read_out_says_what_a_notch_does() {
+        for (factor, percent) in [(3, 0.53_f32), (60, 10.0), (100, 16.1), (500, 58.4)] {
+            let shown = zoom_notch_percent(factor);
+            assert!(
+                (shown - percent).abs() < 0.05,
+                "ZOOMFACTOR {factor} reads {shown}%, not {percent}%"
+            );
+        }
+        // A value from outside the range reads as the one that will be used.
+        assert_eq!(zoom_notch_percent(900), zoom_notch_percent(ZOOM_FACTOR_MAX));
+        assert_eq!(zoom_notch_percent(0), zoom_notch_percent(ZOOM_FACTOR_MIN));
+    }
+
+    /// The default is one whole step, which is the whole reason the camera's
+    /// base is the per-notch ratio and not something scaled.
+    #[test]
+    fn the_default_zoom_factor_is_one_step() {
+        assert_eq!(zoom_notch_steps(60), 1.0);
+        assert_eq!(UserSettings::default().zoom_factor, 60);
+    }
 
     /// Object snap ships live. The modes were always pre-selected; only the
     /// master switch was off, so a new user got a configured snap set that

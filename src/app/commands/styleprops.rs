@@ -1687,13 +1687,23 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             },
+                            // The system variable keeps its own range. The
+                            // Options window reaches further
+                            // (`settings::ZOOM_FACTOR_MAX`) and may have
+                            // stored a value above this, which a bare
+                            // `SETVAR ZOOMFACTOR` still reports; only setting
+                            // one is held to the range of the variable.
                             "ZOOMFACTOR" => match &value {
                                 Some(v) => match v.parse::<i32>() {
-                                    Ok(factor) if (3..=500).contains(&factor) => {
+                                    Ok(factor)
+                                        if (crate::app::settings::ZOOM_FACTOR_MIN
+                                            ..=crate::app::settings::ZOOM_FACTOR_SYSVAR_MAX)
+                                            .contains(&factor) =>
+                                    {
                                         self.zoom_factor = factor;
                                         Ok((format!("ZOOMFACTOR = {factor}"), true))
                                     }
-                                    _ => Err("SETVAR: integer from 3 to 500 required.".into()),
+                                    _ => Err("SETVAR: integer from 3 to 100 required.".into()),
                                 },
                                 None => {
                                     Ok((format!("ZOOMFACTOR = {}", self.zoom_factor), false))
@@ -3473,6 +3483,31 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app
+    }
+
+    /// `SETVAR ZOOMFACTOR` is the system variable, so it keeps the range
+    /// the variable has — the Options window is where a wheel faster than
+    /// that is set, and a value set there is still what the variable
+    /// reports.
+    #[test]
+    fn setvar_zoomfactor_keeps_the_range_of_the_system_variable() {
+        let mut app = fresh_app();
+
+        let _ = app.run_command_line("SETVAR ZOOMFACTOR 100");
+        assert_eq!(app.zoom_factor, 100);
+
+        let _ = app.run_command_line("SETVAR ZOOMFACTOR 101");
+        assert_eq!(app.zoom_factor, 100, "101 is not a value the variable takes");
+
+        let _ = app.run_command_line("SETVAR ZOOMFACTOR 2");
+        assert_eq!(app.zoom_factor, 100, "and neither is 2");
+
+        // What the Options field reached is still reported here, and the
+        // command line can still set any value the variable does have.
+        let _ = app.update(crate::app::Message::ZoomFactorInputChanged("250".into()));
+        assert_eq!(app.zoom_factor, 250);
+        let _ = app.run_command_line("SETVAR ZOOMFACTOR 60");
+        assert_eq!(app.zoom_factor, 60);
     }
 
     /// `SETVAR ISOLINES` stored any parseable `i16` verbatim. The header

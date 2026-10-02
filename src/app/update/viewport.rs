@@ -76,9 +76,18 @@ fn scroll_intent(delta: mouse::ScrollDelta) -> ScrollIntent {
 /// magnification delta (0.05 = the fingers moved 5% further apart).
 ///
 /// AppKit reports the increment of a scale factor, and a 5% wider pinch has to
-/// leave the view 5% closer, so the step solves `1 - step / 10 = 1 / (1 + m)`.
+/// leave the view 5% closer, so the step is the one that scales the camera
+/// distance by exactly `1 / (1 + m)`. The camera is asked for that step
+/// instead of being told it: inverting the zoom law here by hand (it read
+/// `1 - step / 10 = 1 / (1 + m)`) is what made the pinch stop tracking the
+/// fingers the moment the law itself changed.
+///
+/// The ratio is bounded because a magnification of -1 or beyond — which the
+/// gesture should never report — has no finite answer, and because no single
+/// gesture event has any business moving the view a hundredfold.
 fn pinch_zoom_steps(magnification: f32) -> f32 {
-    10.0 * magnification / (1.0 + magnification)
+    let ratio = (1.0 / (1.0 + magnification)).clamp(0.01, 100.0);
+    crate::scene::view::camera::Camera::zoom_steps_for_ratio(ratio)
 }
 
 /// Whether a command point keeps the elevation of its snap instead of being
@@ -5695,7 +5704,8 @@ properties={:.1}ms picked={}",
     pub(super) fn on_viewport_scroll(&mut self, delta: mouse::ScrollDelta) -> Task<Message> {
         match scroll_intent(delta) {
             ScrollIntent::Zoom { notches } => {
-                let mut s = notches * self.zoom_factor as f32 / 60.0;
+                let mut s =
+                    notches * crate::app::settings::zoom_notch_steps(self.zoom_factor);
                 if self.zoom_wheel_reversed {
                     s = -s;
                 }
@@ -5753,9 +5763,9 @@ properties={:.1}ms picked={}",
             .record_nav_perf(crate::scene::NavPerfOp::Pan, started);
     }
 
-    /// Zoom the active view by `s`, in the camera's own units
-    /// (`Camera::zoom`: `distance *= 1 - s / 10`). Shared by the wheel and
-    /// the pinch.
+    /// Zoom the active view by `s`, in the camera's own steps
+    /// (`Camera::zoom`: `distance *= ZOOM_STEP.powf(s)`). Shared by the
+    /// wheel and the pinch.
     fn zoom_view_at_cursor(&mut self, s: f32) -> Task<Message> {
         let nav_started = Instant::now();
         let i = self.active_tab;
@@ -6717,6 +6727,7 @@ properties={:.1}ms picked={}",
 #[cfg(test)]
 mod scroll_intent_tests {
     use super::{pinch_zoom_steps, scroll_intent, ScrollIntent};
+    use crate::scene::view::camera::Camera;
     use iced::mouse::ScrollDelta;
 
     #[test]
@@ -6740,13 +6751,46 @@ mod scroll_intent_tests {
 
     /// A pinch is a scale factor, so the view has to end up exactly that much
     /// closer: fingers 5% apart divide the camera distance by 1.05.
+    ///
+    /// Asked of the camera, not of the formula the step was derived from. The
+    /// version that recomputed `1 - step / 10` here kept passing when the
+    /// camera moved to an exponential zoom and the pinch quietly stopped
+    /// being 1:1.
     #[test]
     fn pinch_is_one_to_one() {
-        let zoom_after = 1.0 - pinch_zoom_steps(0.05) / 10.0;
-        assert!((zoom_after - 1.0 / 1.05).abs() < 1e-6, "{zoom_after}");
+        for magnification in [0.01_f32, 0.05, 0.2, 0.5, 1.0] {
+            let mut camera = Camera::default();
+            let before = camera.distance;
+            camera.zoom(pinch_zoom_steps(magnification));
+            let want = before / (1.0 + magnification);
+            assert!(
+                (camera.distance - want).abs() < 1e-4 * want,
+                "m = {magnification}: {} wanted {want}",
+                camera.distance
+            );
+        }
         assert!(pinch_zoom_steps(-0.05) < 0.0, "pinching in zooms out");
         // No pinch, no step: a zero delta must not divide the view away.
         assert_eq!(pinch_zoom_steps(0.0), 0.0);
+        let mut camera = Camera::default();
+        let before = camera.distance;
+        camera.zoom(pinch_zoom_steps(0.0));
+        assert_eq!(camera.distance, before);
+    }
+
+    /// A gesture the platform should never send must not be able to throw the
+    /// camera out of the world.
+    #[test]
+    fn a_degenerate_pinch_stays_finite() {
+        for magnification in [-1.0_f32, -2.0, f32::NAN, f32::INFINITY] {
+            let mut camera = Camera::default();
+            camera.zoom(pinch_zoom_steps(magnification));
+            assert!(
+                camera.distance.is_finite() && camera.distance > 0.0,
+                "m = {magnification} left distance at {}",
+                camera.distance
+            );
+        }
     }
 }
 
