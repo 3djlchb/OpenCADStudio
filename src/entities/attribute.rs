@@ -713,7 +713,7 @@ impl PropertyEditable for AttributeDefinition {
             return;
         }
         match field {
-            "att_tag" => self.tag = value.trim().to_string(),
+            "att_tag" => self.tag = value.trim().to_uppercase(),
             "att_prompt" if !self.flags.constant => self.prompt = value.to_string(),
             "att_default" => {
                 self.default_value = value.to_string();
