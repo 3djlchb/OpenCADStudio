@@ -40,6 +40,7 @@ impl OpenCADStudio {
             Some(K::GeometricTolerance) => crate::t!("Geometric Tolerance").into_owned(),
             Some(K::AttDef) => crate::t!("Attribute Definition").into_owned(),
             Some(K::AttDefEdit) => crate::t!("Edit Attribute Definition").into_owned(),
+            Some(K::Field) => crate::t!("Field").into_owned(),
             Some(K::DraftingSettings) => crate::t!("Drafting Settings").into_owned(),
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
             Some(K::LayerStateEditor) => crate::tr!("modal", "edit-layer-state"),
@@ -577,6 +578,10 @@ impl OpenCADStudio {
             super::super::ModalKind::AttDef => {
                 let state = self.attdef_dialog.as_ref()?;
                 sized_flow(ex, 720, 520, |flow| crate::ui::window::attdef_dialog::view(state, flow))
+            }
+            super::super::ModalKind::Field => {
+                let state = self.field_dialog.as_ref()?;
+                sized_flow(ex, 760, 660, |flow| crate::ui::window::field_dialog::view(state, flow))
             }
             super::super::ModalKind::AttDefEdit => {
                 let state = self.attdef_edit.as_ref()?;

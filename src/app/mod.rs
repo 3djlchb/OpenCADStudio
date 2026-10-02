@@ -501,6 +501,8 @@ pub(super) struct OpenCADStudio {
     /// ATTDEF dialog and Edit Attribute Definition dialog; `None` while closed.
     attdef_dialog: Option<crate::ui::window::attdef_dialog::AttdefDialogState>,
     attdef_edit: Option<crate::ui::window::attdef_dialog::AttdefEditState>,
+    /// Field dialog working copy; `None` while closed.
+    field_dialog: Option<crate::ui::window::field_dialog::FieldDialogState>,
     point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
     pc_section: Option<crate::ui::window::pdf_dialogs::PcSectionState>,
     underlay_layers: Option<crate::ui::window::pdf_dialogs::UnderlayLayersState>,
@@ -1922,6 +1924,7 @@ pub enum ModalKind {
     GeometricTolerance,
     AttDef,
     AttDefEdit,
+    Field,
     DraftingSettings,
     AutoConstrainSettings,
     LayerStateEditor,
@@ -3870,6 +3873,7 @@ pub enum Message {
     /// An edit in one of the PDF dialogs.
     PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg),
     AttdefDialog(crate::ui::window::attdef_dialog::AttdefDialogMsg),
+    FieldDialog(crate::ui::window::field_dialog::FieldDialogMsg),
     /// A click or search in the Point Cloud Manager.
     PcManager(crate::ui::window::pc_manager::PcManagerMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -4065,6 +4069,7 @@ impl OpenCADStudio {
             point_cloud_attach: None,
             attdef_dialog: None,
             attdef_edit: None,
+            field_dialog: None,
             point_cloud_color_map: None,
             pc_section: None,
             underlay_layers: None,

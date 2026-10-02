@@ -80,6 +80,7 @@ pub(super) const NAMES: &[&str] = &[
     "ribbon_dropdown",
     "dialog_ok",
     "attdef_dialog",
+    "field_dialog",
     "close_document",
     "toggle_properties",
     "toggle_layers",
@@ -870,6 +871,8 @@ impl OpenCADStudio {
                     "align_below" => M::AlignBelow(on),
                     "edit_value" => M::EditValue,
                     "dismiss" => M::DismissError,
+                    "insert_field" if editing => M::EditInsertField,
+                    "insert_field" => M::InsertField,
                     "x" => M::Coord(0, v.into()),
                     "y" => M::Coord(1, v.into()),
                     "z" => M::Coord(2, v.into()),
@@ -885,6 +888,35 @@ impl OpenCADStudio {
                         M::Mode(bit, state == "1")
                     }
                     _ => return Err(failure("invalid_value", "Unknown attdef dialog field")),
+                })
+            }
+            // One field of the open Field dialog: `category=<index>`, `name=Date`,
+            // `date=yyyy-MM-dd`, `case=0..4`, `file=1|2|3`, `ext=0|1`, `size=0..2`,
+            // `sysvar=dimscale`, `diesel=…`, `named_type=<index>`, `named=<index>`,
+            // `prop=Area`, `select_object`.
+            "field_dialog" => {
+                use crate::ui::window::field_dialog::{self as fd, FieldDialogMsg as F};
+                let value = string(req, "value")?;
+                let (key, v) = value.split_once('=').unwrap_or((value, ""));
+                let index = || v.parse::<usize>().map_err(|_| failure("invalid_value", "index expected"));
+                let known = |list: &[&'static str]| {
+                    list.iter().copied().find(|n| n.eq_ignore_ascii_case(v)).ok_or_else(|| failure("invalid_value", "unknown name"))
+                };
+                Message::FieldDialog(match key {
+                    "category" => F::Category(index()?),
+                    "name" => F::Name(known(&fd::fields_of(0))?),
+                    "date" => F::DateFormat(v.into()),
+                    "case" => F::TextCase(index()?),
+                    "file" => F::FileParts(v.parse::<u8>().map_err(|_| failure("invalid_value", "1|2|3"))?),
+                    "ext" => F::FileExtension(v == "1"),
+                    "size" => F::SizeUnit(index()?),
+                    "sysvar" => F::SysVar(v.into()),
+                    "diesel" => F::Diesel(v.into()),
+                    "named_type" => F::NamedType(index()?),
+                    "named" => F::Named(index()?),
+                    "prop" => F::ObjectProp(known(&["Area", "Center", "Circumference", "Diameter", "EndPoint", "Length", "Radius", "StartPoint"])?),
+                    "select_object" => F::SelectObject,
+                    _ => return Err(failure("invalid_value", "Unknown field dialog key")),
                 })
             }
             "ribbon_dropdown" => Message::ToggleRibbonDropdown(string(req, "value")?.into()),
@@ -912,6 +944,9 @@ impl OpenCADStudio {
                 ),
                 Some(crate::app::ModalKind::AttDefEdit) => Message::AttdefDialog(
                     crate::ui::window::attdef_dialog::AttdefDialogMsg::EditOk,
+                ),
+                Some(crate::app::ModalKind::Field) => Message::FieldDialog(
+                    crate::ui::window::field_dialog::FieldDialogMsg::Ok,
                 ),
                 _ => return Err(failure("no_dialog", "No dialog with an OK button is open")),
             },

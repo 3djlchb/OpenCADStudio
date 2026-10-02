@@ -226,8 +226,17 @@ impl OpenCADStudio {
                 self.tabs[i].scene.document.header.text_height = attribute.height;
             }
         }
+        // A field the committed text shows (FIELD, an ATTDEF Default from the
+        // Field dialog) is attached once the entity has its handle; the field
+        // objects are not part of the add delta, so the step is a snapshot.
+        let text_field = self.tabs[i].active_cmd.as_ref().and_then(|cmd| cmd.text_field());
         let label = self.history_label_from_active_cmd(i, "ENTITY");
-        let delta_safe = self.delta_add_safe(i, &entity);
+        let delta_safe = text_field.is_none() && self.delta_add_safe(i, &entity);
+        let field_value = match &entity {
+            codec::EntityType::MText(m) => m.value.clone(),
+            codec::EntityType::AttributeDefinition(a) => a.default_value.clone(),
+            _ => String::new(),
+        };
         let pending = self.begin_undo(i, label, 1, delta_safe);
         let is_associative_dimension = matches!(
             entity,
@@ -246,6 +255,14 @@ impl OpenCADStudio {
                     .scene
                     .attach_dimension_association(handle, sources);
             }
+        }
+        if let (Some(handle), Some(field)) = (committed, text_field) {
+            crate::entities::field::set_text_field(
+                &mut self.tabs[i].scene.document,
+                handle,
+                Some(field),
+                &field_value,
+            );
         }
         if let Some(handle) = committed {
             self.apply_continuous_constraints(i, &[handle]);

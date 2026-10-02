@@ -1,5 +1,6 @@
 pub mod about;
 pub mod attdef_dialog;
+pub mod field_dialog;
 pub mod block_definition;
 pub mod block_palette;
 pub mod browser;
