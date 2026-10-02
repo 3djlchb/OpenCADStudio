@@ -30,6 +30,7 @@ pub use context_tools::{pdf_underlay_tools, point_cloud_tools, xref_tools, Under
 use widgets::{StyleContext, *};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
+mod locate;
 use collapse::{CollapsePanels, Panel};
 pub use collapse::CollapseMode;
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
@@ -303,6 +304,10 @@ impl Ribbon {
     pub fn activate_tool(&mut self, id: &str) {
         self.active_tool = Some(id.to_string());
     }
+    #[cfg(test)]
+    pub(crate) fn active_tool(&self) -> Option<&str> {
+        self.active_tool.as_deref()
+    }
     pub fn deactivate_tool(&mut self) {
         self.active_tool = None;
     }
@@ -516,6 +521,9 @@ impl Ribbon {
         // The quick-access flow and the tabs flow each flex-wrap; WrapBar stacks
         // them so a wrapped tab never shares a row with a quick-access button.
 
+        // A running command whose button is on another tab lights that tab's
+        // header in the button's own blue, pointing at where the button lives.
+        let holding_tab = self.tab_holding_active_tool();
         let tab_items = self.modules.iter().enumerate().fold(
             Vec::<Element<'_, Message>>::new(),
             |mut acc, (i, module)| {
@@ -527,6 +535,7 @@ impl Ribbon {
 
                 let is_active = i == self.active;
                 let is_contextual = module.id() == "layout";
+                let holds_tool = holding_tab == Some(i);
                 let btn = container(
                     button(text(crate::i18n::ribbon_module_title(module.id(), module.title())).size(12))
                         .on_press(Message::RibbonSelectTab(i))
@@ -539,6 +548,7 @@ impl Ribbon {
                             };
                             let pair = match (is_active, status) {
                                 (true, _) => palette.background.weakest,
+                                (false, _) if holds_tool => palette.primary.weak,
                                 (false, button::Status::Hovered) => {
                                     if is_contextual {
                                         palette.warning.weak
@@ -550,9 +560,10 @@ impl Ribbon {
                             };
                             button::Style {
                             background: (is_active
+                                || holds_tool
                                 || matches!(status, button::Status::Hovered))
                                 .then_some(Background::Color(pair.color)),
-                            text_color: if is_active {
+                            text_color: if is_active || holds_tool {
                                 pair.text
                             } else if is_contextual {
                                 accent.color
@@ -1414,6 +1425,7 @@ fn render_group<'a>(
             group.title,
             &group.tools.iter().filter_map(item_id).collect::<Vec<_>>(),
             open_dd,
+            active_tool.as_deref(),
         ),
     ]
     .align_x(iced::Center)
@@ -1495,6 +1507,19 @@ fn collapse_button<'a>(
 ) -> Element<'a, Message> {
     let title = group.title;
     let localized_title = t!(title).into_owned();
+    // A collapsed panel lights its opener while one of its hidden tools runs,
+    // the way a dropdown lights while one of its items does.
+    let active = active_tool.as_deref();
+    let holds = active.is_some_and(|id| locate::group_holds(group, id));
+    let opener_style = move |lit: bool| {
+        move |theme: &Theme, status| {
+            if lit {
+                tool_btn_style(theme, true, status)
+            } else {
+                button::subtle(theme, status)
+            }
+        }
+    };
 
     // Tightest form: one button = the panel's FIRST tool icon + its title + ▾.
     // Clicking opens the flyout listing every tool; no tool runs directly at this
@@ -1525,7 +1550,7 @@ fn collapse_button<'a>(
             .width(Fill),
         )
         .on_press(Message::ToggleRibbonPanel(title.to_string()))
-        .style(button::subtle)
+        .style(opener_style(holds))
         .width(Fill)
         .padding([3, 5]);
         return automatic_large_button(localized_title, content.into());
@@ -1535,6 +1560,8 @@ fn collapse_button<'a>(
     // that runs the last-used tool — above a title + ▾ opener for the full flyout.
     // For a Properties panel the representative is its Match button.
     let rep = representative(group, last_used);
+    // The face lights itself when it is the running tool.
+    let face_lit = rep.zip(active).is_some_and(|(item, id)| locate::item_holds(item, id));
     let face: Element<'_, Message> = match rep {
         Some(RibbonItem::PropertiesGroup { match_prop }) => {
             render_large(
@@ -1590,7 +1617,7 @@ fn collapse_button<'a>(
         .align_y(iced::Center),
     )
     .on_press(Message::ToggleRibbonPanel(title.to_string()))
-    .style(button::subtle)
+    .style(opener_style(holds && !face_lit))
     .width(Fill)
     .padding([1, 4]);
     let opener = automatic_large_button(localized_title, opener.into());
