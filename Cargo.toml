@@ -92,7 +92,7 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 
 # Field authoring API and field format codes (opencadcodec PR pending).
 [patch."https://github.com/HakanSeven12/opencadcodec.git"]
-opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "22a5c3e" }
+opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "595800e" }
 
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }

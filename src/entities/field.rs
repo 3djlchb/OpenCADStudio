@@ -101,9 +101,10 @@ pub const SYSVARS: &[&str] = &[
     "userr4", "userr5",
 ];
 
+/// Real system variables show six decimals, as the reference shows them
+/// (TEXTSIZE 2.500000).
 fn num(v: f64) -> String {
-    let t = format!("{v:.4}");
-    t.trim_end_matches('0').trim_end_matches('.').to_string()
+    format!("{v:.6}")
 }
 
 /// A system variable's value as a field shows it.
