@@ -369,6 +369,8 @@ pub struct UserSettings {
     /// IMAGEFRAME of the profile: used by new drawings and by drawings that
     /// carry no image variables of their own.
     pub image_frame: i16,
+    /// The Attribute Definition dialog's "Specify on-screen" choice.
+    pub attdef_on_screen: bool,
     /// Nested-copy symbol handling: false inserts, true binds.
     pub ncopy_bind: bool,
     /// Last Options page; unknown saved names fall back without rejecting the config.
@@ -657,6 +659,7 @@ impl Default for UserSettings {
             right_click_hold_ms: 250,
             grip_object_limit: DEFAULT_GRIP_OBJECT_LIMIT,
             image_frame: 1,
+            attdef_on_screen: true,
             ncopy_bind: false,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,

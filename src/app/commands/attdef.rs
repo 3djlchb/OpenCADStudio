@@ -309,6 +309,8 @@ impl OpenCADStudio {
             session.annotative = spec.annotative;
             session.on_screen = state.on_screen;
         }
+        // The choice is kept with the user settings, as the reference keeps it.
+        self.persist_settings_if_changed();
         self.reset_command_start_state(i);
         if state.align_below {
             let previous = attdef::session().last.clone();
