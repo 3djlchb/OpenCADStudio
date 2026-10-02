@@ -399,7 +399,9 @@ fn split_mixed_polyline(
                 plinegen: true,
                 fill_tris: vec![],
                 fill_tris_low: Vec::new(),
-            });
+            
+                ..Default::default()
+});
         }
     }
 
@@ -535,7 +537,9 @@ fn split_mixed_polyline(
             plinegen,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        });
+        
+            ..Default::default()
+});
     } else if let Some(first_arc) = out.first_mut() {
         first_arc.snap_pts = snap_pts;
         first_arc.key_vertices = key_vertices.to_vec();
@@ -614,7 +618,9 @@ fn point_cloud_wires(
         plinegen: true,
         fill_tris: Vec::new(),
         fill_tris_low: Vec::new(),
-    }];
+    
+        ..Default::default()
+}];
     let mode = crate::scene::frame::mode(
         document,
         crate::scene::frame::FrameKind::PointCloudClip,
@@ -870,7 +876,9 @@ pub fn tessellate(
                     plinegen: true,
                     fill_tris,
                     fill_tris_low,
-                });
+                
+                    ..Default::default()
+});
             }
         }
         let mut snap_attached = false;
@@ -1039,7 +1047,9 @@ pub fn tessellate(
                     plinegen: false,
                     fill_tris: Vec::new(),
                     fill_tris_low: Vec::new(),
-                });
+                
+                    ..Default::default()
+});
             }
 
             // Snap / key vertices ride the first emitted wire only (they describe
@@ -1254,8 +1264,13 @@ pub fn tessellate(
                 // materialisation and (for block content) the block-expand
                 // transform — no separate document-wide collector.
                 let mut sdf_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
+                let mut searchable: Vec<crate::scene::model::wire_model::SearchableTextRun> =
+                    Vec::new();
                 {
                     if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
+                        use crate::scene::model::wire_model::{
+                            clean_searchable_text, SearchableTextRun,
+                        };
                         // Selection tints the whole run; otherwise inline `\C`
                         // colours (bin key) win, falling back to entity colour.
                         for group in &stroke_groups {
@@ -1263,6 +1278,11 @@ pub fn tessellate(
                             if crate::scene::text::web_font::requires_shaping(&run.text) {
                                 continue;
                             }
+                            // Searchable counterpart, cleaned once here and
+                            // pushed after layout below (one run per laid-out
+                            // group, so MTEXT wrap/attachment and rotation are
+                            // already baked into the origin — no re-layout).
+                            let visible = clean_searchable_text(&run.text);
                             let slx_v = (group.origin[0] - ref_lx_v) * anno + ref_lx_v;
                             let sly_v = (group.origin[1] - ref_ly_v) * anno + ref_ly_v;
                             // Base colour only (inline `\C` wins). Selection /
@@ -1279,17 +1299,18 @@ pub fn tessellate(
                                 gcolor,
                                 text_contrast_background(entity, bg_color),
                             );
-                            let quads = crate::scene::text::glyph_quads::layout_glyph_quads(
-                                &mut atlas,
-                                run.height,
-                                run.rotation,
-                                run.width_factor,
-                                run.oblique,
-                                run.tracking,
-                                &run.font,
-                                run.bold,
-                                &run.text,
-                            );
+                            let (quads, pen_adv) =
+                                crate::scene::text::glyph_quads::layout_glyph_quads(
+                                    &mut atlas,
+                                    run.height,
+                                    run.rotation,
+                                    run.width_factor,
+                                    run.oblique,
+                                    run.tracking,
+                                    &run.font,
+                                    run.bold,
+                                    &run.text,
+                                );
                             if let Some(plane) = group.plane {
                                 let scaled_origin = [
                                     plane.scale_origin[0]
@@ -1318,6 +1339,40 @@ pub fn tessellate(
                                     gcolor,
                                     0.0,
                                 );
+                            }
+                            // Searchable run: same adapted colour as the quads,
+                            // exact pen advance in world units (layout's final
+                            // pen position × annotation factor, like the quads).
+                            if !visible.is_empty() {
+                                let adv_world = (pen_adv as f64 * anno) as f32;
+                                let (origin, rotation) = if let Some(plane) = group.plane {
+                                    (
+                                        [
+                                            plane.scale_origin[0]
+                                                + (plane.origin[0] - plane.scale_origin[0])
+                                                    * anno,
+                                            plane.scale_origin[1]
+                                                + (plane.origin[1] - plane.scale_origin[1])
+                                                    * anno,
+                                            plane.scale_origin[2]
+                                                + (plane.origin[2] - plane.scale_origin[2])
+                                                    * anno,
+                                        ],
+                                        (plane.x_axis[1]).atan2(plane.x_axis[0]) as f32,
+                                    )
+                                } else {
+                                    ([slx_v, sly_v, elev_v], run.rotation)
+                                };
+                                searchable.push(SearchableTextRun {
+                                    text: visible,
+                                    origin,
+                                    height: (run.height as f64 * anno) as f32,
+                                    rotation,
+                                    color: gcolor,
+                                    bold: run.bold,
+                                    font: run.font.clone(),
+                                    adv_width: adv_world,
+                                });
                             }
                         }
                     }
@@ -1428,7 +1483,9 @@ pub fn tessellate(
                                         plinegen: true,
                                         fill_tris: ft,
                                         fill_tris_low: ftl,
-                                    });
+                                    
+                                        ..Default::default()
+});
                                 }
                                 // Text frame — a closed rectangle in the text
                                 // colour around the same box.
@@ -1486,7 +1543,9 @@ pub fn tessellate(
                                         plinegen: true,
                                         fill_tris: vec![],
                                         fill_tris_low: Vec::new(),
-                                    });
+                                    
+                                        ..Default::default()
+});
                                 }
                             }
                         }
@@ -1541,7 +1600,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        });
+                        
+                            ..Default::default()
+});
                     }
                     wires.push(WireModel {
                         bg_adapt: None,
@@ -1561,6 +1622,7 @@ pub fn tessellate(
                         dash_from_start: false,
                         dash_align_end: None,
                         text_verts: sdf_verts,
+                        searchable_text: searchable,
                         name,
                         points: Vec::new(),
                         points_low: Vec::new(),
@@ -1643,7 +1705,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        });
+                        
+            ..Default::default()
+});
                     }
 
                     if !bin.fill_tris.is_empty() {
@@ -1691,7 +1755,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: bin.fill_tris,
                             fill_tris_low: bin.fill_tris_low,
-                        });
+                        
+            ..Default::default()
+});
                     }
                 }
 
@@ -1720,6 +1786,7 @@ pub fn tessellate(
                         dash_from_start: false,
                         dash_align_end: None,
                         text_verts: sdf_verts,
+                        searchable_text: searchable,
                         name: name.clone(),
                         points: Vec::new(),
                         points_low: Vec::new(),
@@ -1774,7 +1841,9 @@ pub fn tessellate(
                         plinegen: true,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
-                    });
+                    
+            ..Default::default()
+});
                 }
                 return out;
             }
@@ -1855,7 +1924,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        }];
+                        
+            ..Default::default()
+}];
                     }
                 }
             }
@@ -2006,7 +2077,9 @@ pub fn tessellate(
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        });
+                        
+                            ..Default::default()
+});
                     }
                 }
 
@@ -2054,7 +2127,9 @@ pub fn tessellate(
                         display_visible: true,
                         snap_only: false,
                         plot_visible: true,
-                    });
+                    
+            ..Default::default()
+});
                 }
 
                 if out.is_empty() {
@@ -2092,7 +2167,9 @@ pub fn tessellate(
                         plinegen: true,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
-                    });
+                    
+            ..Default::default()
+});
                 }
 
                 return out;
@@ -2152,7 +2229,9 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     fill_tris: Vec::new(),
                     fill_tris_low: Vec::new(),
-                }];
+                
+                    ..Default::default()
+}];
             }
 
             RenderObject::SegmentedLines(points) => {
@@ -2242,7 +2321,9 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
-                }];
+                
+            ..Default::default()
+}];
             }
 
             RenderObject::TaperedLines(points, widths) => {
@@ -2321,7 +2402,9 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
-                }];
+                
+                    ..Default::default()
+}];
             }
 
         }
@@ -2431,7 +2514,9 @@ pub fn tessellate(
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }]
+    
+            ..Default::default()
+}]
 }
 
 

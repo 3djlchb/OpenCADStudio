@@ -2106,9 +2106,11 @@ impl MultiLeaderTess for MultiLeader {
             // error at UTM scale) — not a crash. Follow-up: double-single-split
             // via points_to_ds to match emit_wire's paired fill path.
             fill_tris_low: Vec::new(),
-        });
+        
+            ..Default::default()
+});
 
-        let host = codec::EntityType::MultiLeader(ml.clone());
+        let host = codec::EntityType::MultiLeader(Box::new(ml.clone()));
         for block_use in crate::scene::render_graph::entity_render_block_uses(document, &host, 1.0)
             .into_iter()
             .filter(|block_use| {
@@ -2299,6 +2301,8 @@ impl MultiLeaderTess for MultiLeader {
                 // cluster-position data.
                 let mut deco_pts: Vec<[f32; 3]> = Vec::new();
                 let mut deco_fill: Vec<[f32; 3]> = Vec::new();
+                let mut searchable: Vec<crate::scene::model::wire_model::SearchableTextRun> =
+                    Vec::new();
                 if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
                     for ts in &layout.strokes {
                         let is_shaped = ts
@@ -2331,17 +2335,18 @@ impl MultiLeaderTess for MultiLeader {
                             continue;
                         }
                         let run = ts.run.as_ref().unwrap();
-                        let quads = crate::scene::text::glyph_quads::layout_glyph_quads(
-                            &mut atlas,
-                            run.height,
-                            run.rotation,
-                            run.width_factor,
-                            run.oblique,
-                            run.tracking,
-                            &run.font,
-                            run.bold,
-                            &run.text,
-                        );
+                        let (quads, pen_adv) =
+                            crate::scene::text::glyph_quads::layout_glyph_quads(
+                                &mut atlas,
+                                run.height,
+                                run.rotation,
+                                run.width_factor,
+                                run.oblique,
+                                run.tracking,
+                                &run.font,
+                                run.bold,
+                                &run.text,
+                            );
                         // Inline `\C` / `\c` colour wins over the entity text
                         // colour, matching the top-level Text arm.
                         let gcolor = ts
@@ -2356,6 +2361,24 @@ impl MultiLeaderTess for MultiLeader {
                             gcolor,
                             0.0,
                         );
+                        {
+                            use crate::scene::model::wire_model::{
+                                clean_searchable_text, SearchableTextRun,
+                            };
+                            let visible = clean_searchable_text(&run.text);
+                            if !visible.is_empty() {
+                                searchable.push(SearchableTextRun {
+                                    text: visible,
+                                    origin: [ts.origin[0], ts.origin[1], z as f64],
+                                    height: run.height,
+                                    rotation: run.rotation,
+                                    color: gcolor,
+                                    bold: run.bold,
+                                    font: run.font.clone(),
+                                    adv_width: pen_adv,
+                                });
+                            }
+                        }
                     }
                 }
                 if !sdf_verts.is_empty() || !deco_pts.is_empty() || !deco_fill.is_empty() {
@@ -2400,6 +2423,7 @@ impl MultiLeaderTess for MultiLeader {
                         dash_from_start: false,
                         dash_align_end: None,
                         text_verts: sdf_verts,
+                        searchable_text: searchable,
                         name: name.clone(),
                         points: deco_pts,
                         points_low: Vec::new(),
@@ -2492,7 +2516,9 @@ impl MultiLeaderTess for MultiLeader {
                         plinegen: true,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
-                    });
+                    
+                        ..Default::default()
+});
                 }
             }
 
@@ -2583,7 +2609,9 @@ impl MultiLeaderTess for MultiLeader {
                         plinegen: true,
                         fill_tris,
                         fill_tris_low: Vec::new(),
-                    });
+                    
+            ..Default::default()
+});
                 }
 
                 // Text frame — closed rectangle, matches text color.
@@ -2629,7 +2657,9 @@ impl MultiLeaderTess for MultiLeader {
                         plinegen: true,
                         fill_tris: vec![],
                         fill_tris_low: Vec::new(),
-                    });
+                    
+            ..Default::default()
+});
                 }
             }
         }

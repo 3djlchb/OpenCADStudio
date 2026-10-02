@@ -4051,7 +4051,9 @@ fn tessellate_dimension_inner(
                     plinegen: true,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
-                });
+                
+            ..Default::default()
+});
             }
             if !ext2.is_empty() {
                 wires.push(WireModel {
@@ -4088,7 +4090,9 @@ fn tessellate_dimension_inner(
                     plinegen: true,
                     fill_tris: vec![],
                     fill_tris_low: Vec::new(),
-                });
+                
+            ..Default::default()
+});
             }
         } else {
             wires.push(WireModel {
@@ -4125,7 +4129,9 @@ fn tessellate_dimension_inner(
                 plinegen: true,
                 fill_tris: vec![],
                 fill_tris_low: Vec::new(),
-            });
+            
+            ..Default::default()
+});
         }
     }
 
@@ -4168,7 +4174,9 @@ fn tessellate_dimension_inner(
         // — not a crash. Follow-up: double-single-split via points_to_ds to
         // match emit_wire's paired fill path.
         fill_tris_low: Vec::new(),
-    });
+    
+            ..Default::default()
+});
     // Arrowheads and ticks: the dimension line's colour and weight, never
     // its dashes.
     if !geom.arrow_lines.is_empty() {
@@ -4224,7 +4232,9 @@ fn tessellate_dimension_inner(
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        });
+        
+            ..Default::default()
+});
     }
 
     // DIMTFILL: 0=none, 1=drawing background (mask), 2=DIMTFILLCLR.
@@ -4279,7 +4289,9 @@ fn tessellate_dimension_inner(
                     // (sub-metre error at UTM scale) — not a crash. Follow-up:
                     // double-single-split via points_to_ds to match emit_wire.
                     fill_tris_low: Vec::new(),
-                });
+                
+            ..Default::default()
+});
             }
         }
     }
@@ -4326,7 +4338,9 @@ fn tessellate_dimension_inner(
                 plinegen: true,
                 fill_tris: vec![],
                 fill_tris_low: Vec::new(),
-            });
+            
+                ..Default::default()
+});
         }
     }
 
@@ -5854,6 +5868,15 @@ fn map_wire_ocs_to_wcs(wire: &mut WireModel, normal: Vector3) {
     wire.text_verts = crate::scene::model::wire_model::map_text_verts(
         &wire.text_verts,
         map,
+    );
+    // OCS→WCS is rigid: unit height scale, no in-plane rotation change.
+    wire.map_searchable_runs(
+        &|p| {
+            let mapped = map(p[0], p[1], p[2]);
+            [mapped.0, mapped.1, mapped.2]
+        },
+        1.0,
+        0.0,
     );
     for (point, _) in &mut wire.snap_pts {
         let mapped = map(point.x, point.y, point.z);

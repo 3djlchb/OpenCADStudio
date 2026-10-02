@@ -172,7 +172,7 @@ impl SectionPlaneCommand {
             self.kind == SectionKind::Slice,
             depth,
         );
-        EntityType::Extended(entity)
+        EntityType::Extended(Box::new(entity))
     }
 
     fn line_at(&self, point: DVec3, viewing: DVec3, vertical_hint: DVec3) -> (Vec<DVec3>, DVec3) {

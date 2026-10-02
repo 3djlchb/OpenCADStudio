@@ -117,7 +117,10 @@ impl PointCloudCropCommand {
         if let ExtendedEntityData::PointCloudEx(data) = &mut cloud.data {
             change(data);
         }
-        CmdResult::UpdateEntityAndFinish { handle: self.handle, entity: EntityType::Extended(cloud) }
+        CmdResult::UpdateEntityAndFinish {
+            handle: self.handle,
+            entity: EntityType::Extended(Box::new(cloud)),
+        }
     }
 
     fn axes(data: &PointCloudExData) -> glam::DMat3 {
@@ -296,7 +299,7 @@ impl CadCommand for PointCloudCropCommand {
         match self.picked.take() {
             Some(EntityType::Extended(cloud)) if matches!(cloud.data, ExtendedEntityData::PointCloudEx(_)) => {
                 self.handle = handle;
-                self.cloud = Some(cloud);
+                self.cloud = Some(*cloud);
                 if self.uncrop {
                     return self.finish(|data| data.croppings.clear());
                 }

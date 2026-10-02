@@ -116,20 +116,73 @@ fn embed_point(req: &Value) -> Result<codec::types::Vector3, Value> {
     }
     Ok(codec::types::Vector3::new(p[0], p[1], p[2]))
 }
+fn parse_point_2d(val: &Value) -> Result<[f64; 2], Value> {
+    let arr = val
+        .as_array()
+        .filter(|v| v.len() >= 2)
+        .ok_or_else(|| failure("invalid_point", "Expected [x, y]"))?;
+    let x = arr[0]
+        .as_f64()
+        .filter(|v| v.is_finite())
+        .ok_or_else(|| failure("invalid_point", "Expected finite coordinates"))?;
+    let y = arr[1]
+        .as_f64()
+        .filter(|v| v.is_finite())
+        .ok_or_else(|| failure("invalid_point", "Expected finite coordinates"))?;
+    Ok([x, y])
+}
+
 impl OpenCADStudio {
     /// `embed_image` — pack the picture at `path` into an OLE2FRAME placed
     /// with its lower-left corner at `at` (default width ≈ pixel_width/100,
     /// like the interactive command's Enter answer) and commit it as one
     /// undo step. The drawing stays self-contained: no external file to lose.
+    /// Supports automatic 2-point calibration via `source_points` and `target_points`.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn control_embed_image(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         let i = self.active_tab;
         let path = string(req, "path")?;
         let image = crate::io::ole_embed::EmbeddedImage::from_file(std::path::Path::new(&path))
             .map_err(|e| failure("embed_failed", e))?;
-        let at = embed_point(req)?;
-        let default_width = (image.pixel_width as f64 / 100.0).max(1.0);
-        let width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(default_width);
+        let (at, width) = if let (Some(src_pts), Some(tgt_pts)) = (
+            req.get("source_points").and_then(Value::as_array),
+            req.get("target_points").and_then(Value::as_array),
+        ) {
+            if src_pts.len() >= 2 && tgt_pts.len() >= 2 {
+                let p_s1 = parse_point_2d(&src_pts[0])?;
+                let p_s2 = parse_point_2d(&src_pts[1])?;
+                let p_t1 = parse_point_2d(&tgt_pts[0])?;
+                let p_t2 = parse_point_2d(&tgt_pts[1])?;
+                let d_px = ((p_s2[0] - p_s1[0]).powi(2) + (p_s2[1] - p_s1[1]).powi(2)).sqrt();
+                let d_cad = ((p_t2[0] - p_t1[0]).powi(2) + (p_t2[1] - p_t1[1]).powi(2)).sqrt();
+                if d_px <= 1e-6 {
+                    return Err(failure(
+                        "invalid_points",
+                        "Source calibration points must be distinct",
+                    ));
+                }
+                let scale = d_cad / d_px;
+                let w = image.pixel_width as f64 * scale;
+                // In image pixel coords, y is 0 at top and pixel_height at bottom.
+                // In CAD coordinates, lower-left is (x_ll, y_ll).
+                // x_target = x_ll + px * scale => x_ll = x_target - px * scale
+                // y_target = y_ll + (pixel_height - py) * scale => y_ll = y_target - (pixel_height - py) * scale
+                let x_ll = p_t1[0] - p_s1[0] * scale;
+                let y_ll = p_t1[1] - (image.pixel_height as f64 - p_s1[1]) * scale;
+                let calc_at = codec::types::Vector3::new(x_ll, y_ll, 0.0);
+                let final_at = embed_point(req).unwrap_or(calc_at);
+                let final_w = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(w);
+                (final_at, final_w)
+            } else {
+                let default_width = (image.pixel_width as f64 / 100.0).max(1.0);
+                let width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(default_width);
+                (embed_point(req)?, width)
+            }
+        } else {
+            let default_width = (image.pixel_width as f64 / 100.0).max(1.0);
+            let width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(default_width);
+            (embed_point(req)?, width)
+        };
         if req["linked"].as_bool().unwrap_or(false) {
             // Path-linked RasterImage + ImageDefinition: the drawing stores
             // only the file path, so the picture file must travel with the
@@ -168,6 +221,7 @@ impl OpenCADStudio {
                 "handle": format!("{:X}", handle.value()),
                 "kind": "RasterImage",
                 "path": path,
+                "at": [at.x, at.y, at.z],
                 "width": width,
                 "height": height,
                 "linked": true,
@@ -187,6 +241,7 @@ impl OpenCADStudio {
             "handle": format!("{:X}", handle.value()),
             "kind": "Ole2Frame",
             "path": path,
+            "at": [at.x, at.y, at.z],
             "width": width,
         }));
         Ok(Task::none())

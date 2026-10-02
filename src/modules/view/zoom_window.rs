@@ -175,6 +175,8 @@ impl CadCommand for ZoomWindowCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }

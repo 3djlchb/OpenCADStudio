@@ -1354,7 +1354,7 @@ impl super::OpenCADStudio {
                     let mut entity = Surface::new(SurfaceKind::Generic);
                     entity.common = group.common;
                     self.add_surface_model_preserving_style(
-                        EntityType::Surface(entity),
+                        EntityType::Surface(Box::new(entity)),
                         group.body,
                     )
                 }
@@ -2316,7 +2316,7 @@ impl super::OpenCADStudio {
         }
         let n = surfaces.len();
         for surf in surfaces {
-            self.tabs[i].scene.add_entity(EntityType::Surface(surf));
+            self.tabs[i].scene.add_entity(EntityType::Surface(Box::new(surf)));
         }
         self.tabs[i].dirty = true;
         self.refresh_properties();

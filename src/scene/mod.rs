@@ -3052,10 +3052,10 @@ impl Scene {
         let is_insert = matches!(entity, EntityType::Insert(_));
         let is_section = matches!(
             entity,
-            EntityType::Extended(codec::entities::ExtendedEntity {
-                data: codec::entities::ExtendedEntityData::SectionObject(_),
-                ..
-            })
+            EntityType::Extended(extended) if matches!(
+                extended.data,
+                codec::entities::ExtendedEntityData::SectionObject(_)
+            )
         );
         if self.meshes.contains_key(&handle)
             || self.block_meshes.contains_key(&handle)
@@ -7691,16 +7691,14 @@ impl Scene {
                             CACHE_CATEGORY_MESH,
                             |h| {
                                 self.meshes.contains_key(&h)
-                                    || matches!(
-                                        self.document.get_entity(h),
-                                        Some(EntityType::Insert(_))
-                                            | Some(EntityType::Extended(
-                                                codec::entities::ExtendedEntity {
-                                                    data: codec::entities::ExtendedEntityData::SectionObject(_),
-                                                    ..
-                                                }
-                                            ))
-                                    )
+                                    || match self.document.get_entity(h) {
+                                        Some(EntityType::Insert(_)) => true,
+                                        Some(EntityType::Extended(extended)) => matches!(
+                                            extended.data,
+                                            codec::entities::ExtendedEntityData::SectionObject(_)
+                                        ),
+                                        _ => false,
+                                    }
                             },
                         ) =>
                     {
@@ -12153,15 +12151,15 @@ mod section_tests {
     #[test]
     fn adding_and_erasing_a_section_keeps_its_object_graph_consistent() {
         let mut scene = Scene::new();
-        let handle = scene.add_entity(EntityType::Extended(ExtendedEntity {
+        let handle = scene.add_entity(EntityType::Extended(Box::new(ExtendedEntity {
             common: EntityCommon::new(),
             data: ExtendedEntityData::SectionObject(section(1, 0.0)),
-        }));
+        })));
         let settings_handle = match scene.document.get_entity(handle).unwrap() {
-            EntityType::Extended(ExtendedEntity {
-                data: ExtendedEntityData::SectionObject(data),
-                ..
-            }) => data.settings_handle,
+            EntityType::Extended(extended) => match &extended.data {
+                ExtendedEntityData::SectionObject(data) => data.settings_handle,
+                _ => unreachable!(),
+            },
             _ => unreachable!(),
         };
         assert!(matches!(

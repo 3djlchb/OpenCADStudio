@@ -194,6 +194,38 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// If the main application window is minimized, restore it so that viewport captures succeed.
+#[cfg(target_os = "windows")]
+pub fn restore_window_if_minimized() {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow,
+        ShowWindow, SW_RESTORE,
+    };
+    type BOOL = i32;
+
+    unsafe {
+        let current_pid = GetCurrentProcessId();
+        unsafe extern "system" fn enum_wnd(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            let target_pid = lparam as u32;
+            let mut wnd_pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, &mut wnd_pid);
+            if wnd_pid == target_pid && IsWindowVisible(hwnd) != 0 {
+                if IsIconic(hwnd) != 0 {
+                    ShowWindow(hwnd, SW_RESTORE);
+                    SetForegroundWindow(hwnd);
+                }
+            }
+            1
+        }
+        EnumWindows(Some(enum_wnd), current_pid as LPARAM);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn restore_window_if_minimized() {}
+
 /// Copy the rendered web canvas during the frame callback, before the browser
 /// clears its drawing buffer. Canvas readback avoids Iced's synchronous GPU map.
 #[cfg(target_arch = "wasm32")]

@@ -925,7 +925,7 @@ fn gen_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> String {
         }
         if manifest.manual_kinds.contains(kind) {
             arms.push_str(&format!(
-                "        \"{kind}\" => codec::EntityType::{kind}({}_from_dict(dict, vm)?),\n",
+                "        \"{kind}\" => codec::EntityType::{kind}({}_from_dict(dict, vm)?.into()),\n",
                 snake_case(kind)
             ));
             continue;
@@ -962,7 +962,7 @@ fn gen_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> String {
         for f in &fields {
             body.push_str(&format!("            {}\n", f.setter));
         }
-        body.push_str(&format!("            codec::EntityType::{kind}({var})\n"));
+        body.push_str(&format!("            codec::EntityType::{kind}({var}.into())\n"));
         arms.push_str(&format!("        \"{kind}\" => {{\n{body}        }}\n"));
     }
     format!(
@@ -990,7 +990,7 @@ fn gen_apply_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> Str
     for kind in &manifest.type_filter {
         if manifest.manual_kinds.contains(kind) {
             arms.push_str(&format!(
-                "        codec::EntityType::{kind}(existing_value) => codec::EntityType::{kind}({}_apply(existing_value, dict, vm)?),\n",
+                "        codec::EntityType::{kind}(existing_value) => codec::EntityType::{kind}({}_apply(existing_value, dict, vm)?.into()),\n",
                 snake_case(kind)
             ));
             continue;
@@ -1032,7 +1032,7 @@ fn gen_apply_dict_to_entity(manifest: &Manifest, registry: &TypeRegistry) -> Str
         for f in &fields {
             body.push_str(&format!("            {}\n", f.setter));
         }
-        body.push_str(&format!("            codec::EntityType::{kind}({var})\n"));
+        body.push_str(&format!("            codec::EntityType::{kind}({var}.into())\n"));
         arms.push_str(&format!(
             "        codec::EntityType::{kind}(existing_value) => {{\n{body}        }}\n"
         ));

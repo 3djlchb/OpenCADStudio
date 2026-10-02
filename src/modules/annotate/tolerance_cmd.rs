@@ -114,7 +114,9 @@ impl CadCommand for ToleranceCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 }
 

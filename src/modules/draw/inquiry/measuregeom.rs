@@ -103,7 +103,9 @@ impl MeasureGeomCommand {
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        }
+        
+            ..Default::default()
+}
     }
 
     /// Extract (radius) from a Circle or Arc; `None` for anything else.

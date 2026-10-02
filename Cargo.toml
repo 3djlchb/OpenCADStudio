@@ -34,10 +34,10 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-codec = { package = "opencadcodec", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "5ef9376", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "68eeda1", features = ["acis", "offset"] }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "68eeda1" }
-graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "e204966" }
+codec = { package = "opencadcodec", git = "https://github.com/HakanSeven12/opencadcodec.git", rev = "d28fd71", features = ["serde"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "a03e4f0", features = ["acis", "offset"] }
+kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "a03e4f0" }
+graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "79bdc4b" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
@@ -94,9 +94,6 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 
-# ATTDEF/ATTRIB DXF output and the R2013+ solid wire cache (cadcodec PR pending).
-[patch."https://github.com/HakanSeven12/opencadcodec.git"]
-opencadcodec = { git = "https://github.com/ramox81/cadcodec.git", rev = "282b130" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"
@@ -107,6 +104,11 @@ i18n-embed = { version = "0.16", features = ["desktop-requester"] }
 rayon = "1"
 open = "5"
 printpdf = { version = "0.9.1", default-features = false, features = ["images"] }
+# TrueType subsetting for searchable PDF text (same version printpdf itself
+# uses, so no new binary enters the lockfile). Same feature set as printpdf's
+# own allsorts use (pure-Rust flate backend) — the defaults would drag in the
+# libz-sys C dependency. Native-only like printpdf.
+allsorts = { version = "0.16", default-features = false, features = ["flate2_rust"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "win-system-proxy"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

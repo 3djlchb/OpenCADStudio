@@ -269,7 +269,7 @@ impl MLeaderCommand {
             ml.text_style_handle = style_handle;
             ml.context.text_style_handle = style_handle;
         }
-        let entity = self.plane.place_entity(EntityType::MultiLeader(ml));
+        let entity = self.plane.place_entity(EntityType::MultiLeader(Box::new(ml)));
         if self.content_type == LeaderContentType::MText && self.text.is_empty() {
             CmdResult::CommitAndEditText(entity)
         } else {
@@ -799,7 +799,9 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+            ..Default::default()
+}
 }
 
 fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {

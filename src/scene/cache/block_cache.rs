@@ -54,6 +54,7 @@ pub struct LocalWire {
     /// expand-time transform (`emit_wire`) maps each vertex to world exactly
     /// like `points`, so block-instance text lands at the right place/scale.
     pub text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
+    pub searchable_text: Vec<crate::scene::model::wire_model::SearchableTextRun>,
     pub key_vertices: Vec<[f64; 3]>,
     pub snap_pts: Vec<(glam::DVec3, SnapHint)>,
     pub tangent_geoms: Vec<TangentGeom>,
@@ -893,6 +894,7 @@ fn tessellate_sub_local(
             is_point: matches!(sub, EntityType::Point(_)),
             point_marker: wire.point_marker,
             text_verts: wire.text_verts,
+            searchable_text: wire.searchable_text,
             key_vertices: wire.key_vertices,
             snap_pts: wire.snap_pts,
             tangent_geoms: wire.tangent_geoms,
@@ -1358,12 +1360,11 @@ fn translated_prototype_wire(
             }
         }
     }
-    if !wire.text_verts.is_empty() {
-        wire.text_verts =
-            crate::scene::model::wire_model::map_text_verts(&wire.text_verts, |x, y, z| {
-                (x + delta[0], y + delta[1], z + delta[2])
-            });
-    }
+    wire.map_text_layout(
+        &|p| [p[0] + delta[0], p[1] + delta[1], p[2] + delta[2]],
+        1.0,
+        0.0,
+    );
     if wire.aabb != WireModel::UNBOUNDED_AABB {
         wire.aabb[0] += delta_f32[0];
         wire.aabb[1] += delta_f32[1];
@@ -1595,6 +1596,7 @@ struct BatchEntry {
     pick_tris_low: Vec<[f32; 3]>,
     /// Accumulated SDF glyph quads (world space) for block-instance text.
     text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
+    searchable_text: Vec<crate::scene::model::wire_model::SearchableTextRun>,
     min_x: f32,
     min_y: f32,
     max_x: f32,
@@ -1779,6 +1781,7 @@ impl Batches {
                     dash_from_start: false,
                     dash_align_end: None,
                     text_verts: b.text_verts,
+                    searchable_text: b.searchable_text,
                     name: name.to_string(),
                     points: b.points,
                     points_low: b.points_low,
@@ -2562,7 +2565,9 @@ fn emit_wire(
                     plinegen: lw.plinegen,
                     fill_tris: Vec::new(),
                     fill_tris_low: Vec::new(),
-                };
+                
+                    ..Default::default()
+};
                 out.extra_wires.push(wire);
                 return;
             }
@@ -2917,6 +2922,41 @@ fn emit_wire(
             color: [rgb[0], rgb[1], rgb[2], final_color[3]],
             draw_depth: tv.draw_depth,
         });
+    }
+    // Searchable runs follow the same insert transform: origin via the full
+    // matrix, cap height by the mean XY scale, rotation by the transformed
+    // X-axis angle — so block-instance text plots searchable at its placed
+    // size and angle, not its block-local one.
+    //
+    // Notes (review V2): `sx`/`sy` are axis *lengths* (always ≥ 0), so a
+    // mirrored insert (`sx = -1`) yields length 1, not a zero mean — there is
+    // no 0.1 pt collapse. Mirroring folds into `rotation += π` (readable
+    // invisible text) rather than a reflected `Tm`: the visible outlines
+    // carry the true mirror. Non-uniform scale, width factor, oblique and
+    // tracking are approximated by the mean scale here; exact reproduction
+    // needs `Tz`/`Tc`/skewed `Tm` (follow-up — selection-only mismatch on the
+    // invisible layer, never a visual defect).
+    if !lw.searchable_text.is_empty() {
+        let x_axis = accum_xform.apply_rotation(Vector3::new(1.0, 0.0, 0.0));
+        let y_axis = accum_xform.apply_rotation(Vector3::new(0.0, 1.0, 0.0));
+        let sx = (x_axis.x * x_axis.x + x_axis.y * x_axis.y + x_axis.z * x_axis.z).sqrt();
+        let sy = (y_axis.x * y_axis.x + y_axis.y * y_axis.y + y_axis.z * y_axis.z).sqrt();
+        let mean_scale = ((sx + sy) * 0.5).max(1e-6);
+        let rot_delta = (x_axis.y).atan2(x_axis.x);
+        let base_len = entry.searchable_text.len();
+        entry.searchable_text.extend(lw.searchable_text.iter().cloned());
+        crate::scene::model::wire_model::map_searchable_runs(
+            &mut entry.searchable_text[base_len..],
+            &|p| {
+                let v = accum_xform.apply(Vector3::new(p[0], p[1], p[2]));
+                [v.x, v.y, v.z]
+            },
+            mean_scale,
+            rot_delta as f32,
+        );
+        for run in &mut entry.searchable_text[base_len..] {
+            run.color = final_color;
+        }
     }
 }
 

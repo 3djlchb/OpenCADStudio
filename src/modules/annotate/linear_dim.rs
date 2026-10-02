@@ -590,7 +590,9 @@ fn preview_wire(points: Vec<DVec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+            ..Default::default()
+}
 }
 
 /// Project the two extension origins onto the dimension line, which passes

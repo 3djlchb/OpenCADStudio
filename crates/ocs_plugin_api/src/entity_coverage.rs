@@ -1958,7 +1958,7 @@ pub fn validate_entity_mutation(
             if old.is_mpolygon != new.is_mpolygon
                 || old.mpolygon_hatch_color != new.mpolygon_hatch_color
                 || old.mpolygon_x_direction != new.mpolygon_x_direction
-                || old.mpolygon_boundary_handle_count != new.mpolygon_boundary_handle_count
+                || old.mpolygon_invalid_loops != new.mpolygon_invalid_loops
             {
                 return Err("Hatch MPOLYGON fields are unmapped and read-only".into());
             }

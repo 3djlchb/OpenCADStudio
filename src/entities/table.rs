@@ -1488,6 +1488,7 @@ pub fn tessellate_table(
     // SDF cell text: glyph quads (per-vertex coloured) collected across all
     // cells; emitted as one text-carrying wire at the end.
     let mut text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
+    let mut searchable: Vec<crate::scene::model::wire_model::SearchableTextRun> = Vec::new();
     let mut borders: HashMap<([u8; 4], u32), ([f32; 4], f32, Vec<[f32; 3]>)> = HashMap::default();
     let mut emitted: rustc_hash::FxHashSet<(i32, i32, i32, i32, i32, i32)> =
         rustc_hash::FxHashSet::default();
@@ -2016,17 +2017,18 @@ pub fn tessellate_table(
                             }
                             continue;
                         }
-                        let quads = crate::scene::text::glyph_quads::layout_glyph_quads(
-                            &mut atlas,
-                            run.height,
-                            run.rotation,
-                            run.width_factor,
-                            run.oblique,
-                            run.tracking,
-                            &run.font,
-                            run.bold,
-                            &run.text,
-                        );
+                        let (quads, pen_adv) =
+                            crate::scene::text::glyph_quads::layout_glyph_quads(
+                                &mut atlas,
+                                run.height,
+                                run.rotation,
+                                run.width_factor,
+                                run.oblique,
+                                run.tracking,
+                                &run.font,
+                                run.bold,
+                                &run.text,
+                            );
                         crate::scene::pipeline::text_gpu::push_glyph_vertices(
                             &mut text_verts,
                             &quads,
@@ -2035,6 +2037,24 @@ pub fn tessellate_table(
                             tcol,
                             0.0,
                         );
+                        {
+                            use crate::scene::model::wire_model::{
+                                clean_searchable_text, SearchableTextRun,
+                            };
+                            let visible = clean_searchable_text(&run.text);
+                            if !visible.is_empty() {
+                                searchable.push(SearchableTextRun {
+                                    text: visible,
+                                    origin: [stroke.origin[0], stroke.origin[1], to.z as f64],
+                                    height: run.height,
+                                    rotation: run.rotation,
+                                    color: tcol,
+                                    bold: run.bold,
+                                    font: run.font.clone(),
+                                    adv_width: pen_adv,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -2084,7 +2104,9 @@ pub fn tessellate_table(
                 // (sub-metre error at UTM scale) — not a crash. Follow-up:
                 // double-single-split via points_to_ds to match emit_wire.
                 fill_tris_low: Vec::new(),
-            }
+            
+            ..Default::default()
+}
         };
 
     let mut out: Vec<WireModel> = Vec::new();
@@ -2115,6 +2137,7 @@ pub fn tessellate_table(
         let mut w = mk(entity_color, vec![], vec![], line_weight_px);
         w.aabb = [nx as f32, ny as f32, xx as f32, xy as f32];
         w.text_verts = text_verts;
+        w.searchable_text = searchable;
         out.push(w);
     }
     out

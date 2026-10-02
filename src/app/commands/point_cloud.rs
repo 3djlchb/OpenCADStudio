@@ -163,10 +163,10 @@ impl OpenCADStudio {
             elevation_as_gradient: false,
             croppings: Vec::new(),
         };
-        let entity = codec::EntityType::Extended(codec::entities::ExtendedEntity {
+        let entity = codec::EntityType::Extended(Box::new(codec::entities::ExtendedEntity {
             common: codec::entities::EntityCommon::new(),
             data: codec::entities::ExtendedEntityData::PointCloudEx(data),
-        });
+        }));
         if let Some(cloud) = self.commit_entity_handle(entity) {
             // The reactor, owned by the cloud, tells the definition who uses it.
             let document = &mut self.tabs[i].scene.document;

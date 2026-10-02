@@ -523,7 +523,9 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+            ..Default::default()
+}
 }
 
 fn point_segment_distance_xy(point: Vector3, start: Vector3, end: Vector3) -> f64 {

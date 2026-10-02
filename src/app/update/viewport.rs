@@ -2865,7 +2865,9 @@ impl OpenCADStudio {
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        };
+                        
+                            ..Default::default()
+};
                         previews.push(guide);
                     }
                 }

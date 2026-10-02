@@ -91,5 +91,5 @@ pub fn surface_entity(record: &SolidHistoryLoft) -> EntityType {
         ruled_surface: settings.normals == 0, virtual_guide: false,
         cross_sections: Vec::new(), guide_curves: Vec::new(), path_curve: None,
     };
-    EntityType::Surface(surface)
+    EntityType::Surface(Box::new(surface))
 }

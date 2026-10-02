@@ -401,7 +401,9 @@ impl CadCommand for AreaCommand {
             plinegen: true,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
-        })
+        
+            ..Default::default()
+})
     }
 
     fn area_preview_regions(&self) -> Option<Vec<AreaPreviewRegion>> {

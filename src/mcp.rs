@@ -6,6 +6,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
     fs::{File, OpenOptions},
@@ -23,7 +24,7 @@ const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
 const TASK_TTL_MS: u64 = 3_600_000;
-const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
+pub(crate) const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. Verify important results with queries and a viewport capture, and save only to an explicit path. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, supports diff: true for streaming dirty visual regions, and provides multiscale DeepZoom pyramidal tiling via tile: {level, x, y} or cad://session/{session_id}/pyramid/manifest.json and cad://session/{session_id}/tile/{level}/{x}/{y}.png. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -31,6 +32,7 @@ const READ_OPS: &[&str] = &[
     "records",
     "record_schema",
     "capabilities",
+    "tools",
     "entities",
     "layers",
     "header",
@@ -45,11 +47,13 @@ const READ_OPS: &[&str] = &[
     "audit",
     "text_search",
     "text_audit",
+    "capture",
 ];
 const EXECUTE_OPS: &[&str] = &[
     "new",
     "open",
     "activate",
+    "switch_document",
     "run",
     "start",
     "input",
@@ -91,6 +95,7 @@ const BATCH_STEP_OPS: &[&str] = &[
     "new",
     "open",
     "activate",
+    "switch_document",
     "run",
     "start",
     "input",
@@ -201,6 +206,173 @@ impl TaskStore {
 
     fn evict_expired_at(&mut self, now: Instant) {
         self.tasks.retain(|stored| stored.expires_at > now);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CachedSnapshot {
+    session_id: String,
+    hash: String,
+    created_at: String,
+    mime_type: String,
+    data_base64: String,
+    bytes_len: usize,
+    metadata: Value,
+}
+
+#[derive(Default)]
+struct ResourceStore {
+    snapshots: HashMap<String, CachedSnapshot>,
+    order: VecDeque<String>,
+    latest: HashMap<String, String>,
+    last_captures: HashMap<String, (image::RgbaImage, String)>,
+    tiles: HashMap<String, CachedSnapshot>,
+    tile_order: VecDeque<String>,
+    pyramid_manifests: HashMap<String, Value>,
+}
+
+const MAX_STORED_SNAPSHOTS: usize = 32;
+const MAX_STORED_TILES: usize = 64;
+
+impl ResourceStore {
+    fn insert(
+        &mut self,
+        session_id: &str,
+        hash: &str,
+        data_base64: String,
+        bytes_len: usize,
+        metadata: Value,
+    ) -> String {
+        let uri = format!("cad://session/{session_id}/snapshot/{hash}.png");
+        let now = iso8601_now();
+        let snapshot = CachedSnapshot {
+            session_id: session_id.to_string(),
+            hash: hash.to_string(),
+            created_at: now,
+            mime_type: "image/png".to_string(),
+            data_base64,
+            bytes_len,
+            metadata,
+        };
+
+        if !self.snapshots.contains_key(&uri) {
+            if self.order.len() >= MAX_STORED_SNAPSHOTS {
+                if let Some(oldest) = self.order.pop_front() {
+                    self.snapshots.remove(&oldest);
+                }
+            }
+            self.order.push_back(uri.clone());
+        }
+        self.snapshots.insert(uri.clone(), snapshot);
+        self.latest.insert(session_id.to_string(), uri.clone());
+        uri
+    }
+
+    fn insert_tile(
+        &mut self,
+        session_id: &str,
+        level: u32,
+        x: u32,
+        y: u32,
+        data_base64: String,
+        bytes_len: usize,
+        metadata: Value,
+    ) -> String {
+        let uri = format!("cad://session/{session_id}/tile/{level}/{x}/{y}.png");
+        let now = iso8601_now();
+        let snapshot = CachedSnapshot {
+            session_id: session_id.to_string(),
+            hash: format!("tile-{level}-{x}-{y}"),
+            created_at: now,
+            mime_type: "image/png".to_string(),
+            data_base64,
+            bytes_len,
+            metadata,
+        };
+
+        if !self.tiles.contains_key(&uri) {
+            if self.tile_order.len() >= MAX_STORED_TILES {
+                if let Some(oldest) = self.tile_order.pop_front() {
+                    self.tiles.remove(&oldest);
+                }
+            }
+            self.tile_order.push_back(uri.clone());
+        }
+        self.tiles.insert(uri.clone(), snapshot);
+        uri
+    }
+
+    fn insert_pyramid_manifest(&mut self, session_id: &str, manifest: Value) -> String {
+        let uri = format!("cad://session/{session_id}/pyramid/manifest.json");
+        self.pyramid_manifests.insert(session_id.to_string(), manifest);
+        uri
+    }
+
+    fn get_by_uri(&self, uri: &str) -> Option<&CachedSnapshot> {
+        if uri.ends_with("/snapshot/latest.png") {
+            if let Some(session_id) = uri
+                .strip_prefix("cad://session/")
+                .and_then(|s| s.strip_suffix("/snapshot/latest.png"))
+            {
+                if let Some(target_uri) = self.latest.get(session_id) {
+                    return self.snapshots.get(target_uri);
+                }
+            }
+            return None;
+        }
+        if uri.contains("/tile/") {
+            return self.tiles.get(uri);
+        }
+        self.snapshots.get(uri)
+    }
+
+    fn list_resources(&self, active_session_ids: &[String]) -> Vec<Value> {
+        let mut list = Vec::new();
+        for session_id in active_session_ids {
+            list.push(json!({
+                "uri": format!("cad://session/{session_id}/viewport.png"),
+                "name": format!("Active Viewport ({session_id})"),
+                "description": format!("Live render of the active drawing viewport for session {session_id}."),
+                "mimeType": "image/png"
+            }));
+            list.push(json!({
+                "uri": format!("cad://session/{session_id}/pyramid/manifest.json"),
+                "name": format!("Pyramid Manifest ({session_id})"),
+                "description": format!("Multiscale DeepZoom pyramidal tiling manifest for session {session_id}."),
+                "mimeType": "application/json"
+            }));
+            if let Some(latest_uri) = self.latest.get(session_id) {
+                if let Some(snap) = self.snapshots.get(latest_uri) {
+                    list.push(json!({
+                        "uri": format!("cad://session/{session_id}/snapshot/latest.png"),
+                        "name": format!("Latest Capture ({session_id})"),
+                        "description": format!("Most recent viewport capture ({} bytes, captured at {})", snap.bytes_len, snap.created_at),
+                        "mimeType": "image/png"
+                    }));
+                }
+            }
+        }
+        for uri in &self.order {
+            if let Some(snap) = self.snapshots.get(uri) {
+                list.push(json!({
+                    "uri": uri,
+                    "name": format!("Snapshot {}", &snap.hash[..snap.hash.len().min(8)]),
+                    "description": format!("Captured frame for session {} ({} bytes, captured at {})", snap.session_id, snap.bytes_len, snap.created_at),
+                    "mimeType": "image/png"
+                }));
+            }
+        }
+        for uri in &self.tile_order {
+            if let Some(tile) = self.tiles.get(uri) {
+                list.push(json!({
+                    "uri": uri,
+                    "name": format!("Tile {}", tile.hash),
+                    "description": format!("Pyramidal tile for session {} ({} bytes)", tile.session_id, tile.bytes_len),
+                    "mimeType": "image/png"
+                }));
+            }
+        }
+        list
     }
 }
 
@@ -787,10 +959,295 @@ fn shape_execute_response(
     Ok(response)
 }
 
+fn read_resource(
+    uri: &str,
+    clients: &mut HashMap<String, GuiClient>,
+    resources: &mut ResourceStore,
+) -> Result<Value, String> {
+    if !uri.starts_with("cad://") {
+        return Err(format!("Unsupported resource URI scheme: {uri}"));
+    }
+    // Check cached snapshot image: cad://session/{session_id}/snapshot/{hash}.png or latest.png
+    if let Some(snapshot) = resources.get_by_uri(uri) {
+        return Ok(json!({
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": snapshot.mime_type,
+                    "blob": snapshot.data_base64
+                }
+            ]
+        }));
+    }
+    // Check snapshot metadata json: cad://session/{session_id}/snapshot/{hash}.json
+    if uri.ends_with(".json") {
+        let png_uri = format!("{}.png", uri.trim_end_matches(".json"));
+        if let Some(snapshot) = resources.get_by_uri(&png_uri) {
+            return Ok(json!({
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": serde_json::to_string_pretty(&snapshot.metadata)
+                            .unwrap_or_else(|_| snapshot.metadata.to_string())
+                    }
+                ]
+            }));
+        }
+    }
+    // Live viewport capture: cad://session/{session_id}/viewport.png, pyramid manifest, tiles, or state.json
+    if let Some(rest) = uri.strip_prefix("cad://session/") {
+        if let Some((session_id, subpath)) = rest.split_once('/') {
+            if subpath == "pyramid/manifest.json" {
+                if let Some(manifest) = resources.pyramid_manifests.get(session_id) {
+                    let text = serde_json::to_string_pretty(manifest)
+                        .unwrap_or_else(|_| manifest.to_string());
+                    return Ok(json!({
+                        "contents": [
+                            {
+                                "uri": uri,
+                                "mimeType": "application/json",
+                                "text": text
+                            }
+                        ]
+                    }));
+                }
+                let mut bounds = [-100.0, -100.0, 100.0, 100.0];
+                let mut unit = "Millimeters".to_string();
+                if let Some(latest_uri) = resources.latest.get(session_id) {
+                    if let Some(snap) = resources.snapshots.get(latest_uri) {
+                        if let Some(spatial) = snap.metadata.get("_spatial") {
+                            if let Some(u) = spatial.get("unit").and_then(Value::as_str) {
+                                unit = u.to_string();
+                            }
+                            if let Some(wb) = spatial.get("world_bounds") {
+                                if let (Some(min), Some(max)) = (
+                                    wb.get("min").and_then(Value::as_array),
+                                    wb.get("max").and_then(Value::as_array),
+                                ) {
+                                    if min.len() >= 2 && max.len() >= 2 {
+                                        if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                                            min[0].as_f64(),
+                                            min[1].as_f64(),
+                                            max[0].as_f64(),
+                                            max[1].as_f64(),
+                                        ) {
+                                            bounds = [x0, y0, x1, y1];
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let manifest = crate::app::control::vision::compute_pyramid_manifest(
+                    session_id, &unit, bounds, 4, 512,
+                );
+                let manifest_val =
+                    serde_json::to_value(&manifest).map_err(|e| e.to_string())?;
+                resources.insert_pyramid_manifest(session_id, manifest_val.clone());
+                let text = serde_json::to_string_pretty(&manifest_val)
+                    .unwrap_or_else(|_| manifest_val.to_string());
+                return Ok(json!({
+                    "contents": [
+                        {
+                            "uri": uri,
+                            "mimeType": "application/json",
+                            "text": text
+                        }
+                    ]
+                }));
+            } else if subpath.starts_with("tile/") {
+                let trimmed = subpath.strip_prefix("tile/").unwrap_or("");
+                let is_json = trimmed.ends_with(".json");
+                let core = trimmed.trim_end_matches(".png").trim_end_matches(".json");
+                let parts: Vec<&str> = core.split('/').collect();
+                if parts.len() == 3 {
+                    if let (Ok(level), Ok(x), Ok(y)) = (
+                        parts[0].parse::<u32>(),
+                        parts[1].parse::<u32>(),
+                        parts[2].parse::<u32>(),
+                    ) {
+                        let png_uri =
+                            format!("cad://session/{session_id}/tile/{level}/{x}/{y}.png");
+                        if is_json {
+                            if let Some(tile_snap) = resources.tiles.get(&png_uri) {
+                                let meta_text = serde_json::to_string_pretty(&tile_snap.metadata)
+                                    .unwrap_or_else(|_| tile_snap.metadata.to_string());
+                                return Ok(json!({
+                                    "contents": [
+                                        {
+                                            "uri": uri,
+                                            "mimeType": "application/json",
+                                            "text": meta_text
+                                        }
+                                    ]
+                                }));
+                            }
+                        }
+
+                        if let Some(tile_snap) = resources.tiles.get(&png_uri) {
+                            return Ok(json!({
+                                "contents": [
+                                    {
+                                        "uri": png_uri,
+                                        "mimeType": "image/png",
+                                        "blob": tile_snap.data_base64
+                                    }
+                                ]
+                            }));
+                        }
+
+                        let mut base_bounds = [-100.0, -100.0, 100.0, 100.0];
+                        if let Some(manifest) = resources.pyramid_manifests.get(session_id) {
+                            if let Some(arr) =
+                                manifest.get("world_bounds").and_then(Value::as_array)
+                            {
+                                if arr.len() == 4 {
+                                    if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                                        arr[0].as_f64(),
+                                        arr[1].as_f64(),
+                                        arr[2].as_f64(),
+                                        arr[3].as_f64(),
+                                    ) {
+                                        base_bounds = [x0, y0, x1, y1];
+                                    }
+                                }
+                            }
+                        }
+                        let tile_bounds = crate::app::control::vision::compute_tile_bounds(
+                            base_bounds, level, x, y,
+                        )?;
+                        let path = std::env::temp_dir()
+                            .join(format!("ocs-tile-{session_id}-{level}-{x}-{y}.png"));
+                        let req = json!({
+                            "op": "capture",
+                            "path": path.to_string_lossy(),
+                            "scope": "viewport",
+                            "view": "region",
+                            "bounds": tile_bounds,
+                            "max_dimension": 512,
+                        });
+                        let result = client(clients, session_id)?.request(req, 20.0)?;
+                        if result["ok"].as_bool() != Some(true)
+                            || result["status"].as_str() != Some("completed")
+                        {
+                            return Err(result.to_string());
+                        }
+                        let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+                        let _ = std::fs::remove_file(path);
+                        let b64 = BASE64.encode(&bytes);
+                        let bytes_len = bytes.len();
+                        let mut meta =
+                            result.get("result").cloned().unwrap_or_else(|| json!({}));
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.remove("path");
+                            obj.insert(
+                                "pyramid".into(),
+                                json!({
+                                    "level": level,
+                                    "x": x,
+                                    "y": y,
+                                    "tile_world_bounds": tile_bounds,
+                                    "tile_uri": png_uri,
+                                    "manifest_uri": format!("cad://session/{session_id}/pyramid/manifest.json")
+                                }),
+                            );
+                        }
+                        resources.insert_tile(
+                            session_id,
+                            level,
+                            x,
+                            y,
+                            b64.clone(),
+                            bytes_len,
+                            meta.clone(),
+                        );
+                        if is_json {
+                            let meta_text = serde_json::to_string_pretty(&meta)
+                                .unwrap_or_else(|_| meta.to_string());
+                            return Ok(json!({
+                                "contents": [
+                                    {
+                                        "uri": uri,
+                                        "mimeType": "application/json",
+                                        "text": meta_text
+                                    }
+                                ]
+                            }));
+                        }
+                        return Ok(json!({
+                            "contents": [
+                                {
+                                    "uri": png_uri,
+                                    "mimeType": "image/png",
+                                    "blob": b64
+                                }
+                            ]
+                        }));
+                    }
+                }
+            } else if subpath == "viewport.png" {
+                let path = std::env::temp_dir().join(format!("ocs-resource-{}.png", random_id()?));
+                let req = json!({
+                    "op": "capture",
+                    "path": path.to_string_lossy(),
+                    "scope": "viewport",
+                    "max_dimension": 1600,
+                });
+                let result = client(clients, session_id)?
+                    .request(req, 15.0)?;
+                if result["ok"].as_bool() != Some(true)
+                    || result["status"].as_str() != Some("completed")
+                {
+                    return Err(result.to_string());
+                }
+                let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+                let _ = std::fs::remove_file(path);
+
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                let hash = format!("{:x}", hasher.finalize());
+                let b64 = BASE64.encode(&bytes);
+                let bytes_len = bytes.len();
+                let meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
+
+                resources.insert(session_id, &hash, b64.clone(), bytes_len, meta);
+
+                return Ok(json!({
+                    "contents": [
+                        {
+                            "uri": uri,
+                            "mimeType": "image/png",
+                            "blob": b64
+                        }
+                    ]
+                }));
+            } else if subpath == "state.json" {
+                let cli = client(clients, session_id)?;
+                let state_text = serde_json::to_string_pretty(&cli.state)
+                    .unwrap_or_else(|_| cli.state.to_string());
+                return Ok(json!({
+                    "contents": [
+                        {
+                            "uri": uri,
+                            "mimeType": "application/json",
+                            "text": state_text
+                        }
+                    ]
+                }));
+            }
+        }
+    }
+
+    Err(format!("Resource not found: {uri}"))
+}
+
 fn call_tool(
     name: &str,
     arguments: &Value,
     clients: &mut HashMap<String, GuiClient>,
+    resources: &mut ResourceStore,
 ) -> Result<Value, String> {
     match name {
         "ocs_sessions" => {
@@ -802,6 +1259,14 @@ fn call_tool(
             let op = arguments["op"].as_str().unwrap_or("state");
             if !READ_OPS.contains(&op) {
                 return Err("Use ocs_execute for mutations".into());
+            }
+            if op == "tools" {
+                return Ok(json!({
+                    "ok": true,
+                    "status": "completed",
+                    "tools": tool_definitions(),
+                    "instructions": INSTRUCTIONS
+                }));
             }
             let mut request = arguments["parameters"]
                 .as_object()
@@ -849,8 +1314,110 @@ fn call_tool(
             let path = std::env::temp_dir().join(format!("ocs-capture-{}.png", random_id()?));
             let scope = arguments["scope"].as_str().unwrap_or("viewport");
             let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
+            let delivery = arguments["delivery"].as_str().unwrap_or("inline");
+            let diff = arguments["diff"].as_bool().unwrap_or(false);
+            let diff_mode = arguments["diff_mode"].as_str().unwrap_or("highlight");
+            let reset_baseline = arguments["reset_diff_baseline"].as_bool().unwrap_or(false);
+            let tile = arguments.get("tile");
+            let want_manifest = arguments["pyramid_manifest"].as_bool().unwrap_or(false);
+
+            if reset_baseline {
+                resources.last_captures.remove(session_id);
+            }
+
+            let mut tile_info: Option<(u32, u32, u32, [f64; 4])> = None;
+            if let Some(tile_val) = tile {
+                if let (Some(level), Some(x), Some(y)) = (
+                    tile_val.get("level").and_then(Value::as_u64),
+                    tile_val.get("x").and_then(Value::as_u64),
+                    tile_val.get("y").and_then(Value::as_u64),
+                ) {
+                    let mut base_bounds = [-100.0, -100.0, 100.0, 100.0];
+                    if let Some(bounds_arr) = arguments.get("bounds").and_then(Value::as_array) {
+                        if bounds_arr.len() >= 4 {
+                            if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                                bounds_arr[0].as_f64(),
+                                bounds_arr[1].as_f64(),
+                                bounds_arr[2].as_f64(),
+                                bounds_arr[3].as_f64(),
+                            ) {
+                                base_bounds = [x0, y0, x1, y1];
+                            }
+                        }
+                    } else if let Some(manifest) = resources.pyramid_manifests.get(session_id) {
+                        if let Some(arr) = manifest.get("world_bounds").and_then(Value::as_array) {
+                            if arr.len() == 4 {
+                                if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                                    arr[0].as_f64(),
+                                    arr[1].as_f64(),
+                                    arr[2].as_f64(),
+                                    arr[3].as_f64(),
+                                ) {
+                                    base_bounds = [x0, y0, x1, y1];
+                                }
+                            }
+                        }
+                    } else if let Some(latest_uri) = resources.latest.get(session_id) {
+                        if let Some(snap) = resources.snapshots.get(latest_uri) {
+                            if let Some(spatial) = snap.metadata.get("_spatial") {
+                                if let Some(wb) = spatial.get("world_bounds") {
+                                    if let (Some(min), Some(max)) = (
+                                        wb.get("min").and_then(Value::as_array),
+                                        wb.get("max").and_then(Value::as_array),
+                                    ) {
+                                        if min.len() >= 2 && max.len() >= 2 {
+                                            if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                                                min[0].as_f64(),
+                                                min[1].as_f64(),
+                                                max[0].as_f64(),
+                                                max[1].as_f64(),
+                                            ) {
+                                                base_bounds = [x0, y0, x1, y1];
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let tb = crate::app::control::vision::compute_tile_bounds(
+                        base_bounds,
+                        level as u32,
+                        x as u32,
+                        y as u32,
+                    )?;
+                    tile_info = Some((level as u32, x as u32, y as u32, tb));
+                }
+            }
+
+            let mut req = json!({
+                "op": "capture",
+                "path": path.to_string_lossy(),
+                "scope": scope,
+                "max_dimension": if tile_info.is_some() && arguments.get("max_dimension").is_none() { 512 } else { max_dimension },
+            });
+            if let Some((_, _, _, tb)) = tile_info {
+                req["view"] = json!("region");
+                req["bounds"] = json!(tb);
+            } else {
+                if let Some(view) = arguments.get("view").and_then(Value::as_str) {
+                    req["view"] = json!(view);
+                }
+                if let Some(bounds) = arguments.get("bounds").and_then(Value::as_array) {
+                    req["bounds"] = json!(bounds);
+                }
+            }
+            if let Some(focus) = arguments.get("focus_handles").and_then(Value::as_array) {
+                req["focus_handles"] = json!(focus);
+            }
+            if let Some(hl) = arguments.get("highlight_handles").and_then(Value::as_array) {
+                req["highlight_handles"] = json!(hl);
+            }
+            if let Some(annotate) = arguments.get("annotate").and_then(Value::as_bool) {
+                req["annotate"] = json!(annotate);
+            }
             let result = client(clients, session_id)?
-                .request(json!({"op":"capture","path":path.to_string_lossy(),"scope":scope,"max_dimension":max_dimension}), 30.0)?;
+                .request(req, 30.0)?;
             if result["ok"].as_bool() != Some(true)
                 || result["status"].as_str() != Some("completed")
             {
@@ -858,7 +1425,188 @@ fn call_tool(
             }
             let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
             let _ = std::fs::remove_file(path);
-            Ok(json!({"$image":BASE64.encode(bytes)}))
+            let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
+            if let Some(obj) = meta.as_object_mut() {
+                obj.remove("path");
+            }
+
+            let mut final_bytes = bytes;
+            if diff {
+                let current_img = image::load_from_memory(&final_bytes)
+                    .map_err(|e| format!("Failed to decode capture for visual diff: {e}"))?
+                    .to_rgba8();
+
+                let mut p2w = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+                if let Some(arr) = meta
+                    .get("_spatial")
+                    .and_then(|s| s.get("pixel_to_world_matrix"))
+                    .and_then(Value::as_array)
+                {
+                    if arr.len() == 6 {
+                        for (i, v) in arr.iter().enumerate() {
+                            if let Some(num) = v.as_f64() {
+                                p2w[i] = num;
+                            }
+                        }
+                    }
+                }
+
+                if let Some((prev_img, prev_hash)) = resources.last_captures.get(session_id) {
+                    let diff_res = crate::app::control::vision::compute_visual_diff(prev_img, &current_img, &p2w);
+                    let diff_info = json!({
+                        "is_baseline": false,
+                        "baseline_hash": prev_hash,
+                        "changed": diff_res.changed,
+                        "change_percentage": (diff_res.change_percentage * 100.0).round() / 100.0,
+                        "changed_pixels": diff_res.changed_pixels,
+                        "dirty_pixel_bounds": diff_res.dirty_pixel_bounds,
+                        "dirty_world_bounds": diff_res.dirty_world_bounds,
+                        "patch_resolution": diff_res.patch_resolution,
+                        "mode": diff_mode,
+                    });
+                    if let Some(obj) = meta.as_object_mut() {
+                        obj.insert("diff".into(), diff_info);
+                    }
+
+                    if diff_res.changed {
+                        match diff_mode {
+                            "crop" => {
+                                if let Some(crop) = &diff_res.cropped_patch {
+                                    final_bytes = crate::app::control::vision::encode_image_png(crop)?;
+                                }
+                            }
+                            "highlight" => {
+                                final_bytes = crate::app::control::vision::encode_image_png(&diff_res.diff_overlay)?;
+                            }
+                            _ => {}
+                        }
+                    }
+                } else {
+                    let diff_info = json!({
+                        "is_baseline": true,
+                        "changed": false,
+                        "change_percentage": 0.0,
+                        "changed_pixels": 0,
+                        "message": "Baseline capture established; subsequent captures with diff: true will report dirty regions.",
+                        "mode": diff_mode,
+                    });
+                    if let Some(obj) = meta.as_object_mut() {
+                        obj.insert("diff".into(), diff_info);
+                    }
+                }
+
+                let mut base_hasher = Sha256::new();
+                let full_png = crate::app::control::vision::encode_image_png(&current_img)?;
+                base_hasher.update(&full_png);
+                let current_full_hash = format!("{:x}", base_hasher.finalize());
+                resources.last_captures.insert(session_id.to_string(), (current_img, current_full_hash));
+            }
+
+            let mut hasher = Sha256::new();
+            hasher.update(&final_bytes);
+            let hash = format!("{:x}", hasher.finalize());
+            let b64 = BASE64.encode(&final_bytes);
+            let bytes_len = final_bytes.len();
+
+            let uri = resources.insert(session_id, &hash, b64.clone(), bytes_len, meta.clone());
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert("uri".into(), Value::String(uri.clone()));
+                obj.insert("latest_uri".into(), Value::String(format!("cad://session/{session_id}/snapshot/latest.png")));
+                obj.insert("hash".into(), Value::String(hash.clone()));
+                obj.insert("bytes".into(), Value::from(bytes_len));
+            }
+
+            let mut final_uri = uri.clone();
+            if let Some((level, x, y, tb)) = tile_info {
+                let tile_uri = resources.insert_tile(
+                    session_id,
+                    level,
+                    x,
+                    y,
+                    b64.clone(),
+                    bytes_len,
+                    meta.clone(),
+                );
+                final_uri = tile_uri.clone();
+                let pyr = json!({
+                    "level": level,
+                    "x": x,
+                    "y": y,
+                    "tile_world_bounds": tb,
+                    "tile_uri": tile_uri,
+                    "manifest_uri": format!("cad://session/{session_id}/pyramid/manifest.json")
+                });
+                if let Some(obj) = meta.as_object_mut() {
+                    obj.insert("pyramid".into(), pyr);
+                    obj.insert("uri".into(), Value::String(final_uri.clone()));
+                }
+            }
+
+            if want_manifest
+                || (!resources.pyramid_manifests.contains_key(session_id) && tile_info.is_none())
+            {
+                let mut bounds = [-100.0, -100.0, 100.0, 100.0];
+                let mut unit = "Millimeters".to_string();
+                if let Some(spatial) = meta.get("_spatial") {
+                    if let Some(u) = spatial.get("unit").and_then(Value::as_str) {
+                        unit = u.to_string();
+                    }
+                    if let Some(wb) = spatial.get("world_bounds") {
+                        if let (Some(min), Some(max)) = (
+                            wb.get("min").and_then(Value::as_array),
+                            wb.get("max").and_then(Value::as_array),
+                        ) {
+                            if min.len() >= 2 && max.len() >= 2 {
+                                if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                                    min[0].as_f64(),
+                                    min[1].as_f64(),
+                                    max[0].as_f64(),
+                                    max[1].as_f64(),
+                                ) {
+                                    bounds = [x0, y0, x1, y1];
+                                }
+                            }
+                        }
+                    }
+                }
+                let manifest = crate::app::control::vision::compute_pyramid_manifest(
+                    session_id, &unit, bounds, 4, 512,
+                );
+                if let Ok(manifest_val) = serde_json::to_value(&manifest) {
+                    resources.insert_pyramid_manifest(session_id, manifest_val.clone());
+                    if want_manifest {
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("pyramid_manifest".into(), manifest_val);
+                        }
+                    }
+                }
+            }
+
+            match delivery {
+                "resource" => Ok(json!({
+                    "$resource": {
+                        "uri": final_uri,
+                        "mimeType": "image/png",
+                        "hash": hash,
+                        "bytes": bytes_len,
+                    },
+                    "metadata": meta,
+                })),
+                "both" => Ok(json!({
+                    "$image": b64,
+                    "$resource": {
+                        "uri": final_uri,
+                        "mimeType": "image/png",
+                        "hash": hash,
+                        "bytes": bytes_len,
+                    },
+                    "metadata": meta,
+                })),
+                _ => Ok(json!({
+                    "$image": b64,
+                    "metadata": meta,
+                })),
+            }
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
@@ -899,7 +1647,7 @@ fn execute_output_schema() -> Value {
     })
 }
 
-fn tool_definitions() -> Value {
+pub(crate) fn tool_definitions() -> Value {
     json!([
         {
             "name":"ocs_sessions",
@@ -924,16 +1672,63 @@ fn tool_definitions() -> Value {
         },
         {
             "name":"ocs_capture",
-            "description":"Capture the actual current OCS drawing viewport or window as a bounded PNG for visual verification.",
-            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},"max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."}},"required":["ocs_session_id"],"additionalProperties":false},
+            "description":"Capture the actual current OCS drawing viewport or window as a bounded PNG with optional camera framing, entity highlighting, spatial coordinates and Set-of-Marks annotations.",
+            "inputSchema":{
+                "type":"object",
+                "properties":{
+                    "ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},
+                    "scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},
+                    "max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."},
+                    "delivery":{"type":"string","enum":["inline","resource","both"],"default":"inline","description":"Image delivery method: 'inline' embeds base64 in tool content, 'resource' returns an MCP cad:// URI reference without inlining image bytes, 'both' returns both inline image and cad:// URI."},
+                    "diff":{"type":"boolean","default":false,"description":"If true, calculates visual differential compared to the previous capture of this session, returning dirty bounds and changed areas."},
+                    "diff_mode":{"type":"string","enum":["highlight","crop","metadata_only"],"default":"highlight","description":"Visual diff representation: 'highlight' returns full image with changed areas highlighted in vibrant green and unchanged background dimmed; 'crop' returns only the cropped dirty bounding box (saving maximum bandwidth/tokens); 'metadata_only' leaves image untouched but populates the diff metadata."},
+                    "reset_diff_baseline":{"type":"boolean","default":false,"description":"If true, discards any previous diff baseline for this session and establishes this capture as the new baseline."},
+                    "view":{"type":"string","enum":["current","extents","selection","region"],"default":"current","description":"Frame the camera before capture: extents fits all entities, selection fits selected entities, region fits explicit world bounds."},
+                    "bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"World XY bounding box [min_x, min_y, max_x, max_y] to zoom and fit in view before capturing (used with view: 'region')."},
+                    "focus_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to zoom and fit in view before capturing."},
+                    "highlight_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to select/highlight before capturing."},
+                    "annotate":{"type":"boolean","default":false,"description":"Overlay Set-of-Marks numbered tags on visible entities for visual grounding."},
+                    "tile":{"type":"object","properties":{"level":{"type":"integer","minimum":0,"maximum":6,"description":"Pyramid zoom level (0 = full overview, 1 = 2x2 grid, 2 = 4x4 grid, etc.)."},"x":{"type":"integer","minimum":0,"description":"Tile column index (0-indexed, left-to-right)."},"y":{"type":"integer","minimum":0,"description":"Tile row index (0-indexed, top-to-bottom)."}},"required":["level","x","y"],"description":"Fetch a specific DeepZoom pyramid tile. Automatically computes tile world bounds and frames the camera."},
+                    "pyramid_manifest":{"type":"boolean","default":false,"description":"If true, generates and returns the complete multiscale pyramid manifest (levels, grid dimensions, tile world spans and resource URIs) in the response metadata."}
+                },
+                "required":["ocs_session_id"],
+                "additionalProperties":true
+            },
             "annotations":{"title":"Capture OCS window","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
     ])
 }
 
 fn tool_result(value: Value) -> Value {
-    if let Some(image) = value.get("$image").and_then(Value::as_str) {
-        return json!({"content":[{"type":"image","data":image,"mimeType":"image/png"}]});
+    if value.get("$resource").is_some() || value.get("$image").is_some() {
+        let mut content = Vec::new();
+        if let Some(res) = value.get("$resource") {
+            let uri = res["uri"].as_str().unwrap_or("");
+            content.push(json!({
+                "type": "text",
+                "text": format!("Captured viewport to MCP resource: {uri}")
+            }));
+            content.push(json!({
+                "type": "resource",
+                "resource": {
+                    "uri": uri,
+                    "mimeType": res["mimeType"].as_str().unwrap_or("image/png")
+                }
+            }));
+        }
+        if let Some(meta) = value.get("metadata") {
+            let meta_text = serde_json::to_string_pretty(meta).unwrap_or_else(|_| meta.to_string());
+            content.push(json!({"type":"text","text":meta_text}));
+        }
+        if let Some(image) = value.get("$image").and_then(Value::as_str) {
+            content.push(json!({"type":"image","data":image,"mimeType":"image/png"}));
+        }
+        let structured = value.get("metadata").cloned().unwrap_or_else(|| json!({}));
+        return json!({
+            "content": content,
+            "structuredContent": structured,
+            "isError": false
+        });
     }
     let structured = if value.is_object() {
         value.clone()
@@ -994,7 +1789,11 @@ fn task_value(task: &McpTask, status: &str) -> Value {
     value
 }
 
-fn poll_task(task: &mut McpTask, clients: &mut HashMap<String, GuiClient>) -> Value {
+fn poll_task(
+    task: &mut McpTask,
+    clients: &mut HashMap<String, GuiClient>,
+    resources: &mut ResourceStore,
+) -> Value {
     if task.result.is_some() {
         return task_value(task, "completed");
     }
@@ -1004,7 +1803,7 @@ fn poll_task(task: &mut McpTask, clients: &mut HashMap<String, GuiClient>) -> Va
     task.last_updated_at = iso8601_now();
     let mut arguments = task.arguments.clone();
     arguments["wait_seconds"] = Value::from(0);
-    match call_tool(&task.name, &arguments, clients) {
+    match call_tool(&task.name, &arguments, clients, resources) {
         Ok(value) if matches!(value["status"].as_str(), Some("accepted" | "running")) => {
             task_value(task, "working")
         }
@@ -1059,6 +1858,7 @@ fn handle_message(
     message: Value,
     clients: &mut HashMap<String, GuiClient>,
     tasks: &mut TaskStore,
+    resources: &mut ResourceStore,
 ) -> Option<Value> {
     let id = message.get("id").cloned();
     let method = message.get("method").and_then(Value::as_str)?;
@@ -1089,7 +1889,10 @@ fn handle_message(
                 id,
                 json!({
                     "protocolVersion":protocol,
-                    "capabilities":{"tools":{"listChanged":false}},
+                    "capabilities":{
+                        "tools":{"listChanged":false},
+                        "resources":{"subscribe":false,"listChanged":false}
+                    },
                     "serverInfo":server_info(),
                     "instructions":INSTRUCTIONS
                 }),
@@ -1100,7 +1903,11 @@ fn handle_message(
             protocol_result(
                 json!({
                     "supportedVersions":[MODERN_PROTOCOL_VERSION,PROTOCOL_VERSION],
-                    "capabilities":{"tools":{},"extensions":{"io.modelcontextprotocol/tasks":{}}},
+                    "capabilities":{
+                        "tools":{},
+                        "resources":{},
+                        "extensions":{"io.modelcontextprotocol/tasks":{}}
+                    },
                     "instructions":INSTRUCTIONS
                 }),
                 true,
@@ -1108,6 +1915,43 @@ fn handle_message(
             ),
         ),
         "ping" => response(id, protocol_result(json!({}), modern, false)),
+        "resources/list" => {
+            let mut session_ids = Vec::new();
+            if let Ok(available) = descriptors() {
+                for (desc, _) in available {
+                    session_ids.push(desc.session_id);
+                }
+            }
+            for k in clients.keys() {
+                if !session_ids.contains(k) {
+                    session_ids.push(k.clone());
+                }
+            }
+            for k in resources.latest.keys() {
+                if !session_ids.contains(k) {
+                    session_ids.push(k.clone());
+                }
+            }
+            for k in resources.pyramid_manifests.keys() {
+                if !session_ids.contains(k) {
+                    session_ids.push(k.clone());
+                }
+            }
+            let list = resources.list_resources(&session_ids);
+            response(
+                id,
+                protocol_result(json!({ "resources": list }), modern, true),
+            )
+        }
+        "resources/read" => {
+            let Some(uri) = params["uri"].as_str() else {
+                return Some(rpc_error(id, -32602, "Missing resource uri"));
+            };
+            match read_resource(uri, clients, resources) {
+                Ok(contents) => response(id, protocol_result(contents, modern, true)),
+                Err(err) => rpc_error(id, -32002, err),
+            }
+        }
         "tools/list" => response(
             id,
             protocol_result(json!({"tools":tool_definitions()}), modern, true),
@@ -1120,7 +1964,7 @@ fn handle_message(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let called = call_tool(name, &arguments, clients);
+            let called = call_tool(name, &arguments, clients, resources);
             if modern && supports_tasks(&params) {
                 if let Ok(value) = &called {
                     if matches!(value["status"].as_str(), Some("accepted" | "running")) {
@@ -1166,7 +2010,7 @@ fn handle_message(
             let Some(task) = tasks.get_mut(task_id) else {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
             };
-            response(id, protocol_result(poll_task(task, clients), true, false))
+            response(id, protocol_result(poll_task(task, clients, resources), true, false))
         }
         "tasks/update" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -1190,20 +2034,66 @@ fn handle_message(
     })
 }
 
+/// Synchronize agent tool schemas and instructions to ~/.gemini/antigravity/mcp/opencadstudio/.
+/// Returns true if the target directory was found or created and schemas were written.
+pub fn sync_agent_tool_schemas() -> bool {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    if home.is_empty() {
+        return false;
+    }
+    let mcp_root = std::path::PathBuf::from(home)
+        .join(".gemini")
+        .join("antigravity")
+        .join("mcp");
+    if !mcp_root.exists() {
+        return false;
+    }
+    let base_dir = mcp_root.join("opencadstudio");
+    if let Err(_) = std::fs::create_dir_all(&base_dir) {
+        return false;
+    }
+
+    let tools = tool_definitions();
+    let Some(tool_arr) = tools.as_array() else {
+        return false;
+    };
+    for tool in tool_arr {
+        let Some(name) = tool["name"].as_str() else {
+            continue;
+        };
+        let schema = json!({
+            "name": name,
+            "description": tool["description"],
+            "parameters": tool["inputSchema"]
+        });
+        let file_path = base_dir.join(format!("{name}.json"));
+        if let Ok(pretty) = serde_json::to_string_pretty(&schema) {
+            let _ = std::fs::write(&file_path, pretty);
+        }
+    }
+    let instructions_path = base_dir.join("instructions.md");
+    let _ = std::fs::write(instructions_path, INSTRUCTIONS);
+    true
+}
+
 /// Run the MCP stdio loop until the client closes stdin.
 pub fn run() {
+    let _ = sync_agent_tool_schemas();
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut output = stdout.lock();
     let mut clients = HashMap::new();
     let mut tasks = TaskStore::default();
+    let mut resources = ResourceStore::default();
     for line in crate::io::line_read::lines_capped(
         stdin.lock(),
         crate::io::line_read::MAX_LINE_BYTES,
     ) {
         let response = match line {
             Ok(line) if !line.trim().is_empty() => match serde_json::from_str::<Value>(&line) {
-                Ok(message) => handle_message(message, &mut clients, &mut tasks),
+                Ok(message) => handle_message(message, &mut clients, &mut tasks, &mut resources),
                 Err(error) => Some(rpc_error(Value::Null, -32700, error)),
             },
             Ok(_) => None,
@@ -1274,6 +2164,10 @@ mod tests {
             tools[3]["inputSchema"]["properties"]["scope"]["default"],
             "viewport"
         );
+        assert_eq!(
+            tools[3]["inputSchema"]["properties"]["delivery"]["default"],
+            "inline"
+        );
         let find_variant = |op_name: &str| {
             request_variants
                 .iter()
@@ -1333,9 +2227,14 @@ mod tests {
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
+        assert_eq!(
+            initialized["result"]["capabilities"]["resources"]["subscribe"],
+            false
+        );
         assert!(
             initialized["result"]["instructions"]
                 .as_str()
@@ -1347,6 +2246,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 4);
@@ -1361,12 +2261,14 @@ mod tests {
             json!({"jsonrpc":"2.0","id":"discover","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(discovered["result"]["resultType"], "complete");
         assert_eq!(discovered["result"]["ttlMs"], CACHE_TTL_MS);
         assert_eq!(discovered["result"]["cacheScope"], "public");
         assert_eq!(discovered["result"]["supportedVersions"][0], "2026-07-28");
+        assert!(discovered["result"]["capabilities"]["resources"].is_object());
         assert!(
             discovered["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/tasks"]
                 .is_object()
@@ -1380,6 +2282,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(listed["result"]["resultType"], "complete");
@@ -1394,6 +2297,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ocs_read","arguments":{"ocs_session_id":"missing","op":"save"}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -1406,6 +2310,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":4,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01"}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(rejected["error"]["code"], -32022);
@@ -1423,6 +2328,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"ocs_session_id":"missing","request":{"op":"undo"}}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -1441,6 +2347,7 @@ mod tests {
             json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ocs_execute","arguments":{"ocs_session_id":"missing","request":{"op":"run","request_id":"run-1"}}}}),
             &mut clients,
             &mut TaskStore::default(),
+            &mut ResourceStore::default(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -1453,6 +2360,329 @@ mod tests {
             .unwrap();
         assert!(error.contains("Missing cmd"), "{error}");
         assert!(error.contains("LINE 0,0 10,10"), "{error}");
+    }
+
+    #[test]
+    fn resources_list_and_read_snapshots() {
+        let mut clients = HashMap::new();
+        let mut tasks = TaskStore::default();
+        let mut resources = ResourceStore::default();
+
+        let dummy_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        let dummy_hash = "abcdef0123456789";
+        let uri = resources.insert(
+            "sess1",
+            dummy_hash,
+            dummy_data.to_string(),
+            68,
+            json!({"width": 100, "height": 100, "annotations": []}),
+        );
+        assert_eq!(uri, "cad://session/sess1/snapshot/abcdef0123456789.png");
+
+        // Test resources/list
+        let listed = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-list","method":"resources/list"}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let res_arr = listed["result"]["resources"].as_array().unwrap();
+        assert!(res_arr.iter().any(|r| r["uri"] == uri));
+        assert!(res_arr.iter().any(|r| r["uri"] == "cad://session/sess1/snapshot/latest.png"));
+
+        // Test resources/read with png
+        let read_png = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-read","method":"resources/read","params":{"uri":uri}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let contents = read_png["result"]["contents"].as_array().unwrap();
+        assert_eq!(contents[0]["mimeType"], "image/png");
+        assert_eq!(contents[0]["blob"], dummy_data);
+
+        // Test resources/read with latest
+        let read_latest = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-read-lat","method":"resources/read","params":{"uri":"cad://session/sess1/snapshot/latest.png"}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        assert_eq!(read_latest["result"]["contents"][0]["blob"], dummy_data);
+
+        // Test resources/read with json metadata
+        let read_meta = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-read-meta","method":"resources/read","params":{"uri":"cad://session/sess1/snapshot/abcdef0123456789.json"}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let text = read_meta["result"]["contents"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"width\": 100"));
+
+        // Test resources/read on non-existent resource returns -32002 error
+        let read_err = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-err","method":"resources/read","params":{"uri":"cad://session/sess1/snapshot/nonexistent.png"}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        assert_eq!(read_err["error"]["code"], -32002);
+    }
+
+    #[test]
+    fn tool_result_handles_resource_and_both_modes() {
+        // Resource-only delivery mode
+        let res_value = json!({
+            "$resource": {
+                "uri": "cad://session/s1/snapshot/hash123.png",
+                "mimeType": "image/png",
+                "hash": "hash123",
+                "bytes": 1024
+            },
+            "metadata": {
+                "width": 800,
+                "height": 600,
+                "_spatial": {
+                    "crs": "CAD_WCS",
+                    "unit": "Millimeters",
+                    "pixel_to_world_matrix": [0.05, 0.0, 0.0, -0.05, -20.0, 15.0],
+                    "world_to_pixel_matrix": [20.0, 0.0, 0.0, -20.0, 400.0, 300.0]
+                }
+            }
+        });
+        let res_res = tool_result(res_value);
+        assert_eq!(res_res["isError"], false);
+        assert_eq!(res_res["structuredContent"]["_spatial"]["crs"], "CAD_WCS");
+        assert_eq!(res_res["structuredContent"]["_spatial"]["unit"], "Millimeters");
+        assert_eq!(
+            res_res["structuredContent"]["_spatial"]["pixel_to_world_matrix"],
+            json!([0.05, 0.0, 0.0, -0.05, -20.0, 15.0])
+        );
+        let content = res_res["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "text");
+        assert!(content[0]["text"].as_str().unwrap().contains("cad://session/s1/snapshot/hash123.png"));
+        assert_eq!(content[1]["type"], "resource");
+        assert_eq!(content[1]["resource"]["uri"], "cad://session/s1/snapshot/hash123.png");
+        // Ensure no image block was sent
+        assert!(!content.iter().any(|c| c["type"] == "image"));
+
+        // Both mode
+        let both_value = json!({
+            "$image": "base64data",
+            "$resource": {
+                "uri": "cad://session/s1/snapshot/hash123.png",
+                "mimeType": "image/png",
+                "hash": "hash123",
+                "bytes": 1024
+            },
+            "metadata": {"width": 800}
+        });
+        let both_res = tool_result(both_value);
+        let both_content = both_res["content"].as_array().unwrap();
+        assert!(both_content.iter().any(|c| c["type"] == "resource"));
+        assert!(both_content.iter().any(|c| c["type"] == "image"));
+    }
+
+    #[test]
+    fn capture_tool_schema_and_diff_metadata_handling() {
+        // 1. Verify ocs_capture schema has diff parameters
+        let tools = tool_definitions();
+        let capture_tool = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "ocs_capture")
+            .expect("ocs_capture tool exists");
+        let props = &capture_tool["inputSchema"]["properties"];
+        assert_eq!(props["diff"]["type"], "boolean");
+        assert_eq!(props["diff"]["default"], false);
+        assert_eq!(props["diff_mode"]["type"], "string");
+        assert_eq!(props["diff_mode"]["default"], "highlight");
+        let diff_modes = props["diff_mode"]["enum"].as_array().unwrap();
+        assert!(diff_modes.iter().any(|v| v == "highlight"));
+        assert!(diff_modes.iter().any(|v| v == "crop"));
+        assert!(diff_modes.iter().any(|v| v == "metadata_only"));
+        assert_eq!(props["reset_diff_baseline"]["type"], "boolean");
+        assert_eq!(props["delivery"]["type"], "string");
+
+        // 2. Test tool_result with diff metadata
+        let diff_capture_res = json!({
+            "$resource": {
+                "uri": "cad://session/s1/snapshot/diffhash789.png",
+                "mimeType": "image/png",
+                "hash": "diffhash789",
+                "bytes": 512
+            },
+            "metadata": {
+                "width": 800,
+                "height": 600,
+                "_spatial": {
+                    "crs": "CAD_WCS",
+                    "unit": "Millimeters",
+                    "pixel_to_world_matrix": [0.05, 0.0, 0.0, -0.05, -20.0, 15.0],
+                    "world_to_pixel_matrix": [20.0, 0.0, 0.0, -20.0, 400.0, 300.0]
+                },
+                "diff": {
+                    "is_baseline": false,
+                    "baseline_hash": "basehash123",
+                    "changed": true,
+                    "change_percentage": 2.5,
+                    "changed_pixels": 12000,
+                    "dirty_pixel_bounds": [100, 150, 300, 350],
+                    "dirty_world_bounds": [-15.0, -2.5, -5.0, 7.5],
+                    "patch_resolution": [201, 201],
+                    "mode": "crop"
+                }
+            }
+        });
+
+        let structured = tool_result(diff_capture_res);
+        assert_eq!(structured["isError"], false);
+        assert_eq!(structured["structuredContent"]["diff"]["changed"], true);
+        assert_eq!(structured["structuredContent"]["diff"]["mode"], "crop");
+        assert_eq!(
+            structured["structuredContent"]["diff"]["dirty_pixel_bounds"],
+            json!([100, 150, 300, 350])
+        );
+        assert_eq!(
+            structured["structuredContent"]["diff"]["dirty_world_bounds"],
+            json!([-15.0, -2.5, -5.0, 7.5])
+        );
+        assert_eq!(structured["structuredContent"]["_spatial"]["crs"], "CAD_WCS");
+
+        let content = structured["content"].as_array().unwrap();
+        let text_block = content.iter().find(|c| {
+            c["type"] == "text"
+                && c["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("\"dirty_pixel_bounds\"")
+        });
+        assert!(text_block.is_some(), "Metadata text block must format diff parameters");
+    }
+
+    #[test]
+    fn test_pyramid_tiling_protocol_and_resources() {
+        let mut clients = HashMap::new();
+        let mut tasks = TaskStore::default();
+        let mut resources = ResourceStore::default();
+
+        // 1. Verify ocs_capture schema properties
+        let tools = tool_definitions();
+        let capture_tool = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "ocs_capture")
+            .expect("ocs_capture tool exists");
+        let props = &capture_tool["inputSchema"]["properties"];
+        assert!(props.get("tile").is_some());
+        assert_eq!(props["tile"]["type"], "object");
+        assert!(props.get("pyramid_manifest").is_some());
+        assert_eq!(props["pyramid_manifest"]["type"], "boolean");
+
+        // 2. Insert pyramid manifest and tile
+        let manifest = crate::app::control::vision::compute_pyramid_manifest(
+            "sess1",
+            "Millimeters",
+            [0.0, 0.0, 500.0, 300.0],
+            3,
+            512,
+        );
+        let manifest_val = serde_json::to_value(&manifest).unwrap();
+        let manifest_uri = resources.insert_pyramid_manifest("sess1", manifest_val);
+        assert_eq!(manifest_uri, "cad://session/sess1/pyramid/manifest.json");
+
+        let tile_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        let tile_uri = resources.insert_tile(
+            "sess1",
+            1,
+            0,
+            1,
+            tile_data.to_string(),
+            68,
+            json!({
+                "width": 512,
+                "height": 512,
+                "pyramid": {
+                    "level": 1,
+                    "x": 0,
+                    "y": 1,
+                    "tile_world_bounds": [0.0, 0.0, 250.0, 150.0]
+                }
+            }),
+        );
+        assert_eq!(tile_uri, "cad://session/sess1/tile/1/0/1.png");
+
+        // 3. Test resources/list includes manifest and tile
+        let listed = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-list-pyr","method":"resources/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let res_arr = listed["result"]["resources"].as_array().unwrap();
+        assert!(res_arr.iter().any(|r| r["uri"] == manifest_uri));
+        assert!(res_arr.iter().any(|r| r["uri"] == tile_uri));
+
+        // 4. Test resources/read with manifest
+        let read_man = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-read-man","method":"resources/read","params":{"uri":manifest_uri}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let man_contents = read_man["result"]["contents"].as_array().unwrap();
+        assert_eq!(man_contents[0]["mimeType"], "application/json");
+        assert!(man_contents[0]["text"].as_str().unwrap().contains("cad://session/sess1/tile/{level}/{x}/{y}.png"));
+
+        // 5. Test resources/read with tile png
+        let read_tile = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-read-tile","method":"resources/read","params":{"uri":tile_uri}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+        )
+        .unwrap();
+        let tile_contents = read_tile["result"]["contents"].as_array().unwrap();
+        assert_eq!(tile_contents[0]["mimeType"], "image/png");
+        assert_eq!(tile_contents[0]["blob"], tile_data);
+
+        // 6. Test tool_result with tile payload
+        let tile_tool_output = json!({
+            "$resource": {
+                "uri": tile_uri,
+                "mimeType": "image/png",
+                "hash": "tile-1-0-1",
+                "bytes": 68
+            },
+            "metadata": {
+                "width": 512,
+                "height": 512,
+                "pyramid": {
+                    "level": 1,
+                    "x": 0,
+                    "y": 1,
+                    "tile_world_bounds": [0.0, 0.0, 250.0, 150.0],
+                    "tile_uri": tile_uri,
+                    "manifest_uri": manifest_uri
+                }
+            }
+        });
+        let structured = tool_result(tile_tool_output);
+        assert_eq!(structured["isError"], false);
+        assert_eq!(structured["structuredContent"]["pyramid"]["level"], 1);
+        assert_eq!(structured["structuredContent"]["pyramid"]["x"], 0);
+        assert_eq!(structured["structuredContent"]["pyramid"]["y"], 1);
+        assert_eq!(structured["structuredContent"]["pyramid"]["tile_uri"], tile_uri);
     }
 
     #[test]
@@ -1641,7 +2871,50 @@ mod tests {
         assert!(schema["$defs"]["window"].is_object());
         assert!(schema["$defs"]["batch_step"].is_object());
         let json_str = schema.to_string();
-        // Generates cleanly without exponential blowup: compact ~15KB to 30KB
-        assert!(json_str.len() < 40_000, "schema size is {} bytes", json_str.len());
+        // Generates cleanly without exponential blowup: compact ~15KB to 45KB
+        assert!(json_str.len() < 45_000, "schema size is {} bytes", json_str.len());
+    }
+
+    #[test]
+    fn export_agent_tool_schemas() {
+        let synced = sync_agent_tool_schemas();
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        let base_dir = std::path::PathBuf::from(home)
+            .join(".gemini")
+            .join("antigravity")
+            .join("mcp")
+            .join("opencadstudio");
+        if base_dir.exists() {
+            assert!(synced, "sync_agent_tool_schemas must succeed when directory exists");
+            assert!(base_dir.join("ocs_capture.json").exists());
+            assert!(base_dir.join("ocs_execute.json").exists());
+            assert!(base_dir.join("ocs_read.json").exists());
+            assert!(base_dir.join("ocs_sessions.json").exists());
+            assert!(base_dir.join("instructions.md").exists());
+        }
+    }
+
+    #[test]
+    fn read_op_tools_returns_current_schemas_and_instructions() {
+        let mut clients = HashMap::new();
+        let mut resources = ResourceStore::default();
+        let req = json!({
+            "name": "ocs_read",
+            "arguments": {
+                "ocs_session_id": "test_session",
+                "op": "tools"
+            }
+        });
+        let result = call_tool(
+            "ocs_read",
+            &req["arguments"],
+            &mut clients,
+            &mut resources,
+        ).expect("ocs_read op: tools must succeed");
+        assert_eq!(result["ok"], true);
+        assert!(result["tools"].is_array());
+        assert!(result["instructions"].is_string());
     }
 }

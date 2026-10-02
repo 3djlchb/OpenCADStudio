@@ -198,14 +198,14 @@ impl<'a> HostSession<'a> {
         }
         if let EntityType::Helix(new) = entity {
             let old = match old {
-                Some(EntityType::Helix(old)) => Some(old),
+                Some(EntityType::Helix(old)) => Some(&**old),
                 _ => None,
             };
             crate::entities::helix::normalize_scripted_helix(old, new)?;
         }
         if let EntityType::Table(new) = entity {
             let old = match old {
-                Some(EntityType::Table(old)) => Some(old),
+                Some(EntityType::Table(old)) => Some(&**old),
                 _ => None,
             };
             crate::entities::table::normalize_scripted_table(old, new);
@@ -758,7 +758,7 @@ impl<'a> HostSession<'a> {
                 surface.wires = model::edge_wires(&body);
                 surface.acis_data = codec::entities::AcisData::from_sat(&sat.to_sat_string());
                 surface.common.layer = layer;
-                self.commit_profile_result(EntityType::Surface(surface), source, delete_source, "Create surface")
+                self.commit_profile_result(EntityType::Surface(Box::new(surface)), source, delete_source, "Create surface")
             }
             SolidOperation::Extrude { source, direction, layer, delete_source } => {
                 if direction.iter().any(|v| !v.is_finite()) {
@@ -788,7 +788,7 @@ impl<'a> HostSession<'a> {
                     surface.wires = model::edge_wires(&body);
                     surface.acis_data = codec::entities::AcisData::from_sat(&sat.to_sat_string());
                     surface.common.layer = layer;
-                    EntityType::Surface(surface)
+                    EntityType::Surface(Box::new(surface))
                 };
                 self.commit_profile_result(result, source, delete_source, "Extrude profile")
             }
@@ -7201,7 +7201,7 @@ mod tests {
         let unliftable = host.add_entity(EntityType::Solid3D(codec::entities::Solid3D::new()));
         let mut plane = codec::entities::Surface::new(codec::entities::SurfaceKind::Plane);
         plane.acis_data = codec::entities::AcisData::new();
-        let surface = host.add_entity(EntityType::Surface(plane));
+        let surface = host.add_entity(EntityType::Surface(Box::new(plane)));
         let far = { dispatch(&mut host, "PY_EVAL ocs.active_document.solids.box(center=(500, 500, 500), size=(1, 1, 1)).handle");
             *solids_in(host.document()).last().unwrap() };
         let counts = (host.document().entities().count(), host.app.tabs[0].history.undo_stack.len());

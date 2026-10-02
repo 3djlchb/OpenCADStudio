@@ -639,7 +639,9 @@ pub fn frame_wire(
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 /// Clip a hatch fill boundary to `poly`.
@@ -1116,7 +1118,7 @@ mod tests {
             text_verts: Vec::new(),
             points: vec![[5.0, 5.0, 0.0], [15.0, 5.0, 0.0]],
             ..Default::default()
-        }];
+}];
         clip_wires(&mut wires, &poly);
 
         assert_eq!(wires.len(), 1);

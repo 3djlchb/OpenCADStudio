@@ -376,7 +376,9 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
 
 inventory::submit!(crate::command::CommandRegistration { names: &["DIMRADIUS"] });

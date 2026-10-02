@@ -3710,5 +3710,7 @@ fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    }
+    
+        ..Default::default()
+}
 }
