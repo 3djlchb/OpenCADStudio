@@ -1770,7 +1770,10 @@ mod tests {
             app.dock_expanded == Some(crate::ui::dock::PanelId::BlockPalette),
             "palette must open expanded, not as the collapsed bar"
         );
+        // BLOCKSPALETTE only opens; BLOCKSPALETTECLOSE closes.
         let _ = app.run_command_line("BLOCKSPALETTE");
+        assert!(app.show_block_palette);
+        let _ = app.run_command_line("BLOCKSPALETTECLOSE");
         assert!(!app.show_block_palette);
     }
 

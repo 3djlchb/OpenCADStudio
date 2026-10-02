@@ -587,7 +587,11 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
         row![
             text(crate::t!("Options").to_uppercase()).size(10).style(accent_text),
             Space::new().width(Fill),
-            text(if palette.options_collapsed { "▸" } else { "▾" }).size(22),
+            if palette.options_collapsed {
+                crate::ui::icons::themed_arrow_right(12.0)
+            } else {
+                crate::ui::icons::themed_arrow_down(12.0)
+            },
         ]
         .align_y(iced::Center),
     )
@@ -705,7 +709,10 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
                 .text_size(11)
                 .padding([3, 6])
                 .width(Fill),
-            button(text("…").size(12)).on_press(pm(BlockPaletteMsg::LibraryBrowse)).style(button_style(false)).padding([3, 8]),
+            button(crate::ui::icons::themed(crate::ui::icons::FOLDER_OPEN, 14.0))
+                .on_press(pm(BlockPaletteMsg::LibraryBrowse))
+                .style(button_style(false))
+                .padding([3, 8]),
         ]
         .spacing(4)
         .align_y(iced::Center);
@@ -713,7 +720,12 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
             palette.libraries.first().is_some_and(|root| d != &PathBuf::from(root))
         });
         if in_sub {
-            lib_row = lib_row.push(button(text("↑").size(12)).on_press(pm(BlockPaletteMsg::LibraryUp)).style(button_style(false)).padding([3, 8]));
+            lib_row = lib_row.push(
+                button(crate::ui::icons::themed_arrow_up(12.0))
+                    .on_press(pm(BlockPaletteMsg::LibraryUp))
+                    .style(button_style(false))
+                    .padding([3, 8]),
+            );
         }
         top = top.push(lib_row);
         if let (Some(root), Some(dir)) = (palette.libraries.first(), palette.library_dir.as_ref()) {
@@ -767,7 +779,7 @@ pub fn view(palette: &BlockPalette, width: f32, auto_collapse: bool) -> Element<
                     col = col.push(
                         row![
                             text(crate::t!("Icon")).size(11).style(muted_style).width(Length::Fixed(40.0)),
-                            text(format!("{} ▲", crate::t!("Name"))).size(11).style(muted_style).width(Fill),
+                            text(crate::t!("Name")).size(11).style(muted_style).width(Fill),
                             text(crate::t!("Annotative / Dynamic")).size(11).style(muted_style).width(Length::Fixed(140.0)),
                         ]
                         .spacing(4),
