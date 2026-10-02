@@ -249,18 +249,21 @@ pub static ACTION: OpDef = OpDef {
 
 pub static EMBED_IMAGE: OpDef = OpDef {
     name: "embed_image",
-    doc: "Embed or link a raster image into the drawing.",
+    doc: "Embed or link a raster image into the drawing with optional reference scaling and calibration.",
     batchable: true,
     params: &[
         req("path", Ty::Str, "Path to the image file."),
         opt("at", Ty::Point, "Lower-left corner [x, y] or [x, y, z]."),
         opt("width", Ty::Num, "World width of the image."),
         opt("linked", Ty::Bool, "Store as path-linked RasterImage instead of embedded OLE2FRAME."),
+        opt("calibrate", Ty::Raw(r#"{"type":"object","description":"Automatic 2-point reference calibration: {point_a:[px1,py1], point_b:[px2,py2], distance:650.0, align_to:[0,0]}"}"#), "Automatic 2-point reference calibration: {point_a:[px1,py1], point_b:[px2,py2], distance:650.0, align_to:[0,0]}."),
+        opt("layer", Ty::Str, "Layer name to place the image on (auto-created if missing, e.g. '_XREF')."),
+        opt("lock_layer", Ty::Bool, "Lock the target layer after attaching."),
         opt("source_points", Ty::ArrayOf(&Ty::Point), "Pixel points in image [[px1,py1],[px2,py2]] for 2-point alignment."),
         opt("target_points", Ty::ArrayOf(&Ty::Point), "CAD world points [[x1,y1],[x2,y2]] for 2-point alignment."),
     ],
     rules: &[],
-    example: r#"{"op":"embed_image","path":"logo.png","at":[0,0]}"#,
+    example: r#"{"op":"embed_image","path":"plan.png","linked":true,"calibrate":{"point_a":[52,910],"point_b":[450,910],"distance":6500},"layer":"_XREF","lock_layer":true}"#,
 };
 
 pub static WBLOCK: OpDef = OpDef {
