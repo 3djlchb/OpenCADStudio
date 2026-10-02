@@ -1197,4 +1197,3 @@ impl OpenCADStudio {
         self.run_command_line(trimmed)
     }
 }
-

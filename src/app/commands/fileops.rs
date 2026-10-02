@@ -489,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn autodesk_command_prefixes_strip_underscore_and_dot() {
+    fn command_name_prefixes_are_stripped() {
         let mut app = fresh_app();
         let i = app.active_tab;
         let before_count = app.tabs[i].scene.document.entities().count();
@@ -535,4 +535,3 @@ ZOOM EXTENTS
         assert_eq!(app.tabs[i].scene.document.entities().count(), 8);
     }
 }
-

@@ -116,11 +116,6 @@ impl OpenCADStudio {
             Some(rest) => (rest.trim(), true),
             None => (cmd, false),
         };
-        let cmd = cmd.trim();
-        // AutoCAD command prefixes: '_' (international name), '.' (built-in name bypass)
-        let cmd = cmd.strip_prefix('.').unwrap_or(cmd);
-        let cmd = cmd.strip_prefix('_').unwrap_or(cmd);
-        let cmd = cmd.strip_prefix('.').unwrap_or(cmd);
         let resolved = self.resolve_alias(cmd);
         let cmd = resolved.as_deref().unwrap_or(cmd);
         if is_spacemouse_command(cmd) {
@@ -201,7 +196,7 @@ impl OpenCADStudio {
         // editors (shortcuts, aliases) — none of them read the scene. This is
         // the single place that decides; `on_ribbon_tool_click` defers to it
         // rather than keeping a second, blunter copy (#388, #389).
-        if self.tabs[i].is_start && !start_allowed(cmd) {
+        if self.tabs[i].is_start && !start_allowed(strip_command_prefixes(cmd).unwrap_or(cmd)) {
             self.command_line
                 .push_info(crate::t!("No drawing open. Use NEW or OPEN to start a drawing.").as_ref());
             return Task::none();
@@ -231,6 +226,15 @@ impl OpenCADStudio {
             // fallback (`BAC`) stores the real command (`BACKGROUND`).
             self.command_line.record_recent(cmd);
             return t;
+        }
+
+        // Scripts and typed input may carry the international (`_`) and
+        // built-in (`.`) name prefixes (`_LINE`, `._LINE`). Ribbon tools
+        // dispatch internal names that start with `_` themselves
+        // (`_PCCROPPOLY`), so a name is tried as written first and loses its
+        // prefixes only when nothing handles it.
+        if let Some(bare) = strip_command_prefixes(cmd) {
+            return self.dispatch_command_inner(bare, allow_suggest);
         }
 
         // No family matched. From the interactive command line, run the
@@ -1035,4 +1039,11 @@ mod marquee_cancel_tests {
             Some("LINE")
         );
     }
+}
+
+/// `cmd` without its leading `_` / `.` name prefixes (`_LINE`, `.LINE`,
+/// `._LINE`), or `None` when it carries none.
+fn strip_command_prefixes(cmd: &str) -> Option<&str> {
+    let bare = cmd.trim_start_matches(['_', '.']);
+    (bare.len() != cmd.len() && !bare.is_empty()).then_some(bare)
 }
