@@ -2533,6 +2533,7 @@ impl super::Scene {
             }
         }
         crate::io::xref::strip_resolved_xref_content(&mut document);
+        crate::entities::field::stamp_save_dates(&mut document);
         document
     }
 

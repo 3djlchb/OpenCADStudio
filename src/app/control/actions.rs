@@ -981,7 +981,8 @@ impl OpenCADStudio {
             // One field of the open Field dialog: `category=<index>`, `name=Date`,
             // `date=yyyy-MM-dd`, `case=0..4`, `file=1|2|3`, `ext=0|1`, `size=0..2`,
             // `sysvar=dimscale`, `diesel=…`, `named_type=<index>`, `named=<index>`,
-            // `prop=Area`, `select_object`.
+            // `prop=Area`, `select_object`, `formula=(1+2)*3`, `formula_format=<index>`,
+            // `precision=<index>`, `link_text=…`, `link_url=…`, `plot_scale=<index>`.
             "field_dialog" => {
                 use crate::ui::window::field_dialog::{self as fd, FieldDialogMsg as F};
                 let value = string(req, "value")?;
@@ -1004,6 +1005,12 @@ impl OpenCADStudio {
                     "named" => F::Named(index()?),
                     "prop" => F::ObjectProp(known(&["Area", "Center", "Circumference", "Diameter", "EndPoint", "Length", "Radius", "StartPoint"])?),
                     "select_object" => F::SelectObject,
+                    "formula" => F::Formula(v.into()),
+                    "formula_format" => F::FormulaFormat(index()?),
+                    "precision" => F::FormulaPrecision(index()?),
+                    "link_text" => F::HyperlinkText(v.into()),
+                    "link_url" => F::HyperlinkUrl(v.into()),
+                    "plot_scale" => F::PlotScale(index()?),
                     _ => return Err(failure("invalid_value", "Unknown field dialog key")),
                 })
             }

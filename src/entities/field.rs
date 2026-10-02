@@ -17,11 +17,29 @@ struct OcsFieldContext<'a>(Option<&'a CadDocument>);
 
 impl FieldContext for OcsFieldContext<'_> {
     fn now_julian(&self) -> f64 {
-        // Unix epoch is Julian Day 2440587.5.
-        epoch_secs() as f64 / 86_400.0 + 2_440_587.5
+        // Fields show local time. Unix epoch is Julian Day 2440587.5.
+        now_utc_julian() + utc_offset_days()
+    }
+
+    fn file_times(&self) -> Option<(f64, f64)> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let meta = std::fs::metadata(self.0?.source_path.as_deref()?).ok()?;
+            let julian = |t: std::time::SystemTime| -> Option<f64> {
+                let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs_f64();
+                Some(secs / 86_400.0 + 2_440_587.5 + utc_offset_days())
+            };
+            return Some((julian(meta.created().ok()?)?, julian(meta.modified().ok()?)?));
+        }
+        #[cfg(target_arch = "wasm32")]
+        None
     }
 
     fn login(&self) -> Option<String> {
+        // The account's display name, as the reference shows it.
+        if let Some(name) = display_name() {
+            return Some(name);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             for var in ["USER", "LOGNAME", "USERNAME"] {
@@ -274,4 +292,71 @@ pub fn hosts_field(document: &CadDocument, entity: &codec::entities::EntityType)
         document.objects.get(&xdict),
         Some(codec::objects::ObjectType::Dictionary(d)) if d.get("ACAD_FIELD").is_some()
     )
+}
+
+fn now_utc_julian() -> f64 {
+    epoch_secs() as f64 / 86_400.0 + 2_440_587.5
+}
+
+/// Local time minus UTC, in days (the zone's current offset).
+pub fn utc_offset_days() -> f64 {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::Storage::FileSystem::FileTimeToLocalFileTime;
+        // 100 ns ticks since 1601-01-01.
+        let ticks = (epoch_secs() as u64 + 11_644_473_600) * 10_000_000;
+        let utc = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+        let mut local = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        if unsafe { FileTimeToLocalFileTime(&utc, &mut local) } != 0 {
+            let local = ((local.dwHighDateTime as u64) << 32) | local.dwLowDateTime as u64;
+            return (local as i64 - ticks as i64) as f64 / 864_000_000_000.0;
+        }
+        0.0
+    }
+    #[cfg(not(target_os = "windows"))]
+    0.0
+}
+
+/// A DWG stores its header dates in universal time only; the local TDCREATE
+/// and TDUPDATE come from the zone, as the reference derives them on load.
+pub fn local_header_dates(document: &mut CadDocument) {
+    let h = &mut document.header;
+    let offset = utc_offset_days();
+    if h.universal_create_date_julian != 0.0 && h.create_date_julian == h.universal_create_date_julian {
+        h.create_date_julian = h.universal_create_date_julian + offset;
+    }
+    if h.universal_update_date_julian != 0.0 && h.update_date_julian == h.universal_update_date_julian {
+        h.update_date_julian = h.universal_update_date_julian + offset;
+    }
+}
+
+/// Stamp the header's update date (and the creation date of a new drawing)
+/// in local and universal time before a save.
+pub fn stamp_save_dates(document: &mut CadDocument) {
+    let utc = now_utc_julian();
+    let local = utc + utc_offset_days();
+    let h = &mut document.header;
+    if h.create_date_julian == 0.0 && h.universal_create_date_julian == 0.0 {
+        h.create_date_julian = local;
+        h.universal_create_date_julian = utc;
+    }
+    h.update_date_julian = local;
+    h.universal_update_date_julian = utc;
+}
+
+/// The signed-in account's display name, when it has one.
+fn display_name() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Security::Authentication::Identity::{GetUserNameExW, NameDisplay};
+        let mut buffer = [0u16; 256];
+        let mut len = buffer.len() as u32;
+        if unsafe { GetUserNameExW(NameDisplay, buffer.as_mut_ptr(), &mut len) } && len > 0 {
+            return Some(String::from_utf16_lossy(&buffer[..len as usize])).filter(|n| !n.trim().is_empty());
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    None
 }

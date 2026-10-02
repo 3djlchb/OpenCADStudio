@@ -31,9 +31,13 @@ pub const CATEGORIES: &[(&str, &[&str])] = &[
         "Document",
         &["Author", "Comments", "Filename", "Filesize", "HyperlinkBase", "Keywords", "LastSavedBy", "Subject", "Title"],
     ),
-    ("Objects", &["NamedObject", "Object"]),
+    ("Linked", &["Hyperlink"]),
+    ("Objects", &["Formula", "NamedObject", "Object"]),
     ("Other", &["DieselExpression", "SystemVariable"]),
-    ("Plot", &["Login", "PlotDate"]),
+    (
+        "Plot",
+        &["DeviceName", "Login", "PageSetupName", "PaperSize", "PlotDate", "PlotOrientation", "PlotScale", "PlotStyleTable"],
+    ),
 ];
 
 /// The fields of a category; "All" lists every field once, sorted.
@@ -70,7 +74,14 @@ pub enum FieldKind {
     Diesel,
     NamedObject,
     Object,
+    Formula,
+    Hyperlink,
+    PlotScale,
 }
+
+/// Formula precisions: the current one, then 0 to 8 decimals.
+pub const FORMULA_PRECISIONS: &[&str] =
+    &["Current precision", "0", "0.0", "0.00", "0.000", "0.0000", "0.00000", "0.000000", "0.0000000", "0.00000000"];
 
 pub fn kind_of(name: &str) -> FieldKind {
     match name {
@@ -81,6 +92,9 @@ pub fn kind_of(name: &str) -> FieldKind {
         "DieselExpression" => FieldKind::Diesel,
         "NamedObject" => FieldKind::NamedObject,
         "Object" => FieldKind::Object,
+        "Formula" => FieldKind::Formula,
+        "Hyperlink" => FieldKind::Hyperlink,
+        "PlotScale" => FieldKind::PlotScale,
         _ => FieldKind::Text,
     }
 }
@@ -106,6 +120,14 @@ pub struct FieldDialogState {
     pub object: Option<(codec::Handle, String)>,
     pub object_props: Vec<&'static str>,
     pub object_prop: Option<&'static str>,
+    pub formula: String,
+    /// Indexes into codec FORMULA_FORMATS and FORMULA_PRECISIONS.
+    pub formula_format: usize,
+    pub formula_precision: usize,
+    pub hyperlink_text: String,
+    pub hyperlink_url: String,
+    /// Index into codec PLOT_SCALE_FORMATS.
+    pub plot_scale: usize,
     pub preview: String,
     /// Today in each of DATE_FORMATS, for the Examples list.
     pub examples: Vec<String>,
@@ -130,6 +152,12 @@ impl FieldDialogState {
             object: None,
             object_props: Vec::new(),
             object_prop: None,
+            formula: String::new(),
+            formula_format: 0,
+            formula_precision: 0,
+            hyperlink_text: String::new(),
+            hyperlink_url: String::new(),
+            plot_scale: 0,
             preview: String::new(),
             examples: Vec::new(),
         }
@@ -153,7 +181,36 @@ impl FieldDialogState {
                 };
                 (format!("\\AcVar Filename \\f \"{case}%fn{bits}\""), vec![])
             }
-            FieldKind::Filesize => (format!("\\AcVar Filesize \\f \"%ld%by{}\"", self.size_unit + 1), vec![]),
+            // Bytes are whole; kilo- and megabytes keep two decimals.
+            FieldKind::Filesize => (
+                match self.size_unit {
+                    0 => "\\AcVar Filesize \\f \"%ld%by1\"".to_string(),
+                    n => format!("\\AcVar Filesize \\f \"%.2f%by{}\"", n + 1),
+                },
+                vec![],
+            ),
+            FieldKind::Formula => {
+                let format = codec::fields::FORMULA_FORMATS.get(self.formula_format).map_or("", |f| f.1);
+                let precision = match self.formula_precision {
+                    0 => String::new(),
+                    n => format!("%pr{}", n - 1),
+                };
+                let body = format!("\\AcExpr ({})", self.formula.trim());
+                match format!("{format}{precision}") {
+                    f if f.is_empty() => (body, vec![]),
+                    f => (format!("{body} \\f \"{f}\""), vec![]),
+                }
+            }
+            FieldKind::Hyperlink => (
+                format!("\\AcVar \\href \"{}##{}#0\"", self.hyperlink_url.trim(), self.hyperlink_text),
+                vec![],
+            ),
+            FieldKind::PlotScale => (
+                codec::fields::PLOT_SCALE_FORMATS
+                    .get(self.plot_scale)
+                    .map_or_else(|| "\\AcVar PlotScale".to_string(), |f| f.1.to_string()),
+                vec![],
+            ),
             FieldKind::SystemVariable => (format!("\\AcVar {}", self.sysvar), vec![]),
             FieldKind::Diesel => (format!("\\AcDiesel {}", self.diesel), vec![]),
             FieldKind::NamedObject => match self.named.and_then(|i| self.named_names.get(i)) {
@@ -176,6 +233,8 @@ impl FieldDialogState {
             FieldKind::NamedObject => self.named.is_some(),
             FieldKind::Object => self.object.is_some() && self.object_prop.is_some(),
             FieldKind::Diesel => !self.diesel.trim().is_empty(),
+            FieldKind::Formula => !self.formula.trim().is_empty(),
+            FieldKind::Hyperlink => !self.hyperlink_url.trim().is_empty(),
             _ => true,
         }
     }
@@ -211,6 +270,14 @@ pub enum FieldDialogMsg {
     Named(usize),
     SelectObject,
     ObjectProp(&'static str),
+    Formula(String),
+    FormulaFormat(usize),
+    FormulaPrecision(usize),
+    Evaluate,
+    HyperlinkText(String),
+    HyperlinkUrl(String),
+    BrowseHyperlink,
+    PlotScale(usize),
     Help,
     Ok,
 }
@@ -396,6 +463,85 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         ]
         .spacing(8)
         .into(),
+        FieldKind::Formula => {
+            let formats: Vec<Pick> = codec::fields::FORMULA_FORMATS
+                .iter()
+                .enumerate()
+                .map(|(i, (n, _))| Pick(i, t!(*n).into_owned()))
+                .collect();
+            let precisions: Vec<Pick> =
+                FORMULA_PRECISIONS.iter().enumerate().map(|(i, n)| Pick(i, t!(*n).into_owned())).collect();
+            column![
+                row![
+                    text(t!("Format")).size(12).width(Length::Fixed(80.0)),
+                    pick_list(Some(formats[state.formula_format].clone()), formats.clone(), |p: &Pick| p.1.clone())
+                        .on_select(|p| msg(FieldDialogMsg::FormulaFormat(p.0)))
+                        .text_size(12)
+                        .padding([5, 8])
+                        .width(Fill),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+                row![
+                    text(t!("Precision")).size(12).width(Length::Fixed(80.0)),
+                    pick_list(
+                        Some(precisions[state.formula_precision].clone()),
+                        precisions.clone(),
+                        |p: &Pick| p.1.clone(),
+                    )
+                    .on_select(|p| msg(FieldDialogMsg::FormulaPrecision(p.0)))
+                    .text_size(12)
+                    .padding([5, 8])
+                    .width(Fill),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            ]
+            .spacing(8)
+            .into()
+        }
+        FieldKind::Hyperlink => column![
+            row![
+                text(t!("Text to display")).size(12).width(Length::Fixed(120.0)),
+                text_input("", &state.hyperlink_text)
+                    .size(12)
+                    .padding([5, 8])
+                    .style(field_style)
+                    .on_input(|v| msg(FieldDialogMsg::HyperlinkText(v))),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+            row![
+                text(t!("Address")).size(12).width(Length::Fixed(120.0)),
+                text_input("https://", &state.hyperlink_url)
+                    .size(12)
+                    .padding([5, 8])
+                    .font(iced::Font::MONOSPACE)
+                    .style(field_style)
+                    .on_input(|v| msg(FieldDialogMsg::HyperlinkUrl(v))),
+                button(text("…").size(12))
+                    .on_press(msg(FieldDialogMsg::BrowseHyperlink))
+                    .style(button_style(false))
+                    .padding([5, 10]),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        ]
+        .spacing(8)
+        .into(),
+        FieldKind::PlotScale => column![
+            text(t!("Format")).size(12),
+            list(
+                codec::fields::PLOT_SCALE_FORMATS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (n, _))| (t!(*n).into_owned(), state.plot_scale == i, FieldDialogMsg::PlotScale(i)))
+                    .collect(),
+                170.0,
+            ),
+        ]
+        .spacing(8)
+        .into(),
         FieldKind::Object => column![
             row![
                 text(t!("Object type")).size(12).width(Length::Fixed(96.0)),
@@ -460,7 +606,31 @@ pub fn view<'a>(
             .padding([6, 8])
             .width(Fill),
     );
-    let right = column![card(t!("Format").into_owned(), format_panel(state)), preview].spacing(10);
+    let right = match kind_of(state.name) {
+        FieldKind::Formula => column![
+            card(
+                t!("Formula").into_owned(),
+                column![
+                    text_input("(12+3)*2", &state.formula)
+                        .size(12)
+                        .padding([8, 8])
+                        .font(iced::Font::MONOSPACE)
+                        .style(field_style)
+                        .on_input(|v| msg(FieldDialogMsg::Formula(v))),
+                    button(text(t!("Evaluate")).size(12))
+                        .on_press(msg(FieldDialogMsg::Evaluate))
+                        .style(button_style(false))
+                        .padding([5, 14]),
+                ]
+                .spacing(8),
+            ),
+            card(t!("Format").into_owned(), format_panel(state)),
+            preview,
+        ]
+        .spacing(10),
+        FieldKind::Hyperlink => column![card(t!("Hyperlink").into_owned(), format_panel(state)), preview].spacing(10),
+        _ => column![card(t!("Format").into_owned(), format_panel(state)), preview].spacing(10),
+    };
     let (code, _) = state.code();
     let expression = column![
         text(t!("Field expression")).size(12),

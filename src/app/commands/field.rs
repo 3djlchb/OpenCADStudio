@@ -133,6 +133,28 @@ impl OpenCADStudio {
             }
             FieldDialogMsg::Named(k) => state.named = Some(k),
             FieldDialogMsg::ObjectProp(p) => state.object_prop = Some(p),
+            FieldDialogMsg::Formula(v) => state.formula = v,
+            FieldDialogMsg::FormulaFormat(k) => state.formula_format = k,
+            FieldDialogMsg::FormulaPrecision(k) => state.formula_precision = k,
+            FieldDialogMsg::Evaluate => {}
+            FieldDialogMsg::HyperlinkText(v) => state.hyperlink_text = v,
+            FieldDialogMsg::HyperlinkUrl(v) => state.hyperlink_url = v,
+            FieldDialogMsg::BrowseHyperlink => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title(crate::t!("Select a file to link").as_ref())
+                            .pick_file()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h))
+                    },
+                    |path| match path {
+                        Some(path) => Message::FieldDialog(FieldDialogMsg::HyperlinkUrl(path.to_string_lossy().into_owned())),
+                        None => Message::Noop,
+                    },
+                );
+            }
+            FieldDialogMsg::PlotScale(k) => state.plot_scale = k,
             FieldDialogMsg::SelectObject => {
                 // The dialog waits while one object is picked.
                 self.active_modal = None;
