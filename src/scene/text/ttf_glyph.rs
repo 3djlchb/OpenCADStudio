@@ -557,7 +557,7 @@ pub fn fallback_source(ch: char) -> Option<GlyphSource> {
     if let Some(hit) = cache.lock().unwrap().get(&ch) {
         return hit.clone();
     }
-    let built = pick_fallback(ch).and_then(|(_, source)| source);
+    let built = pick_fallback(ch, true).and_then(|(_, source)| source);
     cache.lock().unwrap().insert(ch, built.clone());
     built
 }
@@ -688,15 +688,18 @@ mod fallback_tests {
 /// no stroke font provides.
 #[cfg(not(target_arch = "wasm32"))]
 fn build_fallback(ch: char) -> Option<Arc<Glyph>> {
-    pick_fallback(ch).map(|(glyph, _)| glyph)
+    pick_fallback(ch, false).map(|(glyph, _)| glyph)
 }
 
-/// The fallback glyph for `ch` together with the face it came from -- one
-/// search, so the glyph drawn on screen and the font an exporter embeds can
-/// never disagree.
+/// The fallback glyph for `ch` together with the face it came from -- the
+/// same search for both, so the glyph drawn on screen and the font an
+/// exporter embeds can never disagree.
+///
+/// The source holds a copy of the whole font file, so it is built only when
+/// asked for (`with_source`, an exporter): drawing on screen never keeps one.
 #[cfg(not(target_arch = "wasm32"))]
-fn pick_fallback(ch: char) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
-    outline_from_fallback_face(ch).or_else(|| installed_family_glyph(ch))
+fn pick_fallback(ch: char, with_source: bool) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
+    outline_from_fallback_face(ch, with_source).or_else(|| installed_family_glyph(ch, with_source))
 }
 
 /// Outline `ch` from a parsed face, in the 9-unit text space.
@@ -711,6 +714,7 @@ fn outline_char(
     index: u32,
     face: &ttf_parser::Face,
     ch: char,
+    with_source: bool,
 ) -> Option<(Glyph, Option<GlyphSource>)> {
     let gid = face.glyph_index(ch)?;
     let k = if is_full_width(ch) {
@@ -728,7 +732,8 @@ fn outline_char(
         advance,
         fill_tris,
     };
-    Some((glyph, source_for(data, index, face, gid, k)))
+    let source = with_source.then(|| source_for(data, index, face, gid, k)).flatten();
+    Some((glyph, source))
 }
 
 /// Outline `ch` from the face cosmic-text picks for it: it knows the platform's
@@ -738,7 +743,10 @@ fn outline_char(
 /// does, for every character, because ttf-parser reads no contours out of it —
 /// so an empty outline is not an answer and the caller has to keep looking.
 #[cfg(not(target_arch = "wasm32"))]
-fn outline_from_fallback_face(ch: char) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
+fn outline_from_fallback_face(
+    ch: char,
+    with_source: bool,
+) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
     use cosmic_text::{Attrs, Buffer, Metrics, Shaping};
     let mut fs = font_system().lock().unwrap();
     // Default family → cosmic's own fallback search chooses a covering font.
@@ -757,7 +765,9 @@ fn outline_from_fallback_face(ch: char) -> Option<(Arc<Glyph>, Option<GlyphSourc
             let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
             let font = fs.get_font(g.font_id, g.font_weight)?;
             let face = ttf_parser::Face::parse(font.data(), face_index).ok()?;
-            let Some((glyph, source)) = outline_char(font.data(), face_index, &face, ch) else {
+            let Some((glyph, source)) =
+                outline_char(font.data(), face_index, &face, ch, with_source)
+            else {
                 continue;
             };
             if glyph.strokes.is_empty() && glyph.fill_tris.is_empty() {
@@ -775,13 +785,16 @@ fn outline_from_fallback_face(ch: char) -> Option<(Arc<Glyph>, Option<GlyphSourc
 /// and covers neither Cyrillic nor Greek, however many fonts the machine has
 /// that do.
 #[cfg(not(target_arch = "wasm32"))]
-fn installed_family_glyph(ch: char) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
+fn installed_family_glyph(
+    ch: char,
+    with_source: bool,
+) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
     crate::scene::text::sysfont::families()
         .iter()
         .find_map(|family| {
             let (glyph, source) = sysfont::with_face_data(family, |data, index| {
                 let face = ttf_parser::Face::parse(data, index).ok()?;
-                outline_char(data, index, &face, ch)
+                outline_char(data, index, &face, ch, with_source)
             })
             .flatten()?;
             // A face that yields no outline (the system font, a space) is not a
