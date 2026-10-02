@@ -1170,10 +1170,11 @@ fn lwpoly_segment_curve(
 /// polyline intersect.
 ///
 /// Segment neighbours are deliberately excluded: their common vertex is a
-/// normal polyline vertex, not a self-intersection.
-fn lwpoly_self_cut_params(poly: &LwPolyline) -> Vec<f64> {
+/// normal polyline vertex, not a self-intersection. A polyline cuts itself
+/// only when it is one of the cutting edges.
+fn lwpoly_self_cut_params(poly: &LwPolyline, geos: &[Geo]) -> Vec<f64> {
     let n = poly.vertices.len();
-    if n < 3 {
+    if n < 3 || !geos.iter().any(|geo| geo.handle() == poly.common.handle) {
         return Vec::new();
     }
 
@@ -1286,7 +1287,6 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
         poly.vertices[i % n].bulge
     };
 
-    // Boundary cuts as global params (segment index + local u).
     // External boundary cuts as global params (segment index + local u).
     let mut cuts: Vec<f64> = Vec::new();
 
@@ -1307,25 +1307,16 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
     }
 
     // A polyline can also cut itself. These are intersections between
-    // non-adjacent segments belonging to this same LwPolyline.
-    cuts.extend(lwpoly_self_cut_params(poly));
-
-    // Every polyline vertex is also a valid trim boundary. This allows an entire
-    // segment between two vertices to be removed even when no external entity
-    // crosses that particular segment.
-    if closed {
-        for i in 0..seg_count {
-            cuts.push(i as f64);
-        }
-    } else {
-        // 0 and `total` are added explicitly below as the open polyline ends.
-        for i in 1..seg_count {
-            cuts.push(i as f64);
-        }
-    }
+    // non-adjacent segments belonging to this same LwPolyline. Its vertices
+    // are not cuts: the trimmed piece runs on past corners to the next
+    // cutting edge, and a polyline no edge crosses is left alone.
+    cuts.extend(lwpoly_self_cut_params(poly, geos));
 
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    if cuts.is_empty() {
+        return None;
+    }
 
     // Click param: nearest point on the polyline.
     let mut best = (f64::INFINITY, 0.0_f64);
@@ -1430,7 +1421,11 @@ fn trim_lwpolyline(poly: &LwPolyline, cx: f64, cy: f64, geos: &[Geo]) -> Option<
         }
     }
 
-    Some(out)
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 // ── Extend helpers ────────────────────────────────────────────────────────
@@ -1764,9 +1759,6 @@ enum TrimMode {
 struct CrossingWindow {
     min: [f64; 2],
     max: [f64; 2],
-    /// The first corner is the trim-side hint, matching the side from which
-    /// the crossing window was dragged.
-    pick: [f64; 2],
 }
 
 fn segment_window_range(
@@ -1828,7 +1820,7 @@ fn crossing_trim_lwpolyline(
 
     // Compute the polyline's own non-adjacent segment intersections once.
     // These global parameters will later be mapped back into each source segment.
-    let self_cuts = lwpoly_self_cut_params(poly);
+    let self_cuts = lwpoly_self_cut_params(poly, geos);
 
     for i in 0..seg_count {
         let a = vertex_xy(i);
@@ -1858,7 +1850,6 @@ fn crossing_trim_lwpolyline(
         let Some((inside_lo, inside_hi)) = window_range else {
             continue;
         };
-        // External intersections on this segment.
         // External intersections on this segment.
         let mut cuts = polyline_seg_ts(a, b, bulge, handle, geos);
 
@@ -2923,11 +2914,7 @@ impl CadCommand for TrimCommand {
         if !matches!(self.mode, TrimMode::Pick) || fence.len() < 2 {
             return None;
         }
-        let window = window.map(|(min, max)| CrossingWindow {
-            min,
-            max,
-            pick: fence[0],
-        });
+        let window = window.map(|(min, max)| CrossingWindow { min, max });
         let replacements = fence_pass(
             &self.all_entities,
             &self.geos,
@@ -3307,7 +3294,6 @@ impl CadCommand for TrimCommand {
                 let window = CrossingWindow {
                     min: [p1[0].min(p2[0]), p1[1].min(p2[1])],
                     max: [p1[0].max(p2[0]), p1[1].max(p2[1])],
-                    pick: p1,
                 };
                 self.fence_run(&rect, Some(window))
             }
@@ -3339,7 +3325,6 @@ impl CadCommand for TrimCommand {
                 let window = CrossingWindow {
                     min: [p1[0].min(p2[0]), p1[1].min(p2[1])],
                     max: [p1[0].max(p2[0]), p1[1].max(p2[1])],
-                    pick: p1,
                 };
                 out.extend(fence_result_preview(
                     &self.all_entities,
@@ -3773,7 +3758,6 @@ impl CadCommand for ExtendCommand {
                 let window = CrossingWindow {
                     min: [p1[0].min(p2[0]), p1[1].min(p2[1])],
                     max: [p1[0].max(p2[0]), p1[1].max(p2[1])],
-                    pick: p1,
                 };
                 self.fence_run(&rect, Some(window))
             }
@@ -3805,7 +3789,6 @@ impl CadCommand for ExtendCommand {
                 let window = CrossingWindow {
                     min: [p1[0].min(p2[0]), p1[1].min(p2[1])],
                     max: [p1[0].max(p2[0]), p1[1].max(p2[1])],
-                    pick: p1,
                 };
                 out.extend(fence_result_preview(
                     &self.all_entities,
