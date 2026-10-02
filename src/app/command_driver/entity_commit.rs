@@ -984,7 +984,7 @@ impl OpenCADStudio {
         let i = self.active_tab;
         // Collect the full AttributeDefinitions owned by this block
         // record so each created attribute keeps its geometry (#255).
-        let attdefs: Vec<codec::entities::AttributeDefinition> = {
+        let mut attdefs: Vec<codec::entities::AttributeDefinition> = {
             let doc = &self.tabs[i].scene.document;
             if let Some(br) = doc.block_records.get(&block_name) {
                 br.entity_handles
@@ -1004,6 +1004,12 @@ impl OpenCADStudio {
             }
         };
 
+        // ATTREQ 0: attributes take their defaults without prompting.
+        if !self.tabs[i].scene.document.header.attribute_request {
+            for attdef in &mut attdefs {
+                attdef.flags.preset = true;
+            }
+        }
         if attdefs.is_empty() {
             // No attribute definitions — commit the INSERT directly.
             let entity = self.tabs[i]
