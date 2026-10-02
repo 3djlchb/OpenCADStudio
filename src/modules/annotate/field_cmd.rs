@@ -131,6 +131,8 @@ impl CadCommand for FieldPlaceCommand {
         mtext.height = self.height;
         mtext.style = self.style.clone();
         mtext.attachment_point = self.attachment;
+        // No defined width: the field text never wraps.
+        mtext.rectangle_width = 0.0;
         CmdResult::CommitAndExit(self.plane.place_entity(EntityType::MText(mtext)))
     }
 
