@@ -194,37 +194,74 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
-/// If the main application window is minimized, restore it so that viewport captures succeed.
+/// If the main application window is minimized, restore it quietly in the background
+/// without activating it or stealing user focus, so viewport captures succeed.
 #[cfg(target_os = "windows")]
-pub fn restore_window_if_minimized() {
+pub fn restore_window_if_minimized() -> bool {
     use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow,
-        ShowWindow, SW_RESTORE,
+        EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
+        SetWindowPos, ShowWindow, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SW_SHOWNOACTIVATE,
     };
     type BOOL = i32;
 
+    struct Context {
+        pid: u32,
+        restored: bool,
+    }
+
     unsafe {
         let current_pid = GetCurrentProcessId();
+        let mut ctx = Context {
+            pid: current_pid,
+            restored: false,
+        };
+
         unsafe extern "system" fn enum_wnd(hwnd: HWND, lparam: LPARAM) -> BOOL {
-            let target_pid = lparam as u32;
+            let ctx = &mut *(lparam as *mut Context);
             let mut wnd_pid: u32 = 0;
             GetWindowThreadProcessId(hwnd, &mut wnd_pid);
-            if wnd_pid == target_pid && IsWindowVisible(hwnd) != 0 {
-                if IsIconic(hwnd) != 0 {
-                    ShowWindow(hwnd, SW_RESTORE);
-                    SetForegroundWindow(hwnd);
+            if wnd_pid == ctx.pid {
+                let mut class_buf = [0u16; 64];
+                let len = GetClassNameW(hwnd, class_buf.as_mut_ptr(), 64);
+                let class_str = String::from_utf16_lossy(&class_buf[..len as usize]);
+
+                // CRITICAL FIX: Only touch the main application window ("Window Class").
+                // NEVER touch "Winit Thread Event Target" or hidden helper windows!
+                if class_str.starts_with("Window Class") {
+                    if IsIconic(hwnd) != 0 {
+                        let fg = GetForegroundWindow();
+                        // Restore in background without activation (never steal user focus)
+                        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                        // Ensure it stays behind active user applications
+                        if fg != hwnd && !fg.is_null() {
+                            SetWindowPos(
+                                hwnd,
+                                HWND_BOTTOM,
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            );
+                        }
+                        ctx.restored = true;
+                    }
                 }
             }
             1
         }
-        EnumWindows(Some(enum_wnd), current_pid as LPARAM);
+        EnumWindows(Some(enum_wnd), (&mut ctx as *mut Context) as LPARAM);
+        ctx.restored
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn restore_window_if_minimized() {}
+pub fn restore_window_if_minimized() -> bool {
+    false
+}
 
 /// Copy the rendered web canvas during the frame callback, before the browser
 /// clears its drawing buffer. Canvas readback avoids Iced's synchronous GPU map.

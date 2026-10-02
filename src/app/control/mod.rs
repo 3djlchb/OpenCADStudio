@@ -1070,7 +1070,10 @@ impl OpenCADStudio {
                     .main_window
                     .ok_or_else(|| failure("gui_required", "Capture requires a GUI window"))?;
                 let path = string(req, "path")?.to_owned();
-                crate::sys::restore_window_if_minimized();
+                let was_minimized = crate::sys::restore_window_if_minimized();
+                if was_minimized {
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                }
 
                 // Optional framing / selection adjustments prior to snapshot:
                 if let Some(handles) = req.get("highlight_handles").and_then(Value::as_array) {
