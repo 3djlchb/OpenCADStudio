@@ -615,6 +615,8 @@ pub(super) struct OpenCADStudio {
     pub grid_beyond_limits: bool,
     /// Dynamic input overlay (F12): show coordinate tooltip near cursor.
     dyn_input: bool,
+    /// Dynamic input mode (DYNMODE): 0=off, 1=pointer, 2=dimensional, 3=both.
+    dyn_mode: i16,
     /// Currently visible page in the application Options dialog.
     options_tab: crate::ui::window::options::OptionsTab,
     /// The Options window's commit point (see `options_session`).
@@ -4136,6 +4138,7 @@ impl OpenCADStudio {
             grid_adaptive: true,
             grid_beyond_limits: true,
             dyn_input: true,
+            dyn_mode: 3,
             options_tab: crate::ui::window::options::OptionsTab::General,
             options_saved: None,
             options_close_confirm: false,
