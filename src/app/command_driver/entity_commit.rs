@@ -200,6 +200,7 @@ impl OpenCADStudio {
     pub(super) fn handle_commit_and_exit(
         &mut self,
         entity: codec::EntityType,
+        preserve_commit_layer: bool,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
         // XATTACH: the definition and its INSERT are created together
@@ -255,7 +256,11 @@ impl OpenCADStudio {
         );
         let association_enabled =
             self.tabs[i].scene.document.header.dimension_associativity == 2;
-        let committed = self.commit_entity_handle(entity);
+        let committed = if preserve_commit_layer {
+            self.commit_entity_handle_preserve_layer(entity)
+        } else {
+            self.commit_entity_handle(entity)
+        };
         if is_associative_dimension && association_enabled {
             if let Some(handle) = committed {
                 let sources = self.infer_dimension_sources_guarded(i, handle);

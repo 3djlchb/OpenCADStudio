@@ -143,13 +143,17 @@ impl Scene {
     /// layer 0. Auto-registering keeps it on its own layer (#252). Names are
     /// registered verbatim so the writer's (case-insensitive) lookup matches;
     /// the always-present default layer "0" and empty names are no-ops.
-    pub fn ensure_layer(&mut self, name: &str) {
-        if name.trim().is_empty() || self.document.layers.contains(name) {
-            return;
+    pub fn ensure_layer(&mut self, name: &str) -> bool {
+        let trimmed = name.trim();
+        if trimmed.is_empty() || trimmed == "0" || self.document.layers.contains(trimmed) {
+            return false;
         }
-        let mut layer = codec::tables::Layer::new(name);
+        let mut layer = codec::tables::Layer::new(trimmed);
         layer.handle = self.document.allocate_handle();
         let _ = self.document.layers.add(layer);
+        self.invalidate_layer_dependencies(&[trimmed.to_string()]);
+        self.layer_table_dirty = true;
+        true
     }
 
     pub(crate) fn ensure_app_id(&mut self, name: &str) {

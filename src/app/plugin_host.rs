@@ -350,6 +350,11 @@ impl<'a> HostSession<'a> {
             return handle;
         }
         let handle = self.app.tabs[self.tab].scene.add_entity(entity);
+        if self.app.tabs[self.tab].scene.layer_table_dirty {
+            self.app.tabs[self.tab].scene.layer_table_dirty = false;
+            self.app.tabs[self.tab].dirty = true;
+            self.app.refresh_layer_panel();
+        }
         self.publish_document_view();
         handle
     }
@@ -362,6 +367,11 @@ impl<'a> HostSession<'a> {
             let _ = self.normalize_scripted_entity(None, entity);
         }
         let handles = self.app.tabs[self.tab].scene.add_entities(entities);
+        if self.app.tabs[self.tab].scene.layer_table_dirty {
+            self.app.tabs[self.tab].scene.layer_table_dirty = false;
+            self.app.tabs[self.tab].dirty = true;
+            self.app.refresh_layer_panel();
+        }
         self.publish_document_view();
         handles
     }
@@ -381,6 +391,11 @@ impl<'a> HostSession<'a> {
             EntityType::AttributeEntity(attribute) => self.replace_nested_attribute(attribute),
             entity => self.app.tabs[self.tab].scene.update_entity(entity),
         };
+        if self.app.tabs[self.tab].scene.layer_table_dirty {
+            self.app.tabs[self.tab].scene.layer_table_dirty = false;
+            self.app.tabs[self.tab].dirty = true;
+            self.app.refresh_layer_panel();
+        }
         if ok {
             self.publish_document_view();
         }
@@ -438,6 +453,11 @@ impl<'a> HostSession<'a> {
                 entity => self.app.tabs[self.tab].scene.update_entity(entity),
             };
             assert!(updated);
+        }
+        if self.app.tabs[self.tab].scene.layer_table_dirty {
+            self.app.tabs[self.tab].scene.layer_table_dirty = false;
+            self.app.tabs[self.tab].dirty = true;
+            self.app.refresh_layer_panel();
         }
         self.set_dirty();
         self.publish_document_view();
@@ -9695,6 +9715,44 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             ..Default::default()
         };
         assert!(!host.modify_layer(non_existent));
+    }
+
+    #[test]
+    fn test_entity_creation_with_novel_layer_refreshes_gui() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+
+        // Verify COGO_LINES does not exist initially
+        assert!(!app.tabs[0].scene.document.layers.contains("COGO_LINES"));
+        assert!(!app.ribbon.layer_names.contains(&"COGO_LINES".to_string()));
+
+        // 1. Add entity via HostSession (simulating plugin add_entity / add_line)
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            let mut line = codec::entities::Line::from_coords(0.0, 0.0, 0.0, 10.0, 10.0, 0.0);
+            line.common.layer = "COGO_LINES".to_string();
+            let handle = host.add_entity(codec::EntityType::Line(line));
+            assert_ne!(handle, codec::Handle::NULL);
+        }
+
+        // Verify layer is created in document AND refreshed in ribbon + layer panel
+        assert!(app.tabs[0].scene.document.layers.contains("COGO_LINES"));
+        assert!(app.ribbon.layer_names.contains(&"COGO_LINES".to_string()),
+            "Ribbon layers should contain COGO_LINES after add_entity");
+        assert!(app.tabs[0].layers.layers.iter().any(|l| l.name == "COGO_LINES"),
+            "Layer panel should contain COGO_LINES after add_entity");
+
+        // 2. Commit entity via command driver (simulating interactive tool / palette commit)
+        let mut line2 = codec::entities::Line::from_coords(10.0, 10.0, 0.0, 20.0, 20.0, 0.0);
+        line2.common.layer = "SURVEY_TRAVERSE".to_string();
+        let _ = app.commit_entity_handle_preserve_layer(codec::EntityType::Line(line2));
+
+        // Verify SURVEY_TRAVERSE layer is created and refreshed in ribbon + layer panel
+        assert!(app.tabs[0].scene.document.layers.contains("SURVEY_TRAVERSE"));
+        assert!(app.ribbon.layer_names.contains(&"SURVEY_TRAVERSE".to_string()),
+            "Ribbon layers should contain SURVEY_TRAVERSE after commit_entity");
+        assert!(app.tabs[0].layers.layers.iter().any(|l| l.name == "SURVEY_TRAVERSE"),
+            "Layer panel should contain SURVEY_TRAVERSE after commit_entity");
     }
 
     #[test]
