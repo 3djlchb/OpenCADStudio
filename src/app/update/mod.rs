@@ -4196,12 +4196,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ToggleDynInput => {
-                self.dyn_input ^= true;
-                if self.dyn_input && self.dyn_mode <= 0 {
-                    self.dyn_mode = 3;
-                } else if !self.dyn_input && self.dyn_mode > 0 {
-                    self.dyn_mode = 0;
-                }
+                self.set_dyn_input(!self.dyn_input);
                 Task::none()
             }
             Message::ToggleViewCube => {

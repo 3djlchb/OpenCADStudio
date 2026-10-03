@@ -1713,14 +1713,7 @@ impl OpenCADStudio {
                                     }
                                     _ => Err("SETVAR: integer from -3 to 3 required.".into()),
                                 },
-                                None => {
-                                    let mode = if self.dyn_input {
-                                        if self.dyn_mode > 0 { self.dyn_mode } else { 3 }
-                                    } else {
-                                        if self.dyn_mode <= 0 { self.dyn_mode } else { 0 }
-                                    };
-                                    Ok((format!("DYNMODE = {mode}"), false))
-                                }
+                                None => Ok((format!("DYNMODE = {}", self.dyn_mode), false)),
                             },
                             "ZOOMWHEEL" => match &value {
                                 Some(v) => match parse_bool(v) {
@@ -3838,14 +3831,14 @@ mod tests {
         assert_eq!(app.dyn_mode, 1);
         assert!(app.dyn_input);
 
-        // F12 / Message::ToggleDynInput synchronization
+        // F12 turns it off temporarily (negative) and restores the mode.
         let _ = app.update(crate::app::Message::ToggleDynInput);
         assert!(!app.dyn_input);
-        assert_eq!(app.dyn_mode, 0);
+        assert_eq!(app.dyn_mode, -1);
 
         let _ = app.update(crate::app::Message::ToggleDynInput);
         assert!(app.dyn_input);
-        assert_eq!(app.dyn_mode, 3);
+        assert_eq!(app.dyn_mode, 1);
     }
 }
 
