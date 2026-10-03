@@ -3491,11 +3491,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         if tracks_dimension_chain {
             self.tabs[i].scene.last_created_dimension = new_handle;
         }
-        if self.tabs[i].scene.layer_table_dirty {
-            self.tabs[i].scene.layer_table_dirty = false;
-            self.tabs[i].dirty = true;
-            self.refresh_layer_panel();
-        }
+        self.sync_registered_layers(i);
         new_handle
     }
 }

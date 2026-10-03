@@ -350,11 +350,7 @@ impl<'a> HostSession<'a> {
             return handle;
         }
         let handle = self.app.tabs[self.tab].scene.add_entity(entity);
-        if self.app.tabs[self.tab].scene.layer_table_dirty {
-            self.app.tabs[self.tab].scene.layer_table_dirty = false;
-            self.app.tabs[self.tab].dirty = true;
-            self.app.refresh_layer_panel();
-        }
+        self.app.sync_registered_layers(self.tab);
         self.publish_document_view();
         handle
     }
@@ -367,11 +363,7 @@ impl<'a> HostSession<'a> {
             let _ = self.normalize_scripted_entity(None, entity);
         }
         let handles = self.app.tabs[self.tab].scene.add_entities(entities);
-        if self.app.tabs[self.tab].scene.layer_table_dirty {
-            self.app.tabs[self.tab].scene.layer_table_dirty = false;
-            self.app.tabs[self.tab].dirty = true;
-            self.app.refresh_layer_panel();
-        }
+        self.app.sync_registered_layers(self.tab);
         self.publish_document_view();
         handles
     }
@@ -391,11 +383,7 @@ impl<'a> HostSession<'a> {
             EntityType::AttributeEntity(attribute) => self.replace_nested_attribute(attribute),
             entity => self.app.tabs[self.tab].scene.update_entity(entity),
         };
-        if self.app.tabs[self.tab].scene.layer_table_dirty {
-            self.app.tabs[self.tab].scene.layer_table_dirty = false;
-            self.app.tabs[self.tab].dirty = true;
-            self.app.refresh_layer_panel();
-        }
+        self.app.sync_registered_layers(self.tab);
         if ok {
             self.publish_document_view();
         }
@@ -454,11 +442,7 @@ impl<'a> HostSession<'a> {
             };
             assert!(updated);
         }
-        if self.app.tabs[self.tab].scene.layer_table_dirty {
-            self.app.tabs[self.tab].scene.layer_table_dirty = false;
-            self.app.tabs[self.tab].dirty = true;
-            self.app.refresh_layer_panel();
-        }
+        self.app.sync_registered_layers(self.tab);
         self.set_dirty();
         self.publish_document_view();
         Ok(())

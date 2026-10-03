@@ -68,6 +68,15 @@ impl OpenCADStudio {
         self.sync_ribbon_layers();
     }
 
+    /// Pick up layers an entity edit registered on the fly (`ensure_layer`).
+    pub(super) fn sync_registered_layers(&mut self, tab: usize) {
+        if !std::mem::take(&mut self.tabs[tab].scene.layer_table_dirty) {
+            return;
+        }
+        self.tabs[tab].dirty = true;
+        self.refresh_layer_panel();
+    }
+
     pub(super) fn sync_ribbon_layers(&mut self) {
         let i = self.active_tab;
         // The Start (welcome) tab has no document — leave the layer and
