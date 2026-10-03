@@ -2049,6 +2049,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "OFFSET%{n}  Click through point or [Multiple]:" => Some(("modify", "offset-n-click-through-point-or-multiple")),
         "OFFSET%{n} Multiple  Click next side [distance %{d}]:" => Some(("modify", "offset-n-multiple-click-next-side-distance-d")),
         "OFFSET%{n} Multiple  Click next through point:" => Some(("modify", "offset-n-multiple-click-next-through-point")),
+        "OFFSET%{n}  Click through point or type distance, negative for the other side [Multiple/Erase/Layer] <%{d}>:" => Some(("modify", "offset-n-click-through-point-or-type-distance")),
+        "OFFSET%{n} Multiple  Click through point or type distance, negative for the other side [Erase/Layer] <%{d}>:" => Some(("modify", "offset-n-multiple-click-through-point-or-type-distance")),
         "OK" => Some(("common", "ok")),
         "OLE Frame" => Some(("properties", "ole-frame")),
         "OOPS: nothing to restore." => Some(("file", "oops-nothing-to-restore")),
