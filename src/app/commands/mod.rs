@@ -230,7 +230,8 @@ impl OpenCADStudio {
         // started (typed, alias, shortcut, Repeat), so the user sees where it
         // lives. A transparent command returned above and leaves the running
         // command's highlight alone.
-        self.ribbon.show_command(cmd);
+        self.ribbon
+            .show_command(strip_command_prefixes(cmd).unwrap_or(cmd));
 
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             // try_dispatch returns true for both finished commands and interactive
