@@ -101,6 +101,11 @@ impl OpenCADStudio {
         self.snapper.snap3d_enabled = state.osnap3d_on;
         self.snapper.enabled3d = state.snap3d_modes.clone();
         self.dyn_input = state.dyn_input_on;
+        if self.dyn_input && self.dyn_mode <= 0 {
+            self.dyn_mode = 3;
+        } else if !self.dyn_input && self.dyn_mode > 0 {
+            self.dyn_mode = 0;
+        }
         self.quick_properties = state.quick_props_on;
         self.selection_cycling = state.selection_cycling_on;
         self.sync_vport_display(self.active_tab);
