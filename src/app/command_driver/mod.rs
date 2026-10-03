@@ -507,7 +507,7 @@ impl OpenCADStudio {
                 self.handle_copy_to_clipboard(handles, base);
             }
             CmdResult::CommitAndExit(entity) => {
-                if let Some(task) = self.handle_commit_and_exit(entity) {
+                if let Some(task) = self.handle_commit_and_exit(entity, preserve_commit_layer) {
                     return task;
                 }
             }
