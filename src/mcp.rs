@@ -33,6 +33,9 @@ const TOOL_SCHEMA_DIGEST: &str = "bb2640277721f23e08cf17085bd9204753f810ece27abf
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
+/// Freshness for resources/*, which vary as sessions open and snapshots
+/// land. Tools and discovery are static by comparison, so they keep the hour.
+const RESOURCE_TTL_MS: u64 = 60_000;
 const TASK_TTL_MS: u64 = 3_600_000;
 pub(crate) const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. ARCHITECTURAL VECTORIZATION DIRECTIVE: When converting or vectorizing a floorplan from an image or sketch: 1. Attach reference images as Xref underlays via embed_image on layer _XREF and lock it. 2. NEVER draw loose lines or arcs for doors or windows; always query records (collection: 'block_records') and insert Block References (type: 'INSERT') on A-DOOR and A-GLAZ. If a block is missing, draft standard geometry at origin (0,0) and register it with block_define before inserting. 3. Categorize layers cleanly: A-WALL-EXTR, A-WALL-INTR, A-WALL-HATCH, A-DOOR, A-GLAZ, A-ANNO-TEXT, A-ANNO-DIMS. 4. Always verify drafted geometry using ocs_capture with annotate: true (Set-of-Marks entity IDs) and diff: true (visual dirty streaming). ocs_capture operates quietly in background and overlapped window states without stealing user focus. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, supports diff: true for streaming dirty visual regions, and provides multiscale DeepZoom pyramidal tiling via tile: {level, x, y} or cad://session/{session_id}/pyramid/manifest.json and cad://session/{session_id}/tile/{level}/{x}/{y}.png. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest. When you first connect, announce the build you are working with to the user from the `bridge` object on ocs_sessions states and hello/capabilities responses (OpenCADStudio version, build_rev, tool_schema digest); repeat the announcement if a later handshake reports a different build.";
 const READ_OPS: &[&str] = &[
@@ -2487,13 +2490,13 @@ fn poll_task(
     }
 }
 
-fn protocol_result(mut result: Value, modern: bool, cacheable: bool) -> Value {
+fn protocol_result(mut result: Value, modern: bool, ttl_ms: Option<u64>) -> Value {
     // SEP-2549 freshness hints are version-independent: legacy clients
     // ignore unknown fields, so list results always carry them. The modern
     // envelope (resultType/_meta) stays negotiated.
-    if cacheable {
+    if let Some(ttl_ms) = ttl_ms {
         if let Some(object) = result.as_object_mut() {
-            object.insert("ttlMs".into(), Value::from(CACHE_TTL_MS));
+            object.insert("ttlMs".into(), Value::from(ttl_ms));
             object.insert("cacheScope".into(), Value::String("public".into()));
         }
     }
@@ -2594,10 +2597,10 @@ fn handle_message(
                     "instructions":INSTRUCTIONS
                 }),
                 true,
-                true,
+                Some(CACHE_TTL_MS),
             ),
         ),
-        "ping" => response(id, protocol_result(json!({}), modern, false)),
+        "ping" => response(id, protocol_result(json!({}), modern, None)),
         "resources/list" => {
             let mut session_ids = Vec::new();
             if let Ok(available) = descriptors() {
@@ -2626,7 +2629,7 @@ fn handle_message(
             let list = resources.list_resources(&session_ids);
             response(
                 id,
-                protocol_result(json!({ "resources": list }), modern, true),
+                protocol_result(json!({ "resources": list }), modern, Some(RESOURCE_TTL_MS)),
             )
         }
         "resources/read" => {
@@ -2634,7 +2637,7 @@ fn handle_message(
                 return Some(rpc_error(id, -32602, "Missing resource uri"));
             };
             match read_resource(uri, clients, resources, pump, Some(&id)) {
-                Ok(contents) => response(id, protocol_result(contents, modern, true)),
+                Ok(contents) => response(id, protocol_result(contents, modern, Some(RESOURCE_TTL_MS))),
                 // -32002 was THE not-found code in 2025-11-25 and earlier;
                 // 2026-07-28 says MUST NOT emit it, so modern gets -32602.
                 Err(err) => rpc_error(id, if modern { -32602 } else { -32002 }, err),
@@ -2658,12 +2661,12 @@ fn handle_message(
                     }
                 ]}),
                 modern,
-                true,
+                Some(RESOURCE_TTL_MS),
             ),
         ),
         "tools/list" => response(
             id,
-            protocol_result(json!({"tools":tool_definitions()}), modern, true),
+            protocol_result(json!({"tools":tool_definitions()}), modern, Some(CACHE_TTL_MS)),
         ),
         "tools/call" => {
             let Some(name) = params["name"].as_str() else {
@@ -2715,7 +2718,7 @@ fn handle_message(
                                     "pollIntervalMs":250
                                 }),
                                 true,
-                                false,
+                                None,
                             ),
                         ));
                     }
@@ -2730,7 +2733,7 @@ fn handle_message(
                 Err(CallError::Infra(message)) => return Some(rpc_error(id, -32603, message)),
                 Err(CallError::Cancelled) => return None,
             };
-            response(id, protocol_result(result, modern, false))
+            response(id, protocol_result(result, modern, None))
         }
         "tasks/get" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -2739,7 +2742,7 @@ fn handle_message(
             let Some(task) = tasks.get_mut(task_id) else {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
             };
-            response(id, protocol_result(poll_task(task, clients, resources, pump), true, false))
+            response(id, protocol_result(poll_task(task, clients, resources, pump), true, None))
         }
         "tasks/update" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -2748,7 +2751,7 @@ fn handle_message(
             if tasks.get_mut(task_id).is_none() {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
             }
-            response(id, protocol_result(json!({}), true, false))
+            response(id, protocol_result(json!({}), true, None))
         }
         "tasks/cancel" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -2764,7 +2767,7 @@ fn handle_message(
             task.result = None;
             task.error = None;
             task.last_updated_at = iso8601_now();
-            response(id, protocol_result(json!({}), true, false))
+            response(id, protocol_result(json!({}), true, None))
         }
         _ => rpc_error(id, -32601, format!("Method not found: {method}")),
     })
@@ -3121,11 +3124,30 @@ mod tests {
     }
 
     #[test]
+    fn resource_lists_use_the_short_dynamic_ttl() {
+        // resources/* vary as sessions open and snapshots land: 60 s.
+        // Static tools/discover keep the hour.
+        let listed = handle_message(
+            json!({"jsonrpc":"2.0","id":"res","method":"resources/list"}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(listed["result"]["ttlMs"], RESOURCE_TTL_MS);
+        assert_eq!(listed["result"]["ttlMs"], 60_000);
+    }
+
+    #[test]
     fn legacy_list_results_carry_sep2549_ttl() {
         // SEP-2549 makes ttlMs mandatory on list results; legacy clients
         // ignore unknown fields, so the stamp is version-independent while
         // the modern envelope (resultType/_meta) stays negotiated.
-        for method in ["tools/list", "resources/list"] {
+        for (method, ttl) in [
+            ("tools/list", CACHE_TTL_MS),
+            ("resources/list", RESOURCE_TTL_MS),
+        ] {
             let listed = handle_message(
                 json!({"jsonrpc":"2.0","id":method,"method":method}),
                 &mut HashMap::new(),
@@ -3134,7 +3156,7 @@ mod tests {
                 &mut detached_pump(),
             )
             .unwrap();
-            assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS, "{method}");
+            assert_eq!(listed["result"]["ttlMs"], ttl, "{method}");
             assert_eq!(listed["result"]["cacheScope"], "public", "{method}");
             assert!(listed["result"].get("resultType").is_none(), "{method}");
             assert!(listed["result"].get("_meta").is_none(), "{method}");
@@ -3337,7 +3359,7 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("{hash}")));
-            assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS);
+            assert_eq!(listed["result"]["ttlMs"], RESOURCE_TTL_MS);
             assert_eq!(listed["result"]["cacheScope"], "public");
         }
     }
