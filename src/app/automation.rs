@@ -1398,7 +1398,13 @@ impl OpenCADStudio {
         // The same snapshot a normal save writes: display-only overrides and
         // resolved xref content stay out of the file.
         let snapshot = self.tabs[i].scene.document_for_save();
-        let before = document_manifest(&snapshot);
+        // Bake simulation: save_as_version mints *D geometry blocks on its
+        // private clone, so the reopened manifest always contains baked
+        // sub-entities. Compare against the same baked view or every new
+        // (still blockless) dimension trips a false semantic_mismatch.
+        let mut baked_view = snapshot.clone();
+        crate::modules::draw::modify::explode::bake_dimension_blocks(&mut baked_view);
+        let before = document_manifest(&baked_view);
         crate::io::save_as_version(&snapshot, &path, version)
             .map_err(|error| json!({
                 "ok":false,"status":"failed","code":"save_failed","error":error,
@@ -1568,6 +1574,43 @@ mod tests {
         assert_eq!(result["target_version"], "AC1014", "{result}");
         assert_eq!(result["manifest"]["total"], 1, "{result}");
         assert_eq!(result["sha256"].as_str().map(str::len), Some(64));
+        assert!(path.is_file());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_verified_accepts_new_dimension_with_baked_block() {
+        use codec::entities::{Dimension, DimensionLinear};
+        use codec::{EntityType, Vector3};
+
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        d.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Dimension(Dimension::Linear(d)))
+            .unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "ocs_verified_dim_{}_{}.dwg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let _ = std::fs::remove_file(&path);
+        let result = app
+            .save_verified_request(&serde_json::json!({
+                "path":path,
+                "target_format":"dwg",
+                "overwrite":true,
+            }))
+            .expect("verified save of a new dimension");
+        assert_eq!(result["verified"], true, "{result}");
         assert!(path.is_file());
         let _ = std::fs::remove_file(path);
     }
