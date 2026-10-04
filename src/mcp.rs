@@ -28,7 +28,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// changes, so schema drift (new params, renamed tools) is always a conscious,
 /// reviewed edit — and clients can detect a stale bridge by comparing digests.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "1e9b9acbdac71b34b93aa412f279f68554da822fccf40fbb5ed6895b4397322a";
+const TOOL_SCHEMA_DIGEST: &str = "ede583324d6c78b72a54800c0287fee478863159a8c94a3872ca772092c17661";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -1895,7 +1895,7 @@ pub(crate) fn tool_definitions() -> Value {
     json!([
         {
             "name":"ocs_sessions",
-            "description":"List real OpenCADStudio GUI sessions and documents. Launch the installed editor if none is running.",
+            "description":"List real OpenCADStudio GUI sessions and documents. Launch the installed editor if none is running. On first use, announce the build to the user from the `bridge` object in each result (OpenCADStudio version, build_rev, tool_schema digest); announce again if a later call reports a different build.",
             "inputSchema":{"type":"object","properties":{"launch_if_none":{"type":"boolean","default":true,"description":"Launch OpenCADStudio when no live session exists."}},"additionalProperties":false},
             "outputSchema":{"type":"object","properties":{"result":{"type":"array","items":{"type":"object","properties":{"ok":{"const":true},"session_id":{"type":"string"},"document_id":{"type":"integer"},"revision":{"type":"integer"},"selection":{"type":"array","items":{"type":"string"}},"documents":{"type":"array"}},"required":["ok","session_id","document_id","revision","selection","documents"],"additionalProperties":true}}},"required":["result"],"additionalProperties":false},
             "annotations":{"title":"List OCS sessions","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
@@ -2434,6 +2434,15 @@ mod tests {
         assert_eq!(
             names,
             ["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"]
+        );
+        // The build announcement must live in the entry-point tool
+        // description: global instructions don't reliably reach agents.
+        assert!(
+            tools[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("`bridge`"),
+            "ocs_sessions description must point at the bridge build identity"
         );
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], false);
         for tool in [&tools[1], &tools[2], &tools[3]] {
