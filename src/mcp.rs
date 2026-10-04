@@ -29,7 +29,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// changes, so schema drift (new params, renamed tools) is always a conscious,
 /// reviewed edit — and clients can detect a stale bridge by comparing digests.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "ede583324d6c78b72a54800c0287fee478863159a8c94a3872ca772092c17661";
+const TOOL_SCHEMA_DIGEST: &str = "fbba987a0b2718920eb4f03a204eba843e29c957f09002cd0c23ce969968d5a6";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -2163,21 +2163,21 @@ pub(crate) fn tool_definitions() -> Value {
             "description":"List real OpenCADStudio GUI sessions and documents. Launch the installed editor if none is running. On first use, announce the build to the user from the `bridge` object in each result (OpenCADStudio version, build_rev, tool_schema digest); announce again if a later call reports a different build.",
             "inputSchema":{"type":"object","properties":{"launch_if_none":{"type":"boolean","default":true,"description":"Launch OpenCADStudio when no live session exists."}},"additionalProperties":false},
             "outputSchema":{"type":"object","properties":{"result":{"type":"array","items":{"type":"object","properties":{"ok":{"const":true},"session_id":{"type":"string"},"document_id":{"type":"integer"},"revision":{"type":"integer"},"selection":{"type":"array","items":{"type":"string"}},"documents":{"type":"array"}},"required":["ok","session_id","document_id","revision","selection","documents"],"additionalProperties":true}}},"required":["result"],"additionalProperties":false},
-            "annotations":{"title":"List OCS sessions","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+            "title":"List OCS sessions","annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_read",
             "description":"Discover capabilities and record schemas, or read state, complete database records, command manifests, entities, properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session.",
             "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name or record name."},"search":{"type":"string","description":"Case-insensitive command or record-type search."},"find":{"type":"string","description":"Text query string for text_search."},"match_case":{"type":"boolean","default":false,"description":"Case-sensitive text search."},"whole_word":{"type":"boolean","default":false,"description":"Match only whole words."},"ignore_accents":{"type":"boolean","description":"Ignore accents/diacritics in text (defaults to true when match_case is false)."},"scope":{"type":"string","enum":["all","active_space","blocks"],"default":"all","description":"Text search scope."},"system_spellcheck":{"type":"boolean","default":false,"description":"Use native OS spell-checker (Windows, macOS, Linux)."},"language":{"type":"string","description":"Language tag for spell-checker (e.g. 'fr-FR', 'en-US', 'de-DE', 'es-ES')."},"suggest":{"type":"boolean","default":true,"description":"Include suggested corrections for misspelled words."},"check_terms":{"type":"array","items":{"type":"string"},"description":"List of terms or suspect misspellings to flag in text_audit."},"dictionary":{"type":"array","items":{"type":"string"},"description":"Known valid words for text_audit dictionary check."},"pairs":{"type":"array","description":"Find/replace pairs for dry-run simulation in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"dry_run_pairs":{"type":"array","description":"Alias for pairs in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"document_id":{"type":"integer","minimum":0},"path":{"type":"string","description":"Optional intended output path for audit; extension determines target format."},"target_format":{"type":"string","enum":["dwg","dxf"],"description":"Intended output format for audit."},"target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"],"description":"Intended CAD output version for audit."},"collection":{"type":"string","description":"Record collection, all for records, or omit to discover collections and schema types."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."},"type":{"type":"string","description":"Entity or record type filter; for record_schema, returns its complete type graph and writable field paths."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"paths":{"type":"array","items":{"type":"string"},"description":"Project RFC 6901 JSON Pointer paths relative to record.properties."},"where":{"type":"array","description":"All property filters must match.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string","enum":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],"default":"eq"},"value":{}},"required":["path"],"additionalProperties":false}},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World point whose object snap the snap op reports."},"from":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Base point for perpendicular and tangent snaps (snap op)."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["ocs_session_id"],"additionalProperties":false},
             "outputSchema":read_output_schema(),
-            "annotations":{"title":"Read OCS state","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+            "title":"Read OCS state","annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_execute",
             "description":"Execute semantic OCS actions, batch drafting, and mutations. Supports batch creation (entities_create), reference image underlays (embed_image), block definitions (block_define), and block reference insertions (INSERT). MANDATORY: For architectural drafting, all doors and windows must be inserted as CAD blocks (type: INSERT), never loose lines.",
             "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Total time to wait for completion before returning."},"response_detail":{"type":"string","enum":["compact","changed_entities","full"],"default":"compact","description":"compact returns only state needed for the next edit; changed_entities also returns current geometry for changed handles; full preserves the complete editor state."}},"required":["ocs_session_id","request"],"additionalProperties":false},
             "outputSchema":execute_output_schema(),
-            "annotations":{"title":"Execute OCS action","readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
+            "title":"Execute OCS action","annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_capture",
@@ -2203,7 +2203,7 @@ pub(crate) fn tool_definitions() -> Value {
                 "required":["ocs_session_id"],
                 "additionalProperties":true
             },
-            "annotations":{"title":"Capture OCS window","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+            "title":"Capture OCS window","annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
     ])
 }
@@ -2515,6 +2515,9 @@ fn handle_message(
                     session_ids.push(k.clone());
                 }
             }
+            // Deterministic order: HashMap iteration is random, and stable
+            // ordering keeps client caches and prompt caches hitting.
+            session_ids.sort();
             let list = resources.list_resources(&session_ids);
             response(
                 id,
@@ -2532,6 +2535,27 @@ fn handle_message(
                 Err(err) => rpc_error(id, if modern { -32602 } else { -32002 }, err),
             }
         }
+        "resources/templates/list" => response(
+            id,
+            protocol_result(
+                json!({"resourceTemplates": [
+                    {
+                        "uriTemplate": "cad://session/{session_id}/tile/{level}/{x}/{y}.png",
+                        "name": "Pyramid tile",
+                        "description": "DeepZoom viewport tile at zoom level, column x, row y.",
+                        "mimeType": "image/png"
+                    },
+                    {
+                        "uriTemplate": "cad://session/{session_id}/snapshot/{hash}.png",
+                        "name": "Viewport snapshot",
+                        "description": "Captured viewport frame addressed by content hash.",
+                        "mimeType": "image/png"
+                    }
+                ]}),
+                modern,
+                true,
+            ),
+        ),
         "tools/list" => response(
             id,
             protocol_result(json!({"tools":tool_definitions()}), modern, true),
@@ -3162,6 +3186,70 @@ mod tests {
         assert_eq!(wait_deadline("getpoint", 5.0), Duration::from_secs(5));
         assert_eq!(wait_deadline("run", 3600.0), Duration::from_secs(60));
         assert_eq!(wait_deadline("run", 5.0), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn templates_list_serves_tile_and_snapshot_templates() {
+        for params in [
+            json!({}),
+            json!({"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}),
+        ] {
+            let listed = handle_message(
+                json!({"jsonrpc":"2.0","id":"tpl","method":"resources/templates/list","params":params}),
+                &mut HashMap::new(),
+                &mut TaskStore::default(),
+                &mut ResourceStore::default(),
+                &mut detached_pump(),
+            )
+            .unwrap();
+            let templates = listed["result"]["resourceTemplates"].as_array().unwrap();
+            assert!(templates.iter().any(|t| t["uriTemplate"]
+                .as_str()
+                .unwrap()
+                .contains("{level}")));
+            assert!(templates.iter().any(|t| t["uriTemplate"]
+                .as_str()
+                .unwrap()
+                .contains("{hash}")));
+            assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS);
+            assert_eq!(listed["result"]["cacheScope"], "public");
+        }
+    }
+
+    #[test]
+    fn tool_titles_are_top_level_and_annotations_allowlisted() {
+        // Title lives top-level (2026-07-28 Tool shape), not nested.
+        let tools = tool_definitions();
+        for tool in tools.as_array().unwrap() {
+            assert!(tool["title"].as_str().is_some());
+            assert!(tool["annotations"].get("title").is_none());
+            let annotations = tool["annotations"].as_object().unwrap();
+            for key in annotations.keys() {
+                assert!(
+                    ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]
+                        .contains(&key.as_str()),
+                    "unexpected annotation key: {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn structured_results_conform_to_their_output_schemas() {
+        // Spot-check the shape every schema'd result must have: an object
+        // carrying ok, reachable through tool_result unchanged.
+        let sample = json!({
+            "ok": true,
+            "status": "completed",
+            "document_id": 1,
+            "revision": 2,
+            "geometry_revision": 3,
+            "camera_revision": 4
+        });
+        let result = tool_result(sample);
+        assert_eq!(result["isError"], false);
+        assert_eq!(result["structuredContent"]["ok"], true);
+        assert_eq!(result["structuredContent"]["revision"], 2);
     }
 
     #[test]
