@@ -495,10 +495,17 @@ fn split_mixed_polyline(
             .iter()
             .copied()
             .fold(0.0f32, f32::max);
-        let has_line_taper = straight_widths
-            .first()
-            .map_or(false, |&w0| straight_widths.iter().any(|&w| (w - w0).abs() > 1e-6));
-        let taper_widths = if has_line_taper || straight_widths.iter().any(|&w| w > 1e-6) {
+        // NaN breaks carry a 0 width; only real points decide whether the
+        // band tapers, so a constant-width run keeps its mitered joints.
+        let mut real_widths = line_pts
+            .iter()
+            .zip(&straight_widths)
+            .filter(|(p, _)| p[0].is_finite())
+            .map(|(_, &w)| w);
+        let has_line_taper = real_widths
+            .next()
+            .map_or(false, |w0| real_widths.any(|w| (w - w0).abs() > 1e-6));
+        let taper_widths = if has_line_taper {
             straight_widths
         } else {
             Vec::new()
