@@ -353,6 +353,9 @@ struct McpTask {
     last_updated_at: String,
     result: Option<Value>,
     error: Option<Value>,
+    /// Cooperative cancel acknowledged: polls report `cancelled` and late
+    /// completions are discarded (checked before result/error).
+    cancelled: bool,
 }
 
 struct StoredTask {
@@ -2353,6 +2356,16 @@ fn poll_task(
     resources: &mut ResourceStore,
     pump: &mut CancelPump,
 ) -> Value {
+    if task.cancelled {
+        // Cancelled carries neither result nor error, even if a late
+        // completion landed after the cancel was acknowledged.
+        let mut value = task_value(task, "cancelled");
+        if let Some(object) = value.as_object_mut() {
+            object.remove("result");
+            object.remove("error");
+        }
+        return value;
+    }
     if task.result.is_some() {
         return task_value(task, "completed");
     }
@@ -2376,7 +2389,9 @@ fn poll_task(
         // next poll simply re-issues.
         Err(CallError::Cancelled) => task_value(task, "working"),
         Err(error) => {
-            task.error = Some(json!({"code":-32000,"message":error.message()}));
+            // Public code: the legacy -32000 range is grandfathered, and
+            // new emissions stay out of it.
+            task.error = Some(json!({"code":-32603,"message":error.message()}));
             task_value(task, "failed")
         }
     }
@@ -2594,6 +2609,7 @@ fn handle_message(
                             last_updated_at: now,
                             result: None,
                             error: None,
+                            cancelled: false,
                         });
                         return Some(response(
                             id,
@@ -2648,9 +2664,16 @@ fn handle_message(
             let Some(task_id) = params["taskId"].as_str() else {
                 return Some(rpc_error(id, -32602, "Missing taskId"));
             };
-            if tasks.get_mut(task_id).is_none() {
+            let Some(task) = tasks.get_mut(task_id) else {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
-            }
+            };
+            // Cooperative cancel, honored: the op is dropped (nothing
+            // re-issues once cancelled) and polls report the terminal
+            // `cancelled` state with neither result nor error.
+            task.cancelled = true;
+            task.result = None;
+            task.error = None;
+            task.last_updated_at = iso8601_now();
             response(id, protocol_result(json!({}), true, false))
         }
         _ => rpc_error(id, -32601, format!("Method not found: {method}")),
@@ -2719,13 +2742,21 @@ fn idle_cancel(clients: &mut HashMap<String, GuiClient>, params: &Value) {
     }
 }
 
+/// Agent schema sync is a local convenience, not protocol: operators
+/// disable it with `OCS_SKIP_SCHEMA_SYNC` set to any value.
+fn schema_sync_enabled() -> bool {
+    std::env::var_os("OCS_SKIP_SCHEMA_SYNC").is_none()
+}
+
 /// Run the MCP stdio loop until the client closes stdin.
 ///
 /// A reader thread feeds lines through a channel so wait loops can observe
 /// `notifications/cancelled` mid-wait (see [`CancelPump`]). The reader never
 /// writes: this loop is the only stdout writer.
 pub fn run() {
-    let _ = sync_agent_tool_schemas();
+    if schema_sync_enabled() && sync_agent_tool_schemas() {
+        eprintln!("MCP agent schemas synchronized");
+    }
     let exe_stamp = exe_fingerprint();
     let stdout = io::stdout();
     let mut output = stdout.lock();
@@ -3252,6 +3283,89 @@ mod tests {
         assert_eq!(result["structuredContent"]["revision"], 2);
     }
 
+    fn modern_params() -> Value {
+        json!({"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"extensions":{"io.modelcontextprotocol/tasks":{}}}}})
+    }
+
+    fn stub_task(id: &str) -> McpTask {
+        McpTask {
+            id: id.into(),
+            name: "ocs_read".into(),
+            arguments: json!({}),
+            created_at: iso8601_now(),
+            last_updated_at: iso8601_now(),
+            result: None,
+            error: None,
+            cancelled: false,
+        }
+    }
+
+    #[test]
+    fn tasks_cancel_marks_cancelled_without_result() {
+        let mut tasks = TaskStore::default();
+        tasks.insert(stub_task("t-cancel"));
+        let cancelled = handle_message(
+            json!({"jsonrpc":"2.0","id":"c","method":"tasks/cancel","params":{"taskId":"t-cancel","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"extensions":{"io.modelcontextprotocol/tasks":{}}}}}}),
+            &mut HashMap::new(),
+            &mut tasks,
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert!(cancelled.get("error").is_none());
+        let mut params = modern_params();
+        params["taskId"] = Value::String("t-cancel".into());
+        let status = handle_message(
+            json!({"jsonrpc":"2.0","id":"g","method":"tasks/get","params":params}),
+            &mut HashMap::new(),
+            &mut tasks,
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(status["result"]["status"], "cancelled");
+        assert!(status["result"].get("result").is_none());
+        assert!(status["result"].get("error").is_none());
+        // A late completion landing after the cancel is discarded.
+        tasks.get_mut("t-cancel").unwrap().result = Some(json!({"ok": true}));
+        let mut params = modern_params();
+        params["taskId"] = Value::String("t-cancel".into());
+        let again = handle_message(
+            json!({"jsonrpc":"2.0","id":"g2","method":"tasks/get","params":params}),
+            &mut HashMap::new(),
+            &mut tasks,
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(again["result"]["status"], "cancelled");
+        assert!(again["result"].get("result").is_none());
+    }
+
+    #[test]
+    fn task_envelope_errors_use_public_codes() {
+        // The legacy -32000 range is grandfathered, not for new use.
+        let mut task = stub_task("t-fail");
+        task.arguments =
+            json!({"ocs_session_id":"00000000","op":"state","wait_seconds":0});
+        let failed = poll_task(
+            &mut task,
+            &mut HashMap::new(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        );
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["error"]["code"], -32603);
+    }
+
+    #[test]
+    fn schema_sync_respects_opt_out() {
+        std::env::set_var("OCS_SKIP_SCHEMA_SYNC", "1");
+        assert!(!schema_sync_enabled());
+        std::env::remove_var("OCS_SKIP_SCHEMA_SYNC");
+        assert!(schema_sync_enabled());
+    }
+
     #[test]
     fn malformed_requests_get_jsonrpc_errors() {
         let unknown = handle_message(
@@ -3729,6 +3843,7 @@ mod tests {
             last_updated_at: now,
             result: None,
             error: None,
+            cancelled: false,
         };
         let value = task_value(&task, "working");
         assert_eq!(value["resultType"], "complete");
@@ -3746,6 +3861,7 @@ mod tests {
             last_updated_at: iso8601_now(),
             result: None,
             error: None,
+            cancelled: false,
         };
         let t0 = Instant::now();
         let mut store = TaskStore::default();
