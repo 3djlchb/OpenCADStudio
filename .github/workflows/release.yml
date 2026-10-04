@@ -492,10 +492,16 @@ jobs:
           cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
           cp DWG.icns DXF.icns "$APP/Contents/Resources/"
           # First-party Python scripting plugin. It remains out of process and
-          # uses the same API/toolchain as this host build.
-          bash plugins/opencad-python/tools/stage-bundled.sh \
-            "$APP/Contents/Resources/plugins/opencad.python" \
-            --target aarch64-apple-darwin
+          # uses the same API/toolchain as this host build. A dispatched
+          # rebuild of a tag cut before the plugin existed ships without it.
+          STAGE=plugins/opencad-python/tools/stage-bundled.sh
+          if [ -f "$STAGE" ] || [ "${{ github.event_name }}" != workflow_dispatch ]; then
+            bash "$STAGE" \
+              "$APP/Contents/Resources/plugins/opencad.python" \
+              --target aarch64-apple-darwin
+          else
+            echo "::warning::$STAGE missing at this commit; Python plugin not bundled"
+          fi
           # QuickLook thumbnail extension.
           cp -R DWGThumbnail.appex "$APP/Contents/PlugIns/"
           # Substitute version into Info.plist.
