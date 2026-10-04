@@ -352,13 +352,7 @@ impl OpenCADStudio {
                                         use crate::scene::model::solid_model;
                                         let face =
                                             solid_model::nearest_planar_face(body, pick.to_array())?;
-                                        solid_model::planar_face_normal(body, face)
-                                    })
-                                    .and_then(|normal| {
-                                        super::super::helpers::ucs_from_normal(
-                                            pick,
-                                            glam::DVec3::from_array(normal),
-                                        )
+                                        solid_model::planar_face_ucs(body, face, pick.to_array())
                                     });
                                 match built {
                                     Some(ucs) => {
