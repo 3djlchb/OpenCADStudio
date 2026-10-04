@@ -170,11 +170,20 @@ impl OpenCADStudio {
         }
         let label = self.history_label_from_active_cmd(i, "TRIM");
         self.push_undo_snapshot(i, label);
-        self.tabs[i].scene.erase_entities(&[handle]);
+        // A replacement reusing the original handle must land after the erase;
+        // fresh pieces take over its hatch associations before it goes.
+        let reuses_handle = new_entities.iter().any(|e| e.common().handle == handle);
+        if reuses_handle {
+            self.tabs[i].scene.erase_entities(&[handle]);
+        }
         let new_handles: Vec<codec::Handle> = new_entities
             .into_iter()
             .map(|e| self.tabs[i].scene.add_entity(e))
             .collect();
+        if !reuses_handle {
+            self.tabs[i].scene.split_hatch_source(handle, &new_handles);
+            self.tabs[i].scene.erase_entities(&[handle]);
+        }
         // Rebuild replaced dimensions from edited data.
         for &nh in &new_handles {
             if matches!(
