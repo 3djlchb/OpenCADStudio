@@ -343,6 +343,7 @@ impl OpenCADStudio {
                                 self.tabs[i].active_cmd = Some(Box::new(picker));
                             }
                             Some((handle, pick)) => {
+                                self.tabs[i].scene.restore_solid_models(&[handle]);
                                 let built = self.tabs[i]
                                     .scene
                                     .solid_models

@@ -384,6 +384,10 @@ impl CadCommand for UcsPickCommand {
         true
     }
 
+    fn entity_pick_includes_fills(&self) -> bool {
+        self.face
+    }
+
     fn entity_pick_uses_surface_point(&self) -> bool {
         self.face
     }

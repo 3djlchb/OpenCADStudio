@@ -78,3 +78,30 @@ fn the_curved_side_is_not_offered_as_a_plane() {
         );
     }
 }
+
+#[test]
+fn ucs_pick_command_enables_solid_face_picking() {
+    use OpenCADStudio::command::{CadCommand, CmdResult, UcsPickCommand};
+    use glam::DVec3;
+
+    let cmd_face = UcsPickCommand { face: true };
+    assert!(cmd_face.needs_entity_pick(), "UCS FACE needs entity pick");
+    assert!(cmd_face.entity_pick_includes_fills(), "UCS FACE must include fills to raycast solid faces");
+    assert!(cmd_face.entity_pick_uses_surface_point(), "UCS FACE must use 3D surface point");
+    assert!(cmd_face.entity_pick_highlights_hover(), "UCS FACE must highlight hovered solid face");
+
+    let cmd_obj = UcsPickCommand { face: false };
+    assert!(cmd_obj.needs_entity_pick());
+    assert!(!cmd_obj.entity_pick_includes_fills(), "UCS OBJECT operates on curves, not fills");
+    assert!(!cmd_obj.entity_pick_uses_surface_point());
+
+    let handle = codec::Handle::new(0x2A);
+    let pt = DVec3::new(10.5, 20.25, 30.125);
+    let mut cmd = cmd_face;
+    match cmd.on_entity_pick(handle, pt) {
+        CmdResult::Dispatch(cmd_str) => {
+            assert_eq!(cmd_str, "UCS FACE 2A 10.5,20.25,30.125");
+        }
+        _ => panic!("Expected CmdResult::Dispatch"),
+    }
+}
