@@ -2158,6 +2158,13 @@ fn handle_message(
     tasks: &mut TaskStore,
     resources: &mut ResourceStore,
 ) -> Option<Value> {
+    // Non-object input (batches included: the spec defines no batch
+    // semantics for us) is Invalid Request, never silence: a sender must
+    // not hang waiting for a response that will never come. Id-less
+    // *objects* stay silent (notifications).
+    if !message.is_object() {
+        return Some(rpc_error(Value::Null, -32600, "Invalid request: expected a JSON-RPC object"));
+    }
     let id = message.get("id").cloned();
     let method = message.get("method").and_then(Value::as_str)?;
     if id.is_none() {
@@ -2248,7 +2255,9 @@ fn handle_message(
             };
             match read_resource(uri, clients, resources) {
                 Ok(contents) => response(id, protocol_result(contents, modern, true)),
-                Err(err) => rpc_error(id, -32002, err),
+                // -32002 was THE not-found code in 2025-11-25 and earlier;
+                // 2026-07-28 says MUST NOT emit it, so modern gets -32602.
+                Err(err) => rpc_error(id, if modern { -32602 } else { -32002 }, err),
             }
         }
         "tools/list" => response(
@@ -2666,6 +2675,50 @@ mod tests {
     }
 
     #[test]
+    fn resource_not_found_code_follows_era() {
+        // Modern path MUST NOT emit -32002 (2026-07-28); legacy path keeps
+        // it (it was the code in 2025-11-25 and earlier).
+        let modern = handle_message(
+            json!({"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"cad://session/nope/snapshot/nope.png","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        )
+        .unwrap();
+        assert_eq!(modern["error"]["code"], -32602);
+        let legacy = handle_message(
+            json!({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"cad://session/nope/snapshot/nope.png"}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        )
+        .unwrap();
+        assert_eq!(legacy["error"]["code"], -32002);
+    }
+
+    #[test]
+    fn non_object_input_is_invalid_request() {
+        // Batches and other non-objects get -32600 (so senders never hang)
+        // while id-less objects stay silent (notifications).
+        for bad in [json!([1, 2]), json!("tools/list"), json!(42), json!(null)] {
+            let rejected = handle_message(
+                bad,
+                &mut HashMap::new(),
+                &mut TaskStore::default(),
+                &mut ResourceStore::default(),
+            );
+            assert_eq!(rejected.unwrap()["error"]["code"], -32600);
+        }
+        let silent = handle_message(
+            json!({"jsonrpc":"2.0","method":"ping"}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        );
+        assert!(silent.is_none());
+    }
+
+    #[test]
     fn malformed_requests_get_jsonrpc_errors() {
         let unknown = handle_message(
             json!({"jsonrpc":"2.0","id":1,"method":"frobnicate"}),
@@ -2823,7 +2876,8 @@ mod tests {
         let text = read_meta["result"]["contents"][0]["text"].as_str().unwrap();
         assert!(text.contains("\"width\": 100"));
 
-        // Test resources/read on non-existent resource returns -32002 error
+        // Legacy resources/read on non-existent resource keeps -32002
+        // (modern gets -32602; see resource_not_found_code_follows_era)
         let read_err = handle_message(
             json!({"jsonrpc":"2.0","id":"r-err","method":"resources/read","params":{"uri":"cad://session/sess1/snapshot/nonexistent.png"}}),
             &mut clients,
