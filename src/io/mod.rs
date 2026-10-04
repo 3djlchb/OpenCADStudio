@@ -1036,6 +1036,7 @@ fn finalize_loaded_outcome(
 ) -> Result<codec::ReadOutcome, String> {
     let doc = &mut outcome.document;
     normalize_block_origins(doc);
+    materialize_missing_block_markers(doc);
     normalize_knotless_splines(doc);
     if outcome.stats.source_format == Some(codec::SourceFormat::Dxf) {
         fix_dxf_dimension_rotations(doc);
@@ -1236,6 +1237,84 @@ fn normalize_block_origins(doc: &mut CadDocument) {
         }
         if let Some(record) = doc.block_records.get_mut(&name) {
             record.base_point = Vector3::ZERO;
+        }
+    }
+}
+
+/// The DXF section reader keeps BLOCK/ENDBLK marker identities on the block
+/// record but never materializes the sentinel entities, so
+/// `block_entity_handle`/`block_end_handle` dangle after every DXF load
+/// (reopened baked `*D` dimension blocks hit this every time). Re-create any
+/// missing sentinel so each record points at a real Block/BlockEnd again.
+/// Idempotent: records whose markers already resolve (DWG loads, live docs)
+/// are untouched. File handles are reused when still free so a repair +
+/// resave stays handle-stable; otherwise a fresh handle is minted and the
+/// record is pointed at it.
+fn materialize_missing_block_markers(doc: &mut CadDocument) {
+    use codec::entities::{Block, BlockEnd};
+    use codec::{EntityType, Handle};
+
+    struct Work {
+        name: String,
+        record_handle: Handle,
+        base_point: codec::types::Vector3,
+        block_handle: Handle,
+        end_handle: Handle,
+        need_block: bool,
+        need_end: bool,
+    }
+    let work: Vec<Work> = doc
+        .block_records
+        .iter()
+        .map(|record| Work {
+            name: record.name.clone(),
+            record_handle: record.handle,
+            base_point: record.base_point,
+            block_handle: record.block_entity_handle,
+            end_handle: record.block_end_handle,
+            need_block: !matches!(
+                doc.get_entity(record.block_entity_handle),
+                Some(EntityType::Block(_))
+            ),
+            need_end: !matches!(
+                doc.get_entity(record.block_end_handle),
+                Some(EntityType::BlockEnd(_))
+            ),
+        })
+        .filter(|w| w.need_block || w.need_end)
+        .collect();
+
+    for w in work {
+        if w.need_block {
+            let mut marker = Block::new(&w.name, w.base_point);
+            // Reuse the file handle only if nothing else claims it; an
+            // explicit handle is respected by add_entity (bumping the counter
+            // past it), otherwise a NULL handle mints a fresh one below.
+            if !w.block_handle.is_null() && doc.get_entity(w.block_handle).is_none() {
+                marker.common.handle = w.block_handle;
+            }
+            marker.common.owner_handle = w.record_handle;
+            if let Ok(handle) = doc.add_entity(EntityType::Block(marker)) {
+                if handle != w.block_handle {
+                    if let Some(record) = doc.block_records.get_mut(&w.name) {
+                        record.block_entity_handle = handle;
+                    }
+                }
+            }
+        }
+        if w.need_end {
+            let mut marker = BlockEnd::new();
+            if !w.end_handle.is_null() && doc.get_entity(w.end_handle).is_none() {
+                marker.common.handle = w.end_handle;
+            }
+            marker.common.owner_handle = w.record_handle;
+            if let Ok(handle) = doc.add_entity(EntityType::BlockEnd(marker)) {
+                if handle != w.end_handle {
+                    if let Some(record) = doc.block_records.get_mut(&w.name) {
+                        record.block_end_handle = handle;
+                    }
+                }
+            }
         }
     }
 }
