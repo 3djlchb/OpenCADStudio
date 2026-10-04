@@ -945,10 +945,12 @@ fn append_pdf_page(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Slack around the export window, in sheet mm, so a stroke whose centreline
 /// sits just outside still contributes its width.
 const CULL_MARGIN_MM: f64 = 10.0;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn sheet_overlaps(b: [f64; 4], window: [f64; 4]) -> bool {
     b[0] <= window[2] + CULL_MARGIN_MM
         && b[2] >= window[0] - CULL_MARGIN_MM
@@ -956,6 +958,7 @@ fn sheet_overlaps(b: [f64; 4], window: [f64; 4]) -> bool {
         && b[3] >= window[1] - CULL_MARGIN_MM
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn grow(bounds: &mut Option<[f64; 4]>, x: f64, y: f64) {
     if !x.is_finite() || !y.is_finite() {
         return;
@@ -967,6 +970,7 @@ fn grow(bounds: &mut Option<[f64; 4]>, x: f64, y: f64) {
     b[3] = b[3].max(y);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sheet-mm bounds of everything a wire inks (strokes, glyphs, fills).
 fn wire_sheet_bounds(wire: &WireModel, ox: f64, oy: f64, marker_h: f64) -> Option<[f64; 4]> {
     let mut bounds = None;
@@ -991,6 +995,7 @@ fn wire_sheet_bounds(wire: &WireModel, ox: f64, oy: f64, marker_h: f64) -> Optio
     bounds
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sheet-mm bounds of a hatch, resolved the way `emit_hatch` places it.
 fn hatch_sheet_bounds(hatch: &HatchModel, ox: f64, oy: f64) -> Option<[f64; 4]> {
     let mut bounds = None;
