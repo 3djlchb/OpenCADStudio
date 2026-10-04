@@ -29,7 +29,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// changes, so schema drift (new params, renamed tools) is always a conscious,
 /// reviewed edit — and clients can detect a stale bridge by comparing digests.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "fbba987a0b2718920eb4f03a204eba843e29c957f09002cd0c23ce969968d5a6";
+const TOOL_SCHEMA_DIGEST: &str = "bb2640277721f23e08cf17085bd9204753f810ece27abf31402be876e2c4683d";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -1062,8 +1062,23 @@ impl GuiClient {
             .and_then(Value::as_str)
             .ok_or_else(|| "request must contain op".to_string())?
             .to_string();
-        if !READ_OPS.contains(&op.as_str()) {
+        // The GUI requires request_id on every non-query op, capture
+        // included: without one the GUI rejects the request outright, so
+        // the bridge always mints one (a client-supplied id wins).
+        if !READ_OPS.contains(&op.as_str()) || op == "capture" {
             insert_default(&mut object, "request_id", Value::String(random_id()?));
+        }
+        // Capture reads the active tab, so it needs the document the
+        // GUI requires on every non-query op (revision stays absent:
+        // the GUI only checks revisions callers supply).
+        if op == "capture" {
+            insert_default(
+                &mut object,
+                "document_id",
+                self.state["document_id"].clone(),
+            );
+        }
+        if !READ_OPS.contains(&op.as_str()) {
             insert_default(
                 &mut object,
                 "client_id",
@@ -1819,6 +1834,17 @@ fn call_tool(
             if !READ_OPS.contains(&op) {
                 return Err("Use ocs_execute for mutations".to_string().into());
             }
+            if op == "capture" {
+                // The GUI capture op needs a file path and lives behind the
+                // ocs_capture tool; agents hitting the bare read op get
+                // guidance instead of a cryptic missing-path failure.
+                return Ok(json!({
+                    "ok": false,
+                    "status": "failed",
+                    "code": "use_capture_tool",
+                    "error": "Viewport captures run through the ocs_capture tool (scope, annotate, tiles, diff). ocs_read exposes capture products already stored as resources, not new captures."
+                }));
+            }
             if op == "tools" {
                 return Ok(json!({
                     "ok": true,
@@ -1961,6 +1987,11 @@ fn call_tool(
                 "scope": scope,
                 "max_dimension": if tile_info.is_some() && arguments.get("max_dimension").is_none() { 512 } else { max_dimension },
             });
+            // The client's id wins when supplied (and is echoed back in
+            // metadata); otherwise request() mints one for the GUI below.
+            if let Some(request_id) = arguments.get("request_id").and_then(Value::as_str) {
+                req["request_id"] = json!(request_id);
+            }
             if let Some((_, _, _, tb)) = tile_info {
                 req["view"] = json!("region");
                 req["bounds"] = json!(tb);
@@ -1994,6 +2025,9 @@ fn call_tool(
             let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
             if let Some(obj) = meta.as_object_mut() {
                 obj.remove("path");
+                if let Some(request_id) = arguments["request_id"].as_str() {
+                    obj.insert("request_id".into(), Value::String(request_id.into()));
+                }
             }
 
             let mut final_bytes = bytes;
@@ -2244,6 +2278,7 @@ pub(crate) fn tool_definitions() -> Value {
                 "type":"object",
                 "properties":{
                     "ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},
+                    "request_id":{"type":"string","description":"Optional client request id, accepted for schema compatibility and echoed in the result metadata. Captures are not idempotency-keyed."},
                     "scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},
                     "max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."},
                     "delivery":{"type":"string","enum":["inline","resource","both"],"default":"inline","description":"Image delivery method: 'inline' embeds base64 in tool content, 'resource' returns an MCP cad:// URI reference without inlining image bytes, 'both' returns both inline image and cad:// URI."},
@@ -3437,6 +3472,47 @@ mod tests {
         assert!(stale_snapshot_may_delete(true, Duration::from_secs(120)));
         assert!(stale_snapshot_may_delete(true, Duration::from_secs(3600)));
         assert!(!stale_snapshot_may_delete(false, Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn capture_accepts_optional_request_id() {
+        // Strict clients insist on sending request_id even though capture
+        // is not idempotency-keyed: declare it optional so they can.
+        let tools = tool_definitions();
+        let capture = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "ocs_capture")
+            .unwrap();
+        let prop = &capture["inputSchema"]["properties"]["request_id"];
+        assert_eq!(prop["type"], "string");
+        assert!(
+            !capture["inputSchema"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("request_id"))
+        );
+    }
+
+    #[test]
+    fn read_op_capture_points_at_the_capture_tool() {
+        // ocs_read advertises "capture" but the GUI op needs a file path;
+        // agents hitting it bare get guidance, not a cryptic failure.
+        let guided = call_tool(
+            "ocs_read",
+            &json!({"ocs_session_id":"s","op":"capture"}),
+            &mut HashMap::new(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(guided["ok"], false);
+        assert!(guided["error"]
+            .as_str()
+            .unwrap()
+            .contains("ocs_capture"));
     }
 
     #[test]
