@@ -744,6 +744,11 @@ impl WireModel {
     pub fn is_display_only(&self) -> bool {
         self.snap_only && self.display_visible
     }
+    /// A POINT's wire: the Node is its only snap; the glyph strokes are drawn
+    /// but offer no endpoints or segments to snap to.
+    pub fn is_node_marker(&self) -> bool {
+        self.key_vertices.is_empty() && matches!(self.snap_pts.as_slice(), [(_, SnapHint::Node)])
+    }
     /// Sentinel AABB that never rejects any snap query.
     pub const UNBOUNDED_AABB: [f32; 4] = [
         f32::NEG_INFINITY,

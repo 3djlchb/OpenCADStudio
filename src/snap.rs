@@ -1346,10 +1346,17 @@ impl Snapper {
         const MAX_PAIRWISE_POINTS: usize = 3_000;
         let mut in_range_pts = 0usize;
         let mut in_range_wires = InRangeWires::new();
+        // POINT wires offer only their Node; their glyph strokes stay out of
+        // every geometric snap below.
+        let mut in_range_nodes: Vec<&WireModel> = Vec::new();
         let unindexed = wires.segments().is_none();
         if unindexed {
             for w in wires.iter() {
-                if !w.is_display_only() && wire_in_range(w) {
+                if w.is_node_marker() {
+                    if wire_in_range(w) {
+                        in_range_nodes.push(w);
+                    }
+                } else if !w.is_display_only() && wire_in_range(w) {
                     in_range_pts += w.points.len();
                     in_range_wires.push(w);
                 }
@@ -1361,7 +1368,11 @@ impl Snapper {
         // Early out: if no unindexed wires overlap the cursor aperture and
         // no persistent tracking points exist, discrete/continuous object snaps
         // cannot hit anything. Avoid running all subsequent pass setups and loops.
-        if unindexed && in_range_wires.is_empty() && self.tracking_points.is_empty() {
+        if unindexed
+            && in_range_wires.is_empty()
+            && in_range_nodes.is_empty()
+            && self.tracking_points.is_empty()
+        {
             return best;
         }
 
@@ -1460,7 +1471,7 @@ impl Snapper {
                 try_snap_hint(world, hint, wire_source(wire));
             }
         } else {
-            for wire in in_range_wires.iter() {
+            for wire in in_range_wires.iter().chain(in_range_nodes.iter().copied()) {
                 let src = wire_source(wire);
                 for &(world, hint) in &wire.snap_pts {
                     try_snap_hint(world, hint, src);
@@ -1489,7 +1500,10 @@ impl Snapper {
                 // Tessellated open curves have no key-vertex set. Their only
                 // endpoints are first/last, so testing candidate wires remains
                 // O(local wires), independent of tessellation density.
-                for wire in wires.iter().filter(|wire| wire.key_vertices.is_empty()) {
+                for wire in wires
+                    .iter()
+                    .filter(|wire| wire.key_vertices.is_empty() && !wire.is_node_marker())
+                {
                     let closed = wire
                         .snap_pts
                         .iter()
@@ -1516,7 +1530,7 @@ impl Snapper {
                         for &point in &wire.key_vertices {
                             try_pt(DVec3::from_array(point), SnapType::Endpoint, src, None);
                         }
-                    } else {
+                    } else if !wire.is_node_marker() {
                         let closed = wire
                             .snap_pts
                             .iter()
