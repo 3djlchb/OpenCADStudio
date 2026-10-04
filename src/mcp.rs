@@ -14,6 +14,7 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::mpsc::{Receiver, TryRecvError},
     thread,
     time::{Duration, Instant, SystemTime},
 };
@@ -238,6 +239,98 @@ struct GuiClient {
     state: Value,
     client_id: String,
     batches: VecDeque<BatchExecution>,
+    /// MCP request id (as string) -> GUI request id for ops still pending
+    /// server-side. Lets an idle-arriving `notifications/cancelled` find
+    /// the GUI op to dismiss. Entries leave on terminal responses and
+    /// dismissals; abandoned entries mirror GUI sessions that outlive
+    /// interest (pre-existing behavior, two small strings each).
+    inflight: HashMap<String, String>,
+    /// GUI request ids dismissed by cancel/timeout: late completions and
+    /// re-polls answer `cancelled` without touching the GUI. Capped.
+    dismissed: VecDeque<String>,
+}
+
+/// Reader-thread inbox for stdin lines. The reader never writes: the main
+/// loop (and, during waits, the wait loop) is the only consumer, so stdout
+/// stays single-writer. Non-cancel lines met during a wait are stowed in
+/// `backlog` and handled in order once the wait ends.
+struct CancelPump {
+    rx: Receiver<Result<String, String>>,
+    backlog: VecDeque<String>,
+}
+
+enum PumpEvent {
+    Cancelled,
+    Quiet,
+}
+
+impl CancelPump {
+    fn next(&mut self) -> Option<String> {
+        if let Some(line) = self.backlog.pop_front() {
+            return Some(line);
+        }
+        match self.rx.recv() {
+            Ok(Ok(line)) => Some(line),
+            Ok(Err(error)) => {
+                eprintln!("MCP input error: {error}");
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Drain newly arrived lines for up to `quantum`: consume a cancel naming
+    /// `mkey`, stow everything else in order. Never blocks past the quantum.
+    fn wait_line(&mut self, quantum: Duration, mkey: Option<&str>) -> PumpEvent {
+        let deadline = Instant::now() + quantum;
+        loop {
+            match self.rx.try_recv() {
+                Ok(Ok(line)) => {
+                    if mkey.is_some_and(|key| is_cancel_for(&line, key)) {
+                        return PumpEvent::Cancelled;
+                    }
+                    self.backlog.push_back(line);
+                }
+                // Reader gone or input broken: end the wait quietly; the
+                // main loop observes the closed channel right after.
+                Ok(Err(_)) | Err(TryRecvError::Disconnected) => return PumpEvent::Quiet,
+                Err(TryRecvError::Empty) => {
+                    if Instant::now() >= deadline {
+                        return PumpEvent::Quiet;
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+    }
+}
+
+/// MCP request-id key for cancel matching. String and number ids stay
+/// distinct (`7` vs `"7"`): both sides stringify the same JSON value.
+fn mcp_key(id: &Value) -> String {
+    id.to_string()
+}
+
+fn is_cancel_for(line: &str, mkey: &str) -> bool {
+    let Ok(message) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    if message.get("method").and_then(Value::as_str) != Some("notifications/cancelled") {
+        return false;
+    }
+    message
+        .get("params")
+        .and_then(|params| params.get("requestId"))
+        .is_some_and(|id| id.to_string() == mkey)
+}
+
+fn wait_deadline(op: &str, wait_seconds: f64) -> Duration {
+    let capped = if matches!(op, "user_select" | "getpoint") {
+        wait_seconds.clamp(0.0, INTERACTIVE_MAX_WAIT.as_secs_f64())
+    } else {
+        wait_seconds.clamp(0.0, 60.0)
+    };
+    Duration::from_secs_f64(capped)
 }
 
 struct BatchExecution {
@@ -546,7 +639,14 @@ fn private_descriptor(_: &Path) -> bool {
 enum CallError {
     Tool(String),
     Infra(String),
+    /// Client cancelled the in-flight request: send nothing back.
+    Cancelled,
 }
+
+/// Interactive picks may legitimately take a human minutes; everything else
+/// keeps the 60 s clamp. This bounds a single call; agents re-poll with
+/// small waits by design.
+const INTERACTIVE_MAX_WAIT: Duration = Duration::from_secs(600);
 
 impl From<String> for CallError {
     fn from(message: String) -> Self {
@@ -573,6 +673,7 @@ impl CallError {
     fn message(&self) -> &str {
         match self {
             CallError::Tool(message) | CallError::Infra(message) => message,
+            CallError::Cancelled => "cancelled by client",
         }
     }
 
@@ -861,10 +962,41 @@ impl GuiClient {
             state,
             client_id: random_id().map_err(CallError::Infra)?,
             batches: VecDeque::new(),
+            inflight: HashMap::new(),
+            dismissed: VecDeque::new(),
         })
     }
 
-    fn request(&mut self, request: Value, wait_seconds: f64) -> Result<Value, CallError> {
+    /// Best-effort dismiss of a GUI-pending interactive op: the GUI resolves
+    /// a pending `user_select`/`getpoint` as cancelled on `op == "cancel"`
+    /// (see `app::control`), and late completions are dropped bridge-side
+    /// via `dismissed`. Failures are ignored: dismissal races a GUI that may
+    /// already be gone, and the outcome (Cancelled/timeout) stands either way.
+    fn dismiss(&mut self, gui_id: Option<&str>) {
+        let Some(gui_id) = gui_id else { return };
+        let cancel = json!({
+            "op": "cancel",
+            "request_id": random_id().unwrap_or_else(|_| format!("cancel-{}", iso8601_now())),
+            "client_id": self.client_id.clone(),
+            "document_id": self.state["document_id"].clone(),
+            "revision": self.state["revision"].clone(),
+        });
+        let _ = exchange(&self.descriptor, cancel, Duration::from_secs(5));
+        if !self.dismissed.iter().any(|id| id == gui_id) {
+            if self.dismissed.len() >= 128 {
+                self.dismissed.pop_front();
+            }
+            self.dismissed.push_back(gui_id.to_string());
+        }
+    }
+
+    fn request(
+        &mut self,
+        request: Value,
+        wait_seconds: f64,
+        pump: &mut CancelPump,
+        mcp_id: Option<&Value>,
+    ) -> Result<Value, CallError> {
         let mut object = request
             .as_object()
             .cloned()
@@ -896,25 +1028,77 @@ impl GuiClient {
         }
 
         let request_id = object.get("request_id").cloned();
+        // Re-polls for dismissed interactions answer `cancelled` without
+        // touching the GUI: the prompt is already gone.
+        if op == "operation" {
+            if let Some(polled) = request_id.as_ref().and_then(Value::as_str) {
+                if self.dismissed.iter().any(|id| id == polled) {
+                    return Ok(json!({"ok":false,"status":"cancelled","request_id":polled}));
+                }
+            }
+        }
         let mut response = exchange(
             &self.descriptor,
             Value::Object(object),
             Duration::from_secs(15),
         )?;
-        let wait = wait_seconds.clamp(0.0, 60.0);
-        let deadline = Instant::now() + Duration::from_secs_f64(wait);
+        let gui_id = request_id.as_ref().and_then(Value::as_str).map(str::to_string);
+        let mkey = mcp_id.map(mcp_key);
+        // Track the GUI op while it stays pending so an idle-arriving
+        // cancel can find and dismiss it. Terminal outcomes remove the
+        // entry; deadline exits keep it (the agent re-polls and re-tracks).
+        if let (Some(key), Some(gui)) = (mkey.as_ref(), gui_id.as_ref()) {
+            self.inflight.insert(key.clone(), gui.clone());
+        }
+        let interactive = matches!(op.as_str(), "user_select" | "getpoint");
+        let deadline = Instant::now() + wait_deadline(&op, wait_seconds);
         while matches!(response["status"].as_str(), Some("accepted" | "running"))
             && Instant::now() < deadline
         {
             let Some(request_id) = request_id.clone() else {
                 break;
             };
-            thread::sleep(Duration::from_millis(50));
+            match pump.wait_line(Duration::from_millis(50), mkey.as_deref()) {
+                PumpEvent::Cancelled => {
+                    self.dismiss(gui_id.as_deref());
+                    if let Some(key) = mkey.as_ref() {
+                        self.inflight.remove(key);
+                    }
+                    return Err(CallError::Cancelled);
+                }
+                PumpEvent::Quiet => {}
+            }
             response = exchange(
                 &self.descriptor,
                 json!({"op":"operation","request_id":request_id}),
                 Duration::from_secs(15),
             )?;
+        }
+        let terminal = !matches!(response["status"].as_str(), Some("accepted" | "running"));
+        if terminal {
+            if let Some(key) = mkey.as_ref() {
+                self.inflight.remove(key);
+            }
+            if interactive && response["status"].as_str() == Some("cancelled") {
+                if let Some(gui) = gui_id.as_ref() {
+                    if !self.dismissed.iter().any(|id| id == gui) {
+                        if self.dismissed.len() >= 128 {
+                            self.dismissed.pop_front();
+                        }
+                        self.dismissed.push_back(gui.clone());
+                    }
+                }
+            }
+        } else if interactive && Instant::now() >= deadline {
+            // Single-call ceiling for human-paced picks: dismiss the prompt
+            // and say so plainly instead of blocking forever.
+            self.dismiss(gui_id.as_deref());
+            if let Some(key) = mkey.as_ref() {
+                self.inflight.remove(key);
+            }
+            return Err(CallError::Tool(
+                "timed out waiting for user (10 min); the prompt was dismissed".into(),
+            ));
         }
         if response.get("state").is_some() {
             self.state = response["state"].clone();
@@ -925,7 +1109,13 @@ impl GuiClient {
         Ok(response)
     }
 
-    fn execute_batch(&mut self, request: Value, wait_seconds: f64) -> Result<Value, CallError> {
+    fn execute_batch(
+        &mut self,
+        request: Value,
+        wait_seconds: f64,
+        pump: &mut CancelPump,
+        mcp_id: Option<&Value>,
+    ) -> Result<Value, CallError> {
         let id = required_string(&request, "request_id")?.to_owned();
         let mut batch = if let Some(position) = self.batches.iter().position(|batch| batch.id == id)
         {
@@ -991,6 +1181,14 @@ impl GuiClient {
             }
             attempted = true;
 
+            // Cancel between steps: dismiss a pending interactive step so
+            // no late answer fires, then abandon the batch (cancel = stop).
+            if let PumpEvent::Cancelled =
+                pump.wait_line(Duration::ZERO, mcp_id.map(mcp_key).as_deref())
+            {
+                self.dismiss(batch.active.as_deref());
+                return Err(CallError::Cancelled);
+            }
             let step_id = batch
                 .active
                 .clone()
@@ -1001,6 +1199,8 @@ impl GuiClient {
                     deadline
                         .saturating_duration_since(Instant::now())
                         .as_secs_f64(),
+                    pump,
+                    mcp_id,
                 )
             } else {
                 let mut step = batch.steps[batch.next]
@@ -1022,10 +1222,15 @@ impl GuiClient {
                     deadline
                         .saturating_duration_since(Instant::now())
                         .as_secs_f64(),
+                    pump,
+                    mcp_id,
                 )
             };
             let response = match response {
                 Ok(response) => response,
+                // Cancelled abandons the batch outright: resuming would
+                // re-poll a dismissed step.
+                Err(CallError::Cancelled) => return Err(CallError::Cancelled),
                 Err(error) => {
                     batch.active = Some(step_id);
                     self.batches.push_back(batch);
@@ -1224,6 +1429,7 @@ fn shape_execute_response(
     mut response: Value,
     detail: &str,
     gui: &mut GuiClient,
+    pump: &mut CancelPump,
 ) -> Result<Value, String> {
     if detail == "changed_entities" {
         let handles = response_handles(&response);
@@ -1231,6 +1437,8 @@ fn shape_execute_response(
             let entities = gui.request(
                 json!({"op":"query","handles":handles,"detail":"geometry","limit":MAX_BATCH_STEPS * 100}),
                 30.0,
+                pump,
+                None,
             )?;
             if let Some(object) = response.as_object_mut() {
                 object.insert("changed_entities".into(), entities["entities"].clone());
@@ -1251,6 +1459,8 @@ fn read_resource(
     uri: &str,
     clients: &mut HashMap<String, GuiClient>,
     resources: &mut ResourceStore,
+    pump: &mut CancelPump,
+    mcp_id: Option<&Value>,
 ) -> Result<Value, String> {
     if !uri.starts_with("cad://") {
         return Err(format!("Unsupported resource URI scheme: {uri}"));
@@ -1416,7 +1626,8 @@ fn read_resource(
                             "bounds": tile_bounds,
                             "max_dimension": 512,
                         });
-                        let result = client(clients, session_id)?.request(req, 20.0)?;
+                        let result =
+                            client(clients, session_id)?.request(req, 20.0, pump, mcp_id)?;
                         if result["ok"].as_bool() != Some(true)
                             || result["status"].as_str() != Some("completed")
                         {
@@ -1484,7 +1695,7 @@ fn read_resource(
                     "max_dimension": 1600,
                 });
                 let result = client(clients, session_id)?
-                    .request(req, 15.0)?;
+                    .request(req, 15.0, pump, mcp_id)?;
                 if result["ok"].as_bool() != Some(true)
                     || result["status"].as_str() != Some("completed")
                 {
@@ -1536,6 +1747,8 @@ fn call_tool(
     arguments: &Value,
     clients: &mut HashMap<String, GuiClient>,
     resources: &mut ResourceStore,
+    pump: &mut CancelPump,
+    mcp_id: Option<&Value>,
 ) -> Result<Value, CallError> {
     match name {
         "ocs_sessions" => {
@@ -1561,7 +1774,8 @@ fn call_tool(
                 .cloned()
                 .unwrap_or_default();
             request.insert("op".into(), Value::String(op.into()));
-            let response = client(clients, session_id)?.request(Value::Object(request), 30.0)?;
+            let response =
+                client(clients, session_id)?.request(Value::Object(request), 30.0, pump, mcp_id)?;
             if matches!(op, "hello" | "capabilities") {
                 Ok(with_bridge_identity(response))
             } else {
@@ -1588,9 +1802,9 @@ fn call_tool(
             let detail = arguments["response_detail"].as_str().unwrap_or("compact");
             let gui = client(clients, session_id)?;
             let mut response = if op == "batch" {
-                gui.execute_batch(request, wait)?
+                gui.execute_batch(request, wait, pump, mcp_id)?
             } else {
-                gui.request(request, wait)?
+                gui.request(request, wait, pump, mcp_id)?
             };
             if !val_res.warnings.is_empty() {
                 if let Some(object) = response.as_object_mut() {
@@ -1600,7 +1814,7 @@ fn call_tool(
                     );
                 }
             }
-            shape_execute_response(response, detail, gui).map_err(CallError::from)
+            shape_execute_response(response, detail, gui, pump).map_err(CallError::from)
         }
         "ocs_capture" => {
             let session_id = required_string(arguments, "ocs_session_id")?;
@@ -1710,7 +1924,7 @@ fn call_tool(
                 req["annotate"] = json!(annotate);
             }
             let result = client(clients, session_id)?
-                .request(req, 30.0)?;
+                .request(req, 30.0, pump, mcp_id)?;
             if result["ok"].as_bool() != Some(true)
                 || result["status"].as_str() != Some("completed")
             {
@@ -2137,6 +2351,7 @@ fn poll_task(
     task: &mut McpTask,
     clients: &mut HashMap<String, GuiClient>,
     resources: &mut ResourceStore,
+    pump: &mut CancelPump,
 ) -> Value {
     if task.result.is_some() {
         return task_value(task, "completed");
@@ -2147,7 +2362,9 @@ fn poll_task(
     task.last_updated_at = iso8601_now();
     let mut arguments = task.arguments.clone();
     arguments["wait_seconds"] = Value::from(0);
-    match call_tool(&task.name, &arguments, clients, resources) {
+    // Task re-issues are server-driven with no client wait: no MCP id to
+    // match cancels against, and a cancel here only means "stop polling".
+    match call_tool(&task.name, &arguments, clients, resources, pump, None) {
         Ok(value) if matches!(value["status"].as_str(), Some("accepted" | "running")) => {
             task_value(task, "working")
         }
@@ -2155,6 +2372,9 @@ fn poll_task(
             task.result = Some(tool_result(value));
             task_value(task, "completed")
         }
+        // Don't cache a cancel as failure: the client moved on, and the
+        // next poll simply re-issues.
+        Err(CallError::Cancelled) => task_value(task, "working"),
         Err(error) => {
             task.error = Some(json!({"code":-32000,"message":error.message()}));
             task_value(task, "failed")
@@ -2208,6 +2428,7 @@ fn handle_message(
     clients: &mut HashMap<String, GuiClient>,
     tasks: &mut TaskStore,
     resources: &mut ResourceStore,
+    pump: &mut CancelPump,
 ) -> Option<Value> {
     // Non-object input (batches included: the spec defines no batch
     // semantics for us) is Invalid Request, never silence: a sender must
@@ -2304,7 +2525,7 @@ fn handle_message(
             let Some(uri) = params["uri"].as_str() else {
                 return Some(rpc_error(id, -32602, "Missing resource uri"));
             };
-            match read_resource(uri, clients, resources) {
+            match read_resource(uri, clients, resources, pump, Some(&id)) {
                 Ok(contents) => response(id, protocol_result(contents, modern, true)),
                 // -32002 was THE not-found code in 2025-11-25 and earlier;
                 // 2026-07-28 says MUST NOT emit it, so modern gets -32602.
@@ -2334,7 +2555,7 @@ fn handle_message(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let called = call_tool(name, &arguments, clients, resources);
+            let called = call_tool(name, &arguments, clients, resources, pump, Some(&id));
             if modern && supports_tasks(&params) {
                 if let Ok(value) = &called {
                     if matches!(value["status"].as_str(), Some("accepted" | "running")) {
@@ -2371,11 +2592,13 @@ fn handle_message(
                 }
             }
             // Tool-domain failures stay isError results (model-actionable);
-            // infrastructure failures become -32603 (nothing to fix in-band).
+            // infrastructure failures become -32603 (nothing to fix in-band);
+            // a cancelled request gets no response at all (spec SHOULD).
             let result = match called {
                 Ok(value) => tool_result(value),
                 Err(CallError::Tool(message)) => error_result(message),
                 Err(CallError::Infra(message)) => return Some(rpc_error(id, -32603, message)),
+                Err(CallError::Cancelled) => return None,
             };
             response(id, protocol_result(result, modern, false))
         }
@@ -2386,7 +2609,7 @@ fn handle_message(
             let Some(task) = tasks.get_mut(task_id) else {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
             };
-            response(id, protocol_result(poll_task(task, clients, resources), true, false))
+            response(id, protocol_result(poll_task(task, clients, resources, pump), true, false))
         }
         "tasks/update" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -2454,33 +2677,83 @@ pub fn sync_agent_tool_schemas() -> bool {
     true
 }
 
+/// A cancel arriving while nothing waits targets an op that is pending
+/// server-side between polls: find its GUI request via the inflight map and
+/// dismiss it now, so the next poll answers `cancelled`. Unknown ids are
+/// ignored (spec: fire-and-forget, races expected).
+fn idle_cancel(clients: &mut HashMap<String, GuiClient>, params: &Value) {
+    let Some(key) = params
+        .get("requestId")
+        .map(|id| id.to_string())
+    else {
+        return;
+    };
+    for gui in clients.values_mut() {
+        if let Some(gui_id) = gui.inflight.remove(&key) {
+            gui.dismiss(Some(&gui_id));
+        }
+    }
+}
+
 /// Run the MCP stdio loop until the client closes stdin.
+///
+/// A reader thread feeds lines through a channel so wait loops can observe
+/// `notifications/cancelled` mid-wait (see [`CancelPump`]). The reader never
+/// writes: this loop is the only stdout writer.
 pub fn run() {
     let _ = sync_agent_tool_schemas();
     let exe_stamp = exe_fingerprint();
-    let stdin = io::stdin();
     let stdout = io::stdout();
     let mut output = stdout.lock();
     let mut clients = HashMap::new();
     let mut tasks = TaskStore::default();
     let mut resources = ResourceStore::default();
-    for line in crate::io::line_read::lines_capped(
-        stdin.lock(),
-        crate::io::line_read::MAX_LINE_BYTES,
-    ) {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+    let stdin = io::stdin();
+    thread::spawn(move || {
+        for line in crate::io::line_read::lines_capped(
+            stdin.lock(),
+            crate::io::line_read::MAX_LINE_BYTES,
+        ) {
+            if tx.send(line.map_err(|error| error.to_string())).is_err() {
+                break;
+            }
+        }
+    });
+    let mut pump = CancelPump {
+        rx,
+        backlog: VecDeque::new(),
+    };
+    loop {
+        let Some(line) = pump.next() else {
+            break;
+        };
         // Serve the in-flight request with the old schema first (it was made
         // against it), then exit so the client respawns a fresh bridge. This
         // ordering means a rebuild never fails a call that is already running.
         let superseded = exe_superseded(&exe_stamp);
-        let response = match line {
-            Ok(line) if !line.trim().is_empty() => match serde_json::from_str::<Value>(&line) {
-                Ok(message) => handle_message(message, &mut clients, &mut tasks, &mut resources),
+        let response = if line.trim().is_empty() {
+            None
+        } else {
+            match serde_json::from_str::<Value>(&line) {
+                Ok(message) => {
+                    if message.get("id").is_none()
+                        && message.get("method").and_then(Value::as_str)
+                            == Some("notifications/cancelled")
+                    {
+                        idle_cancel(&mut clients, &message["params"]);
+                        None
+                    } else {
+                        handle_message(
+                            message,
+                            &mut clients,
+                            &mut tasks,
+                            &mut resources,
+                            &mut pump,
+                        )
+                    }
+                }
                 Err(error) => Some(rpc_error(Value::Null, -32700, error)),
-            },
-            Ok(_) => None,
-            Err(error) => {
-                eprintln!("MCP input error: {error}");
-                break;
             }
         };
         if let Some(response) = response {
@@ -2501,6 +2774,16 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pump with no reader: waits behave exactly as before (quiet
+    /// immediately), so tests that never cancel need no other changes.
+    fn detached_pump() -> CancelPump {
+        let (_tx, rx) = std::sync::mpsc::channel();
+        CancelPump {
+            rx,
+            backlog: VecDeque::new(),
+        }
+    }
 
     #[test]
     fn advertises_the_shared_tools() {
@@ -2622,6 +2905,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
@@ -2641,6 +2925,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 4);
@@ -2660,6 +2945,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(discovered["result"]["resultType"], "complete");
@@ -2681,6 +2967,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(listed["result"]["resultType"], "complete");
@@ -2699,6 +2986,7 @@ mod tests {
                 &mut HashMap::new(),
                 &mut TaskStore::default(),
                 &mut ResourceStore::default(),
+                &mut detached_pump(),
             )
             .unwrap();
             assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS, "{method}");
@@ -2718,6 +3006,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         let info = &initialized["result"]["serverInfo"];
@@ -2736,6 +3025,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(fallback["result"]["protocolVersion"], PROTOCOL_VERSION);
@@ -2751,6 +3041,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(modern["error"]["code"], -32602);
@@ -2759,6 +3050,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(legacy["error"]["code"], -32002);
@@ -2774,6 +3066,7 @@ mod tests {
                 &mut HashMap::new(),
                 &mut TaskStore::default(),
                 &mut ResourceStore::default(),
+                &mut detached_pump(),
             );
             assert_eq!(rejected.unwrap()["error"]["code"], -32600);
         }
@@ -2782,6 +3075,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         );
         assert!(silent.is_none());
     }
@@ -2795,6 +3089,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(unknown["error"]["code"], -32602);
@@ -2815,9 +3110,58 @@ mod tests {
             &json!({"ocs_session_id":"00000000","op":"state"}),
             &mut clients,
             &mut resources,
+            &mut detached_pump(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(err, CallError::Infra(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn cancelled_notifications_are_accepted_silently() {
+        // No response to notifications, even for cancel (nothing in flight
+        // in a unit test; live waits honor it — see wait_deadline below).
+        let silent = handle_message(
+            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        );
+        assert!(silent.is_none());
+    }
+
+    #[test]
+    fn cancel_matching_and_wait_deadlines() {
+        // Only a cancel naming our in-flight MCP id counts; anything else
+        // (other ids, pings, results) is ignored by the wait, not eaten.
+        assert!(is_cancel_for(
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}}"#,
+            "7"
+        ));
+        assert!(!is_cancel_for(
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":8}}"#,
+            "7"
+        ));
+        assert!(!is_cancel_for(
+            r#"{"jsonrpc":"2.0","id":7,"method":"ping"}"#,
+            "7"
+        ));
+        assert!(!is_cancel_for("not json at all", "7"));
+        // String ids compare as strings: 7 != "7".
+        assert!(!is_cancel_for(
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}}"#,
+            "\"7\""
+        ));
+        // Interactive picks may legitimately take minutes; everything else
+        // keeps the 60 s clamp.
+        assert_eq!(
+            wait_deadline("user_select", 3600.0),
+            Duration::from_secs(600)
+        );
+        assert_eq!(wait_deadline("getpoint", 5.0), Duration::from_secs(5));
+        assert_eq!(wait_deadline("run", 3600.0), Duration::from_secs(60));
+        assert_eq!(wait_deadline("run", 5.0), Duration::from_secs(5));
     }
 
     #[test]
@@ -2827,6 +3171,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(unknown["error"]["code"], -32601);
@@ -2835,6 +3180,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(nameless["error"]["code"], -32602);
@@ -2843,6 +3189,7 @@ mod tests {
             &mut HashMap::new(),
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(uriless["error"]["code"], -32602);
@@ -2856,6 +3203,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -2869,6 +3217,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(rejected["error"]["code"], -32022);
@@ -2887,6 +3236,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -2907,6 +3257,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -2939,6 +3290,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let res_arr = listed["result"]["resources"].as_array().unwrap();
@@ -2951,6 +3303,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let contents = read_png["result"]["contents"].as_array().unwrap();
@@ -2963,6 +3316,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(read_latest["result"]["contents"][0]["blob"], dummy_data);
@@ -2973,6 +3327,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let text = read_meta["result"]["contents"][0]["text"].as_str().unwrap();
@@ -2985,6 +3340,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(read_err["error"]["code"], -32002);
@@ -3181,6 +3537,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let res_arr = listed["result"]["resources"].as_array().unwrap();
@@ -3193,6 +3550,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let man_contents = read_man["result"]["contents"].as_array().unwrap();
@@ -3205,6 +3563,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let tile_contents = read_tile["result"]["contents"].as_array().unwrap();
@@ -3470,6 +3829,8 @@ mod tests {
             &req["arguments"],
             &mut clients,
             &mut resources,
+            &mut detached_pump(),
+            None,
         ).expect("ocs_read op: tools must succeed");
         assert_eq!(result["ok"], true);
         assert!(result["tools"].is_array());
