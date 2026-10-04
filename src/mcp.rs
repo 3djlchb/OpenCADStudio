@@ -537,45 +537,93 @@ fn private_descriptor(_: &Path) -> bool {
     true
 }
 
-fn exchange(descriptor: &Descriptor, request: Value, timeout: Duration) -> Result<Value, String> {
+/// Tool-call failure split for error routing: Tool-domain failures carry
+/// model-actionable guidance and stay `isError` results (SEP-1303); bridge
+/// and GUI infrastructure failures (nothing the model can fix) become
+/// JSON-RPC errors. `From<String>` defaults to Tool so existing sites keep
+/// working unchanged; infrastructure sites opt in explicitly.
+#[derive(Debug)]
+enum CallError {
+    Tool(String),
+    Infra(String),
+}
+
+impl From<String> for CallError {
+    fn from(message: String) -> Self {
+        CallError::Tool(message)
+    }
+}
+
+impl From<&str> for CallError {
+    fn from(message: &str) -> Self {
+        CallError::Tool(message.to_string())
+    }
+}
+
+// Collapses back to String where the caller maps everything to one code
+// anyway (resources/read not-found codes); the routing decision is made
+// by the caller, not the classification.
+impl From<CallError> for String {
+    fn from(error: CallError) -> Self {
+        error.message().to_string()
+    }
+}
+
+impl CallError {
+    fn message(&self) -> &str {
+        match self {
+            CallError::Tool(message) | CallError::Infra(message) => message,
+        }
+    }
+
+    fn infra(message: impl ToString) -> Self {
+        CallError::Infra(message.to_string())
+    }
+}
+
+fn exchange(descriptor: &Descriptor, request: Value, timeout: Duration) -> Result<Value, CallError> {
     let mut object = request
         .as_object()
         .cloned()
-        .ok_or_else(|| "GUI request must be an object".to_string())?;
+        .ok_or_else(|| CallError::infra("GUI request must be an object"))?;
     object.insert("token".into(), Value::String(descriptor.token.clone()));
     object.insert(
         "session_id".into(),
         Value::String(descriptor.session_id.clone()),
     );
     object.insert("protocol".into(), Value::from(1));
-    let mut wire = serde_json::to_vec(&Value::Object(object)).map_err(|e| e.to_string())?;
+    let mut wire = serde_json::to_vec(&Value::Object(object))
+        .map_err(CallError::infra)?;
     wire.push(b'\n');
     if wire.len() > MAX_REQUEST {
-        return Err("Request exceeds 1 MiB".into());
+        // Caller-caused (batch too big): model-actionable, stays Tool.
+        return Err("Request exceeds 1 MiB".to_string().into());
     }
 
     let mut stream = TcpStream::connect_timeout(
         &SocketAddr::from(([127, 0, 0, 1], descriptor.port)),
         timeout,
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(CallError::infra)?;
     stream
         .set_read_timeout(Some(timeout))
-        .map_err(|error| error.to_string())?;
+        .map_err(CallError::infra)?;
     stream
         .set_write_timeout(Some(timeout))
-        .map_err(|error| error.to_string())?;
-    stream.write_all(&wire).map_err(|error| error.to_string())?;
+        .map_err(CallError::infra)?;
+    stream.write_all(&wire).map_err(CallError::infra)?;
 
     let mut response = String::new();
     BufReader::new(stream)
         .take(MAX_RESPONSE + 1)
         .read_to_string(&mut response)
-        .map_err(|error| error.to_string())?;
+        .map_err(CallError::infra)?;
     if response.is_empty() || response.len() as u64 > MAX_RESPONSE {
-        return Err("No valid OCS response; query request_id before retrying a mutation".into());
+        return Err(CallError::infra(
+            "No valid OCS response; query request_id before retrying a mutation",
+        ));
     }
-    serde_json::from_str(response.trim_end()).map_err(|error| error.to_string())
+    serde_json::from_str(response.trim_end()).map_err(CallError::infra)
 }
 
 fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
@@ -795,27 +843,28 @@ fn insert_default(object: &mut Map<String, Value>, key: &str, value: Value) {
 }
 
 impl GuiClient {
-    fn connect(session_id: &str) -> Result<Self, String> {
-        let mut matching: Vec<_> = descriptors()?
+    fn connect(session_id: &str) -> Result<Self, CallError> {
+        let mut matching: Vec<_> = descriptors()
+            .map_err(CallError::Infra)?
             .into_iter()
             .filter(|(descriptor, _)| descriptor.session_id == session_id)
             .collect();
         if matching.len() != 1 {
-            return Err(format!(
+            return Err(CallError::infra(format!(
                 "Choose session_id from ocs_sessions; found {} matching sessions",
                 matching.len()
-            ));
+            )));
         }
         let (descriptor, state) = matching.remove(0);
         Ok(Self {
             descriptor,
             state,
-            client_id: random_id()?,
+            client_id: random_id().map_err(CallError::Infra)?,
             batches: VecDeque::new(),
         })
     }
 
-    fn request(&mut self, request: Value, wait_seconds: f64) -> Result<Value, String> {
+    fn request(&mut self, request: Value, wait_seconds: f64) -> Result<Value, CallError> {
         let mut object = request
             .as_object()
             .cloned()
@@ -876,7 +925,7 @@ impl GuiClient {
         Ok(response)
     }
 
-    fn execute_batch(&mut self, request: Value, wait_seconds: f64) -> Result<Value, String> {
+    fn execute_batch(&mut self, request: Value, wait_seconds: f64) -> Result<Value, CallError> {
         let id = required_string(&request, "request_id")?.to_owned();
         let mut batch = if let Some(position) = self.batches.iter().position(|batch| batch.id == id)
         {
@@ -1080,7 +1129,7 @@ fn trim_batches(batches: &mut VecDeque<BatchExecution>) {
 fn client<'a>(
     clients: &'a mut HashMap<String, GuiClient>,
     session_id: &str,
-) -> Result<&'a mut GuiClient, String> {
+) -> Result<&'a mut GuiClient, CallError> {
     if !clients.contains_key(session_id) {
         clients.insert(session_id.into(), GuiClient::connect(session_id)?);
     }
@@ -1371,7 +1420,7 @@ fn read_resource(
                         if result["ok"].as_bool() != Some(true)
                             || result["status"].as_str() != Some("completed")
                         {
-                            return Err(result.to_string());
+                return Err(result.to_string().into());
                         }
                         let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
                         let _ = std::fs::remove_file(path);
@@ -1487,17 +1536,17 @@ fn call_tool(
     arguments: &Value,
     clients: &mut HashMap<String, GuiClient>,
     resources: &mut ResourceStore,
-) -> Result<Value, String> {
+) -> Result<Value, CallError> {
     match name {
         "ocs_sessions" => {
             let launch = arguments["launch_if_none"].as_bool().unwrap_or(true);
-            Ok(Value::Array(sessions(launch)?))
+            Ok(Value::Array(sessions(launch).map_err(CallError::Infra)?))
         }
         "ocs_read" => {
             let session_id = required_string(arguments, "ocs_session_id")?;
             let op = arguments["op"].as_str().unwrap_or("state");
             if !READ_OPS.contains(&op) {
-                return Err("Use ocs_execute for mutations".into());
+                return Err("Use ocs_execute for mutations".to_string().into());
             }
             if op == "tools" {
                 return Ok(json!({
@@ -1528,11 +1577,11 @@ fn call_tool(
                 .ok_or_else(|| "Missing request object".to_string())?;
             let op = required_string(&request, "op")?;
             if !EXECUTE_OPS.contains(&op) {
-                return Err(format!("Unknown mutation operation: {op}"));
+                return Err(CallError::Tool(format!("Unknown mutation operation: {op}")));
             }
             let request_id = required_string(&request, "request_id")?;
             if request_id.len() > 128 {
-                return Err("request_id must not exceed 128 bytes".into());
+                return Err("request_id must not exceed 128 bytes".to_string().into());
             }
             let val_res = validate_execute_request(&request, op)?;
             let wait = arguments["wait_seconds"].as_f64().unwrap_or(30.0);
@@ -1551,7 +1600,7 @@ fn call_tool(
                     );
                 }
             }
-            shape_execute_response(response, detail, gui)
+            shape_execute_response(response, detail, gui).map_err(CallError::from)
         }
         "ocs_capture" => {
             let session_id = required_string(arguments, "ocs_session_id")?;
@@ -1665,7 +1714,8 @@ fn call_tool(
             if result["ok"].as_bool() != Some(true)
                 || result["status"].as_str() != Some("completed")
             {
-                return Err(result.to_string());
+                // Failed capture response from the GUI: retryable, stays Tool.
+                return Err(result.to_string().into());
             }
             let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
             let _ = std::fs::remove_file(path);
@@ -1852,7 +1902,8 @@ fn call_tool(
                 })),
             }
         }
-        _ => Err(format!("Unknown tool: {name}")),
+        // Backstop: the dispatcher rejects unknown names first with -32602.
+        _ => Err(CallError::Tool(format!("Unknown tool: {name}"))),
     }
 }
 
@@ -2105,7 +2156,7 @@ fn poll_task(
             task_value(task, "completed")
         }
         Err(error) => {
-            task.error = Some(json!({"code":-32000,"message":error}));
+            task.error = Some(json!({"code":-32000,"message":error.message()}));
             task_value(task, "failed")
         }
     }
@@ -2268,6 +2319,17 @@ fn handle_message(
             let Some(name) = params["name"].as_str() else {
                 return Some(rpc_error(id, -32602, "Missing tool name"));
             };
+            // Unknown tools are Protocol Errors (-32602), never isError
+            // results; the valid names ride along so the model can recover.
+            if !["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"].contains(&name) {
+                return Some(rpc_error(
+                    id,
+                    -32602,
+                    format!(
+                        "Unknown tool: {name}. Available tools: ocs_sessions, ocs_read, ocs_execute, ocs_capture"
+                    ),
+                ));
+            }
             let arguments = params
                 .get("arguments")
                 .cloned()
@@ -2308,7 +2370,13 @@ fn handle_message(
                     }
                 }
             }
-            let result = called.map(tool_result).unwrap_or_else(error_result);
+            // Tool-domain failures stay isError results (model-actionable);
+            // infrastructure failures become -32603 (nothing to fix in-band).
+            let result = match called {
+                Ok(value) => tool_result(value),
+                Err(CallError::Tool(message)) => error_result(message),
+                Err(CallError::Infra(message)) => return Some(rpc_error(id, -32603, message)),
+            };
             response(id, protocol_result(result, modern, false))
         }
         "tasks/get" if modern && supports_tasks(&params) => {
@@ -2716,6 +2784,40 @@ mod tests {
             &mut ResourceStore::default(),
         );
         assert!(silent.is_none());
+    }
+
+    #[test]
+    fn unknown_tool_is_a_protocol_error_with_names() {
+        // Spec lists unknown tools under Protocol Errors (-32602). The
+        // message carries the valid names so the model can still recover.
+        let unknown = handle_message(
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ocs_frobnicate","arguments":{}}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        )
+        .unwrap();
+        assert_eq!(unknown["error"]["code"], -32602);
+        let message = unknown["error"]["message"].as_str().unwrap();
+        for name in ["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"] {
+            assert!(message.contains(name), "{message}");
+        }
+    }
+
+    #[test]
+    fn infrastructure_failures_are_marked_infra() {
+        // A session id matching no live GUI is bridge/GUI infrastructure,
+        // not a tool-domain error: must route to -32603, not isError text.
+        let mut clients = HashMap::new();
+        let mut resources = ResourceStore::default();
+        let err = call_tool(
+            "ocs_read",
+            &json!({"ocs_session_id":"00000000","op":"state"}),
+            &mut clients,
+            &mut resources,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CallError::Infra(_)), "got {err:?}");
     }
 
     #[test]
