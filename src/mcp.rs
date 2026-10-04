@@ -333,6 +333,13 @@ fn wait_deadline(op: &str, wait_seconds: f64) -> Duration {
     Duration::from_secs_f64(capped)
 }
 
+/// Only a wait that actually reaches the interactive ceiling dismisses the
+/// prompt. Shorter waits return `running` so the agent can re-poll; without
+/// this distinction the first short poll would kill every interactive op.
+fn interactive_timeout(wait_seconds: f64) -> bool {
+    wait_seconds >= INTERACTIVE_MAX_WAIT.as_secs_f64()
+}
+
 struct BatchExecution {
     id: String,
     request: Value,
@@ -1092,9 +1099,11 @@ impl GuiClient {
                     }
                 }
             }
-        } else if interactive && Instant::now() >= deadline {
-            // Single-call ceiling for human-paced picks: dismiss the prompt
-            // and say so plainly instead of blocking forever.
+        } else if interactive && interactive_timeout(wait_seconds) {
+            // Only the ceiling itself dismisses: short waits keep the
+            // classic running response so agents can re-poll. Hitting the
+            // ten-minute ceiling means nobody is coming: dismiss the prompt
+            // and say so plainly instead of parking it forever.
             self.dismiss(gui_id.as_deref());
             if let Some(key) = mkey.as_ref() {
                 self.inflight.remove(key);
@@ -3217,6 +3226,11 @@ mod tests {
         assert_eq!(wait_deadline("getpoint", 5.0), Duration::from_secs(5));
         assert_eq!(wait_deadline("run", 3600.0), Duration::from_secs(60));
         assert_eq!(wait_deadline("run", 5.0), Duration::from_secs(5));
+        // The ceiling dismisses; anything below returns running for re-poll.
+        assert!(!interactive_timeout(5.0));
+        assert!(!interactive_timeout(599.0));
+        assert!(interactive_timeout(600.0));
+        assert!(interactive_timeout(3600.0));
     }
 
     #[test]
