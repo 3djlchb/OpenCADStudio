@@ -2004,14 +2004,15 @@ fn response(id: Value, result: Value) -> Value {
     json!({"jsonrpc":"2.0","id":id,"result":result})
 }
 
+/// Spec-pure implementation block: exactly name/title/version, so strict
+/// clients (deny_unknown_fields, strict Zod schemas) never reject the
+/// handshake. Build extras live canonically in [`bridge_identity`],
+/// surfaced via `capabilities.experimental` and the in-band `bridge` stamp.
 fn server_info() -> Value {
     json!({
         "name":"OpenCADStudio",
         "title":"Open CAD Studio",
         "version":env!("OCS_APP_VERSION"),
-        "build_rev":env!("OCS_GIT_REV"),
-        "build_profile":env!("OCS_BUILD_PROFILE"),
-        "tool_schema":tool_schema_digest(),
     })
 }
 
@@ -2041,8 +2042,9 @@ fn with_bridge_identity(mut value: Value) -> Value {
 
 /// Sha256 hex digest of the canonical [`tool_definitions`] JSON.
 ///
-/// Published via [`server_info`] so MCP clients can detect a stale bridge
-/// (running an older binary than the one on disk) without guessing.
+/// Published via `capabilities.experimental` and the in-band [`bridge_identity`]
+/// stamp so MCP clients can detect a stale bridge (running an older binary
+/// than the one on disk) without guessing.
 fn tool_schema_digest() -> String {
     let canonical = serde_json::to_string(&tool_definitions()).unwrap_or_default();
     let mut hasher = Sha256::new();
@@ -2187,7 +2189,8 @@ fn handle_message(
                     "protocolVersion":protocol,
                     "capabilities":{
                         "tools":{"listChanged":false},
-                        "resources":{"subscribe":false,"listChanged":false}
+                        "resources":{"subscribe":false,"listChanged":false},
+                        "experimental":{"opencadstudio.build":bridge_identity()}
                     },
                     "serverInfo":server_info(),
                     "instructions":INSTRUCTIONS
@@ -2626,6 +2629,68 @@ mod tests {
             assert!(listed["result"].get("resultType").is_none(), "{method}");
             assert!(listed["result"].get("_meta").is_none(), "{method}");
         }
+    }
+
+    #[test]
+    fn initialize_is_spec_pure_with_experimental_build() {
+        // serverInfo carries only the spec'd name/title/version; build
+        // extras live canonically in capabilities.experimental (single
+        // source: bridge_identity), never copied.
+        let initialized = handle_message(
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        )
+        .unwrap();
+        let info = &initialized["result"]["serverInfo"];
+        assert_eq!(
+            info.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["name", "title", "version"]
+        );
+        assert_eq!(info["name"], "OpenCADStudio");
+        let build = &initialized["result"]["capabilities"]["experimental"]["opencadstudio.build"];
+        assert_eq!(build["tool_schema"], Value::String(tool_schema_digest()));
+        assert!(build["build_rev"].as_str().is_some());
+        assert!(build["build_profile"].as_str().is_some());
+        // Unknown versions fall back to our newest instead of erroring.
+        let fallback = handle_message(
+            json!({"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2099-01-01"}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        )
+        .unwrap();
+        assert_eq!(fallback["result"]["protocolVersion"], PROTOCOL_VERSION);
+        assert!(fallback.get("error").is_none());
+    }
+
+    #[test]
+    fn malformed_requests_get_jsonrpc_errors() {
+        let unknown = handle_message(
+            json!({"jsonrpc":"2.0","id":1,"method":"frobnicate"}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        )
+        .unwrap();
+        assert_eq!(unknown["error"]["code"], -32601);
+        let nameless = handle_message(
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        )
+        .unwrap();
+        assert_eq!(nameless["error"]["code"], -32602);
+        let uriless = handle_message(
+            json!({"jsonrpc":"2.0","id":3,"method":"resources/read","params":{}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+        )
+        .unwrap();
+        assert_eq!(uriless["error"]["code"], -32602);
     }
 
     #[test]
