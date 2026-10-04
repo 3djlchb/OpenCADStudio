@@ -11,20 +11,29 @@ use std::{
     collections::{HashMap, VecDeque},
     fs::{File, OpenOptions},
     io::{self, BufReader, Read, Write},
-    net::TcpStream,
+    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
+#[cfg(any(windows, target_os = "macos"))]
+use std::collections::HashSet;
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
 const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
+/// Pinned content digest of [`tool_definitions`].
+///
+/// The `tool_schema_digest_is_pinned` test fails whenever the MCP tool surface
+/// changes, so schema drift (new params, renamed tools) is always a conscious,
+/// reviewed edit — and clients can detect a stale bridge by comparing digests.
+#[cfg(test)]
+const TOOL_SCHEMA_DIGEST: &str = "1e9b9acbdac71b34b93aa412f279f68554da822fccf40fbb5ed6895b4397322a";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
 const TASK_TTL_MS: u64 = 3_600_000;
-pub(crate) const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. ARCHITECTURAL VECTORIZATION DIRECTIVE: When converting or vectorizing a floorplan from an image or sketch: 1. Attach reference images as Xref underlays via embed_image on layer _XREF and lock it. 2. NEVER draw loose lines or arcs for doors or windows; always query records (collection: 'block_records') and insert Block References (type: 'INSERT') on A-DOOR and A-GLAZ. If a block is missing, draft standard geometry at origin (0,0) and register it with block_define before inserting. 3. Categorize layers cleanly: A-WALL-EXTR, A-WALL-INTR, A-WALL-HATCH, A-DOOR, A-GLAZ, A-ANNO-TEXT, A-ANNO-DIMS. 4. Always verify drafted geometry using ocs_capture with annotate: true (Set-of-Marks entity IDs) and diff: true (visual dirty streaming). ocs_capture operates quietly in background and overlapped window states without stealing user focus. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, supports diff: true for streaming dirty visual regions, and provides multiscale DeepZoom pyramidal tiling via tile: {level, x, y} or cad://session/{session_id}/pyramid/manifest.json and cad://session/{session_id}/tile/{level}/{x}/{y}.png. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
+pub(crate) const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. ARCHITECTURAL VECTORIZATION DIRECTIVE: When converting or vectorizing a floorplan from an image or sketch: 1. Attach reference images as Xref underlays via embed_image on layer _XREF and lock it. 2. NEVER draw loose lines or arcs for doors or windows; always query records (collection: 'block_records') and insert Block References (type: 'INSERT') on A-DOOR and A-GLAZ. If a block is missing, draft standard geometry at origin (0,0) and register it with block_define before inserting. 3. Categorize layers cleanly: A-WALL-EXTR, A-WALL-INTR, A-WALL-HATCH, A-DOOR, A-GLAZ, A-ANNO-TEXT, A-ANNO-DIMS. 4. Always verify drafted geometry using ocs_capture with annotate: true (Set-of-Marks entity IDs) and diff: true (visual dirty streaming). ocs_capture operates quietly in background and overlapped window states without stealing user focus. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, supports diff: true for streaming dirty visual regions, and provides multiscale DeepZoom pyramidal tiling via tile: {level, x, y} or cad://session/{session_id}/pyramid/manifest.json and cad://session/{session_id}/tile/{level}/{x}/{y}.png. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest. When you first connect, announce the build you are working with to the user from the `bridge` object on ocs_sessions states and hello/capabilities responses (OpenCADStudio version, build_rev, tool_schema digest); repeat the announcement if a later handshake reports a different build.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -138,6 +147,90 @@ struct Descriptor {
     session_id: String,
     port: u16,
     token: String,
+    /// GUI process id when the descriptor writer knows it. Used to skip dead
+    /// sessions without a (possibly hanging) TCP probe; absent on legacy
+    /// files, which keep the old probe path.
+    #[serde(default)]
+    pid: Option<u64>,
+}
+
+/// True when `pid` currently exists. Linux checks /proc (no spawn, no new
+/// dependencies); other platforms go through one shared snapshot per
+/// [`descriptors`] pass (see below) instead of per-pid spawns.
+#[cfg(target_os = "linux")]
+fn pid_alive(pid: u64) -> bool {
+    // Fail open where /proc is unavailable (containers, chroots): without it
+    // every pid would read "dead" and live sessions would be dropped en masse.
+    Path::new("/proc").exists() && Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// One snapshot of all live PIDs. `None` on any failure so callers fail open
+/// (treat every descriptor as alive) instead of dropping live sessions
+/// because enumeration broke.
+#[cfg(windows)]
+fn live_pids_snapshot() -> Option<HashSet<u64>> {
+    let output = Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut set = HashSet::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut fields = line.split("\",\"");
+        fields.next()?;
+        if let Some(pid) = fields
+            .next()
+            .and_then(|field| field.trim_matches('"').parse::<u64>().ok())
+        {
+            set.insert(pid);
+        }
+    }
+    (!set.is_empty()).then_some(set)
+}
+
+/// macOS has no /proc: same one-snapshot approach as Windows via `ps`.
+#[cfg(target_os = "macos")]
+fn live_pids_snapshot() -> Option<HashSet<u64>> {
+    let output = Command::new("ps").args(["-Ao", "pid="]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut set = HashSet::new();
+    for token in String::from_utf8_lossy(&output.stdout).split_whitespace() {
+        if let Ok(pid) = token.parse::<u64>() {
+            set.insert(pid);
+        }
+    }
+    (!set.is_empty()).then_some(set)
+}
+
+/// Process snapshots cost a spawn (~100ms), but `ocs_sessions` can run every
+/// agent turn — cache each snapshot briefly. Failures cache as `None`, which
+/// keeps the fail-open behavior below.
+#[cfg(any(windows, target_os = "macos"))]
+const PID_SNAPSHOT_TTL: Duration = Duration::from_secs(10);
+
+#[cfg(any(windows, target_os = "macos"))]
+std::thread_local! {
+    static PID_SNAPSHOT_CACHE: std::cell::RefCell<(Instant, Option<HashSet<u64>>)> =
+        std::cell::RefCell::new((Instant::now() - PID_SNAPSHOT_TTL - Duration::from_secs(1), None));
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn live_pids_cached() -> Option<HashSet<u64>> {
+    PID_SNAPSHOT_CACHE.with(|cache| {
+        {
+            let (stamp, cached) = &*cache.borrow();
+            if stamp.elapsed() < PID_SNAPSHOT_TTL {
+                return cached.clone();
+            }
+        }
+        let fresh = live_pids_snapshot();
+        *cache.borrow_mut() = (Instant::now(), fresh.clone());
+        fresh
+    })
 }
 
 struct GuiClient {
@@ -376,6 +469,23 @@ impl ResourceStore {
     }
 }
 
+/// (mtime, byte length) of this executable. A rebuild changes at least one of
+/// the two, so a mismatch means this bridge serves a stale tool schema.
+fn exe_fingerprint() -> Option<(SystemTime, u64)> {
+    let exe = std::env::current_exe().ok()?;
+    let meta = std::fs::metadata(exe).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// True when both fingerprints are known and differ (unknown counts as same
+/// to avoid false-positive exits on locked-down filesystems).
+fn exe_superseded(baseline: &Option<(SystemTime, u64)>) -> bool {
+    match (baseline, &exe_fingerprint()) {
+        (Some(before), Some(now)) => before != now,
+        _ => false,
+    }
+}
+
 fn random_id() -> Result<String, String> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
@@ -444,8 +554,11 @@ fn exchange(descriptor: &Descriptor, request: Value, timeout: Duration) -> Resul
         return Err("Request exceeds 1 MiB".into());
     }
 
-    let mut stream =
-        TcpStream::connect(("127.0.0.1", descriptor.port)).map_err(|error| error.to_string())?;
+    let mut stream = TcpStream::connect_timeout(
+        &SocketAddr::from(([127, 0, 0, 1], descriptor.port)),
+        timeout,
+    )
+    .map_err(|error| error.to_string())?;
     stream
         .set_read_timeout(Some(timeout))
         .map_err(|error| error.to_string())?;
@@ -479,6 +592,8 @@ fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
         .collect();
     paths.sort();
 
+    #[cfg(any(windows, target_os = "macos"))]
+    let live_pids = live_pids_cached();
     let mut found = Vec::new();
     for path in paths {
         if !private_descriptor(&path) {
@@ -490,6 +605,35 @@ fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
         let Ok(descriptor) = serde_json::from_str::<Descriptor>(&text) else {
             continue;
         };
+        // A dead GUI leaves its descriptor file behind; its TCP port may hang
+        // instead of refusing, which used to stall discovery past client
+        // timeouts. Skip (and delete) pid-verified corpses before probing.
+        let pid_dead = match descriptor.pid {
+            Some(pid) => {
+                #[cfg(target_os = "linux")]
+                {
+                    !pid_alive(pid)
+                }
+                #[cfg(any(windows, target_os = "macos"))]
+                {
+                    live_pids.as_ref().is_some_and(|set| !set.contains(&pid))
+                }
+                #[cfg(not(any(
+                    target_os = "linux",
+                    windows,
+                    target_os = "macos"
+                )))]
+                {
+                    let _ = pid;
+                    false
+                }
+            }
+            None => false,
+        };
+        if pid_dead {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
         let Ok(state) = exchange(&descriptor, json!({"op":"hello"}), Duration::from_secs(1)) else {
             continue;
         };
@@ -514,6 +658,76 @@ fn log_file() -> Result<File, String> {
         .map_err(|error| error.to_string())
 }
 
+/// A launch already in flight keeps its claim here so concurrent
+/// `ocs_sessions(launch_if_none: true)` calls wait for the same GUI instead
+/// of spawning one window each. Content is `{"pid":..,"started":unix_secs}`.
+const STARTUP_LOCK_FILE: &str = "starting.lock";
+/// Claims older than this are abandoned (crashed starter, previous boot).
+const STARTUP_LOCK_TTL_SECS: u64 = 60;
+
+fn startup_lock_path_for(directory: &Path) -> PathBuf {
+    directory.join(STARTUP_LOCK_FILE)
+}
+
+fn now_unix_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn write_startup_lock_at(directory: &Path, pid: u64, started: u64) -> Result<(), String> {
+    let text = serde_json::to_string(&json!({"pid": pid, "started": started}))
+        .map_err(|error| error.to_string())?;
+    std::fs::write(startup_lock_path_for(directory), text).map_err(|error| error.to_string())
+}
+
+fn read_startup_lock_at(directory: &Path) -> Option<(u64, u64)> {
+    let text = std::fs::read_to_string(startup_lock_path_for(directory)).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    Some((
+        value.get("pid")?.as_u64()?,
+        value.get("started")?.as_u64()?,
+    ))
+}
+
+fn claim_pid_alive(pid: u64) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        pid_alive(pid)
+    }
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        live_pids_cached().is_none_or(|set| set.contains(&pid))
+    }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+/// True when this caller owns the startup claim and may spawn the GUI.
+/// False means a live starter holds a fresh claim: wait for its descriptor
+/// instead of spawning another window. Stale claims and claims from dead
+/// pids are reclaimed. Fail open (claim granted) when the directory is
+/// unusable so a broken lock can never wedge launching.
+fn try_claim_startup_lock(directory: &Path, pid: u64) -> bool {
+    let now = now_unix_secs();
+    if let Some((owner, started)) = read_startup_lock_at(directory) {
+        let fresh = now.saturating_sub(started) < STARTUP_LOCK_TTL_SECS;
+        if fresh && claim_pid_alive(owner) {
+            return false;
+        }
+    }
+    write_startup_lock_at(directory, pid, now).is_ok()
+}
+
+fn release_startup_lock(directory: &Path) {
+    let _ = std::fs::remove_file(startup_lock_path_for(directory));
+}
+
 fn start_gui() -> Result<Child, String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let log = log_file()?;
@@ -527,14 +741,33 @@ fn start_gui() -> Result<Child, String> {
         .map_err(|error| error.to_string())
 }
 
+fn automation_dir() -> Result<PathBuf, String> {
+    let base = crate::config::config_dir()
+        .ok_or_else(|| "No user configuration directory".to_string())?;
+    Ok(base.join("automation"))
+}
+
 fn sessions(launch_if_none: bool) -> Result<Vec<Value>, String> {
     let mut available = descriptors()?;
     if available.is_empty() && launch_if_none {
-        let mut child = start_gui()?;
+        let directory = automation_dir()?;
+        // A concurrent caller may already be starting the GUI: wait for its
+        // descriptor instead of spawning another window.
+        let claimed = try_claim_startup_lock(&directory, std::process::id() as u64);
+        let mut child = if claimed {
+            Some(start_gui()?)
+        } else {
+            None
+        };
         let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
-            if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-                return Err(format!("OpenCADStudio exited while starting ({status})"));
+            if let Some(child) = child.as_mut() {
+                if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+                    if claimed {
+                        release_startup_lock(&directory);
+                    }
+                    return Err(format!("OpenCADStudio exited while starting ({status})"));
+                }
             }
             thread::sleep(Duration::from_millis(200));
             available = descriptors()?;
@@ -542,11 +775,17 @@ fn sessions(launch_if_none: bool) -> Result<Vec<Value>, String> {
                 break;
             }
         }
+        if claimed {
+            release_startup_lock(&directory);
+        }
         if available.is_empty() {
             return Err("OpenCADStudio is still starting; call ocs_sessions again".into());
         }
     }
-    Ok(available.into_iter().map(|(_, state)| state).collect())
+    Ok(available
+        .into_iter()
+        .map(|(_, state)| with_bridge_identity(state))
+        .collect())
 }
 
 fn insert_default(object: &mut Map<String, Value>, key: &str, value: Value) {
@@ -1273,7 +1512,12 @@ fn call_tool(
                 .cloned()
                 .unwrap_or_default();
             request.insert("op".into(), Value::String(op.into()));
-            client(clients, session_id)?.request(Value::Object(request), 30.0)
+            let response = client(clients, session_id)?.request(Value::Object(request), 30.0)?;
+            if matches!(op, "hello" | "capabilities") {
+                Ok(with_bridge_identity(response))
+            } else {
+                Ok(response)
+            }
         }
         "ocs_execute" => {
             let session_id = required_string(arguments, "ocs_session_id")?;
@@ -1730,23 +1974,28 @@ fn tool_result(value: Value) -> Value {
             "isError": false
         });
     }
-    let structured = if value.is_object() {
-        value.clone()
-    } else {
-        json!({"result":value.clone()})
-    };
-    json!({
+    let is_err = value["ok"].as_bool() == Some(false);
+    let mut result = json!({
         "content":[{"type":"text","text":value.to_string()}],
-        "structuredContent":structured,
-        "isError":value["ok"].as_bool() == Some(false)
-    })
+        "isError": is_err,
+    });
+    // Strict clients validate structuredContent against outputSchema, which
+    // only describes successful results. Omitting it on errors keeps the real
+    // message visible instead of masked by a schema complaint.
+    if !is_err {
+        result["structuredContent"] = if value.is_object() {
+            value.clone()
+        } else {
+            json!({"result":value.clone()})
+        };
+    }
+    result
 }
 
 fn error_result(message: impl ToString) -> Value {
     let message = message.to_string();
     json!({
-        "content":[{"type":"text","text":message.clone()}],
-        "structuredContent":{"ok":false,"status":"failed","code":"invalid_arguments","error":message,"retryable":false},
+        "content":[{"type":"text","text":message}],
         "isError":true
     })
 }
@@ -1756,7 +2005,49 @@ fn response(id: Value, result: Value) -> Value {
 }
 
 fn server_info() -> Value {
-    json!({"name":"OpenCADStudio","title":"Open CAD Studio","version":env!("OCS_APP_VERSION")})
+    json!({
+        "name":"OpenCADStudio",
+        "title":"Open CAD Studio",
+        "version":env!("OCS_APP_VERSION"),
+        "build_rev":env!("OCS_GIT_REV"),
+        "build_profile":env!("OCS_BUILD_PROFILE"),
+        "tool_schema":tool_schema_digest(),
+    })
+}
+
+/// Build identity agents CAN see. MCP `serverInfo` never reaches tool
+/// callers, so the same fields ride on handshake payloads (`ocs_sessions`
+/// states, `hello`/`capabilities` responses) under the `bridge` key.
+fn bridge_identity() -> Value {
+    json!({
+        "name":"OpenCADStudio",
+        "version":env!("OCS_APP_VERSION"),
+        "build_rev":env!("OCS_GIT_REV"),
+        "build_profile":env!("OCS_BUILD_PROFILE"),
+        "tool_schema":tool_schema_digest(),
+    })
+}
+
+/// Stamp a `bridge` identity onto a handshake payload. Non-objects pass
+/// through untouched; an existing `bridge` key (GUI-provided) is kept.
+fn with_bridge_identity(mut value: Value) -> Value {
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("bridge")
+            .or_insert_with(bridge_identity);
+    }
+    value
+}
+
+/// Sha256 hex digest of the canonical [`tool_definitions`] JSON.
+///
+/// Published via [`server_info`] so MCP clients can detect a stale bridge
+/// (running an older binary than the one on disk) without guessing.
+fn tool_schema_digest() -> String {
+    let canonical = serde_json::to_string(&tool_definitions()).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 fn modern_request(params: &Value) -> bool {
@@ -2081,6 +2372,7 @@ pub fn sync_agent_tool_schemas() -> bool {
 /// Run the MCP stdio loop until the client closes stdin.
 pub fn run() {
     let _ = sync_agent_tool_schemas();
+    let exe_stamp = exe_fingerprint();
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut output = stdout.lock();
@@ -2091,6 +2383,10 @@ pub fn run() {
         stdin.lock(),
         crate::io::line_read::MAX_LINE_BYTES,
     ) {
+        // Serve the in-flight request with the old schema first (it was made
+        // against it), then exit so the client respawns a fresh bridge. This
+        // ordering means a rebuild never fails a call that is already running.
+        let superseded = exe_superseded(&exe_stamp);
         let response = match line {
             Ok(line) if !line.trim().is_empty() => match serde_json::from_str::<Value>(&line) {
                 Ok(message) => handle_message(message, &mut clients, &mut tasks, &mut resources),
@@ -2109,6 +2405,10 @@ pub fn run() {
             {
                 break;
             }
+        }
+        if superseded {
+            eprintln!("MCP bridge superseded by rebuild; exiting for respawn");
+            break;
         }
     }
 }
@@ -2332,8 +2632,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
+        assert!(called["result"].get("structuredContent").is_none());
         assert!(
-            called["result"]["structuredContent"]["error"]
+            called["result"]["content"][0]["text"]
                 .as_str()
                 .unwrap()
                 .contains("request_id")
@@ -2351,13 +2652,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
-        assert_eq!(
-            called["result"]["structuredContent"]["code"],
-            "invalid_arguments"
-        );
-        let error = called["result"]["structuredContent"]["error"]
-            .as_str()
-            .unwrap();
+        assert!(called["result"].get("structuredContent").is_none());
+        let error = called["result"]["content"][0]["text"].as_str().unwrap();
         assert!(error.contains("Missing cmd"), "{error}");
         assert!(error.contains("LINE 0,0 10,10"), "{error}");
     }
@@ -2770,7 +3066,11 @@ mod tests {
             "error":"Refresh state before editing"
         }));
         assert_eq!(result["isError"], true);
-        assert_eq!(result["structuredContent"]["code"], "stale_state");
+        assert!(result.get("structuredContent").is_none());
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("stale_state"));
     }
 
     #[test]
@@ -2897,8 +3197,7 @@ mod tests {
     }
 
     #[test]
-    fn read_op_tools_returns_current_schemas_and_instructions() {
-        let mut clients = HashMap::new();
+    fn read_op_tools_returns_current_schemas_and_instructions() {        let mut clients = HashMap::new();
         let mut resources = ResourceStore::default();
         let req = json!({
             "name": "ocs_read",
@@ -2916,5 +3215,61 @@ mod tests {
         assert_eq!(result["ok"], true);
         assert!(result["tools"].is_array());
         assert!(result["instructions"].is_string());
+    }
+
+    #[test]
+    fn tool_schema_digest_is_pinned() {
+        // If this fails, the MCP tool surface changed: review the diff, then
+        // update TOOL_SCHEMA_DIGEST deliberately (never blindly).
+        assert_eq!(tool_schema_digest(), TOOL_SCHEMA_DIGEST);
+    }
+
+    #[test]
+    fn bridge_identity_is_exposed_on_handshake_payloads() {
+        // Agents never see MCP serverInfo, so the build announcement must
+        // ride on payloads they do see: session states and hello/capabilities.
+        let identity = bridge_identity();
+        assert_eq!(identity["name"], "OpenCADStudio");
+        assert!(identity["version"].as_str().is_some());
+        assert!(identity["build_rev"].as_str().is_some());
+        assert!(identity["build_profile"].as_str().is_some());
+        assert_eq!(identity["tool_schema"], Value::String(tool_schema_digest()));
+
+        let stamped = with_bridge_identity(json!({"ok": true, "session_id": "s"}));
+        assert_eq!(stamped["bridge"]["name"], "OpenCADStudio");
+        assert_eq!(stamped["ok"], true);
+        // Non-objects pass through untouched.
+        assert_eq!(with_bridge_identity(json!([1, 2])), json!([1, 2]));
+    }
+
+    #[test]
+    fn startup_lock_serializes_concurrent_launches() {
+        // A fresh lock held by a live pid means another GUI is already
+        // starting: the second caller must wait, never spawn.
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-startup-lock-test-{}-{}",
+            std::process::id(),
+            random_id().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // No lock yet: first caller claims it and may spawn.
+        assert!(try_claim_startup_lock(&dir, std::process::id() as u64));
+        // Second caller sees the fresh live claim and must wait.
+        assert!(!try_claim_startup_lock(&dir, u64::MAX - 1));
+
+        // A stale lock (previous boot left it behind) is reclaimable.
+        let stale = now_unix_secs().saturating_sub(STARTUP_LOCK_TTL_SECS + 60);
+        write_startup_lock_at(&dir, 12345, stale).unwrap();
+        assert!(try_claim_startup_lock(&dir, std::process::id() as u64));
+
+        // A fresh lock from a dead pid is reclaimable (crashed starter).
+        let fresh = now_unix_secs();
+        write_startup_lock_at(&dir, u64::MAX - 2, fresh).unwrap();
+        assert!(try_claim_startup_lock(&dir, std::process::id() as u64));
+
+        release_startup_lock(&dir);
+        assert!(!startup_lock_path_for(&dir).exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
