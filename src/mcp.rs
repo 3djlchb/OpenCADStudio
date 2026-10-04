@@ -234,6 +234,34 @@ fn live_pids_cached() -> Option<HashSet<u64>> {
     })
 }
 
+/// Drop the cached PID snapshot so the next discovery pass enumerates
+/// fresh. Called after spawning a GUI: without this, the pre-spawn snapshot
+/// does not contain the newborn pid, and the corpse cleanup below would
+/// delete its just-written descriptor as "dead on arrival".
+#[cfg(any(windows, target_os = "macos"))]
+fn live_pids_invalidate() {
+    PID_SNAPSHOT_CACHE.with(|cache| {
+        *cache.borrow_mut() = (
+            Instant::now() - PID_SNAPSHOT_TTL - Duration::from_secs(1),
+            None,
+        );
+    });
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn live_pids_invalidate() {}
+
+/// Descriptors younger than this are never deleted, even when their pid is
+/// missing from the snapshot: the snapshot may predate the spawn, and slow
+/// starters write late. Deletion stays for genuinely old corpses.
+const DESCRIPTOR_GRACE: Duration = Duration::from_secs(120);
+
+/// Whether a pid missing from the snapshot authorizes deletion. Pure
+/// predicate so the staleness rule is unit-testable: only old files go.
+fn stale_snapshot_may_delete(missing_from_snapshot: bool, file_age: Duration) -> bool {
+    missing_from_snapshot && file_age >= DESCRIPTOR_GRACE
+}
+
 struct GuiClient {
     descriptor: Descriptor,
     state: Value,
@@ -767,6 +795,14 @@ fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
         // A dead GUI leaves its descriptor file behind; its TCP port may hang
         // instead of refusing, which used to stall discovery past client
         // timeouts. Skip (and delete) pid-verified corpses before probing.
+        // Deletion waits out DESCRIPTOR_GRACE: the PID snapshot may predate
+        // a spawn, and a newborn pid missing from it must never read "dead".
+        // Unknown file age counts as newborn (fail open, probe instead).
+        let file_age = std::fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+            .unwrap_or(Duration::ZERO);
         let pid_dead = match descriptor.pid {
             Some(pid) => {
                 #[cfg(target_os = "linux")]
@@ -775,7 +811,12 @@ fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
                 }
                 #[cfg(any(windows, target_os = "macos"))]
                 {
-                    live_pids.as_ref().is_some_and(|set| !set.contains(&pid))
+                    match &live_pids {
+                        None => false,
+                        Some(set) => {
+                            stale_snapshot_may_delete(!set.contains(&pid), file_age)
+                        }
+                    }
                 }
                 #[cfg(not(any(
                     target_os = "linux",
@@ -914,7 +955,12 @@ fn sessions(launch_if_none: bool) -> Result<Vec<Value>, String> {
         // descriptor instead of spawning another window.
         let claimed = try_claim_startup_lock(&directory, std::process::id() as u64);
         let mut child = if claimed {
-            Some(start_gui()?)
+            let child = start_gui()?;
+            // The pre-spawn PID snapshot cannot contain the newborn GUI:
+            // drop it so the next discovery pass enumerates fresh instead
+            // of deleting the just-written descriptor as a corpse.
+            live_pids_invalidate();
+            Some(child)
         } else {
             None
         };
@@ -3378,6 +3424,19 @@ mod tests {
         assert!(!schema_sync_enabled());
         std::env::remove_var("OCS_SKIP_SCHEMA_SYNC");
         assert!(schema_sync_enabled());
+    }
+
+    #[test]
+    fn stale_snapshots_never_delete_fresh_descriptors() {
+        // Regression: a cached PID snapshot predates a GUI spawn, so the
+        // newborn pid is "missing" from it. Deletion must still wait until
+        // the file is older than the grace period (slow starters write
+        // late); unknown snapshot state never deletes either.
+        assert!(!stale_snapshot_may_delete(true, Duration::from_secs(0)));
+        assert!(!stale_snapshot_may_delete(true, Duration::from_secs(59)));
+        assert!(stale_snapshot_may_delete(true, Duration::from_secs(120)));
+        assert!(stale_snapshot_may_delete(true, Duration::from_secs(3600)));
+        assert!(!stale_snapshot_may_delete(false, Duration::from_secs(3600)));
     }
 
     #[test]
