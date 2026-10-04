@@ -2110,6 +2110,15 @@ fn poll_task(
 }
 
 fn protocol_result(mut result: Value, modern: bool, cacheable: bool) -> Value {
+    // SEP-2549 freshness hints are version-independent: legacy clients
+    // ignore unknown fields, so list results always carry them. The modern
+    // envelope (resultType/_meta) stays negotiated.
+    if cacheable {
+        if let Some(object) = result.as_object_mut() {
+            object.insert("ttlMs".into(), Value::from(CACHE_TTL_MS));
+            object.insert("cacheScope".into(), Value::String("public".into()));
+        }
+    }
     if modern {
         let object = result
             .as_object_mut()
@@ -2121,10 +2130,6 @@ fn protocol_result(mut result: Value, modern: bool, cacheable: bool) -> Value {
             "_meta".into(),
             json!({"io.modelcontextprotocol/serverInfo":server_info()}),
         );
-        if cacheable {
-            object.insert("ttlMs".into(), Value::from(CACHE_TTL_MS));
-            object.insert("cacheScope".into(), Value::String("public".into()));
-        }
     }
     result
 }
@@ -2550,7 +2555,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 4);
-        assert!(listed["result"].get("ttlMs").is_none());
+        // SEP-2549: freshness hints ship on every protocol version; only
+        // the modern envelope stays negotiated (see
+        // legacy_list_results_carry_sep2549_ttl).
+        assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS);
+        assert_eq!(listed["result"]["cacheScope"], "public");
         assert!(listed["result"].get("resultType").is_none());
     }
 
@@ -2588,6 +2597,26 @@ mod tests {
         assert_eq!(listed["result"]["resultType"], "complete");
         assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS);
         assert_eq!(listed["result"]["cacheScope"], "public");
+    }
+
+    #[test]
+    fn legacy_list_results_carry_sep2549_ttl() {
+        // SEP-2549 makes ttlMs mandatory on list results; legacy clients
+        // ignore unknown fields, so the stamp is version-independent while
+        // the modern envelope (resultType/_meta) stays negotiated.
+        for method in ["tools/list", "resources/list"] {
+            let listed = handle_message(
+                json!({"jsonrpc":"2.0","id":method,"method":method}),
+                &mut HashMap::new(),
+                &mut TaskStore::default(),
+                &mut ResourceStore::default(),
+            )
+            .unwrap();
+            assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS, "{method}");
+            assert_eq!(listed["result"]["cacheScope"], "public", "{method}");
+            assert!(listed["result"].get("resultType").is_none(), "{method}");
+            assert!(listed["result"].get("_meta").is_none(), "{method}");
+        }
     }
 
     #[test]
