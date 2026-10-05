@@ -118,7 +118,9 @@ pub struct WireConst {
     /// in drawing units.
     pub world_half_width: f32,
     pub is_tapered: f32,
-    pub _pad2: f32,
+    /// Non-zero hides every segment of the wire: arena slabs of hidden
+    /// entities stay resident and are collapsed by the vertex shader.
+    pub hidden: f32,
     /// Point-marker origin as a double-single pair. `marker_normal_scale.w`
     /// stores the viewport-height percentage; zero disables marker scaling.
     pub marker_origin_high: [f32; 4],
@@ -776,7 +778,7 @@ pub(crate) fn emit_wire_native(
         align_total,
         world_half_width: wire.world_width * 0.5,
         is_tapered: if is_tapered { 1.0 } else { 0.0 },
-        _pad2: 0.0,
+        hidden: 0.0,
         marker_origin_high,
         marker_origin_low,
         marker_normal_scale,

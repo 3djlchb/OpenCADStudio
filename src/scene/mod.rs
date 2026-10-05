@@ -500,10 +500,53 @@ pub(super) struct EntityIndex {
     pub unbounded_handles: Vec<Handle>,
 }
 
+/// Hash of every baked display input a memoized tessellation depends on; a
+/// memo entry is reusable only under the guard it was built with.
+fn tess_memo_guard(
+    view_aabb: Option<[f32; 4]>,
+    anno: f32,
+    annotation_scale_handle: Option<Handle>,
+    all_visible: bool,
+    bg: [f32; 4],
+    avp: Option<Handle>,
+) -> u64 {
+    let mut g: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |x: u64| g = g.rotate_left(13) ^ x;
+    // wpp removed from guard: GPU analytical rendering handles
+    // circles/arcs/ellipses, Point ignores wpp, and Light (the
+    // only remaining wpp consumer) is rare enough that its stale
+    // glyphs don't justify clearing every memoized entity on zoom.
+    if let Some(v) = view_aabb {
+        for c in v {
+            mix(c.to_bits() as u64);
+        }
+    }
+    mix(anno.to_bits() as u64);
+    mix(annotation_scale_handle
+        .map(|handle| handle.value())
+        .unwrap_or(0));
+    mix(all_visible as u64);
+    // Direct entities and inherited/faded block colours still bake
+    // the background before Batches::finalize records its inputs.
+    for channel in bg {
+        mix(channel.to_bits() as u64);
+    }
+    mix(avp.map(|h| h.value()).unwrap_or(0));
+    // SDF glyph quads bake the atlas UV of each tile, so a growth or
+    // a re-bake (which rescale / rewind every UV) makes memoized text
+    // address the wrong tile — garbage on screen, and a silent miss in
+    // the PDF export's glyph lookup (#385 under #347's conditions).
+    mix(crate::scene::text::sdf_atlas::generation());
+    g
+}
+
 #[derive(Clone, Default)]
 struct DependencyTargets {
     render_handles: HashSet<Handle>,
     source_handles: HashSet<Handle>,
+    /// Render handles reached through a block definition (INSERTs and other
+    /// block users), as opposed to entities that carry the name themselves.
+    block_users: HashSet<Handle>,
     touches_block_definition: bool,
 }
 
@@ -4020,6 +4063,9 @@ impl Scene {
         let bg = self.bg_color;
         let materials: HashMap<Handle, crate::scene::model::material_model::MeshMaterial> = handles
             .iter()
+            .filter(|handle| {
+                self.meshes.contains_key(handle) || self.block_meshes.contains_key(handle)
+            })
             .filter_map(|&handle| {
                 self.document.get_entity(handle).map(|entity| {
                     let color = self.render_style(entity).0;
@@ -6706,6 +6752,12 @@ impl Scene {
         let mut new_runs: HashMap<Handle, Vec<WireModel>> = HashMap::default();
         let mut memo_updates: Vec<(Handle, Arc<Vec<WireModel>>)> = Vec::new();
         let mut visible_changed: HashSet<Handle> = HashSet::default();
+        // Every geometry edit drops its handle's memo entry, so an entry that
+        // survived its delta marks a visibility-only change: its wires come
+        // back from the memo, provided it was built under this display context.
+        let avp = style_viewport.or(self.active_viewport);
+        let memo_ok = self.resident_tess_guard.get()
+            == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp);
         for (h, kind) in &deltas {
             if matches!(kind, ChangeKind::Removed) {
                 continue;
@@ -6723,10 +6775,19 @@ impl Scene {
                 continue;
             }
             visible_changed.insert(*h);
+            let memoized = memo_ok
+                .then(|| self.resident_tess_memo.borrow().get(h).cloned())
+                .flatten();
+            if let Some(raw) = memoized {
+                let mut faded = raw.as_ref().clone();
+                self.apply_refedit_fade(&mut faded, bg);
+                new_runs.insert(*h, faded);
+                continue;
+            }
             let mut raw = tessellate_entity(
                 &self.document,
                 &empty_sel,
-                style_viewport.or(self.active_viewport),
+                avp,
                 bg,
                 anno,
                 annotation_scale_handle,
@@ -6777,13 +6838,20 @@ impl Scene {
                     .copied()
                     .unwrap_or(handle.value())
             };
+            // Hashed once: a linear `order.contains` per re-shown entity made
+            // turning a big layer back on quadratic.
+            let ordered: HashSet<Handle> = if visible_changed.is_empty() {
+                HashSet::default()
+            } else {
+                layout.order.iter().copied().collect()
+            };
             for &(handle, kind) in &deltas {
                 if matches!(kind, ChangeKind::Removed) {
                     // Keep the order entry as a tombstone. Undo/Redo can then
                     // restore the exact physical slot and submission position.
                     continue;
                 }
-                if visible_changed.contains(&handle) && !layout.order.contains(&handle) {
+                if visible_changed.contains(&handle) && !ordered.contains(&handle) {
                     let key = effective(handle);
                     let position = layout
                         .order
@@ -10748,36 +10816,8 @@ impl Scene {
         let t_build = perf.then(iced::time::Instant::now);
         let mut wires: Vec<WireModel> = if memo_active {
             // Invalidate when any baked display input changes.
-            let guard = {
-                let mut g: u64 = 0xcbf2_9ce4_8422_2325;
-                let mut mix = |x: u64| g = g.rotate_left(13) ^ x;
-                // wpp removed from guard: GPU analytical rendering handles
-                // circles/arcs/ellipses, Point ignores wpp, and Light (the
-                // only remaining wpp consumer) is rare enough that its stale
-                // glyphs don't justify clearing every memoized entity on zoom.
-                if let Some(v) = view_aabb {
-                    for c in v {
-                        mix(c.to_bits() as u64);
-                    }
-                }
-                mix(anno.to_bits() as u64);
-                mix(annotation_scale_handle
-                    .map(|handle| handle.value())
-                    .unwrap_or(0));
-                mix(all_visible as u64);
-                // Direct entities and inherited/faded block colours still bake
-                // the background before Batches::finalize records its inputs.
-                for channel in bg {
-                    mix(channel.to_bits() as u64);
-                }
-                mix(avp.map(|h| h.value()).unwrap_or(0));
-                // SDF glyph quads bake the atlas UV of each tile, so a growth or
-                // a re-bake (which rescale / rewind every UV) makes memoized text
-                // address the wrong tile — garbage on screen, and a silent miss in
-                // the PDF export's glyph lookup (#385 under #347's conditions).
-                mix(crate::scene::text::sdf_atlas::generation());
-                g
-            };
+            let guard =
+                tess_memo_guard(view_aabb, anno, annotation_scale_handle, all_visible, bg, avp);
             let (memo_cell, guard_cell) = if resident {
                 (&self.resident_tess_memo, &self.resident_tess_guard)
             } else {
@@ -11369,6 +11409,9 @@ vis_index={:.1} visible_probe={:.1}",
                 target.render_handles.extend(render_handles.iter().copied());
                 target.source_handles.insert(common.handle);
                 target.touches_block_definition |= inside_block;
+                if inside_block {
+                    target.block_users.extend(render_handles.iter().copied());
+                }
             };
             if matches!(entity, EntityType::Point(_)) {
                 extend_category(&mut index.points);
@@ -11399,6 +11442,9 @@ vis_index={:.1} visible_probe={:.1}",
                 target.render_handles.extend(render_handles.iter().copied());
                 target.source_handles.insert(common.handle);
                 target.touches_block_definition |= inside_block;
+                if inside_block {
+                    target.block_users.extend(render_handles.iter().copied());
+                }
             };
             let add_handle = |map: &mut HashMap<Handle, DependencyTargets>,
                               handle: Option<Handle>| {
@@ -11409,6 +11455,9 @@ vis_index={:.1} visible_probe={:.1}",
                 target.render_handles.extend(render_handles.iter().copied());
                 target.source_handles.insert(common.handle);
                 target.touches_block_definition |= inside_block;
+                if inside_block {
+                    target.block_users.extend(render_handles.iter().copied());
+                }
             };
             add(&mut index.layers, &common.layer);
             match entity {
@@ -11541,6 +11590,9 @@ vis_index={:.1} visible_probe={:.1}",
             combined
                 .source_handles
                 .extend(target.source_handles.iter().copied());
+            combined
+                .block_users
+                .extend(target.block_users.iter().copied());
             combined.touches_block_definition |= target.touches_block_definition;
         }
         combined
@@ -11561,6 +11613,47 @@ vis_index={:.1} visible_probe={:.1}",
             .map(|handle| (handle, ChangeKind::Modified))
             .collect();
         self.bump_entities_restyled(&changes);
+    }
+
+    /// Off/freeze toggle on `names`, nothing else changed. Visibility gates an
+    /// entity before it is tessellated, so entities carrying these layers keep
+    /// their tessellation memo and only leave or re-enter the resident set;
+    /// block users re-expand, since their definitions bake the children's
+    /// visibility. Nothing is recoloured.
+    pub fn invalidate_layer_visibility(&mut self, names: &[String]) {
+        let targets = self.dependency_targets(DependencyKind::Layer, names);
+        if targets.render_handles.is_empty() {
+            return;
+        }
+        if targets.touches_block_definition {
+            self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+        }
+        let kept: Vec<_> = {
+            let mut tm = self.tess_memo.borrow_mut();
+            let mut rm = self.resident_tess_memo.borrow_mut();
+            targets
+                .render_handles
+                .iter()
+                .filter(|handle| !targets.block_users.contains(handle))
+                .map(|&handle| (handle, tm.remove(&handle), rm.remove(&handle)))
+                .collect()
+        };
+        let changes: Vec<(Handle, ChangeKind)> = targets
+            .render_handles
+            .iter()
+            .map(|&handle| (handle, ChangeKind::Modified))
+            .collect();
+        self.bump_entities_restyled(&changes);
+        let mut tm = self.tess_memo.borrow_mut();
+        let mut rm = self.resident_tess_memo.borrow_mut();
+        for (handle, culled, resident) in kept {
+            if let Some(wires) = culled {
+                tm.insert(handle, wires);
+            }
+            if let Some(wires) = resident {
+                rm.insert(handle, wires);
+            }
+        }
     }
 
     pub fn invalidate_layer_dependencies(&mut self, names: &[String]) {

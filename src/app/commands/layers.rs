@@ -33,7 +33,7 @@ impl OpenCADStudio {
                             dl.turn_off();
                         }
                     }
-                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                    self.tabs[i].scene.invalidate_layer_visibility(&names);
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
@@ -70,7 +70,7 @@ impl OpenCADStudio {
                             dl.freeze();
                         }
                     }
-                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                    self.tabs[i].scene.invalidate_layer_visibility(&names);
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
@@ -440,7 +440,7 @@ impl OpenCADStudio {
                         dl.turn_on();
                     }
                 }
-                self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                self.tabs[i].scene.invalidate_layer_visibility(&names);
                 self.tabs[i].dirty = true;
                 self.commit_layer_undo(i, undo);
                 self.refresh_layer_panel();
@@ -461,7 +461,7 @@ impl OpenCADStudio {
                         dl.thaw();
                     }
                 }
-                self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                self.tabs[i].scene.invalidate_layer_visibility(&names);
                 self.tabs[i].dirty = true;
                 self.commit_layer_undo(i, undo);
                 self.refresh_layer_panel();
@@ -530,7 +530,7 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                    self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                    self.tabs[i].scene.invalidate_layer_visibility(&names);
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
@@ -620,7 +620,7 @@ impl OpenCADStudio {
                         dl.turn_on();
                     }
                 }
-                self.tabs[i].scene.invalidate_layer_dependencies(&names);
+                self.tabs[i].scene.invalidate_layer_visibility(&names);
                 self.tabs[i].dirty = true;
                 self.commit_layer_undo(i, undo);
                 self.refresh_layer_panel();

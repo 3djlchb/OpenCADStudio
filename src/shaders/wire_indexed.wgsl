@@ -33,7 +33,7 @@ struct WireConst {
     align_total:    f32,
     world_half_width: f32,
     is_tapered:     f32,
-    _pad2:          f32,
+    hidden:         f32,
     marker_origin_high: vec4<f32>,
     marker_origin_low: vec4<f32>,
     marker_normal_scale: vec4<f32>,
@@ -244,6 +244,12 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
     out.min_elem       = min_elem;
     out.align_end      = c.align_end * lt_scale;
     out.align_total    = c.align_total;
+    // A hidden entity's arena slab stays resident; collapse it outside the
+    // clip volume and take the tombstone discard.
+    if c.hidden != 0.0 {
+        out.clip_pos = vec4<f32>(0.0, 0.0, -2.0, 1.0);
+        out.pattern_length = -1.0;
+    }
     return out;
 }
 

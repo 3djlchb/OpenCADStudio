@@ -1227,9 +1227,9 @@ impl OpenCADStudio {
             "redo" => Message::Redo,
             "layer_visible" | "layer_locked" | "layer_frozen" | "layer_current" => {
                 let layer = string(req, "layer")?;
+                // The Layer* messages index the panel's (sortable) row list.
                 let index = self.tabs[self.active_tab]
-                    .scene
-                    .document
+                    .layers
                     .layers
                     .iter()
                     .position(|l| l.name == layer)
