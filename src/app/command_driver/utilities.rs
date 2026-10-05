@@ -1166,7 +1166,13 @@ impl OpenCADStudio {
 
         // 2. Blank line submits Enter to the active command (or repeats last).
         if trimmed.is_empty() {
-            return self.feed_command(StepInput::Enter);
+            if self.tabs[i].active_cmd.is_some() {
+                return self.feed_command(StepInput::Enter);
+            }
+            if let Some(cmd) = self.tabs[i].last_cmd.clone() {
+                return self.run_command_line(&cmd);
+            }
+            return Task::none();
         }
 
         // 3. A command is currently active: route to its prompt handlers.

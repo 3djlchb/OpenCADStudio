@@ -534,4 +534,44 @@ ZOOM EXTENTS
         // 4 square edges + 2 diagonal lines + 2 circles = 8 entities
         assert_eq!(app.tabs[i].scene.document.entities().count(), 8);
     }
+
+    #[test]
+    fn blank_line_repeats_last_command_when_idle() {
+        let mut app = fresh_app();
+        let i = app.active_tab;
+
+        // Blank line before any command does nothing and does not panic
+        let _ = app.update(Message::ScriptLine("".into()));
+        assert!(app.tabs[i].active_cmd.is_none());
+
+        // 1. Draw a line
+        let _ = app.update(Message::ScriptLine("LINE".into()));
+        let _ = app.update(Message::ScriptLine("0,0".into()));
+        let _ = app.update(Message::ScriptLine("10,10".into()));
+        let _ = app.update(Message::ScriptLine("".into())); // finishes LINE
+        assert_eq!(app.tabs[i].scene.document.entities().count(), 1);
+        assert!(app.tabs[i].active_cmd.is_none());
+
+        // 2. Blank line when idle repeats LINE
+        let _ = app.update(Message::ScriptLine("".into()));
+        assert!(app.tabs[i].active_cmd.is_some(), "Blank line should repeat LINE");
+        let _ = app.update(Message::ScriptLine("20,20".into()));
+        let _ = app.update(Message::ScriptLine("30,30".into()));
+        let _ = app.update(Message::ScriptLine("".into())); // finishes second LINE
+        assert_eq!(app.tabs[i].scene.document.entities().count(), 2);
+        assert!(app.tabs[i].active_cmd.is_none());
+
+        // 3. Single-line command repeat
+        let _ = app.update(Message::ScriptLine("CIRCLE 5,5 2".into()));
+        assert_eq!(app.tabs[i].scene.document.entities().count(), 3);
+        assert!(app.tabs[i].active_cmd.is_none());
+
+        // Blank line repeats CIRCLE
+        let _ = app.update(Message::ScriptLine("".into()));
+        assert!(app.tabs[i].active_cmd.is_some(), "Blank line should repeat CIRCLE");
+        let _ = app.update(Message::ScriptLine("15,15".into()));
+        let _ = app.update(Message::ScriptLine("3".into()));
+        assert_eq!(app.tabs[i].scene.document.entities().count(), 4);
+        assert!(app.tabs[i].active_cmd.is_none());
+    }
 }
