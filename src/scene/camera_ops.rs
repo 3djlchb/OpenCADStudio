@@ -227,7 +227,8 @@ impl Scene {
         let cam = self.camera.borrow();
         let eye_dir = cam.rotation * glam::Vec3::Z;
         let height = cam.ortho_size() * 2.0;
-        let width = height; // caller can adjust; rough square
+        // The window's shape: the last rendered aspect ratio.
+        let width = height * self.active_camera_aspect();
         let mut view = codec::tables::View::new(name);
         // The centre is in view (DCS) coordinates, relative to the target.
         view.center = Vector3 { x: 0.0, y: 0.0, z: 0.0 };

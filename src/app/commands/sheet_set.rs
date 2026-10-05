@@ -705,13 +705,24 @@ impl OpenCADStudio {
             SheetSetMsg::AddBlocks => {
                 if let Some(SsDialog::Category(c)) = self.sheet_set.dialog.take() {
                     let blocks = c.blocks.iter().map(|(id, label, _)| (id.clone(), label.clone())).collect();
-                    self.sheet_set.dialog = Some(SsDialog::BlockList(BlockList { category: Box::new(c), blocks, selected: None }));
+                    self.sheet_set.dialog = Some(SsDialog::BlockList(BlockList { category: Box::new(c), blocks, selected: None, preview: None }));
                 }
             }
             SheetSetMsg::BlocksPicked(_) | SheetSetMsg::LocationPicked(None) => {}
+            SheetSetMsg::Submenu(key) => self.sheet_set.submenu = key,
             SheetSetMsg::BlockListSelect(k) => {
+                let target = match self.sheet_set.dialog.as_ref() {
+                    Some(SsDialog::BlockList(b)) => b.blocks.get(k).and_then(|(id, _)| self.listed_block(b.category.set, id)),
+                    _ => None,
+                };
+                // A whole drawing taken as a block shows its model space.
+                let preview = target.and_then(|(file, name)| {
+                    let whole = self.sheet_set.drawings.get(&file).is_some_and(|d| d.block_records.get(&name).is_none());
+                    self.block_preview(&file, if whole { "" } else { &name })
+                });
                 if let Some(SsDialog::BlockList(b)) = self.sheet_set.dialog.as_mut() {
                     b.selected = Some(k);
+                    b.preview = preview;
                 }
             }
             SheetSetMsg::BlockListDelete => {
@@ -728,6 +739,7 @@ impl OpenCADStudio {
                         file: String::new(),
                         whole: true,
                         names: Vec::new(),
+                        preview: None,
                         error: None,
                     }));
                 }
@@ -748,15 +760,28 @@ impl OpenCADStudio {
             SheetSetMsg::SelectBlockPicked(None) => {}
             SheetSetMsg::SelectBlockPicked(Some(path)) => self.select_block_file(path),
             SheetSetMsg::SelectBlockWhole(v) => {
+                let file = match self.sheet_set.dialog.as_ref() {
+                    Some(SsDialog::SelectBlock(b)) => b.file.clone(),
+                    _ => String::new(),
+                };
+                let preview = if v && !file.is_empty() { self.block_preview(&file, "") } else { None };
                 if let Some(SsDialog::SelectBlock(b)) = self.sheet_set.dialog.as_mut() {
                     b.whole = v;
+                    b.preview = preview;
                 }
             }
             SheetSetMsg::SelectBlockCheck(k, v) => {
+                let picked = match self.sheet_set.dialog.as_ref() {
+                    Some(SsDialog::SelectBlock(b)) => b.names.get(k).map(|n| (b.file.clone(), n.0.clone())),
+                    _ => None,
+                };
+                // The block just checked is previewed.
+                let preview = picked.and_then(|(file, name)| self.block_preview(&file, &name));
                 if let Some(SsDialog::SelectBlock(b)) = self.sheet_set.dialog.as_mut() {
                     if let Some(n) = b.names.get_mut(k) {
                         n.2 = v;
                     }
+                    b.preview = preview;
                 }
             }
             SheetSetMsg::ToggleDrawing(path) => {
@@ -771,7 +796,10 @@ impl OpenCADStudio {
                 self.sheet_set.open_drawings.insert(ss::path_key(&path));
             }
             SheetSetMsg::PlaceOnSheet(path, view) => self.start_place_view(path, view),
-            SheetSetMsg::ViewMenu(id, action) => return self.view_menu(id, action),
+            SheetSetMsg::ViewMenu(id, action) => {
+                self.sheet_set.submenu = None;
+                return self.view_menu(id, action);
+            }
             SheetSetMsg::AddLocation => {
                 return Task::perform(
                     async {
@@ -1540,13 +1568,55 @@ impl OpenCADStudio {
         self.save_current_sheet_set();
     }
 
+    /// A block preview (`name` empty: the drawing's model space), cached by
+    /// `file|name`; returns its key.
+    fn block_preview(&mut self, file: &str, name: &str) -> Option<String> {
+        let key = format!("{}|{}", ss::path_key(file), name);
+        if self.sheet_set.previews.contains_key(&key) {
+            return Some(key);
+        }
+        let doc = self.sheet_set.drawings.get(file)?;
+        let mut scene = crate::scene::Scene::new();
+        scene.document = (*doc).clone();
+        let wires = if name.is_empty() {
+            let model = scene.document.header.model_space_block_handle;
+            let entities: Vec<codec::EntityType> = scene
+                .document
+                .entities()
+                .filter(|e| e.common().owner_handle == model)
+                .filter(|e| !matches!(e, codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_)))
+                .take(20_000)
+                .cloned()
+                .collect();
+            scene.wires_for_entities(&entities)
+        } else {
+            scene.block_preview_wires(name)
+        };
+        self.sheet_set.previews.insert(key.clone(), wires);
+        Some(key)
+    }
+
+    /// The file and block name behind a List of Blocks id.
+    fn listed_block(&self, set: usize, id: &str) -> Option<(String, String)> {
+        if let Some(spec) = id.strip_prefix("new:") {
+            let mut p = spec.splitn(3, '|');
+            return Some((p.next()?.to_string(), p.next()?.to_string()));
+        }
+        let db = self.sheet_set.sets.get(set)?;
+        let b = db.find(id)?;
+        Some((db.resolve_file(b), b.prop("Name").unwrap_or("").to_string()))
+    }
+
     /// Named model views of a drawing (read once, when its row is opened).
     fn load_model_views(&mut self, path: &str) {
         let key = ss::path_key(path);
         if self.sheet_set.model_views.contains_key(&key) {
             return;
         }
-        let views = crate::io::load_file(Path::new(path))
+        let views = self
+            .sheet_set
+            .drawings
+            .get(path)
             .map(|d| d.views.iter().filter(|v| !v.paper_space).map(|v| v.name.clone()).collect())
             .unwrap_or_default();
         self.sheet_set.model_views.insert(key, views);
@@ -1589,13 +1659,20 @@ impl OpenCADStudio {
 
     /// Place on Sheet: only on a sheet of this set open at its layout.
     fn start_place_view(&mut self, drawing: String, view: Option<String>) {
+        if self.tabs[self.active_tab].scene.current_layout.eq_ignore_ascii_case("Model") {
+            self.command_line
+                .push_error(crate::t!("Content cannot be placed into model space. Please switch to paper space and try again.").as_ref());
+            return;
+        }
         let Some((set, sheet)) = self.current_sheet() else {
             self.command_line
                 .push_error(crate::t!("Open a sheet of this sheet set at its layout to place a view on it.").as_ref());
             return;
         };
-        let size = crate::io::load_file(Path::new(&drawing))
-            .ok()
+        let size = self
+            .sheet_set
+            .drawings
+            .get(&drawing)
             .and_then(|d| model_view(&d, view.as_deref()))
             .map(|v| (v.width, v.height));
         let Some(size) = size else {
@@ -1637,6 +1714,10 @@ impl OpenCADStudio {
                 }
                 self.save_current_sheet_set();
             }
+            ViewAction::Callout(_) | ViewAction::Label if self.tabs[self.active_tab].scene.current_layout.eq_ignore_ascii_case("Model") => {
+                self.command_line
+                    .push_error(crate::t!("Content cannot be placed into model space. Please switch to paper space and try again.").as_ref());
+            }
             ViewAction::Callout(_) | ViewAction::Label if self.current_sheet().map(|s| s.1) != Some(sheet.clone()) => {
                 self.command_line
                     .push_error(crate::t!("Open the view's sheet at its layout to place a block on it.").as_ref());
@@ -1662,7 +1743,7 @@ impl OpenCADStudio {
     /// insert it at `at` with its attributes; their `?View.` / `?Sheet.`
     /// fields become the view's and sheet's navigation fields.
     fn insert_set_block(&mut self, i: usize, file: &str, name: &str, at: codec::types::Vector3, view: &str, sheet: &str, set: usize) {
-        let Ok(source) = crate::io::load_file(Path::new(file)) else {
+        let Some(source) = self.sheet_set.drawings.get(file) else {
             self.command_line.push_error(crate::tf!("{}: cannot be read.", file).as_ref());
             return;
         };
@@ -1719,7 +1800,7 @@ impl OpenCADStudio {
                 self.insert_set_block(i, &file, &name, Vector3::new(x, y, 0.0), &view, &sheet, set);
             }
             Placing::View { set, sheet, drawing, view } => {
-                let Some(mv) = crate::io::load_file(Path::new(&drawing)).ok().and_then(|d| model_view(&d, view.as_deref())) else {
+                let Some(mv) = self.sheet_set.drawings.get(&drawing).and_then(|d| model_view(&d, view.as_deref())) else {
                     return;
                 };
                 let title = view.clone().unwrap_or_else(|| {
@@ -1791,7 +1872,8 @@ impl OpenCADStudio {
 
     /// Select Block: read a drawing's named blocks.
     fn select_block_file(&mut self, path: PathBuf) {
-        let names: Vec<(String, String, bool)> = match crate::io::load_file(&path) {
+        let file = path.to_string_lossy().to_string();
+        let names: Vec<(String, String, bool)> = match self.sheet_set.drawings.get(&file).ok_or_else(|| crate::t!("cannot be read").into_owned()) {
             Ok(doc) => {
                 let mut n: Vec<(String, String, bool)> = doc
                     .block_records
@@ -1807,9 +1889,12 @@ impl OpenCADStudio {
                 return;
             }
         };
+        // The whole drawing is the first preview.
+        let preview = self.block_preview(&file, "");
         if let Some(SsDialog::SelectBlock(b)) = self.sheet_set.dialog.as_mut() {
-            b.file = path.to_string_lossy().to_string();
+            b.file = file;
             b.names = names;
+            b.preview = preview;
             b.error = None;
         }
     }

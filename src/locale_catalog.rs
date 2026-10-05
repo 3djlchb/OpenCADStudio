@@ -50,6 +50,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "New sheet location" => Some(("view", "ss-new-sheet-location")),
         "Remove Subset" => Some(("view", "ss-remove-subset")),
         "Rename Subset..." => Some(("view", "ss-rename-subset")),
+        "Content cannot be placed into model space. Please switch to paper space and try again." => Some(("view", "ss-content-model-space")),
+        "cannot be read" => Some(("view", "ss-cannot-read")),
         "Rename & Renumber View" => Some(("view", "ss-rename-renumber-view")),
         "List of Blocks" => Some(("view", "ss-list-of-blocks")),
         "Select Block" => Some(("view", "ss-select-block")),

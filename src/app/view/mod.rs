@@ -3041,7 +3041,7 @@ impl OpenCADStudio {
                 auto_collapse,
             ),
             crate::ui::dock::PanelId::SheetSetManager => {
-                crate::ui::window::sheet_set::view(&self.sheet_set, width, auto_collapse)
+                crate::ui::window::sheet_set::view(&self.sheet_set, width, auto_collapse, side == crate::app::config::DockSide::Right)
             }
         };
         let divider = dock_divider(id);
