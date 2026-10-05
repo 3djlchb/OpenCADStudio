@@ -1,6 +1,6 @@
 [package]
 name = "OpenCADStudio"
-version = "2026.40.0"
+version = "2026.40.1"
 edition = "2021"
 build = "build.rs"
 default-run = "OpenCADStudio"
