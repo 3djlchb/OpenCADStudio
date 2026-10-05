@@ -2646,12 +2646,10 @@ impl OpenCADStudio {
         let plugin_drain = Subscription::none();
         // Open sheet sets reload when their .dst changes on disk.
         #[cfg(not(target_arch = "wasm32"))]
-        let sheet_set_poll = if self.sheet_set.sets.is_empty() {
-            Subscription::none()
-        } else {
-            iced::time::every(std::time::Duration::from_secs(1))
-                .map(|_| Message::SheetSet(crate::ui::window::sheet_set::SheetSetMsg::Poll))
-        };
+        // Open sheet sets reload when their .dst changes on disk; the
+        // drawings' .dwl lock files follow the open tabs.
+        let sheet_set_poll = iced::time::every(std::time::Duration::from_secs(1))
+            .map(|_| Message::SheetSet(crate::ui::window::sheet_set::SheetSetMsg::Poll));
         #[cfg(target_arch = "wasm32")]
         let sheet_set_poll = Subscription::none();
         let hatch_pattern_keys = if self.tabs[self.active_tab]

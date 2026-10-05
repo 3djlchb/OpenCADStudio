@@ -72,6 +72,8 @@ pub struct SheetSetManager {
     pub by_category: bool,
     /// Model Views: location id, folder and its drawings.
     pub locations: Vec<(String, String, Vec<String>)>,
+    /// Drawings this application holds `.dwl` / `.dwl2` lock files for.
+    pub locks: HashSet<std::path::PathBuf>,
 }
 
 /// A sheet whose drawing is missing, or open (a `.dwl` lock file, or a tab here).
@@ -294,8 +296,10 @@ pub struct ImportRow {
     pub drawing: String,
     pub layout: String,
     pub handle: String,
-    /// The sheet set the layout already belongs to (cannot be imported).
-    pub owner: Option<String>,
+    /// Already a sheet of this set: cannot be imported.
+    pub taken: bool,
+    /// The drawing's sheet link names another sheet set (importable, warned).
+    pub warn: bool,
     pub on: bool,
 }
 
@@ -1277,11 +1281,20 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
             let mut list = vec![head.into()];
             for (k, r) in f.rows.iter().enumerate() {
                 let file = std::path::Path::new(&r.drawing).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                let status: Element<'a, Message> = match &r.owner {
-                    None => text(t!("Available for import").into_owned()).size(12).style(|t: &Theme| text::Style { color: Some(t.palette().success.base.color) }).into(),
-                    Some(owner) => text(crate::tf!("Belongs to sheet set {}", owner).into_owned()).size(12).style(|t: &Theme| text::Style { color: Some(t.palette().warning.base.color) }).into(),
+                let (label, warn) = if r.taken {
+                    ("This layout is already part of a sheet set - not available for import.", true)
+                } else if r.warn {
+                    ("Warning: this layout may belong to another sheet set.", true)
+                } else {
+                    ("Available for import", false)
                 };
-                let enabled = r.owner.is_none();
+                let status: Element<'a, Message> = text(t!(label).into_owned())
+                    .size(12)
+                    .style(move |t: &Theme| text::Style {
+                        color: Some(if warn { t.palette().warning.base.color } else { t.palette().success.base.color }),
+                    })
+                    .into();
+                let enabled = !r.taken;
                 let cb = checkbox(r.on).size(14);
                 let cb: Element<'a, Message> = if enabled { cb.on_toggle(move |v| msg(SheetSetMsg::Toggle(FieldId::ImportRow(k), v))).into() } else { cb.into() };
                 let name = text(r.layout.clone()).size(12).width(Fill);

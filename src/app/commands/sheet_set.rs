@@ -9,6 +9,7 @@ use crate::ui::window::sheet_set::{
 };
 use codec::sheet_set::{self as ss, ComponentKind, LayoutReference, SheetSetData, SheetSetDatabase};
 use iced::Task;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// The variables this family answers for.
@@ -63,6 +64,55 @@ fn folder_of(path: &str) -> String {
 
 /// Template of a component for new sheets: its own `DefDwtLayout`, else
 /// the nearest parent's.
+/// The lock files' date: the long date of the user's locale, two spaces and
+/// the 24-hour time (`5 Ekim 2026 Pazartesi  09:26:39`).
+#[cfg(windows)]
+fn lock_stamp() -> String {
+    use windows_sys::Win32::Globalization::{GetDateFormatEx, GetTimeFormatEx, DATE_LONGDATE};
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let mut date = [0u16; 128];
+    let mut time = [0u16; 64];
+    let format = wide("HH:mm:ss");
+    // SAFETY: the buffers outlive the calls and their lengths are passed.
+    let (d, t) = unsafe {
+        (
+            GetDateFormatEx(std::ptr::null(), DATE_LONGDATE, std::ptr::null(), std::ptr::null(), date.as_mut_ptr(), date.len() as i32, std::ptr::null()),
+            GetTimeFormatEx(std::ptr::null(), 0, std::ptr::null(), format.as_ptr(), time.as_mut_ptr(), time.len() as i32),
+        )
+    };
+    let text = |b: &[u16], n: i32| String::from_utf16_lossy(&b[..(n.max(1) as usize - 1)]);
+    format!("{}  {}", text(&date, d), text(&time, t))
+}
+
+#[cfg(not(windows))]
+fn lock_stamp() -> String {
+    String::new()
+}
+
+/// `<drawing>.dwl` (user, machine, date lines) and `<drawing>.dwl2` (the same
+/// as XML), as the reference writes them for a drawing it has open.
+// ponytail: .dwl is written as UTF-8; the reference's encoding of non-ASCII
+// day names was not measured.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_lock(path: &Path) -> std::io::Result<()> {
+    let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
+    let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
+    let stamp = lock_stamp();
+    std::fs::write(path.with_extension("dwl"), format!("{user}\n{machine} \n{stamp}"))?;
+    std::fs::write(
+        path.with_extension("dwl2"),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\">\n<whprops>\n<username>{user}</username>\n<machinename>{machine} </machinename>\n<fullname></fullname>\n<datetime>{stamp}</datetime>\n</whprops>"
+        ),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::app) fn release_lock(path: &Path) {
+    let _ = std::fs::remove_file(path.with_extension("dwl"));
+    let _ = std::fs::remove_file(path.with_extension("dwl2"));
+}
+
 /// Whether new sheets of `component` prompt for their template: its own
 /// "Prompt for template", else the nearest parent's.
 fn prompts_for_template(db: &SheetSetDatabase, component: &str) -> bool {
@@ -92,16 +142,15 @@ fn import_rows(path: &Path, db: &SheetSetDatabase) -> Result<Vec<ImportRow>, Str
             let mine = db.sheet_for(&drawing, Some(&layout)).is_some_and(|s| {
                 s.named("Layout").and_then(|r| r.prop("Name")).is_some_and(|n| n.eq_ignore_ascii_case(&layout))
             });
-            let owner = if mine {
-                Some(db.name().to_string())
-            } else {
-                link.as_ref().filter(|l| l.layout_name.eq_ignore_ascii_case(&layout) && !l.sheet_set_file_name.is_empty()).map(|l| {
-                    SheetSetDatabase::read(&l.sheet_set_file_name)
-                        .map(|d| d.name().to_string())
-                        .unwrap_or_else(|_| Path::new(&l.sheet_set_file_name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default())
-                })
-            };
-            ImportRow { drawing: drawing.clone(), layout, handle, on: owner.is_none(), owner }
+            // A layout of this set is taken; one the drawing's sheet link
+            // names for another set is only warned about (still importable).
+            let warn = !mine
+                && link.as_ref().is_some_and(|l| {
+                    l.layout_name.eq_ignore_ascii_case(&layout)
+                        && !l.sheet_set_file_name.is_empty()
+                        && db.path.as_deref().is_none_or(|p| ss::path_key(p) != ss::path_key(&l.sheet_set_file_name))
+                });
+            ImportRow { drawing: drawing.clone(), layout, handle, on: !mine, taken: mine, warn }
         })
         .collect())
 }
@@ -331,6 +380,30 @@ impl OpenCADStudio {
         Ok(())
     }
 
+    /// Lock files for the drawings open in tabs, as other instances expect
+    /// them (the sheet status shows such a sheet as open); a drawing that
+    /// already has someone else's lock file is left alone.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn sync_drawing_locks(&mut self) {
+        let open: HashSet<PathBuf> = self.tabs.iter().filter_map(|t| t.current_path.clone()).filter(|p| p.exists()).collect();
+        let gone: Vec<PathBuf> = self.sheet_set.locks.difference(&open).cloned().collect();
+        for p in gone {
+            release_lock(&p);
+            self.sheet_set.locks.remove(&p);
+        }
+        for p in open {
+            if self.sheet_set.locks.contains(&p) || p.with_extension("dwl").exists() {
+                continue;
+            }
+            if write_lock(&p).is_ok() {
+                self.sheet_set.locks.insert(p);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn sync_drawing_locks(&mut self) {}
+
     /// Reload every open set whose `.dst` was changed by someone else.
     fn poll_sheet_sets(&mut self) {
         let mut changed = false;
@@ -463,6 +536,7 @@ impl OpenCADStudio {
                 }
             }
             SheetSetMsg::Poll => {
+                self.sync_drawing_locks();
                 self.poll_sheet_sets();
                 // SSMSHEETSTATUS 2: the status is taken again every SSMPOLLTIME seconds.
                 let every = std::time::Duration::from_secs(u64::from(self.sheet_set.settings.poll_time.max(20)));
@@ -605,7 +679,7 @@ impl OpenCADStudio {
                     (FieldId::ImportPrefix, Some(SsDialog::Form(f))) => f.prefix = v,
                     (FieldId::ImportRow(k), Some(SsDialog::Form(f))) => {
                         if let Some(r) = f.rows.get_mut(k) {
-                            r.on = v && r.owner.is_none();
+                            r.on = v && !r.taken;
                         }
                     }
                     (FieldId::RenameOption(k), Some(SsDialog::Form(f))) => {
@@ -1098,11 +1172,10 @@ impl OpenCADStudio {
                 Err(e) => self.command_line.push_error(&format!("{}: {e}", p.display())),
             }
         }
+        // The drawings picked replace the list.
         if let Some(SsDialog::Form(f)) = self.sheet_set.dialog.as_mut() {
-            for r in added {
-                if !f.rows.iter().any(|o| ss::path_key(&o.drawing) == ss::path_key(&r.drawing) && o.layout == r.layout) {
-                    f.rows.push(r);
-                }
+            if !added.is_empty() {
+                f.rows = added;
             }
         }
     }
@@ -1309,7 +1382,7 @@ impl OpenCADStudio {
             let path = Path::new(&r.file_name);
             let state = if !path.exists() {
                 Some(SheetStatus::Missing)
-            } else if path.with_extension("dwl").exists() || self.tab_showing(path).is_some() {
+            } else if path.with_extension("dwl").exists() {
                 Some(SheetStatus::Locked)
             } else {
                 None
@@ -1500,7 +1573,7 @@ impl OpenCADStudio {
                 }
             }
             FormKind::ImportLayout => {
-                let chosen: Vec<&ImportRow> = f.rows.iter().filter(|r| r.on && r.owner.is_none()).collect();
+                let chosen: Vec<&ImportRow> = f.rows.iter().filter(|r| r.on && !r.taken).collect();
                 if chosen.is_empty() {
                     f.error = Some(crate::t!("The drawing has no layout to import.").into_owned());
                     self.sheet_set.dialog = Some(SsDialog::Form(f));

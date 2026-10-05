@@ -97,8 +97,21 @@ pub fn nav_nodes(db: &codec::sheet_set::SheetSetDatabase, views: bool) -> Vec<(u
     let set = db.sheet_set();
     let mut out = vec![(0, set.id().to_string(), db.name().to_string(), false)];
     if views {
-        for c in db.view_categories() {
+        // Views of the unnamed (default) category sit under the set, then each
+        // named category with its views.
+        let all: Vec<&SsElement> = db.sheets().into_iter().flat_map(|s| db.sheet_views(s)).collect();
+        let named: Vec<&SsElement> = db.view_categories();
+        let in_named = |v: &SsElement| {
+            codec::sheet_set::SheetSetDatabase::view_category_of(v).is_some_and(|c| named.iter().any(|n| n.id() == c))
+        };
+        for v in all.iter().filter(|v| !in_named(v)) {
+            out.push((1, v.id().to_string(), number_and_title(v), true));
+        }
+        for c in &named {
             out.push((1, c.id().to_string(), c.prop("Name").unwrap_or("").to_string(), false));
+            for v in all.iter().filter(|v| codec::sheet_set::SheetSetDatabase::view_category_of(v) == Some(c.id())) {
+                out.push((2, v.id().to_string(), number_and_title(v), true));
+            }
         }
         return out;
     }
@@ -156,8 +169,30 @@ pub fn nav_props(db: &codec::sheet_set::SheetSetDatabase, id: &str) -> Vec<(Stri
             v.extend(custom(CUSTOM_SHEET_PROP));
             v
         }
+        None if el.name == "AcSmSheetView" => fixed(&[
+            ("ViewNumberAndTitle", "NumberAndTitle", ""),
+            ("ViewTitle", "Title", ""),
+            ("ViewNumber", "Number", ""),
+            ("ViewportScale", "ViewportScale", ".16.2"),
+        ]),
         None => fixed(&[("ViewCategoryName", "Name", "")]),
     }
+}
+
+/// The sheet drawing, named view and layout a sheet or sheet view node links to.
+pub fn nav_link(db: &codec::sheet_set::SheetSetDatabase, id: &str) -> Option<(String, String, String)> {
+    let el = db.find(id)?;
+    let (sheet, view) = if el.name == "AcSmSheetView" {
+        let views = db.parent_of(id)?;
+        let sheet = db.parent_of(views.id())?;
+        (sheet.id().to_string(), el.named("NamedView").and_then(|v| v.prop("Name")).unwrap_or("").to_string())
+    } else if codec::sheet_set::ComponentKind::of(el) == Some(codec::sheet_set::ComponentKind::Sheet) {
+        (id.to_string(), String::new())
+    } else {
+        return None;
+    };
+    let r = db.layout_reference(&sheet, "Layout")?;
+    Some((r.file_name, view, r.name))
 }
 
 impl FieldDialogState {
@@ -170,19 +205,36 @@ impl FieldDialogState {
         };
         let set = db.sheet_set().id().to_string();
         let path = codec::sheet_set::native_path(db.path.as_deref().unwrap_or(""));
+        // ViewportScale takes a scale format (and its version), not a text case.
+        let scale = prop == "ViewportScale";
+        let version = if scale {
+            codec::fields::PLOT_SCALE_FORMATS
+                .get(self.ss_scale_format)
+                .map_or("", |(_, c)| if c.starts_with("\\AcVar.16.2") { ".16.2" } else { "" })
+        } else {
+            version
+        };
         let mut code = format!("\\AcSm{version} Database(\"{path}\").SheetSet(\"{set}\")");
         if self.ss_node != set {
             code.push_str(&format!(".Component(\"{}\")", self.ss_node));
         }
         code.push('.');
         code.push_str(&prop);
+        if scale {
+            let f = viewport_scale_picture(self.ss_scale_format);
+            if !f.is_empty() {
+                code.push(' ');
+                code.push_str(&f);
+            }
+            return code;
+        }
         if self.text_case != 0 {
             code.push_str(&format!(" \\f \"%tc{}\"", self.text_case));
         }
-        let sheet = db.find(&self.ss_node).and_then(codec::sheet_set::ComponentKind::of) == Some(codec::sheet_set::ComponentKind::Sheet);
-        if sheet && self.ss_href {
-            if let Some(r) = db.layout_reference(&self.ss_node, "Layout") {
-                code.push_str(&format!(" \\href \"{}#,{}##1\"", r.file_name, r.name));
+        // A sheet links to its layout, a view to its named view on the sheet.
+        if self.ss_href {
+            if let Some((file, view, layout)) = nav_link(db, &self.ss_node) {
+                code.push_str(&format!(" \\href \"{file}#{view},{layout}##1\""));
             }
         }
         code
@@ -959,11 +1011,23 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 props.iter().map(|(l, _, _)| (l.clone(), *l == state.ss_prop, FieldDialogMsg::SsProp(l.clone()))).collect(),
                 92.0,
             );
-            let sheet = nodes.iter().any(|(_, id, _, sheet)| *sheet && *id == state.ss_node);
-            let mut href = checkbox(state.ss_href && sheet).label(t!("Associate hyperlink").into_owned()).text_size(12).size(14);
-            if sheet {
+            let linkable = db.is_some_and(|d| nav_link(d, &state.ss_node).is_some()) && state.ss_prop != "ViewportScale";
+            let mut href = checkbox(state.ss_href && linkable).label(t!("Associate hyperlink").into_owned()).text_size(12).size(14);
+            if linkable {
                 href = href.on_toggle(|v| msg(FieldDialogMsg::SsHref(v)));
             }
+            let format: Element<'a, Message> = if state.ss_prop == "ViewportScale" {
+                list(
+                    codec::fields::PLOT_SCALE_FORMATS
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (n, _))| (t!(*n).into_owned(), state.ss_scale_format == i, FieldDialogMsg::SsScaleFormat(i)))
+                        .collect(),
+                    120.0,
+                )
+            } else {
+                case_list(state)
+            };
             column![
                 text(t!("Sheet set")).size(12),
                 set_row,
@@ -972,7 +1036,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 text(t!("Property")).size(12),
                 prop_list,
                 text(t!("Format")).size(12),
-                case_list(state),
+                format,
                 href,
             ]
             .spacing(8)

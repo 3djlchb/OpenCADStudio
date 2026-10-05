@@ -3308,6 +3308,10 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             let _ = std::fs::remove_file(self.autosave_target(i));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        for path in &self.sheet_set.locks {
+            crate::app::commands::sheet_set::release_lock(path);
+        }
     }
 
     /// Remove the autosave recovery files, then quit the application.
