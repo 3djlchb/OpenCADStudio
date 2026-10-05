@@ -278,7 +278,6 @@ impl OpenCADStudio {
     pub(in crate::app) fn close_count(&mut self, i: usize) {
         if let Some(mode) = self.tabs[i].count.take() {
             self.drop_count_boundary(i, mode.boundary);
-            self.drop_count_boundary(i, mode.remembered.and_then(|(_, b)| b));
         }
         self.tabs[i].scene.set_count_display(None);
     }
@@ -311,13 +310,9 @@ impl OpenCADStudio {
                 let mode = self.tabs[i].count.as_ref();
                 Some((mode.and_then(|m| m.area.clone()), mode.and_then(|m| m.boundary)))
             }
-            // Current area: the count area in use (also one Entire model space
-            // set aside), else all of model space.
-            "C" => Some(match self.tabs[i].count.as_ref() {
-                Some(m) if m.area.is_some() => (m.area.clone(), m.boundary),
-                Some(m) => m.remembered.clone().map_or((None, None), |(a, b)| (Some(a), b)),
-                None => (None, None),
-            }),
+            // Current area counts all of model space (the view and an area
+            // in use take no part).
+            "C" => Some((None, None)),
             "R" => {
                 let p = points();
                 let (a, b) = (p.first()?, p.get(1)?);
@@ -408,18 +403,11 @@ impl OpenCADStudio {
         };
         // The picked targets do not stay selected.
         self.tabs[i].scene.deselect_all();
-        // Entire model space counts without the area but keeps it for a later
-        // Current area; a new area replaces it.
-        let mut remembered = None;
-        if let Some(old) = self.tabs[i].count.take() {
-            let old_area = old.area.map(|a| (a, old.boundary)).or(old.remembered);
-            if area.is_none() {
-                remembered = old_area;
-            } else if let Some((_, b)) = old_area.filter(|(_, b)| *b != boundary) {
-                self.drop_count_boundary(i, b);
-            }
+        self.refresh_properties();
+        if let Some(old) = self.tabs[i].count.take().filter(|o| o.boundary != boundary) {
+            self.drop_count_boundary(i, old.boundary);
         }
-        let mode = CountMode { area, boundary, target, remembered, ..CountMode::default() };
+        let mode = CountMode { area, boundary, target, ..CountMode::default() };
         if let Some(name) = mode.target_name() {
             let n = mode.count(&self.tabs[i].scene.document);
             self.command_line.push_output(&format!("{name} ...... {n}"));

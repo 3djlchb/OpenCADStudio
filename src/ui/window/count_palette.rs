@@ -51,8 +51,6 @@ pub struct CountMode {
     pub cursor: Option<usize>,
     /// The scene geometry epoch the colouring was computed at.
     pub epoch: u64,
-    /// The area Entire model space set aside, for a later Current area.
-    pub remembered: Option<(Vec<[f64; 2]>, Option<(Handle, bool)>)>,
     /// The result and count at `epoch` (recomputed when the drawing changes).
     pub cache: Option<(CountResult, usize)>,
 }
