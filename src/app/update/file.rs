@@ -5544,7 +5544,7 @@ impl OpenCADStudio {
     /// Current visible rectangle in the active space. The result is deliberately
     /// not clamped to the paper sheet: Display and Window may include the grey
     /// canvas outside the sheet, matching Model-space plotting.
-    pub(in crate::app) fn display_plot_window(&self) -> Option<(f64, f64, f64, f64)> {
+    fn display_plot_window(&self) -> Option<(f64, f64, f64, f64)> {
         let scene = &self.tabs[self.active_tab].scene;
         let (canvas_w, canvas_h) = scene.selection.borrow().vp_size;
         let viewport = if scene.current_layout == "Model" {

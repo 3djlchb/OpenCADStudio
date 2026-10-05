@@ -5545,6 +5545,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Count: {}" => Some(("count-feature", "toolbar-count")),
         "Overlapping object" => Some(("count-feature", "overlap")),
         "Show Count Instances" => Some(("count-feature", "show-instances")),
+        "Geometries: {}" => Some(("count-feature", "geometries")),
         _ => None,
     }
 }

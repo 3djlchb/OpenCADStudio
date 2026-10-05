@@ -216,16 +216,12 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 self.apply_count_display(i);
             }
-            Ok(_) => {
+            _ => {
                 self.command_line.push_error(&if max == 1 {
                     "Requires 0 or 1 only.".to_string()
                 } else {
                     format!("Requires an integer between {min} and {max}.")
                 });
-                ask(self);
-            }
-            Err(_) => {
-                self.command_line.push_error("Requires an integer value.");
                 ask(self);
             }
         }
@@ -249,6 +245,10 @@ impl OpenCADStudio {
     /// Recolour the drawing for count mode: counted references, duplicates,
     /// the rest faded (nothing changes without a target).
     pub(in crate::app) fn apply_count_display(&mut self, i: usize) {
+        let computed = self.tabs[i].count.as_ref().map(|m| m.compute(&self.tabs[i].scene.document));
+        if let (Some(mode), Some(c)) = (self.tabs[i].count.as_mut(), computed) {
+            mode.cache = Some(c);
+        }
         let display = self.tabs[i].count.as_ref().filter(|m| m.target.is_some()).map(|m| {
             let r = m.result(&self.tabs[i].scene.document);
             crate::scene::CountDisplay {
@@ -278,6 +278,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn close_count(&mut self, i: usize) {
         if let Some(mode) = self.tabs[i].count.take() {
             self.drop_count_boundary(i, mode.boundary);
+            self.drop_count_boundary(i, mode.remembered.and_then(|(_, b)| b));
         }
         self.tabs[i].scene.set_count_display(None);
     }
@@ -310,10 +311,13 @@ impl OpenCADStudio {
                 let mode = self.tabs[i].count.as_ref();
                 Some((mode.and_then(|m| m.area.clone()), mode.and_then(|m| m.boundary)))
             }
-            "C" => {
-                let (x0, y0, x1, y1) = self.display_plot_window()?;
-                Some((Some(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]), None))
-            }
+            // Current area: the count area in use (also one Entire model space
+            // set aside), else all of model space.
+            "C" => Some(match self.tabs[i].count.as_ref() {
+                Some(m) if m.area.is_some() => (m.area.clone(), m.boundary),
+                Some(m) => m.remembered.clone().map_or((None, None), |(a, b)| (Some(a), b)),
+                None => (None, None),
+            }),
             "R" => {
                 let p = points();
                 let (a, b) = (p.first()?, p.get(1)?);
@@ -404,11 +408,18 @@ impl OpenCADStudio {
         };
         // The picked targets do not stay selected.
         self.tabs[i].scene.deselect_all();
-        let old = self.tabs[i].count.take();
-        if let Some(old) = old.as_ref().filter(|o| o.boundary != boundary) {
-            self.drop_count_boundary(i, old.boundary);
+        // Entire model space counts without the area but keeps it for a later
+        // Current area; a new area replaces it.
+        let mut remembered = None;
+        if let Some(old) = self.tabs[i].count.take() {
+            let old_area = old.area.map(|a| (a, old.boundary)).or(old.remembered);
+            if area.is_none() {
+                remembered = old_area;
+            } else if let Some((_, b)) = old_area.filter(|(_, b)| *b != boundary) {
+                self.drop_count_boundary(i, b);
+            }
         }
-        let mode = CountMode { area, boundary, target, cursor: None, epoch: 0 };
+        let mode = CountMode { area, boundary, target, remembered, ..CountMode::default() };
         if let Some(name) = mode.target_name() {
             let n = mode.count(&self.tabs[i].scene.document);
             self.command_line.push_output(&format!("{name} ...... {n}"));
@@ -566,13 +577,16 @@ impl OpenCADStudio {
         self.tabs[i].dirty = true;
     }
 
-    /// Zoom to a reference (← / →, an error of the report).
+    /// Zoom to a counted object (← / →, an error of the report).
     fn zoom_to_insert(&mut self, i: usize, h: Handle) {
         let doc = &self.tabs[i].scene.document;
-        let Some(EntityType::Insert(ins)) = doc.get_entity(h) else { return };
-        let Some(corners) = codec::count::insert_corners(doc, ins, 0) else { return };
+        let Some(entity) = doc.get_entity(h) else { return };
+        let outline = codec::count::entity_outline(doc, entity);
+        if outline.iter().all(|part| part.is_empty()) {
+            return;
+        }
         let (mut lo, mut hi) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
-        for c in corners {
+        for c in outline.into_iter().flatten() {
             let p = glam::Vec3::new(c.x as f32, c.y as f32, c.z as f32);
             lo = lo.min(p);
             hi = hi.max(p);

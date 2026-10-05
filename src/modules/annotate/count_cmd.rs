@@ -144,8 +144,16 @@ impl CadCommand for CountCommand {
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        // The selection arrives whole after every pick: `1 found`, then
+        // `1 found, 2 total`.
+        let found = handles.iter().filter(|h| !self.targets.contains(h)).count();
+        let first = self.targets.is_empty();
         self.targets = handles;
-        CmdResult::ReportMeasurement(format!("{} found", self.targets.len()))
+        CmdResult::ReportMeasurement(if first {
+            format!("{found} found")
+        } else {
+            format!("{found} found, {} total", self.targets.len())
+        })
     }
 
     fn needs_entity_pick(&self) -> bool {
@@ -162,11 +170,13 @@ impl CadCommand for CountCommand {
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
         match self.picked.take() {
-            Some(EntityType::LwPolyline(pl)) if pl.is_closed && pl.vertices.len() >= 3 => {
+            Some(EntityType::LwPolyline(pl)) if codec::count::valid_boundary(&pl) => {
                 self.area_done(format!("O {:X}", handle.value()))
             }
-            // Anything else: the prompt again.
-            _ => CmdResult::NeedPoint,
+            _ => CmdResult::CancelWithMessage(
+                "Invalid count area boundary object. Select a closed polyline consisting of line segments and does not intersect itself."
+                    .into(),
+            ),
         }
     }
 
@@ -244,6 +254,8 @@ pub struct CountTableCommand {
     blocks: Vec<String>,
     others: [usize; 3],
     names: Vec<String>,
+    /// Listing lines still to show after `Press ENTER to continue:`.
+    pending: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -251,36 +263,73 @@ enum TableStep {
     Names,
     List,
     Point,
+    Page,
 }
 
 impl CountTableCommand {
     pub fn new(blocks: Vec<String>, others: [usize; 3]) -> Self {
-        Self { step: TableStep::Names, blocks, others, names: Vec::new() }
+        Self { step: TableStep::Names, blocks, others, names: Vec::new(), pending: Vec::new() }
     }
 
     /// The palette's Create Table: the blocks are chosen, only the point is asked.
     pub fn placing(names: Vec<String>) -> Self {
-        Self { step: TableStep::Point, blocks: Vec::new(), others: [0; 3], names }
+        Self { step: TableStep::Point, blocks: Vec::new(), others: [0; 3], names, pending: Vec::new() }
     }
 
-    /// `?`: the defined blocks matching the pattern and the summary.
-    fn listing(&self, pattern: &str) -> String {
+    /// `?`: the defined blocks matching the pattern, paged by 22 lines
+    /// (`Press ENTER to continue:` in between), then the summary.
+    fn listing(&mut self, pattern: &str) -> CmdResult {
         let pattern = if pattern.trim().is_empty() { "*" } else { pattern.trim() };
-        let mut out = String::from("Defined blocks.");
-        for name in &self.blocks {
-            if pattern.split(',').any(|p| crate::io::xref_model::wildcard_match(name, p.trim())) {
-                out.push_str(&format!("\n  \"{name}\""));
-            }
+        let mut names: Vec<&String> = self
+            .blocks
+            .iter()
+            .filter(|name| pattern.split(',').any(|p| crate::io::xref_model::wildcard_match(name, p.trim())))
+            .collect();
+        names.sort_by_key(|name| list_order(name));
+        self.pending = std::iter::once(String::new())
+            .chain(std::iter::once("Defined blocks.".to_string()))
+            .chain(names.iter().map(|name| format!("  {:<31}", format!("\"{name}\""))))
+            .collect();
+        self.next_page()
+    }
+
+    fn next_page(&mut self) -> CmdResult {
+        let page: Vec<String> = self.pending.drain(..self.pending.len().min(22)).collect();
+        if !self.pending.is_empty() {
+            self.step = TableStep::Page;
+            return CmdResult::ReportMeasurement(page.join("
+"));
         }
-        out.push_str(&format!(
-            "\n\nUser      External     Dependent    Unnamed\nBlocks    References   Blocks       Blocks\n{:>5}{:>11}{:>13}{:>12}",
+        CmdResult::Measurement(format!(
+            "{}
+
+User     External     Dependent   Unnamed
+Blocks   References   Blocks      Blocks
+{:>5}{:>10}{:>12}{:>12}
+",
+            page.join("
+"),
             self.blocks.len(),
             self.others[0],
             self.others[1],
             self.others[2]
-        ));
-        out
+        ))
     }
+}
+
+/// Block listing order: `_` first, then `-`, space and other punctuation,
+/// digits, and letters without case.
+fn list_order(name: &str) -> Vec<(u32, u32)> {
+    name.chars()
+        .map(|c| match c {
+            '_' => (0, 0),
+            '-' => (1, 0),
+            ' ' => (2, 0),
+            '0'..='9' => (4, c as u32),
+            c if c.is_alphabetic() => (5, c.to_lowercase().next().unwrap_or(c) as u32),
+            c => (3, c as u32),
+        })
+        .collect()
 }
 
 impl CadCommand for CountTableCommand {
@@ -293,6 +342,7 @@ impl CadCommand for CountTableCommand {
             TableStep::Names => "Enter block name(s) to include or [?] <all blocks>:".into(),
             TableStep::List => "Enter block(s) to list <*>:".into(),
             TableStep::Point => "Specify insertion point:".into(),
+            TableStep::Page => "Press ENTER to continue:".into(),
         }
     }
 
@@ -327,7 +377,8 @@ impl CadCommand for CountTableCommand {
                 self.step = TableStep::Point;
                 CmdResult::NeedPoint
             }
-            TableStep::List => CmdResult::Measurement(self.listing(text)),
+            TableStep::List => self.listing(text),
+            TableStep::Page => self.next_page(),
             TableStep::Point => return None,
         })
     }

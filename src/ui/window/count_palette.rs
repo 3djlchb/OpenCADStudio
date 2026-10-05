@@ -33,7 +33,8 @@ pub enum CountTarget {
         matching: [bool; 3],
         picked: bool,
     },
-    /// Several picked objects counted as one group.
+    /// Picked objects (several, or one that is not a reference): the copies
+    /// of the group are counted.
     Group(Vec<Handle>),
 }
 
@@ -50,6 +51,10 @@ pub struct CountMode {
     pub cursor: Option<usize>,
     /// The scene geometry epoch the colouring was computed at.
     pub epoch: u64,
+    /// The area Entire model space set aside, for a later Current area.
+    pub remembered: Option<(Vec<[f64; 2]>, Option<(Handle, bool)>)>,
+    /// The result and count at `epoch` (recomputed when the drawing changes).
+    pub cache: Option<(CountResult, usize)>,
 }
 
 /// A count mode's result: the counted references and the overlapping
@@ -80,13 +85,35 @@ impl CountMode {
     }
 
     pub fn result(&self, doc: &CadDocument) -> CountResult {
+        match &self.cache {
+            Some((result, _)) => result.clone(),
+            None => self.compute(doc).0,
+        }
+    }
+
+    /// What the count shows: the counted references, or the copies of a group.
+    pub fn count(&self, doc: &CadDocument) -> usize {
+        match &self.cache {
+            Some((_, n)) => *n,
+            None => self.compute(doc).1,
+        }
+    }
+
+    /// The result and the count, worked out from the drawing.
+    pub fn compute(&self, doc: &CadDocument) -> (CountResult, usize) {
+        if let Some(CountTarget::Group(handles)) = &self.target {
+            let groups = codec::count::group_matches(doc, handles, self.area.as_deref());
+            let result = CountResult { counted: groups.concat(), errors: Vec::new(), overlapped: Vec::new() };
+            return (result, groups.len());
+        }
+        let result = self.block_result(doc);
+        let n = result.counted.len();
+        (result, n)
+    }
+
+    fn block_result(&self, doc: &CadDocument) -> CountResult {
         match &self.target {
-            None => CountResult::default(),
-            Some(CountTarget::Group(handles)) => CountResult {
-                counted: handles.iter().copied().filter(|h| doc.get_entity(*h).is_some()).collect(),
-                errors: Vec::new(),
-                overlapped: Vec::new(),
-            },
+            None | Some(CountTarget::Group(_)) => CountResult::default(),
             Some(CountTarget::Block { name, .. }) => {
                 let instances = self.instances(doc);
                 let key = self.key(&instances);
@@ -97,15 +124,6 @@ impl CountMode {
                     overlapped: instances.iter().filter(mine).filter_map(|i| i.duplicate_of).collect(),
                 }
             }
-        }
-    }
-
-    /// What the count shows: the counted references, or 1 for a group whose
-    /// objects all exist.
-    pub fn count(&self, doc: &CadDocument) -> usize {
-        match &self.target {
-            Some(CountTarget::Group(handles)) => usize::from(handles.iter().all(|h| doc.get_entity(*h).is_some())),
-            _ => self.result(doc).counted.len(),
         }
     }
 
@@ -137,6 +155,8 @@ pub struct CountPalette {
     pub color: i16,
     pub error_color: i16,
     pub service: bool,
+    /// The list's references for (document, geometry epoch, area).
+    pub list_cache: std::cell::RefCell<Option<(usize, u64, Option<Vec<[f64; 2]>>, std::rc::Rc<Vec<BlockInstance>>)>>,
 }
 
 impl Default for CountPalette {
@@ -153,6 +173,7 @@ impl Default for CountPalette {
             color: 3,
             error_color: 1,
             service: true,
+            list_cache: Default::default(),
         }
     }
 }
@@ -434,7 +455,12 @@ fn mode_view<'a>(palette: &'a CountPalette, mode: &'a CountMode, doc: &CadDocume
         let mut details = column![button(
             row![
                 crate::ui::icons::themed_success(CHECK_ICON, 12.0),
-                text(format!("{name}: {}", mode.count(doc))).size(12).width(Fill),
+                text(match mode.target {
+                    Some(CountTarget::Group(_)) => crate::tf!("Geometries: {}", mode.count(doc)).into_owned(),
+                    _ => format!("{name}: {}", mode.count(doc)),
+                })
+                .size(12)
+                .width(Fill),
             ]
             .spacing(6)
             .align_y(iced::Center),
@@ -488,16 +514,25 @@ pub fn view<'a>(
     palette: &'a CountPalette,
     mode: Option<&'a CountMode>,
     doc: &'a CadDocument,
+    epoch: u64,
     width: f32,
     auto_collapse: bool,
 ) -> Element<'a, Message> {
     let title_bar = crate::ui::dock::title_bar(PanelId::Count, crate::t!("Count palette").into_owned(), auto_collapse);
-    // ponytail: the list is recounted on every view; cache by geometry epoch
-    // if very large drawings make the palette slow.
     let body = match mode {
         Some(mode) if mode.target.is_some() => mode_view(palette, mode, doc),
         _ => {
-            let instances = codec::count::block_instances(doc, mode.and_then(|m| m.area.as_deref()));
+            let area = mode.and_then(|m| m.area.clone());
+            let key = (doc as *const CadDocument as usize, epoch);
+            let mut cache = palette.list_cache.borrow_mut();
+            let instances = match cache.as_ref() {
+                Some((d, e, a, list)) if (*d, *e) == key && *a == area => list.clone(),
+                _ => {
+                    let list = std::rc::Rc::new(codec::count::block_instances(doc, area.as_deref()));
+                    *cache = Some((key.0, key.1, area, list.clone()));
+                    list
+                }
+            };
             list_view(palette, &instances)
         }
     };

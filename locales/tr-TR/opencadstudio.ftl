@@ -5866,3 +5866,4 @@ count-feature =
     .toolbar-count = Sayım: __ocs_fmt_0__
     .overlap = Üst üste binen nesne
     .show-instances = Örnekleri göster
+    .geometries = Geometriler: __ocs_fmt_0__

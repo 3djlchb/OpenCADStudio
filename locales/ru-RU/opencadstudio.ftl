@@ -5944,3 +5944,4 @@ count-feature =
     .toolbar-count = Count: __ocs_fmt_0__
     .overlap = Overlapping object
     .show-instances = Show Count Instances
+    .geometries = Geometries: __ocs_fmt_0__

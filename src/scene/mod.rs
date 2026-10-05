@@ -4007,6 +4007,9 @@ impl Scene {
                             );
                         }
                     }
+                    if self.meshes.contains_key(&h) {
+                        material.diffuse = self.count_color(h, material.diffuse, bg);
+                    }
                     (h, material)
                 })
             })
@@ -4108,7 +4111,26 @@ impl Scene {
             return;
         }
         self.count_display = display;
+        self.hatch_cache.borrow_mut().clear();
+        self.recolor_meshes();
         self.bump_geometry_no_blocks();
+    }
+
+    /// The colour count mode gives an object drawn as part of `handle` (a
+    /// top-level entity): the count colours, else faded; unchanged outside
+    /// count mode.
+    pub(crate) fn count_color(&self, handle: Handle, color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
+        let Some(count) = &self.count_display else {
+            return color;
+        };
+        let [r, g, b, _] = if count.errors.contains(&handle) {
+            count.error_color
+        } else if count.counted.contains(&handle) {
+            count.color
+        } else {
+            return crate::scene::cache::block_cache::fade_toward_bg(color, bg);
+        };
+        [r, g, b, color[3]]
     }
 
     /// Fade the colours of wires that belong to entities outside the REFEDIT
@@ -4118,8 +4140,7 @@ impl Scene {
     fn apply_refedit_fade(&self, wires: &mut [WireModel], bg: [f32; 4]) {
         if let Some(count) = &self.count_display {
             for w in wires.iter_mut() {
-                let h = Self::handle_from_wire_name(&w.name);
-                w.color = match h {
+                w.color = match Self::handle_from_wire_name(&w.name) {
                     Some(h) if count.errors.contains(&h) => count.error_color,
                     Some(h) if count.counted.contains(&h) => count.color,
                     _ => crate::scene::cache::block_cache::fade_toward_bg(w.color, bg),
@@ -8744,6 +8765,14 @@ impl Scene {
                         &self.document,
                         self.material_base_dir.as_deref(),
                     );
+                }
+                if self.count_display.is_some() {
+                    let own = transformed.instance_color.or(set.display_color()).unwrap_or([1.0; 4]);
+                    let color = self.count_color(context.root_handle, own, self.current_bg());
+                    transformed.instance_color = Some(color);
+                    if let Some(material) = transformed.material.as_mut() {
+                        material.diffuse = color;
+                    }
                 }
                 transformed.instance_handle = Some(context.root_handle);
                 out.push(transformed);

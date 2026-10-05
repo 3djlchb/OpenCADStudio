@@ -3035,6 +3035,7 @@ impl OpenCADStudio {
                 &self.count_palette,
                 tab.count.as_ref(),
                 &tab.scene.document,
+                tab.scene.geometry_epoch,
                 width,
                 auto_collapse,
             ),
