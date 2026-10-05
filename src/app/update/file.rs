@@ -554,11 +554,14 @@ fn plot_scene_content(
 }
 
 impl OpenCADStudio {
-    /// Persist exact ACIS bodies and kernel-derived edge caches before saving.
+    /// Persist exact ACIS bodies, and an edge cache with them, for solids that
+    /// have no ACIS data before saving. A solid that has ACIS data keeps its
+    /// own wireframe cache: display edges are not written into a solid OCS
+    /// did not create or edit (those get their wires when they are built).
     fn sync_solid_models_for_save(&mut self, i: usize) {
         use codec::EntityType;
         let scene = &mut self.tabs[i].scene;
-        let targets: Vec<(codec::Handle, bool, bool)> = scene
+        let targets: Vec<(codec::Handle, bool)> = scene
             .document
             .entities()
             .filter_map(|entity| {
@@ -566,16 +569,12 @@ impl OpenCADStudio {
                     return None;
                 };
                 let h = solid.common.handle;
-                let needs_acis = !solid.acis_data.has_data();
-                let needs_wires = solid.wires.is_empty();
-                (needs_acis || needs_wires).then_some((h, needs_acis, needs_wires))
+                (!solid.acis_data.has_data()).then_some((h, solid.wires.is_empty()))
             })
             .collect();
-        for (h, needs_acis, needs_wires) in targets {
+        for (h, needs_wires) in targets {
             let body = scene.solid_models.get(&h);
-            let sat = needs_acis
-                .then(|| body.and_then(crate::scene::convert::acis_export::solid_to_sat))
-                .flatten();
+            let sat = body.and_then(crate::scene::convert::acis_export::solid_to_sat);
             let wires = needs_wires.then(|| {
                 if let Some(body) = body {
                     return crate::scene::model::solid_model::edge_wires(body);
