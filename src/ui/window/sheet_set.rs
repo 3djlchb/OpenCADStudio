@@ -754,7 +754,7 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
 
 /// Where the wizard writes the `.dst`.
 pub fn wizard_dst_path(w: &Wizard) -> String {
-    std::path::Path::new(&w.folder).join(format!("{}.dst", w.name.trim())).to_string_lossy().to_string()
+    ss::native_path(&std::path::Path::new(&w.folder).join(format!("{}.dst", w.name.trim())).to_string_lossy())
 }
 
 fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {

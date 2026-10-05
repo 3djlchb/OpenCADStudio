@@ -434,6 +434,16 @@ impl OpenCADStudio {
                     sync_wizard_draft(&mut w);
                     let set = w.draft.sheet_set().id().to_string();
                     let mut p = build_properties(&w.draft, &set, None);
+                    // The set is not written yet: show where it will be.
+                    for row in &mut p.rows {
+                        match row.key {
+                            RowKey::ReadOnly if row.label == "Sheet set data file" => {
+                                row.value = crate::ui::window::sheet_set::wizard_dst_path(&w)
+                            }
+                            RowKey::Folder(_) if row.value.is_empty() => row.value = w.folder.clone(),
+                            _ => {}
+                        }
+                    }
                     p.wizard = Some(Box::new(w));
                     self.sheet_set.dialog = Some(SsDialog::Properties(p));
                 }
@@ -684,8 +694,8 @@ impl OpenCADStudio {
             doc.set_sheet_set_data(&SheetSetData {
                 layout_handle: handle,
                 layout_name: reference.name,
-                sheet_dwg_name: path.clone(),
-                sheet_set_file_name: db.path.clone().unwrap_or_default(),
+                sheet_dwg_name: ss::native_path(&path),
+                sheet_set_file_name: ss::native_path(db.path.as_deref().unwrap_or_default()),
                 sheet_set_version: db.file_revision(),
                 update_count: previous.update_count + 1,
                 update_time: utc_stamp(),
@@ -888,9 +898,12 @@ impl OpenCADStudio {
         let mut db = w.draft.clone();
         db.path = Some(path.clone());
         let set = db.sheet_set().id().to_string();
-        if db.file_reference(&set, "NewSheetLocation").is_none() {
-            db.set_file_reference(&set, "NewSheetLocation", &w.folder);
-        }
+        // Written again now the `.dst` has a place, so it carries its relative path.
+        let location = db
+            .file_reference(&set, "NewSheetLocation")
+            .filter(|f| !f.is_empty())
+            .unwrap_or_else(|| w.folder.clone());
+        db.set_file_reference(&set, "NewSheetLocation", &location);
         // Existing drawings: a subset per folder, a sheet per chosen layout.
         if w.existing {
             for folder in &w.folders {
@@ -1061,7 +1074,7 @@ impl OpenCADStudio {
         let Some(sheet) = db.add_sheet(&f.component, &f.number, &title, "") else {
             return Task::none();
         };
-        let file = path.to_string_lossy().to_string();
+        let file = ss::native_path(&path.to_string_lossy());
         db.set_layout_reference(
             &sheet,
             "Layout",
@@ -1076,7 +1089,7 @@ impl OpenCADStudio {
             layout_handle: handle.to_lowercase(),
             layout_name,
             sheet_dwg_name: file.clone(),
-            sheet_set_file_name: dst,
+            sheet_set_file_name: ss::native_path(&dst),
             sheet_set_version: revision,
             update_count: 1,
             update_time: utc_stamp(),
