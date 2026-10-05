@@ -2866,8 +2866,6 @@ impl CadCommand for PrimitiveCommand {
                 ConeStep::BaseCenter
                     | ConeStep::BaseRadius
                     | ConeStep::EllipseFirst
-                    | ConeStep::Height
-                    | ConeStep::HeightAfterTopRadius
             );
         }
         if self.shape == Shape::Pyramid {
@@ -2875,15 +2873,32 @@ impl CadCommand for PrimitiveCommand {
                 self.pyramid_step,
                 PyramidStep::BaseCenter
                     | PyramidStep::BaseRadius
-                    | PyramidStep::Height
-                    | PyramidStep::HeightAfterTopRadius
             );
         }
         self.shape.rectangular()
             && matches!(
                 self.box_step,
-                BoxStep::FirstCorner | BoxStep::OppositeCorner | BoxStep::Height
+                BoxStep::FirstCorner | BoxStep::OppositeCorner
             )
+    }
+
+    fn dyn_commit_as_text(&self) -> bool {
+        if self.shape == Shape::Cone {
+            return matches!(
+                self.cone_step,
+                ConeStep::Height | ConeStep::HeightAfterTopRadius
+            );
+        }
+        if self.shape == Shape::Pyramid {
+            return matches!(
+                self.pyramid_step,
+                PyramidStep::Height | PyramidStep::HeightAfterTopRadius
+            );
+        }
+        if self.shape.rectangular() {
+            return matches!(self.box_step, BoxStep::Height);
+        }
+        self.height_step
     }
 
     fn on_text_input(&mut self, raw: &str) -> Option<CmdResult> {
