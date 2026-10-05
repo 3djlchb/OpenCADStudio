@@ -268,8 +268,63 @@ impl OpenCADStudio {
     /// After the drawing changes, count mode colours its references again.
     pub(in crate::app) fn refresh_count_if_stale(&mut self) {
         let i = self.active_tab;
-        if self.tabs[i].count.as_ref().is_some_and(|m| m.epoch != self.tabs[i].scene.geometry_epoch) {
-            self.apply_count_display(i);
+        let Some(mode) = self.tabs[i].count.as_ref().filter(|m| m.epoch != self.tabs[i].scene.geometry_epoch) else {
+            return;
+        };
+        if let Some((h, _)) = mode.boundary {
+            match self.tabs[i].scene.document.get_entity(h) {
+                // The boundary is gone (erased, undone): ask, or do what was
+                // chosen for good.
+                None => {
+                    if self.active_modal == Some(crate::app::ModalKind::CountInvalidArea) {
+                        return;
+                    }
+                    match self.count_palette.invalid_choice {
+                        1 => self.count_invalid_undo(i),
+                        2 => self.count_invalid_continue(i),
+                        _ => {
+                            self.count_palette.invalid_always = false;
+                            self.active_modal = Some(crate::app::ModalKind::CountInvalidArea);
+                        }
+                    }
+                    return;
+                }
+                // An edited boundary moves the area with it.
+                Some(EntityType::LwPolyline(pl)) => {
+                    let ring: Vec<[f64; 2]> = pl.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
+                    if let Some(mode) = self.tabs[i].count.as_mut() {
+                        mode.area = Some(ring);
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        self.apply_count_display(i);
+    }
+
+    /// Invalid Area › Undo (also ✕ and Cancel): the change that took the
+    /// boundary away is undone.
+    fn count_invalid_undo(&mut self, i: usize) {
+        self.undo_active_tab();
+        self.apply_count_display(i);
+    }
+
+    /// Invalid Area › Continue: the area goes, the count covers all of model space.
+    fn count_invalid_continue(&mut self, i: usize) {
+        if let Some(mode) = self.tabs[i].count.as_mut() {
+            mode.area = None;
+            mode.boundary = None;
+        }
+        self.apply_count_display(i);
+    }
+
+    fn close_invalid_area(&mut self, choice: u8) {
+        if self.active_modal == Some(crate::app::ModalKind::CountInvalidArea) {
+            self.close_active_modal();
+        }
+        if self.count_palette.invalid_always {
+            self.count_palette.invalid_choice = choice;
+            self.persist_settings_if_changed();
         }
     }
 
@@ -755,6 +810,15 @@ impl OpenCADStudio {
                 return self.start_count_command(i, Box::new(command), "COUNT");
             }
             CountMsg::Field => return self.dispatch_command("COUNTFIELD"),
+            CountMsg::InvalidAlways(v) => self.count_palette.invalid_always = v,
+            CountMsg::InvalidUndo => {
+                self.close_invalid_area(1);
+                self.count_invalid_undo(i);
+            }
+            CountMsg::InvalidContinue => {
+                self.close_invalid_area(2);
+                self.count_invalid_continue(i);
+            }
         }
         Task::none()
     }

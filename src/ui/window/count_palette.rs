@@ -153,6 +153,11 @@ pub struct CountPalette {
     pub color: i16,
     pub error_color: i16,
     pub service: bool,
+    /// The Invalid Area dialog's "always" box while it is open.
+    pub invalid_always: bool,
+    /// What a lost count boundary does without asking: 0 ask, 1 undo, 2 go
+    /// on with all of model space (kept with the user settings).
+    pub invalid_choice: u8,
     /// The list's references for (document, geometry epoch, area).
     pub list_cache: std::cell::RefCell<Option<(usize, u64, Option<Vec<[f64; 2]>>, std::rc::Rc<Vec<BlockInstance>>)>>,
 }
@@ -171,6 +176,8 @@ impl Default for CountPalette {
             color: 3,
             error_color: 1,
             service: true,
+            invalid_always: false,
+            invalid_choice: 0,
             list_cache: Default::default(),
         }
     }
@@ -217,6 +224,12 @@ pub enum CountMsg {
     Select,
     Field,
     Close,
+    /// The Invalid Area dialog: undo the boundary change (also its ✕ and
+    /// Cancel), or go on counting all of model space; `InvalidAlways` is its
+    /// "always perform my current choice" box.
+    InvalidUndo,
+    InvalidContinue,
+    InvalidAlways(bool),
 }
 
 fn msg(m: CountMsg) -> Message {
@@ -609,3 +622,57 @@ pub fn aci_rgba(index: i16) -> [f32; 4] {
     crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::from_index(index))
 }
 
+
+/// The Invalid Area dialog, shown when the count area's boundary is gone.
+pub fn invalid_area_view<'a>(palette: &CountPalette, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    let action = |title: String, detail: String, m: CountMsg| -> Element<'a, Message> {
+        button(
+            row![
+                text("→").size(16).style(|theme: &Theme| text::Style { color: Some(theme.palette().primary.base.color) }),
+                column![text(title).size(13), text(detail).size(11).style(muted_style)].spacing(2),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .on_press(msg(m))
+        .width(Fill)
+        .padding([10, 12])
+        .style(button_style(false))
+        .into()
+    };
+    column![
+        row![
+            crate::ui::icons::themed_warning(WARNING_ICON, 20.0),
+            text(crate::t!("The changes to count boundary have resulted to an invalid count area. What do you want to do?"))
+                .size(14)
+                .width(Fill),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+        action(
+            crate::t!("Undo the changes to the count boundary").into_owned(),
+            crate::t!("The last change is undone; the boundary and the count area come back.").into_owned(),
+            CountMsg::InvalidUndo,
+        ),
+        action(
+            crate::t!("Continue and count the entire model space").into_owned(),
+            crate::t!("The count area is dropped; counting goes on in all of model space.").into_owned(),
+            CountMsg::InvalidContinue,
+        ),
+        row![
+            checkbox(palette.invalid_always)
+                .label(crate::t!("Always perform my current choice").into_owned())
+                .text_size(12)
+                .size(14)
+                .on_toggle(|v| msg(CountMsg::InvalidAlways(v))),
+            Space::new().width(Fill),
+            crate::ui::style::form::dialog_button(crate::t!("Cancel"), msg(CountMsg::InvalidUndo), false),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    ]
+    .spacing(10)
+    .padding([12, 14])
+    .width(sizing.width)
+    .into()
+}

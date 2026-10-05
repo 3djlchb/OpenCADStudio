@@ -3468,6 +3468,15 @@ impl Scene {
             self.associative_hatch_source_cache.borrow_mut().take();
         }
         let mut changes = changes.to_vec();
+        // A table's drawing (its *T block) follows the table's cells, sizes
+        // and styles; it is left alone while it already matches.
+        for (handle, kind) in &changes {
+            if !matches!(kind, ChangeKind::Removed)
+                && matches!(self.document.get_entity(*handle), Some(EntityType::Table(_)))
+            {
+                self.document.refresh_table_block(*handle);
+            }
+        }
         // A restyle (layer on/off, colour, text or dimension style) moves no
         // geometry, so nothing measured from it is re-resolved: an
         // association that disagrees with its dimension would otherwise

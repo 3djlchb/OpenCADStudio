@@ -1943,6 +1943,7 @@ pub enum ModalKind {
     GeometricTolerance,
     AttDef,
     AttDefEdit,
+    CountInvalidArea,
     Field,
     DraftingSettings,
     AutoConstrainSettings,

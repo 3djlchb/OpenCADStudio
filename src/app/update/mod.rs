@@ -8524,6 +8524,10 @@ impl OpenCADStudio {
             }
 
             Message::CloseModal => {
+                // The Invalid Area dialog's ✕ undoes the boundary change, as its Cancel does.
+                if self.active_modal == Some(super::ModalKind::CountInvalidArea) {
+                    return self.update(Message::Count(crate::ui::window::count_palette::CountMsg::InvalidUndo));
+                }
                 if self.active_modal == Some(super::ModalKind::Field) {
                     self.close_field_dialog();
                     return Task::none();

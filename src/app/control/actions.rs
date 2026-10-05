@@ -933,7 +933,7 @@ impl OpenCADStudio {
             // layer|scale|mirror>:NAME", "create_table", "check=NAME:1",
             // "all=1", "table_cancel", "table_insert", "back", "match=<0|1|2>:1",
             // "details", "errors", "error=<n>", "area", "prev", "next", "select",
-            // "field", "close".
+            // "field", "close", "invalid_undo", "invalid_continue", "invalid_always=1".
             "count_palette" => {
                 use crate::ui::window::count_palette::{CountMsg as M, RowAction};
                 let value = string(req, "value")?;
@@ -993,6 +993,10 @@ impl OpenCADStudio {
                     "select" => M::Select,
                     "field" => M::Field,
                     "close" => M::Close,
+                    // The Invalid Area dialog.
+                    "invalid_undo" => M::InvalidUndo,
+                    "invalid_continue" => M::InvalidContinue,
+                    "invalid_always" => M::InvalidAlways(arg == "1"),
                     _ => return Err(bad()),
                 })
             }

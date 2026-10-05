@@ -5546,6 +5546,13 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Overlapping object" => Some(("count-feature", "overlap")),
         "Show Count Instances" => Some(("count-feature", "show-instances")),
         "Geometries: {}" => Some(("count-feature", "geometries")),
+        "Count - Invalid Area" => Some(("count-feature", "invalid-title")),
+        "The changes to count boundary have resulted to an invalid count area. What do you want to do?" => Some(("count-feature", "invalid-message")),
+        "Undo the changes to the count boundary" => Some(("count-feature", "invalid-undo")),
+        "The last change is undone; the boundary and the count area come back." => Some(("count-feature", "invalid-undo-detail")),
+        "Continue and count the entire model space" => Some(("count-feature", "invalid-continue")),
+        "The count area is dropped; counting goes on in all of model space." => Some(("count-feature", "invalid-continue-detail")),
+        "Always perform my current choice" => Some(("count-feature", "invalid-always")),
         _ => None,
     }
 }

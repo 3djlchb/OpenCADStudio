@@ -622,6 +622,9 @@ pub struct UserSettings {
     /// COUNTSERVICE (default on).
     #[serde(default = "default_true")]
     pub count_service: bool,
+    /// Count - Invalid Area: 0 ask, 1 undo, 2 count all of model space.
+    #[serde(default)]
+    pub count_invalid_area: u8,
 }
 
 /// A block the Blocks palette lists from outside the current drawing (a
@@ -873,6 +876,7 @@ impl Default for UserSettings {
             count_color: 3,
             count_error_color: 1,
             count_service: true,
+            count_invalid_area: 0,
         }
     }
 }

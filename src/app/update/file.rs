@@ -748,6 +748,7 @@ impl OpenCADStudio {
             count_color: self.count_palette.color,
             count_error_color: self.count_palette.error_color,
             count_service: self.count_palette.service,
+            count_invalid_area: self.count_palette.invalid_choice,
         }
     }
 
@@ -882,6 +883,7 @@ impl OpenCADStudio {
         self.count_palette.color = s.count_color;
         self.count_palette.error_color = s.count_error_color;
         self.count_palette.service = s.count_service;
+        self.count_palette.invalid_choice = s.count_invalid_area.min(2);
         self.block_palette.recent = s.block_recent.clone();
         self.block_palette.favorites = s.block_favorites.clone();
         self.block_palette.libraries = s.block_libraries.clone();
