@@ -11,20 +11,33 @@ use std::{
     collections::{HashMap, VecDeque},
     fs::{File, OpenOptions},
     io::{self, BufReader, Read, Write},
-    net::TcpStream,
+    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::mpsc::{Receiver, TryRecvError},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
+#[cfg(any(windows, target_os = "macos"))]
+use std::collections::HashSet;
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
 const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
+/// Pinned content digest of [`tool_definitions`].
+///
+/// The `tool_schema_digest_is_pinned` test fails whenever the MCP tool surface
+/// changes, so schema drift (new params, renamed tools) is always a conscious,
+/// reviewed edit — and clients can detect a stale bridge by comparing digests.
+#[cfg(test)]
+const TOOL_SCHEMA_DIGEST: &str = "bb2640277721f23e08cf17085bd9204753f810ece27abf31402be876e2c4683d";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
+/// Freshness for resources/*, which vary as sessions open and snapshots
+/// land. Tools and discovery are static by comparison, so they keep the hour.
+const RESOURCE_TTL_MS: u64 = 60_000;
 const TASK_TTL_MS: u64 = 3_600_000;
-pub(crate) const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. ARCHITECTURAL VECTORIZATION DIRECTIVE: When converting or vectorizing a floorplan from an image or sketch: 1. Attach reference images as Xref underlays via embed_image on layer _XREF and lock it. 2. NEVER draw loose lines or arcs for doors or windows; always query records (collection: 'block_records') and insert Block References (type: 'INSERT') on A-DOOR and A-GLAZ. If a block is missing, draft standard geometry at origin (0,0) and register it with block_define before inserting. 3. Categorize layers cleanly: A-WALL-EXTR, A-WALL-INTR, A-WALL-HATCH, A-DOOR, A-GLAZ, A-ANNO-TEXT, A-ANNO-DIMS. 4. Always verify drafted geometry using ocs_capture with annotate: true (Set-of-Marks entity IDs) and diff: true (visual dirty streaming). ocs_capture operates quietly in background and overlapped window states without stealing user focus. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, supports diff: true for streaming dirty visual regions, and provides multiscale DeepZoom pyramidal tiling via tile: {level, x, y} or cad://session/{session_id}/pyramid/manifest.json and cad://session/{session_id}/tile/{level}/{x}/{y}.png. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest.";
+pub(crate) const INSTRUCTIONS: &str = "Call ocs_sessions, then pass its session_id as ocs_session_id to ocs_read, ocs_execute and ocs_capture. Read capabilities to discover the complete CAD automation surface. Call record_schema to discover every record type, property path, JSON type, enum, unit, constraint and write rule before editing unfamiliar data. Use records to inspect every serializable entity, object, table, header and document record; filter with RFC 6901 JSON Pointer paths. Use set_properties for atomic, type-checked record edits and preserve document_id, revision and request_id. Use commands with parameters.name for a command manifest. Use batch when several steps are known, and request changed_entities when resulting geometry is needed. For interactive work, call start and follow state.command.accepts, options and input_example. To have the person at the screen pick entities for you, call user_select and keep polling until it completes; running means they are still picking. A run.cmd contains the command name followed by prompt answers separated by spaces; points use x,y or x,y,z. After a timeout, query the existing operation and never replay a mutation with a new request_id. waiting_input and running are not completion. Let OCS and its geometry kernel calculate geometry; use query near, contains_point and intersections for exact relationships. ARCHITECTURAL VECTORIZATION DIRECTIVE: When converting or vectorizing a floorplan from an image or sketch: 1. Attach reference images as Xref underlays via embed_image on layer _XREF and lock it. 2. NEVER draw loose lines or arcs for doors or windows; always query records (collection: 'block_records') and insert Block References (type: 'INSERT') on A-DOOR and A-GLAZ. If a block is missing, draft standard geometry at origin (0,0) and register it with block_define before inserting. 3. Categorize layers cleanly: A-WALL-EXTR, A-WALL-INTR, A-WALL-HATCH, A-DOOR, A-GLAZ, A-ANNO-TEXT, A-ANNO-DIMS. 4. Always verify drafted geometry using ocs_capture with annotate: true (Set-of-Marks entity IDs) and diff: true (visual dirty streaming). ocs_capture operates quietly in background and overlapped window states without stealing user focus. Viewports and captured snapshots are available as MCP resources under cad://session/{session_id}/viewport.png and cad://session/{session_id}/snapshot/{hash}.png; ocs_capture accepts delivery: 'resource' to avoid large inline base64 payloads, supplies standardized spatial grounding in _spatial, supports diff: true for streaming dirty visual regions, and provides multiscale DeepZoom pyramidal tiling via tile: {level, x, y} or cad://session/{session_id}/pyramid/manifest.json and cad://session/{session_id}/tile/{level}/{x}/{y}.png. Before delivery call audit with the intended target_format and target_version; use save_verified with an explicit absolute path to save, reopen, hash and compare the semantic manifest. When you first connect, announce the build you are working with to the user from the `bridge` object on ocs_sessions states and hello/capabilities responses (OpenCADStudio version, build_rev, tool_schema digest); repeat the announcement if a later handshake reports a different build.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -138,6 +151,118 @@ struct Descriptor {
     session_id: String,
     port: u16,
     token: String,
+    /// GUI process id when the descriptor writer knows it. Used to skip dead
+    /// sessions without a (possibly hanging) TCP probe; absent on legacy
+    /// files, which keep the old probe path.
+    #[serde(default)]
+    pid: Option<u64>,
+}
+
+/// True when `pid` currently exists. Linux checks /proc (no spawn, no new
+/// dependencies); other platforms go through one shared snapshot per
+/// [`descriptors`] pass (see below) instead of per-pid spawns.
+#[cfg(target_os = "linux")]
+fn pid_alive(pid: u64) -> bool {
+    // Fail open where /proc is unavailable (containers, chroots): without it
+    // every pid would read "dead" and live sessions would be dropped en masse.
+    Path::new("/proc").exists() && Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// One snapshot of all live PIDs. `None` on any failure so callers fail open
+/// (treat every descriptor as alive) instead of dropping live sessions
+/// because enumeration broke.
+#[cfg(windows)]
+fn live_pids_snapshot() -> Option<HashSet<u64>> {
+    let output = Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut set = HashSet::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut fields = line.split("\",\"");
+        fields.next()?;
+        if let Some(pid) = fields
+            .next()
+            .and_then(|field| field.trim_matches('"').parse::<u64>().ok())
+        {
+            set.insert(pid);
+        }
+    }
+    (!set.is_empty()).then_some(set)
+}
+
+/// macOS has no /proc: same one-snapshot approach as Windows via `ps`.
+#[cfg(target_os = "macos")]
+fn live_pids_snapshot() -> Option<HashSet<u64>> {
+    let output = Command::new("ps").args(["-Ao", "pid="]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut set = HashSet::new();
+    for token in String::from_utf8_lossy(&output.stdout).split_whitespace() {
+        if let Ok(pid) = token.parse::<u64>() {
+            set.insert(pid);
+        }
+    }
+    (!set.is_empty()).then_some(set)
+}
+
+/// Process snapshots cost a spawn (~100ms), but `ocs_sessions` can run every
+/// agent turn — cache each snapshot briefly. Failures cache as `None`, which
+/// keeps the fail-open behavior below.
+#[cfg(any(windows, target_os = "macos"))]
+const PID_SNAPSHOT_TTL: Duration = Duration::from_secs(10);
+
+#[cfg(any(windows, target_os = "macos"))]
+std::thread_local! {
+    static PID_SNAPSHOT_CACHE: std::cell::RefCell<(Instant, Option<HashSet<u64>>)> =
+        std::cell::RefCell::new((Instant::now() - PID_SNAPSHOT_TTL - Duration::from_secs(1), None));
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn live_pids_cached() -> Option<HashSet<u64>> {
+    PID_SNAPSHOT_CACHE.with(|cache| {
+        {
+            let (stamp, cached) = &*cache.borrow();
+            if stamp.elapsed() < PID_SNAPSHOT_TTL {
+                return cached.clone();
+            }
+        }
+        let fresh = live_pids_snapshot();
+        *cache.borrow_mut() = (Instant::now(), fresh.clone());
+        fresh
+    })
+}
+
+/// Drop the cached PID snapshot so the next discovery pass enumerates
+/// fresh. Called after spawning a GUI: without this, the pre-spawn snapshot
+/// does not contain the newborn pid, and the corpse cleanup below would
+/// delete its just-written descriptor as "dead on arrival".
+#[cfg(any(windows, target_os = "macos"))]
+fn live_pids_invalidate() {
+    PID_SNAPSHOT_CACHE.with(|cache| {
+        *cache.borrow_mut() = (
+            Instant::now() - PID_SNAPSHOT_TTL - Duration::from_secs(1),
+            None,
+        );
+    });
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn live_pids_invalidate() {}
+
+/// Descriptors younger than this are never deleted, even when their pid is
+/// missing from the snapshot: the snapshot may predate the spawn, and slow
+/// starters write late. Deletion stays for genuinely old corpses.
+const DESCRIPTOR_GRACE: Duration = Duration::from_secs(120);
+
+/// Whether a pid missing from the snapshot authorizes deletion. Pure
+/// predicate so the staleness rule is unit-testable: only old files go.
+fn stale_snapshot_may_delete(missing_from_snapshot: bool, file_age: Duration) -> bool {
+    missing_from_snapshot && file_age >= DESCRIPTOR_GRACE
 }
 
 struct GuiClient {
@@ -145,6 +270,105 @@ struct GuiClient {
     state: Value,
     client_id: String,
     batches: VecDeque<BatchExecution>,
+    /// MCP request id (as string) -> GUI request id for ops still pending
+    /// server-side. Lets an idle-arriving `notifications/cancelled` find
+    /// the GUI op to dismiss. Entries leave on terminal responses and
+    /// dismissals; abandoned entries mirror GUI sessions that outlive
+    /// interest (pre-existing behavior, two small strings each).
+    inflight: HashMap<String, String>,
+    /// GUI request ids dismissed by cancel/timeout: late completions and
+    /// re-polls answer `cancelled` without touching the GUI. Capped.
+    dismissed: VecDeque<String>,
+}
+
+/// Reader-thread inbox for stdin lines. The reader never writes: the main
+/// loop (and, during waits, the wait loop) is the only consumer, so stdout
+/// stays single-writer. Non-cancel lines met during a wait are stowed in
+/// `backlog` and handled in order once the wait ends.
+struct CancelPump {
+    rx: Receiver<Result<String, String>>,
+    backlog: VecDeque<String>,
+}
+
+enum PumpEvent {
+    Cancelled,
+    Quiet,
+}
+
+impl CancelPump {
+    fn next(&mut self) -> Option<String> {
+        if let Some(line) = self.backlog.pop_front() {
+            return Some(line);
+        }
+        match self.rx.recv() {
+            Ok(Ok(line)) => Some(line),
+            Ok(Err(error)) => {
+                eprintln!("MCP input error: {error}");
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Drain newly arrived lines for up to `quantum`: consume a cancel naming
+    /// `mkey`, stow everything else in order. Never blocks past the quantum.
+    fn wait_line(&mut self, quantum: Duration, mkey: Option<&str>) -> PumpEvent {
+        let deadline = Instant::now() + quantum;
+        loop {
+            match self.rx.try_recv() {
+                Ok(Ok(line)) => {
+                    if mkey.is_some_and(|key| is_cancel_for(&line, key)) {
+                        return PumpEvent::Cancelled;
+                    }
+                    self.backlog.push_back(line);
+                }
+                // Reader gone or input broken: end the wait quietly; the
+                // main loop observes the closed channel right after.
+                Ok(Err(_)) | Err(TryRecvError::Disconnected) => return PumpEvent::Quiet,
+                Err(TryRecvError::Empty) => {
+                    if Instant::now() >= deadline {
+                        return PumpEvent::Quiet;
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+    }
+}
+
+/// MCP request-id key for cancel matching. String and number ids stay
+/// distinct (`7` vs `"7"`): both sides stringify the same JSON value.
+fn mcp_key(id: &Value) -> String {
+    id.to_string()
+}
+
+fn is_cancel_for(line: &str, mkey: &str) -> bool {
+    let Ok(message) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    if message.get("method").and_then(Value::as_str) != Some("notifications/cancelled") {
+        return false;
+    }
+    message
+        .get("params")
+        .and_then(|params| params.get("requestId"))
+        .is_some_and(|id| id.to_string() == mkey)
+}
+
+fn wait_deadline(op: &str, wait_seconds: f64) -> Duration {
+    let capped = if matches!(op, "user_select" | "getpoint") {
+        wait_seconds.clamp(0.0, INTERACTIVE_MAX_WAIT.as_secs_f64())
+    } else {
+        wait_seconds.clamp(0.0, 60.0)
+    };
+    Duration::from_secs_f64(capped)
+}
+
+/// Only a wait that actually reaches the interactive ceiling dismisses the
+/// prompt. Shorter waits return `running` so the agent can re-poll; without
+/// this distinction the first short poll would kill every interactive op.
+fn interactive_timeout(wait_seconds: f64) -> bool {
+    wait_seconds >= INTERACTIVE_MAX_WAIT.as_secs_f64()
 }
 
 struct BatchExecution {
@@ -167,6 +391,9 @@ struct McpTask {
     last_updated_at: String,
     result: Option<Value>,
     error: Option<Value>,
+    /// Cooperative cancel acknowledged: polls report `cancelled` and late
+    /// completions are discarded (checked before result/error).
+    cancelled: bool,
 }
 
 struct StoredTask {
@@ -376,6 +603,23 @@ impl ResourceStore {
     }
 }
 
+/// (mtime, byte length) of this executable. A rebuild changes at least one of
+/// the two, so a mismatch means this bridge serves a stale tool schema.
+fn exe_fingerprint() -> Option<(SystemTime, u64)> {
+    let exe = std::env::current_exe().ok()?;
+    let meta = std::fs::metadata(exe).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// True when both fingerprints are known and differ (unknown counts as same
+/// to avoid false-positive exits on locked-down filesystems).
+fn exe_superseded(baseline: &Option<(SystemTime, u64)>) -> bool {
+    match (baseline, &exe_fingerprint()) {
+        (Some(before), Some(now)) => before != now,
+        _ => false,
+    }
+}
+
 fn random_id() -> Result<String, String> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
@@ -427,42 +671,101 @@ fn private_descriptor(_: &Path) -> bool {
     true
 }
 
-fn exchange(descriptor: &Descriptor, request: Value, timeout: Duration) -> Result<Value, String> {
+/// Tool-call failure split for error routing: Tool-domain failures carry
+/// model-actionable guidance and stay `isError` results (SEP-1303); bridge
+/// and GUI infrastructure failures (nothing the model can fix) become
+/// JSON-RPC errors. `From<String>` defaults to Tool so existing sites keep
+/// working unchanged; infrastructure sites opt in explicitly.
+#[derive(Debug)]
+enum CallError {
+    Tool(String),
+    Infra(String),
+    /// Client cancelled the in-flight request: send nothing back.
+    Cancelled,
+}
+
+/// Interactive picks may legitimately take a human minutes; everything else
+/// keeps the 60 s clamp. This bounds a single call; agents re-poll with
+/// small waits by design.
+const INTERACTIVE_MAX_WAIT: Duration = Duration::from_secs(600);
+
+impl From<String> for CallError {
+    fn from(message: String) -> Self {
+        CallError::Tool(message)
+    }
+}
+
+impl From<&str> for CallError {
+    fn from(message: &str) -> Self {
+        CallError::Tool(message.to_string())
+    }
+}
+
+// Collapses back to String where the caller maps everything to one code
+// anyway (resources/read not-found codes); the routing decision is made
+// by the caller, not the classification.
+impl From<CallError> for String {
+    fn from(error: CallError) -> Self {
+        error.message().to_string()
+    }
+}
+
+impl CallError {
+    fn message(&self) -> &str {
+        match self {
+            CallError::Tool(message) | CallError::Infra(message) => message,
+            CallError::Cancelled => "cancelled by client",
+        }
+    }
+
+    fn infra(message: impl ToString) -> Self {
+        CallError::Infra(message.to_string())
+    }
+}
+
+fn exchange(descriptor: &Descriptor, request: Value, timeout: Duration) -> Result<Value, CallError> {
     let mut object = request
         .as_object()
         .cloned()
-        .ok_or_else(|| "GUI request must be an object".to_string())?;
+        .ok_or_else(|| CallError::infra("GUI request must be an object"))?;
     object.insert("token".into(), Value::String(descriptor.token.clone()));
     object.insert(
         "session_id".into(),
         Value::String(descriptor.session_id.clone()),
     );
     object.insert("protocol".into(), Value::from(1));
-    let mut wire = serde_json::to_vec(&Value::Object(object)).map_err(|e| e.to_string())?;
+    let mut wire = serde_json::to_vec(&Value::Object(object))
+        .map_err(CallError::infra)?;
     wire.push(b'\n');
     if wire.len() > MAX_REQUEST {
-        return Err("Request exceeds 1 MiB".into());
+        // Caller-caused (batch too big): model-actionable, stays Tool.
+        return Err("Request exceeds 1 MiB".to_string().into());
     }
 
-    let mut stream =
-        TcpStream::connect(("127.0.0.1", descriptor.port)).map_err(|error| error.to_string())?;
+    let mut stream = TcpStream::connect_timeout(
+        &SocketAddr::from(([127, 0, 0, 1], descriptor.port)),
+        timeout,
+    )
+    .map_err(CallError::infra)?;
     stream
         .set_read_timeout(Some(timeout))
-        .map_err(|error| error.to_string())?;
+        .map_err(CallError::infra)?;
     stream
         .set_write_timeout(Some(timeout))
-        .map_err(|error| error.to_string())?;
-    stream.write_all(&wire).map_err(|error| error.to_string())?;
+        .map_err(CallError::infra)?;
+    stream.write_all(&wire).map_err(CallError::infra)?;
 
     let mut response = String::new();
     BufReader::new(stream)
         .take(MAX_RESPONSE + 1)
         .read_to_string(&mut response)
-        .map_err(|error| error.to_string())?;
+        .map_err(CallError::infra)?;
     if response.is_empty() || response.len() as u64 > MAX_RESPONSE {
-        return Err("No valid OCS response; query request_id before retrying a mutation".into());
+        return Err(CallError::infra(
+            "No valid OCS response; query request_id before retrying a mutation",
+        ));
     }
-    serde_json::from_str(response.trim_end()).map_err(|error| error.to_string())
+    serde_json::from_str(response.trim_end()).map_err(CallError::infra)
 }
 
 fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
@@ -479,6 +782,8 @@ fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
         .collect();
     paths.sort();
 
+    #[cfg(any(windows, target_os = "macos"))]
+    let live_pids = live_pids_cached();
     let mut found = Vec::new();
     for path in paths {
         if !private_descriptor(&path) {
@@ -490,6 +795,48 @@ fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
         let Ok(descriptor) = serde_json::from_str::<Descriptor>(&text) else {
             continue;
         };
+        // A dead GUI leaves its descriptor file behind; its TCP port may hang
+        // instead of refusing, which used to stall discovery past client
+        // timeouts. Skip (and delete) pid-verified corpses before probing.
+        // Deletion waits out DESCRIPTOR_GRACE: the PID snapshot may predate
+        // a spawn, and a newborn pid missing from it must never read "dead".
+        // Unknown file age counts as newborn (fail open, probe instead).
+        let file_age = std::fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+            .unwrap_or(Duration::ZERO);
+        let pid_dead = match descriptor.pid {
+            Some(pid) => {
+                #[cfg(target_os = "linux")]
+                {
+                    !pid_alive(pid)
+                }
+                #[cfg(any(windows, target_os = "macos"))]
+                {
+                    match &live_pids {
+                        None => false,
+                        Some(set) => {
+                            stale_snapshot_may_delete(!set.contains(&pid), file_age)
+                        }
+                    }
+                }
+                #[cfg(not(any(
+                    target_os = "linux",
+                    windows,
+                    target_os = "macos"
+                )))]
+                {
+                    let _ = pid;
+                    false
+                }
+            }
+            None => false,
+        };
+        if pid_dead {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
         let Ok(state) = exchange(&descriptor, json!({"op":"hello"}), Duration::from_secs(1)) else {
             continue;
         };
@@ -514,6 +861,76 @@ fn log_file() -> Result<File, String> {
         .map_err(|error| error.to_string())
 }
 
+/// A launch already in flight keeps its claim here so concurrent
+/// `ocs_sessions(launch_if_none: true)` calls wait for the same GUI instead
+/// of spawning one window each. Content is `{"pid":..,"started":unix_secs}`.
+const STARTUP_LOCK_FILE: &str = "starting.lock";
+/// Claims older than this are abandoned (crashed starter, previous boot).
+const STARTUP_LOCK_TTL_SECS: u64 = 60;
+
+fn startup_lock_path_for(directory: &Path) -> PathBuf {
+    directory.join(STARTUP_LOCK_FILE)
+}
+
+fn now_unix_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn write_startup_lock_at(directory: &Path, pid: u64, started: u64) -> Result<(), String> {
+    let text = serde_json::to_string(&json!({"pid": pid, "started": started}))
+        .map_err(|error| error.to_string())?;
+    std::fs::write(startup_lock_path_for(directory), text).map_err(|error| error.to_string())
+}
+
+fn read_startup_lock_at(directory: &Path) -> Option<(u64, u64)> {
+    let text = std::fs::read_to_string(startup_lock_path_for(directory)).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    Some((
+        value.get("pid")?.as_u64()?,
+        value.get("started")?.as_u64()?,
+    ))
+}
+
+fn claim_pid_alive(pid: u64) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        pid_alive(pid)
+    }
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        live_pids_cached().is_none_or(|set| set.contains(&pid))
+    }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+/// True when this caller owns the startup claim and may spawn the GUI.
+/// False means a live starter holds a fresh claim: wait for its descriptor
+/// instead of spawning another window. Stale claims and claims from dead
+/// pids are reclaimed. Fail open (claim granted) when the directory is
+/// unusable so a broken lock can never wedge launching.
+fn try_claim_startup_lock(directory: &Path, pid: u64) -> bool {
+    let now = now_unix_secs();
+    if let Some((owner, started)) = read_startup_lock_at(directory) {
+        let fresh = now.saturating_sub(started) < STARTUP_LOCK_TTL_SECS;
+        if fresh && claim_pid_alive(owner) {
+            return false;
+        }
+    }
+    write_startup_lock_at(directory, pid, now).is_ok()
+}
+
+fn release_startup_lock(directory: &Path) {
+    let _ = std::fs::remove_file(startup_lock_path_for(directory));
+}
+
 fn start_gui() -> Result<Child, String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let log = log_file()?;
@@ -527,14 +944,38 @@ fn start_gui() -> Result<Child, String> {
         .map_err(|error| error.to_string())
 }
 
+fn automation_dir() -> Result<PathBuf, String> {
+    let base = crate::config::config_dir()
+        .ok_or_else(|| "No user configuration directory".to_string())?;
+    Ok(base.join("automation"))
+}
+
 fn sessions(launch_if_none: bool) -> Result<Vec<Value>, String> {
     let mut available = descriptors()?;
     if available.is_empty() && launch_if_none {
-        let mut child = start_gui()?;
+        let directory = automation_dir()?;
+        // A concurrent caller may already be starting the GUI: wait for its
+        // descriptor instead of spawning another window.
+        let claimed = try_claim_startup_lock(&directory, std::process::id() as u64);
+        let mut child = if claimed {
+            let child = start_gui()?;
+            // The pre-spawn PID snapshot cannot contain the newborn GUI:
+            // drop it so the next discovery pass enumerates fresh instead
+            // of deleting the just-written descriptor as a corpse.
+            live_pids_invalidate();
+            Some(child)
+        } else {
+            None
+        };
         let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
-            if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-                return Err(format!("OpenCADStudio exited while starting ({status})"));
+            if let Some(child) = child.as_mut() {
+                if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+                    if claimed {
+                        release_startup_lock(&directory);
+                    }
+                    return Err(format!("OpenCADStudio exited while starting ({status})"));
+                }
             }
             thread::sleep(Duration::from_millis(200));
             available = descriptors()?;
@@ -542,11 +983,17 @@ fn sessions(launch_if_none: bool) -> Result<Vec<Value>, String> {
                 break;
             }
         }
+        if claimed {
+            release_startup_lock(&directory);
+        }
         if available.is_empty() {
             return Err("OpenCADStudio is still starting; call ocs_sessions again".into());
         }
     }
-    Ok(available.into_iter().map(|(_, state)| state).collect())
+    Ok(available
+        .into_iter()
+        .map(|(_, state)| with_bridge_identity(state))
+        .collect())
 }
 
 fn insert_default(object: &mut Map<String, Value>, key: &str, value: Value) {
@@ -556,27 +1003,59 @@ fn insert_default(object: &mut Map<String, Value>, key: &str, value: Value) {
 }
 
 impl GuiClient {
-    fn connect(session_id: &str) -> Result<Self, String> {
-        let mut matching: Vec<_> = descriptors()?
+    fn connect(session_id: &str) -> Result<Self, CallError> {
+        let mut matching: Vec<_> = descriptors()
+            .map_err(CallError::Infra)?
             .into_iter()
             .filter(|(descriptor, _)| descriptor.session_id == session_id)
             .collect();
         if matching.len() != 1 {
-            return Err(format!(
+            return Err(CallError::infra(format!(
                 "Choose session_id from ocs_sessions; found {} matching sessions",
                 matching.len()
-            ));
+            )));
         }
         let (descriptor, state) = matching.remove(0);
         Ok(Self {
             descriptor,
             state,
-            client_id: random_id()?,
+            client_id: random_id().map_err(CallError::Infra)?,
             batches: VecDeque::new(),
+            inflight: HashMap::new(),
+            dismissed: VecDeque::new(),
         })
     }
 
-    fn request(&mut self, request: Value, wait_seconds: f64) -> Result<Value, String> {
+    /// Best-effort dismiss of a GUI-pending interactive op: the GUI resolves
+    /// a pending `user_select`/`getpoint` as cancelled on `op == "cancel"`
+    /// (see `app::control`), and late completions are dropped bridge-side
+    /// via `dismissed`. Failures are ignored: dismissal races a GUI that may
+    /// already be gone, and the outcome (Cancelled/timeout) stands either way.
+    fn dismiss(&mut self, gui_id: Option<&str>) {
+        let Some(gui_id) = gui_id else { return };
+        let cancel = json!({
+            "op": "cancel",
+            "request_id": random_id().unwrap_or_else(|_| format!("cancel-{}", iso8601_now())),
+            "client_id": self.client_id.clone(),
+            "document_id": self.state["document_id"].clone(),
+            "revision": self.state["revision"].clone(),
+        });
+        let _ = exchange(&self.descriptor, cancel, Duration::from_secs(5));
+        if !self.dismissed.iter().any(|id| id == gui_id) {
+            if self.dismissed.len() >= 128 {
+                self.dismissed.pop_front();
+            }
+            self.dismissed.push_back(gui_id.to_string());
+        }
+    }
+
+    fn request(
+        &mut self,
+        request: Value,
+        wait_seconds: f64,
+        pump: &mut CancelPump,
+        mcp_id: Option<&Value>,
+    ) -> Result<Value, CallError> {
         let mut object = request
             .as_object()
             .cloned()
@@ -586,8 +1065,23 @@ impl GuiClient {
             .and_then(Value::as_str)
             .ok_or_else(|| "request must contain op".to_string())?
             .to_string();
-        if !READ_OPS.contains(&op.as_str()) {
+        // The GUI requires request_id on every non-query op, capture
+        // included: without one the GUI rejects the request outright, so
+        // the bridge always mints one (a client-supplied id wins).
+        if !READ_OPS.contains(&op.as_str()) || op == "capture" {
             insert_default(&mut object, "request_id", Value::String(random_id()?));
+        }
+        // Capture reads the active tab, so it needs the document the
+        // GUI requires on every non-query op (revision stays absent:
+        // the GUI only checks revisions callers supply).
+        if op == "capture" {
+            insert_default(
+                &mut object,
+                "document_id",
+                self.state["document_id"].clone(),
+            );
+        }
+        if !READ_OPS.contains(&op.as_str()) {
             insert_default(
                 &mut object,
                 "client_id",
@@ -608,25 +1102,79 @@ impl GuiClient {
         }
 
         let request_id = object.get("request_id").cloned();
+        // Re-polls for dismissed interactions answer `cancelled` without
+        // touching the GUI: the prompt is already gone.
+        if op == "operation" {
+            if let Some(polled) = request_id.as_ref().and_then(Value::as_str) {
+                if self.dismissed.iter().any(|id| id == polled) {
+                    return Ok(json!({"ok":false,"status":"cancelled","request_id":polled}));
+                }
+            }
+        }
         let mut response = exchange(
             &self.descriptor,
             Value::Object(object),
             Duration::from_secs(15),
         )?;
-        let wait = wait_seconds.clamp(0.0, 60.0);
-        let deadline = Instant::now() + Duration::from_secs_f64(wait);
+        let gui_id = request_id.as_ref().and_then(Value::as_str).map(str::to_string);
+        let mkey = mcp_id.map(mcp_key);
+        // Track the GUI op while it stays pending so an idle-arriving
+        // cancel can find and dismiss it. Terminal outcomes remove the
+        // entry; deadline exits keep it (the agent re-polls and re-tracks).
+        if let (Some(key), Some(gui)) = (mkey.as_ref(), gui_id.as_ref()) {
+            self.inflight.insert(key.clone(), gui.clone());
+        }
+        let interactive = matches!(op.as_str(), "user_select" | "getpoint");
+        let deadline = Instant::now() + wait_deadline(&op, wait_seconds);
         while matches!(response["status"].as_str(), Some("accepted" | "running"))
             && Instant::now() < deadline
         {
             let Some(request_id) = request_id.clone() else {
                 break;
             };
-            thread::sleep(Duration::from_millis(50));
+            match pump.wait_line(Duration::from_millis(50), mkey.as_deref()) {
+                PumpEvent::Cancelled => {
+                    self.dismiss(gui_id.as_deref());
+                    if let Some(key) = mkey.as_ref() {
+                        self.inflight.remove(key);
+                    }
+                    return Err(CallError::Cancelled);
+                }
+                PumpEvent::Quiet => {}
+            }
             response = exchange(
                 &self.descriptor,
                 json!({"op":"operation","request_id":request_id}),
                 Duration::from_secs(15),
             )?;
+        }
+        let terminal = !matches!(response["status"].as_str(), Some("accepted" | "running"));
+        if terminal {
+            if let Some(key) = mkey.as_ref() {
+                self.inflight.remove(key);
+            }
+            if interactive && response["status"].as_str() == Some("cancelled") {
+                if let Some(gui) = gui_id.as_ref() {
+                    if !self.dismissed.iter().any(|id| id == gui) {
+                        if self.dismissed.len() >= 128 {
+                            self.dismissed.pop_front();
+                        }
+                        self.dismissed.push_back(gui.clone());
+                    }
+                }
+            }
+        } else if interactive && interactive_timeout(wait_seconds) {
+            // Only the ceiling itself dismisses: short waits keep the
+            // classic running response so agents can re-poll. Hitting the
+            // ten-minute ceiling means nobody is coming: dismiss the prompt
+            // and say so plainly instead of parking it forever.
+            self.dismiss(gui_id.as_deref());
+            if let Some(key) = mkey.as_ref() {
+                self.inflight.remove(key);
+            }
+            return Err(CallError::Tool(
+                "timed out waiting for user (10 min); the prompt was dismissed".into(),
+            ));
         }
         if response.get("state").is_some() {
             self.state = response["state"].clone();
@@ -637,7 +1185,13 @@ impl GuiClient {
         Ok(response)
     }
 
-    fn execute_batch(&mut self, request: Value, wait_seconds: f64) -> Result<Value, String> {
+    fn execute_batch(
+        &mut self,
+        request: Value,
+        wait_seconds: f64,
+        pump: &mut CancelPump,
+        mcp_id: Option<&Value>,
+    ) -> Result<Value, CallError> {
         let id = required_string(&request, "request_id")?.to_owned();
         let mut batch = if let Some(position) = self.batches.iter().position(|batch| batch.id == id)
         {
@@ -703,6 +1257,14 @@ impl GuiClient {
             }
             attempted = true;
 
+            // Cancel between steps: dismiss a pending interactive step so
+            // no late answer fires, then abandon the batch (cancel = stop).
+            if let PumpEvent::Cancelled =
+                pump.wait_line(Duration::ZERO, mcp_id.map(mcp_key).as_deref())
+            {
+                self.dismiss(batch.active.as_deref());
+                return Err(CallError::Cancelled);
+            }
             let step_id = batch
                 .active
                 .clone()
@@ -713,6 +1275,8 @@ impl GuiClient {
                     deadline
                         .saturating_duration_since(Instant::now())
                         .as_secs_f64(),
+                    pump,
+                    mcp_id,
                 )
             } else {
                 let mut step = batch.steps[batch.next]
@@ -734,10 +1298,15 @@ impl GuiClient {
                     deadline
                         .saturating_duration_since(Instant::now())
                         .as_secs_f64(),
+                    pump,
+                    mcp_id,
                 )
             };
             let response = match response {
                 Ok(response) => response,
+                // Cancelled abandons the batch outright: resuming would
+                // re-poll a dismissed step.
+                Err(CallError::Cancelled) => return Err(CallError::Cancelled),
                 Err(error) => {
                     batch.active = Some(step_id);
                     self.batches.push_back(batch);
@@ -841,7 +1410,7 @@ fn trim_batches(batches: &mut VecDeque<BatchExecution>) {
 fn client<'a>(
     clients: &'a mut HashMap<String, GuiClient>,
     session_id: &str,
-) -> Result<&'a mut GuiClient, String> {
+) -> Result<&'a mut GuiClient, CallError> {
     if !clients.contains_key(session_id) {
         clients.insert(session_id.into(), GuiClient::connect(session_id)?);
     }
@@ -936,6 +1505,7 @@ fn shape_execute_response(
     mut response: Value,
     detail: &str,
     gui: &mut GuiClient,
+    pump: &mut CancelPump,
 ) -> Result<Value, String> {
     if detail == "changed_entities" {
         let handles = response_handles(&response);
@@ -943,6 +1513,8 @@ fn shape_execute_response(
             let entities = gui.request(
                 json!({"op":"query","handles":handles,"detail":"geometry","limit":MAX_BATCH_STEPS * 100}),
                 30.0,
+                pump,
+                None,
             )?;
             if let Some(object) = response.as_object_mut() {
                 object.insert("changed_entities".into(), entities["entities"].clone());
@@ -963,6 +1535,8 @@ fn read_resource(
     uri: &str,
     clients: &mut HashMap<String, GuiClient>,
     resources: &mut ResourceStore,
+    pump: &mut CancelPump,
+    mcp_id: Option<&Value>,
 ) -> Result<Value, String> {
     if !uri.starts_with("cad://") {
         return Err(format!("Unsupported resource URI scheme: {uri}"));
@@ -1128,11 +1702,12 @@ fn read_resource(
                             "bounds": tile_bounds,
                             "max_dimension": 512,
                         });
-                        let result = client(clients, session_id)?.request(req, 20.0)?;
+                        let result =
+                            client(clients, session_id)?.request(req, 20.0, pump, mcp_id)?;
                         if result["ok"].as_bool() != Some(true)
                             || result["status"].as_str() != Some("completed")
                         {
-                            return Err(result.to_string());
+                return Err(result.to_string().into());
                         }
                         let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
                         let _ = std::fs::remove_file(path);
@@ -1196,7 +1771,7 @@ fn read_resource(
                     "max_dimension": 1600,
                 });
                 let result = client(clients, session_id)?
-                    .request(req, 15.0)?;
+                    .request(req, 15.0, pump, mcp_id)?;
                 if result["ok"].as_bool() != Some(true)
                     || result["status"].as_str() != Some("completed")
                 {
@@ -1248,17 +1823,30 @@ fn call_tool(
     arguments: &Value,
     clients: &mut HashMap<String, GuiClient>,
     resources: &mut ResourceStore,
-) -> Result<Value, String> {
+    pump: &mut CancelPump,
+    mcp_id: Option<&Value>,
+) -> Result<Value, CallError> {
     match name {
         "ocs_sessions" => {
             let launch = arguments["launch_if_none"].as_bool().unwrap_or(true);
-            Ok(Value::Array(sessions(launch)?))
+            Ok(Value::Array(sessions(launch).map_err(CallError::Infra)?))
         }
         "ocs_read" => {
             let session_id = required_string(arguments, "ocs_session_id")?;
             let op = arguments["op"].as_str().unwrap_or("state");
             if !READ_OPS.contains(&op) {
-                return Err("Use ocs_execute for mutations".into());
+                return Err("Use ocs_execute for mutations".to_string().into());
+            }
+            if op == "capture" {
+                // The GUI capture op needs a file path and lives behind the
+                // ocs_capture tool; agents hitting the bare read op get
+                // guidance instead of a cryptic missing-path failure.
+                return Ok(json!({
+                    "ok": false,
+                    "status": "failed",
+                    "code": "use_capture_tool",
+                    "error": "Viewport captures run through the ocs_capture tool (scope, annotate, tiles, diff). ocs_read exposes capture products already stored as resources, not new captures."
+                }));
             }
             if op == "tools" {
                 return Ok(json!({
@@ -1273,7 +1861,13 @@ fn call_tool(
                 .cloned()
                 .unwrap_or_default();
             request.insert("op".into(), Value::String(op.into()));
-            client(clients, session_id)?.request(Value::Object(request), 30.0)
+            let response =
+                client(clients, session_id)?.request(Value::Object(request), 30.0, pump, mcp_id)?;
+            if matches!(op, "hello" | "capabilities") {
+                Ok(with_bridge_identity(response))
+            } else {
+                Ok(response)
+            }
         }
         "ocs_execute" => {
             let session_id = required_string(arguments, "ocs_session_id")?;
@@ -1284,20 +1878,20 @@ fn call_tool(
                 .ok_or_else(|| "Missing request object".to_string())?;
             let op = required_string(&request, "op")?;
             if !EXECUTE_OPS.contains(&op) {
-                return Err(format!("Unknown mutation operation: {op}"));
+                return Err(CallError::Tool(format!("Unknown mutation operation: {op}")));
             }
             let request_id = required_string(&request, "request_id")?;
             if request_id.len() > 128 {
-                return Err("request_id must not exceed 128 bytes".into());
+                return Err("request_id must not exceed 128 bytes".to_string().into());
             }
             let val_res = validate_execute_request(&request, op)?;
             let wait = arguments["wait_seconds"].as_f64().unwrap_or(30.0);
             let detail = arguments["response_detail"].as_str().unwrap_or("compact");
             let gui = client(clients, session_id)?;
             let mut response = if op == "batch" {
-                gui.execute_batch(request, wait)?
+                gui.execute_batch(request, wait, pump, mcp_id)?
             } else {
-                gui.request(request, wait)?
+                gui.request(request, wait, pump, mcp_id)?
             };
             if !val_res.warnings.is_empty() {
                 if let Some(object) = response.as_object_mut() {
@@ -1307,7 +1901,7 @@ fn call_tool(
                     );
                 }
             }
-            shape_execute_response(response, detail, gui)
+            shape_execute_response(response, detail, gui, pump).map_err(CallError::from)
         }
         "ocs_capture" => {
             let session_id = required_string(arguments, "ocs_session_id")?;
@@ -1396,6 +1990,11 @@ fn call_tool(
                 "scope": scope,
                 "max_dimension": if tile_info.is_some() && arguments.get("max_dimension").is_none() { 512 } else { max_dimension },
             });
+            // The client's id wins when supplied (and is echoed back in
+            // metadata); otherwise request() mints one for the GUI below.
+            if let Some(request_id) = arguments.get("request_id").and_then(Value::as_str) {
+                req["request_id"] = json!(request_id);
+            }
             if let Some((_, _, _, tb)) = tile_info {
                 req["view"] = json!("region");
                 req["bounds"] = json!(tb);
@@ -1417,17 +2016,21 @@ fn call_tool(
                 req["annotate"] = json!(annotate);
             }
             let result = client(clients, session_id)?
-                .request(req, 30.0)?;
+                .request(req, 30.0, pump, mcp_id)?;
             if result["ok"].as_bool() != Some(true)
                 || result["status"].as_str() != Some("completed")
             {
-                return Err(result.to_string());
+                // Failed capture response from the GUI: retryable, stays Tool.
+                return Err(result.to_string().into());
             }
             let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
             let _ = std::fs::remove_file(path);
             let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
             if let Some(obj) = meta.as_object_mut() {
                 obj.remove("path");
+                if let Some(request_id) = arguments["request_id"].as_str() {
+                    obj.insert("request_id".into(), Value::String(request_id.into()));
+                }
             }
 
             let mut final_bytes = bytes;
@@ -1608,7 +2211,8 @@ fn call_tool(
                 })),
             }
         }
-        _ => Err(format!("Unknown tool: {name}")),
+        // Backstop: the dispatcher rejects unknown names first with -32602.
+        _ => Err(CallError::Tool(format!("Unknown tool: {name}"))),
     }
 }
 
@@ -1651,24 +2255,24 @@ pub(crate) fn tool_definitions() -> Value {
     json!([
         {
             "name":"ocs_sessions",
-            "description":"List real OpenCADStudio GUI sessions and documents. Launch the installed editor if none is running.",
+            "description":"List real OpenCADStudio GUI sessions and documents. Launch the installed editor if none is running. On first use, announce the build to the user from the `bridge` object in each result (OpenCADStudio version, build_rev, tool_schema digest); announce again if a later call reports a different build.",
             "inputSchema":{"type":"object","properties":{"launch_if_none":{"type":"boolean","default":true,"description":"Launch OpenCADStudio when no live session exists."}},"additionalProperties":false},
             "outputSchema":{"type":"object","properties":{"result":{"type":"array","items":{"type":"object","properties":{"ok":{"const":true},"session_id":{"type":"string"},"document_id":{"type":"integer"},"revision":{"type":"integer"},"selection":{"type":"array","items":{"type":"string"}},"documents":{"type":"array"}},"required":["ok","session_id","document_id","revision","selection","documents"],"additionalProperties":true}}},"required":["result"],"additionalProperties":false},
-            "annotations":{"title":"List OCS sessions","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+            "title":"List OCS sessions","annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_read",
             "description":"Discover capabilities and record schemas, or read state, complete database records, command manifests, entities, properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session.",
             "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"name":{"type":"string","description":"Command name or record name."},"search":{"type":"string","description":"Case-insensitive command or record-type search."},"find":{"type":"string","description":"Text query string for text_search."},"match_case":{"type":"boolean","default":false,"description":"Case-sensitive text search."},"whole_word":{"type":"boolean","default":false,"description":"Match only whole words."},"ignore_accents":{"type":"boolean","description":"Ignore accents/diacritics in text (defaults to true when match_case is false)."},"scope":{"type":"string","enum":["all","active_space","blocks"],"default":"all","description":"Text search scope."},"system_spellcheck":{"type":"boolean","default":false,"description":"Use native OS spell-checker (Windows, macOS, Linux)."},"language":{"type":"string","description":"Language tag for spell-checker (e.g. 'fr-FR', 'en-US', 'de-DE', 'es-ES')."},"suggest":{"type":"boolean","default":true,"description":"Include suggested corrections for misspelled words."},"check_terms":{"type":"array","items":{"type":"string"},"description":"List of terms or suspect misspellings to flag in text_audit."},"dictionary":{"type":"array","items":{"type":"string"},"description":"Known valid words for text_audit dictionary check."},"pairs":{"type":"array","description":"Find/replace pairs for dry-run simulation in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"dry_run_pairs":{"type":"array","description":"Alias for pairs in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"document_id":{"type":"integer","minimum":0},"path":{"type":"string","description":"Optional intended output path for audit; extension determines target format."},"target_format":{"type":"string","enum":["dwg","dxf"],"description":"Intended output format for audit."},"target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"],"description":"Intended CAD output version for audit."},"collection":{"type":"string","description":"Record collection, all for records, or omit to discover collections and schema types."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."},"type":{"type":"string","description":"Entity or record type filter; for record_schema, returns its complete type graph and writable field paths."},"layer":{"type":"string","description":"Layer name filter for query."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"paths":{"type":"array","items":{"type":"string"},"description":"Project RFC 6901 JSON Pointer paths relative to record.properties."},"where":{"type":"array","description":"All property filters must match.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string","enum":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],"default":"eq"},"value":{}},"required":["path"],"additionalProperties":false}},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World point whose object snap the snap op reports."},"from":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Base point for perpendicular and tangent snaps (snap op)."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"required":["ocs_session_id"],"additionalProperties":false},
             "outputSchema":read_output_schema(),
-            "annotations":{"title":"Read OCS state","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+            "title":"Read OCS state","annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_execute",
             "description":"Execute semantic OCS actions, batch drafting, and mutations. Supports batch creation (entities_create), reference image underlays (embed_image), block definitions (block_define), and block reference insertions (INSERT). MANDATORY: For architectural drafting, all doors and windows must be inserted as CAD blocks (type: INSERT), never loose lines.",
             "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"request":execute_request_schema(),"wait_seconds":{"type":"number","minimum":0,"maximum":60,"default":30,"description":"Total time to wait for completion before returning."},"response_detail":{"type":"string","enum":["compact","changed_entities","full"],"default":"compact","description":"compact returns only state needed for the next edit; changed_entities also returns current geometry for changed handles; full preserves the complete editor state."}},"required":["ocs_session_id","request"],"additionalProperties":false},
             "outputSchema":execute_output_schema(),
-            "annotations":{"title":"Execute OCS action","readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
+            "title":"Execute OCS action","annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_capture",
@@ -1677,6 +2281,7 @@ pub(crate) fn tool_definitions() -> Value {
                 "type":"object",
                 "properties":{
                     "ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},
+                    "request_id":{"type":"string","description":"Optional client request id, accepted for schema compatibility and echoed in the result metadata. Captures are not idempotency-keyed."},
                     "scope":{"type":"string","enum":["viewport","window"],"default":"viewport","description":"Capture only the drawing viewport by default, or the complete application window."},
                     "max_dimension":{"type":"integer","minimum":256,"maximum":4096,"default":1600,"description":"Resize the longest image edge to at most this many pixels."},
                     "delivery":{"type":"string","enum":["inline","resource","both"],"default":"inline","description":"Image delivery method: 'inline' embeds base64 in tool content, 'resource' returns an MCP cad:// URI reference without inlining image bytes, 'both' returns both inline image and cad:// URI."},
@@ -1694,7 +2299,7 @@ pub(crate) fn tool_definitions() -> Value {
                 "required":["ocs_session_id"],
                 "additionalProperties":true
             },
-            "annotations":{"title":"Capture OCS window","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+            "title":"Capture OCS window","annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }
     ])
 }
@@ -1730,23 +2335,28 @@ fn tool_result(value: Value) -> Value {
             "isError": false
         });
     }
-    let structured = if value.is_object() {
-        value.clone()
-    } else {
-        json!({"result":value.clone()})
-    };
-    json!({
+    let is_err = value["ok"].as_bool() == Some(false);
+    let mut result = json!({
         "content":[{"type":"text","text":value.to_string()}],
-        "structuredContent":structured,
-        "isError":value["ok"].as_bool() == Some(false)
-    })
+        "isError": is_err,
+    });
+    // Strict clients validate structuredContent against outputSchema, which
+    // only describes successful results. Omitting it on errors keeps the real
+    // message visible instead of masked by a schema complaint.
+    if !is_err {
+        result["structuredContent"] = if value.is_object() {
+            value.clone()
+        } else {
+            json!({"result":value.clone()})
+        };
+    }
+    result
 }
 
 fn error_result(message: impl ToString) -> Value {
     let message = message.to_string();
     json!({
-        "content":[{"type":"text","text":message.clone()}],
-        "structuredContent":{"ok":false,"status":"failed","code":"invalid_arguments","error":message,"retryable":false},
+        "content":[{"type":"text","text":message}],
         "isError":true
     })
 }
@@ -1755,8 +2365,52 @@ fn response(id: Value, result: Value) -> Value {
     json!({"jsonrpc":"2.0","id":id,"result":result})
 }
 
+/// Spec-pure implementation block: exactly name/title/version, so strict
+/// clients (deny_unknown_fields, strict Zod schemas) never reject the
+/// handshake. Build extras live canonically in [`bridge_identity`],
+/// surfaced via `capabilities.experimental` and the in-band `bridge` stamp.
 fn server_info() -> Value {
-    json!({"name":"OpenCADStudio","title":"Open CAD Studio","version":env!("OCS_APP_VERSION")})
+    json!({
+        "name":"OpenCADStudio",
+        "title":"Open CAD Studio",
+        "version":env!("OCS_APP_VERSION"),
+    })
+}
+
+/// Build identity agents CAN see. MCP `serverInfo` never reaches tool
+/// callers, so the same fields ride on handshake payloads (`ocs_sessions`
+/// states, `hello`/`capabilities` responses) under the `bridge` key.
+fn bridge_identity() -> Value {
+    json!({
+        "name":"OpenCADStudio",
+        "version":env!("OCS_APP_VERSION"),
+        "build_rev":env!("OCS_GIT_REV"),
+        "build_profile":env!("OCS_BUILD_PROFILE"),
+        "tool_schema":tool_schema_digest(),
+    })
+}
+
+/// Stamp a `bridge` identity onto a handshake payload. Non-objects pass
+/// through untouched; an existing `bridge` key (GUI-provided) is kept.
+fn with_bridge_identity(mut value: Value) -> Value {
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("bridge")
+            .or_insert_with(bridge_identity);
+    }
+    value
+}
+
+/// Sha256 hex digest of the canonical [`tool_definitions`] JSON.
+///
+/// Published via `capabilities.experimental` and the in-band [`bridge_identity`]
+/// stamp so MCP clients can detect a stale bridge (running an older binary
+/// than the one on disk) without guessing.
+fn tool_schema_digest() -> String {
+    let canonical = serde_json::to_string(&tool_definitions()).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 fn modern_request(params: &Value) -> bool {
@@ -1793,7 +2447,18 @@ fn poll_task(
     task: &mut McpTask,
     clients: &mut HashMap<String, GuiClient>,
     resources: &mut ResourceStore,
+    pump: &mut CancelPump,
 ) -> Value {
+    if task.cancelled {
+        // Cancelled carries neither result nor error, even if a late
+        // completion landed after the cancel was acknowledged.
+        let mut value = task_value(task, "cancelled");
+        if let Some(object) = value.as_object_mut() {
+            object.remove("result");
+            object.remove("error");
+        }
+        return value;
+    }
     if task.result.is_some() {
         return task_value(task, "completed");
     }
@@ -1803,7 +2468,9 @@ fn poll_task(
     task.last_updated_at = iso8601_now();
     let mut arguments = task.arguments.clone();
     arguments["wait_seconds"] = Value::from(0);
-    match call_tool(&task.name, &arguments, clients, resources) {
+    // Task re-issues are server-driven with no client wait: no MCP id to
+    // match cancels against, and a cancel here only means "stop polling".
+    match call_tool(&task.name, &arguments, clients, resources, pump, None) {
         Ok(value) if matches!(value["status"].as_str(), Some("accepted" | "running")) => {
             task_value(task, "working")
         }
@@ -1811,14 +2478,28 @@ fn poll_task(
             task.result = Some(tool_result(value));
             task_value(task, "completed")
         }
+        // Don't cache a cancel as failure: the client moved on, and the
+        // next poll simply re-issues.
+        Err(CallError::Cancelled) => task_value(task, "working"),
         Err(error) => {
-            task.error = Some(json!({"code":-32000,"message":error}));
+            // Public code: the legacy -32000 range is grandfathered, and
+            // new emissions stay out of it.
+            task.error = Some(json!({"code":-32603,"message":error.message()}));
             task_value(task, "failed")
         }
     }
 }
 
-fn protocol_result(mut result: Value, modern: bool, cacheable: bool) -> Value {
+fn protocol_result(mut result: Value, modern: bool, ttl_ms: Option<u64>) -> Value {
+    // SEP-2549 freshness hints are version-independent: legacy clients
+    // ignore unknown fields, so list results always carry them. The modern
+    // envelope (resultType/_meta) stays negotiated.
+    if let Some(ttl_ms) = ttl_ms {
+        if let Some(object) = result.as_object_mut() {
+            object.insert("ttlMs".into(), Value::from(ttl_ms));
+            object.insert("cacheScope".into(), Value::String("public".into()));
+        }
+    }
     if modern {
         let object = result
             .as_object_mut()
@@ -1830,10 +2511,6 @@ fn protocol_result(mut result: Value, modern: bool, cacheable: bool) -> Value {
             "_meta".into(),
             json!({"io.modelcontextprotocol/serverInfo":server_info()}),
         );
-        if cacheable {
-            object.insert("ttlMs".into(), Value::from(CACHE_TTL_MS));
-            object.insert("cacheScope".into(), Value::String("public".into()));
-        }
     }
     result
 }
@@ -1859,7 +2536,15 @@ fn handle_message(
     clients: &mut HashMap<String, GuiClient>,
     tasks: &mut TaskStore,
     resources: &mut ResourceStore,
+    pump: &mut CancelPump,
 ) -> Option<Value> {
+    // Non-object input (batches included: the spec defines no batch
+    // semantics for us) is Invalid Request, never silence: a sender must
+    // not hang waiting for a response that will never come. Id-less
+    // *objects* stay silent (notifications).
+    if !message.is_object() {
+        return Some(rpc_error(Value::Null, -32600, "Invalid request: expected a JSON-RPC object"));
+    }
     let id = message.get("id").cloned();
     let method = message.get("method").and_then(Value::as_str)?;
     if id.is_none() {
@@ -1891,7 +2576,8 @@ fn handle_message(
                     "protocolVersion":protocol,
                     "capabilities":{
                         "tools":{"listChanged":false},
-                        "resources":{"subscribe":false,"listChanged":false}
+                        "resources":{"subscribe":false,"listChanged":false},
+                        "experimental":{"opencadstudio.build":bridge_identity()}
                     },
                     "serverInfo":server_info(),
                     "instructions":INSTRUCTIONS
@@ -1911,10 +2597,10 @@ fn handle_message(
                     "instructions":INSTRUCTIONS
                 }),
                 true,
-                true,
+                Some(CACHE_TTL_MS),
             ),
         ),
-        "ping" => response(id, protocol_result(json!({}), modern, false)),
+        "ping" => response(id, protocol_result(json!({}), modern, None)),
         "resources/list" => {
             let mut session_ids = Vec::new();
             if let Ok(available) = descriptors() {
@@ -1937,34 +2623,71 @@ fn handle_message(
                     session_ids.push(k.clone());
                 }
             }
+            // Deterministic order: HashMap iteration is random, and stable
+            // ordering keeps client caches and prompt caches hitting.
+            session_ids.sort();
             let list = resources.list_resources(&session_ids);
             response(
                 id,
-                protocol_result(json!({ "resources": list }), modern, true),
+                protocol_result(json!({ "resources": list }), modern, Some(RESOURCE_TTL_MS)),
             )
         }
         "resources/read" => {
             let Some(uri) = params["uri"].as_str() else {
                 return Some(rpc_error(id, -32602, "Missing resource uri"));
             };
-            match read_resource(uri, clients, resources) {
-                Ok(contents) => response(id, protocol_result(contents, modern, true)),
-                Err(err) => rpc_error(id, -32002, err),
+            match read_resource(uri, clients, resources, pump, Some(&id)) {
+                Ok(contents) => response(id, protocol_result(contents, modern, Some(RESOURCE_TTL_MS))),
+                // -32002 was THE not-found code in 2025-11-25 and earlier;
+                // 2026-07-28 says MUST NOT emit it, so modern gets -32602.
+                Err(err) => rpc_error(id, if modern { -32602 } else { -32002 }, err),
             }
         }
+        "resources/templates/list" => response(
+            id,
+            protocol_result(
+                json!({"resourceTemplates": [
+                    {
+                        "uriTemplate": "cad://session/{session_id}/tile/{level}/{x}/{y}.png",
+                        "name": "Pyramid tile",
+                        "description": "DeepZoom viewport tile at zoom level, column x, row y.",
+                        "mimeType": "image/png"
+                    },
+                    {
+                        "uriTemplate": "cad://session/{session_id}/snapshot/{hash}.png",
+                        "name": "Viewport snapshot",
+                        "description": "Captured viewport frame addressed by content hash.",
+                        "mimeType": "image/png"
+                    }
+                ]}),
+                modern,
+                Some(RESOURCE_TTL_MS),
+            ),
+        ),
         "tools/list" => response(
             id,
-            protocol_result(json!({"tools":tool_definitions()}), modern, true),
+            protocol_result(json!({"tools":tool_definitions()}), modern, Some(CACHE_TTL_MS)),
         ),
         "tools/call" => {
             let Some(name) = params["name"].as_str() else {
                 return Some(rpc_error(id, -32602, "Missing tool name"));
             };
+            // Unknown tools are Protocol Errors (-32602), never isError
+            // results; the valid names ride along so the model can recover.
+            if !["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"].contains(&name) {
+                return Some(rpc_error(
+                    id,
+                    -32602,
+                    format!(
+                        "Unknown tool: {name}. Available tools: ocs_sessions, ocs_read, ocs_execute, ocs_capture"
+                    ),
+                ));
+            }
             let arguments = params
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let called = call_tool(name, &arguments, clients, resources);
+            let called = call_tool(name, &arguments, clients, resources, pump, Some(&id));
             if modern && supports_tasks(&params) {
                 if let Ok(value) = &called {
                     if matches!(value["status"].as_str(), Some("accepted" | "running")) {
@@ -1979,6 +2702,7 @@ fn handle_message(
                             last_updated_at: now,
                             result: None,
                             error: None,
+                            cancelled: false,
                         });
                         return Some(response(
                             id,
@@ -1994,14 +2718,22 @@ fn handle_message(
                                     "pollIntervalMs":250
                                 }),
                                 true,
-                                false,
+                                None,
                             ),
                         ));
                     }
                 }
             }
-            let result = called.map(tool_result).unwrap_or_else(error_result);
-            response(id, protocol_result(result, modern, false))
+            // Tool-domain failures stay isError results (model-actionable);
+            // infrastructure failures become -32603 (nothing to fix in-band);
+            // a cancelled request gets no response at all (spec SHOULD).
+            let result = match called {
+                Ok(value) => tool_result(value),
+                Err(CallError::Tool(message)) => error_result(message),
+                Err(CallError::Infra(message)) => return Some(rpc_error(id, -32603, message)),
+                Err(CallError::Cancelled) => return None,
+            };
+            response(id, protocol_result(result, modern, None))
         }
         "tasks/get" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -2010,7 +2742,7 @@ fn handle_message(
             let Some(task) = tasks.get_mut(task_id) else {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
             };
-            response(id, protocol_result(poll_task(task, clients, resources), true, false))
+            response(id, protocol_result(poll_task(task, clients, resources, pump), true, None))
         }
         "tasks/update" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -2019,16 +2751,23 @@ fn handle_message(
             if tasks.get_mut(task_id).is_none() {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
             }
-            response(id, protocol_result(json!({}), true, false))
+            response(id, protocol_result(json!({}), true, None))
         }
         "tasks/cancel" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
                 return Some(rpc_error(id, -32602, "Missing taskId"));
             };
-            if tasks.get_mut(task_id).is_none() {
+            let Some(task) = tasks.get_mut(task_id) else {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
-            }
-            response(id, protocol_result(json!({}), true, false))
+            };
+            // Cooperative cancel, honored: the op is dropped (nothing
+            // re-issues once cancelled) and polls report the terminal
+            // `cancelled` state with neither result nor error.
+            task.cancelled = true;
+            task.result = None;
+            task.error = None;
+            task.last_updated_at = iso8601_now();
+            response(id, protocol_result(json!({}), true, None))
         }
         _ => rpc_error(id, -32601, format!("Method not found: {method}")),
     })
@@ -2078,28 +2817,91 @@ pub fn sync_agent_tool_schemas() -> bool {
     true
 }
 
+/// A cancel arriving while nothing waits targets an op that is pending
+/// server-side between polls: find its GUI request via the inflight map and
+/// dismiss it now, so the next poll answers `cancelled`. Unknown ids are
+/// ignored (spec: fire-and-forget, races expected).
+fn idle_cancel(clients: &mut HashMap<String, GuiClient>, params: &Value) {
+    let Some(key) = params
+        .get("requestId")
+        .map(|id| id.to_string())
+    else {
+        return;
+    };
+    for gui in clients.values_mut() {
+        if let Some(gui_id) = gui.inflight.remove(&key) {
+            gui.dismiss(Some(&gui_id));
+        }
+    }
+}
+
+/// Agent schema sync is a local convenience, not protocol: operators
+/// disable it with `OCS_SKIP_SCHEMA_SYNC` set to any value.
+fn schema_sync_enabled() -> bool {
+    std::env::var_os("OCS_SKIP_SCHEMA_SYNC").is_none()
+}
+
 /// Run the MCP stdio loop until the client closes stdin.
+///
+/// A reader thread feeds lines through a channel so wait loops can observe
+/// `notifications/cancelled` mid-wait (see [`CancelPump`]). The reader never
+/// writes: this loop is the only stdout writer.
 pub fn run() {
-    let _ = sync_agent_tool_schemas();
-    let stdin = io::stdin();
+    if schema_sync_enabled() && sync_agent_tool_schemas() {
+        eprintln!("MCP agent schemas synchronized");
+    }
+    let exe_stamp = exe_fingerprint();
     let stdout = io::stdout();
     let mut output = stdout.lock();
     let mut clients = HashMap::new();
     let mut tasks = TaskStore::default();
     let mut resources = ResourceStore::default();
-    for line in crate::io::line_read::lines_capped(
-        stdin.lock(),
-        crate::io::line_read::MAX_LINE_BYTES,
-    ) {
-        let response = match line {
-            Ok(line) if !line.trim().is_empty() => match serde_json::from_str::<Value>(&line) {
-                Ok(message) => handle_message(message, &mut clients, &mut tasks, &mut resources),
-                Err(error) => Some(rpc_error(Value::Null, -32700, error)),
-            },
-            Ok(_) => None,
-            Err(error) => {
-                eprintln!("MCP input error: {error}");
+    let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+    let stdin = io::stdin();
+    thread::spawn(move || {
+        for line in crate::io::line_read::lines_capped(
+            stdin.lock(),
+            crate::io::line_read::MAX_LINE_BYTES,
+        ) {
+            if tx.send(line.map_err(|error| error.to_string())).is_err() {
                 break;
+            }
+        }
+    });
+    let mut pump = CancelPump {
+        rx,
+        backlog: VecDeque::new(),
+    };
+    loop {
+        let Some(line) = pump.next() else {
+            break;
+        };
+        // Serve the in-flight request with the old schema first (it was made
+        // against it), then exit so the client respawns a fresh bridge. This
+        // ordering means a rebuild never fails a call that is already running.
+        let superseded = exe_superseded(&exe_stamp);
+        let response = if line.trim().is_empty() {
+            None
+        } else {
+            match serde_json::from_str::<Value>(&line) {
+                Ok(message) => {
+                    if message.get("id").is_none()
+                        && message.get("method").and_then(Value::as_str)
+                            == Some("notifications/cancelled")
+                    {
+                        idle_cancel(&mut clients, &message["params"]);
+                        None
+                    } else {
+                        handle_message(
+                            message,
+                            &mut clients,
+                            &mut tasks,
+                            &mut resources,
+                            &mut pump,
+                        )
+                    }
+                }
+                Err(error) => Some(rpc_error(Value::Null, -32700, error)),
             }
         };
         if let Some(response) = response {
@@ -2110,12 +2912,26 @@ pub fn run() {
                 break;
             }
         }
+        if superseded {
+            eprintln!("MCP bridge superseded by rebuild; exiting for respawn");
+            break;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pump with no reader: waits behave exactly as before (quiet
+    /// immediately), so tests that never cancel need no other changes.
+    fn detached_pump() -> CancelPump {
+        let (_tx, rx) = std::sync::mpsc::channel();
+        CancelPump {
+            rx,
+            backlog: VecDeque::new(),
+        }
+    }
 
     #[test]
     fn advertises_the_shared_tools() {
@@ -2129,6 +2945,15 @@ mod tests {
         assert_eq!(
             names,
             ["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"]
+        );
+        // The build announcement must live in the entry-point tool
+        // description: global instructions don't reliably reach agents.
+        assert!(
+            tools[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("`bridge`"),
+            "ocs_sessions description must point at the bridge build identity"
         );
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], false);
         for tool in [&tools[1], &tools[2], &tools[3]] {
@@ -2228,6 +3053,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
@@ -2247,10 +3073,15 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 4);
-        assert!(listed["result"].get("ttlMs").is_none());
+        // SEP-2549: freshness hints ship on every protocol version; only
+        // the modern envelope stays negotiated (see
+        // legacy_list_results_carry_sep2549_ttl).
+        assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS);
+        assert_eq!(listed["result"]["cacheScope"], "public");
         assert!(listed["result"].get("resultType").is_none());
     }
 
@@ -2262,6 +3093,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(discovered["result"]["resultType"], "complete");
@@ -2283,11 +3115,457 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(listed["result"]["resultType"], "complete");
         assert_eq!(listed["result"]["ttlMs"], CACHE_TTL_MS);
         assert_eq!(listed["result"]["cacheScope"], "public");
+    }
+
+    #[test]
+    fn resource_lists_use_the_short_dynamic_ttl() {
+        // resources/* vary as sessions open and snapshots land: 60 s.
+        // Static tools/discover keep the hour.
+        let listed = handle_message(
+            json!({"jsonrpc":"2.0","id":"res","method":"resources/list"}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(listed["result"]["ttlMs"], RESOURCE_TTL_MS);
+        assert_eq!(listed["result"]["ttlMs"], 60_000);
+    }
+
+    #[test]
+    fn legacy_list_results_carry_sep2549_ttl() {
+        // SEP-2549 makes ttlMs mandatory on list results; legacy clients
+        // ignore unknown fields, so the stamp is version-independent while
+        // the modern envelope (resultType/_meta) stays negotiated.
+        for (method, ttl) in [
+            ("tools/list", CACHE_TTL_MS),
+            ("resources/list", RESOURCE_TTL_MS),
+        ] {
+            let listed = handle_message(
+                json!({"jsonrpc":"2.0","id":method,"method":method}),
+                &mut HashMap::new(),
+                &mut TaskStore::default(),
+                &mut ResourceStore::default(),
+                &mut detached_pump(),
+            )
+            .unwrap();
+            assert_eq!(listed["result"]["ttlMs"], ttl, "{method}");
+            assert_eq!(listed["result"]["cacheScope"], "public", "{method}");
+            assert!(listed["result"].get("resultType").is_none(), "{method}");
+            assert!(listed["result"].get("_meta").is_none(), "{method}");
+        }
+    }
+
+    #[test]
+    fn initialize_is_spec_pure_with_experimental_build() {
+        // serverInfo carries only the spec'd name/title/version; build
+        // extras live canonically in capabilities.experimental (single
+        // source: bridge_identity), never copied.
+        let initialized = handle_message(
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        let info = &initialized["result"]["serverInfo"];
+        assert_eq!(
+            info.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["name", "title", "version"]
+        );
+        assert_eq!(info["name"], "OpenCADStudio");
+        let build = &initialized["result"]["capabilities"]["experimental"]["opencadstudio.build"];
+        assert_eq!(build["tool_schema"], Value::String(tool_schema_digest()));
+        assert!(build["build_rev"].as_str().is_some());
+        assert!(build["build_profile"].as_str().is_some());
+        // Unknown versions fall back to our newest instead of erroring.
+        let fallback = handle_message(
+            json!({"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2099-01-01"}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(fallback["result"]["protocolVersion"], PROTOCOL_VERSION);
+        assert!(fallback.get("error").is_none());
+    }
+
+    #[test]
+    fn resource_not_found_code_follows_era() {
+        // Modern path MUST NOT emit -32002 (2026-07-28); legacy path keeps
+        // it (it was the code in 2025-11-25 and earlier).
+        let modern = handle_message(
+            json!({"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"cad://session/nope/snapshot/nope.png","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(modern["error"]["code"], -32602);
+        let legacy = handle_message(
+            json!({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"cad://session/nope/snapshot/nope.png"}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(legacy["error"]["code"], -32002);
+    }
+
+    #[test]
+    fn non_object_input_is_invalid_request() {
+        // Batches and other non-objects get -32600 (so senders never hang)
+        // while id-less objects stay silent (notifications).
+        for bad in [json!([1, 2]), json!("tools/list"), json!(42), json!(null)] {
+            let rejected = handle_message(
+                bad,
+                &mut HashMap::new(),
+                &mut TaskStore::default(),
+                &mut ResourceStore::default(),
+                &mut detached_pump(),
+            );
+            assert_eq!(rejected.unwrap()["error"]["code"], -32600);
+        }
+        let silent = handle_message(
+            json!({"jsonrpc":"2.0","method":"ping"}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        );
+        assert!(silent.is_none());
+    }
+
+    #[test]
+    fn unknown_tool_is_a_protocol_error_with_names() {
+        // Spec lists unknown tools under Protocol Errors (-32602). The
+        // message carries the valid names so the model can still recover.
+        let unknown = handle_message(
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ocs_frobnicate","arguments":{}}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(unknown["error"]["code"], -32602);
+        let message = unknown["error"]["message"].as_str().unwrap();
+        for name in ["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"] {
+            assert!(message.contains(name), "{message}");
+        }
+    }
+
+    #[test]
+    fn infrastructure_failures_are_marked_infra() {
+        // A session id matching no live GUI is bridge/GUI infrastructure,
+        // not a tool-domain error: must route to -32603, not isError text.
+        let mut clients = HashMap::new();
+        let mut resources = ResourceStore::default();
+        let err = call_tool(
+            "ocs_read",
+            &json!({"ocs_session_id":"00000000","op":"state"}),
+            &mut clients,
+            &mut resources,
+            &mut detached_pump(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CallError::Infra(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn cancelled_notifications_are_accepted_silently() {
+        // No response to notifications, even for cancel (nothing in flight
+        // in a unit test; live waits honor it — see wait_deadline below).
+        let silent = handle_message(
+            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        );
+        assert!(silent.is_none());
+    }
+
+    #[test]
+    fn cancel_matching_and_wait_deadlines() {
+        // Only a cancel naming our in-flight MCP id counts; anything else
+        // (other ids, pings, results) is ignored by the wait, not eaten.
+        assert!(is_cancel_for(
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}}"#,
+            "7"
+        ));
+        assert!(!is_cancel_for(
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":8}}"#,
+            "7"
+        ));
+        assert!(!is_cancel_for(
+            r#"{"jsonrpc":"2.0","id":7,"method":"ping"}"#,
+            "7"
+        ));
+        assert!(!is_cancel_for("not json at all", "7"));
+        // String ids compare as strings: 7 != "7".
+        assert!(!is_cancel_for(
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}}"#,
+            "\"7\""
+        ));
+        // Interactive picks may legitimately take minutes; everything else
+        // keeps the 60 s clamp.
+        assert_eq!(
+            wait_deadline("user_select", 3600.0),
+            Duration::from_secs(600)
+        );
+        assert_eq!(wait_deadline("getpoint", 5.0), Duration::from_secs(5));
+        assert_eq!(wait_deadline("run", 3600.0), Duration::from_secs(60));
+        assert_eq!(wait_deadline("run", 5.0), Duration::from_secs(5));
+        // The ceiling dismisses; anything below returns running for re-poll.
+        assert!(!interactive_timeout(5.0));
+        assert!(!interactive_timeout(599.0));
+        assert!(interactive_timeout(600.0));
+        assert!(interactive_timeout(3600.0));
+    }
+
+    #[test]
+    fn templates_list_serves_tile_and_snapshot_templates() {
+        for params in [
+            json!({}),
+            json!({"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}),
+        ] {
+            let listed = handle_message(
+                json!({"jsonrpc":"2.0","id":"tpl","method":"resources/templates/list","params":params}),
+                &mut HashMap::new(),
+                &mut TaskStore::default(),
+                &mut ResourceStore::default(),
+                &mut detached_pump(),
+            )
+            .unwrap();
+            let templates = listed["result"]["resourceTemplates"].as_array().unwrap();
+            assert!(templates.iter().any(|t| t["uriTemplate"]
+                .as_str()
+                .unwrap()
+                .contains("{level}")));
+            assert!(templates.iter().any(|t| t["uriTemplate"]
+                .as_str()
+                .unwrap()
+                .contains("{hash}")));
+            assert_eq!(listed["result"]["ttlMs"], RESOURCE_TTL_MS);
+            assert_eq!(listed["result"]["cacheScope"], "public");
+        }
+    }
+
+    #[test]
+    fn tool_titles_are_top_level_and_annotations_allowlisted() {
+        // Title lives top-level (2026-07-28 Tool shape), not nested.
+        let tools = tool_definitions();
+        for tool in tools.as_array().unwrap() {
+            assert!(tool["title"].as_str().is_some());
+            assert!(tool["annotations"].get("title").is_none());
+            let annotations = tool["annotations"].as_object().unwrap();
+            for key in annotations.keys() {
+                assert!(
+                    ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]
+                        .contains(&key.as_str()),
+                    "unexpected annotation key: {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn structured_results_conform_to_their_output_schemas() {
+        // Spot-check the shape every schema'd result must have: an object
+        // carrying ok, reachable through tool_result unchanged.
+        let sample = json!({
+            "ok": true,
+            "status": "completed",
+            "document_id": 1,
+            "revision": 2,
+            "geometry_revision": 3,
+            "camera_revision": 4
+        });
+        let result = tool_result(sample);
+        assert_eq!(result["isError"], false);
+        assert_eq!(result["structuredContent"]["ok"], true);
+        assert_eq!(result["structuredContent"]["revision"], 2);
+    }
+
+    fn modern_params() -> Value {
+        json!({"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"extensions":{"io.modelcontextprotocol/tasks":{}}}}})
+    }
+
+    fn stub_task(id: &str) -> McpTask {
+        McpTask {
+            id: id.into(),
+            name: "ocs_read".into(),
+            arguments: json!({}),
+            created_at: iso8601_now(),
+            last_updated_at: iso8601_now(),
+            result: None,
+            error: None,
+            cancelled: false,
+        }
+    }
+
+    #[test]
+    fn tasks_cancel_marks_cancelled_without_result() {
+        let mut tasks = TaskStore::default();
+        tasks.insert(stub_task("t-cancel"));
+        let cancelled = handle_message(
+            json!({"jsonrpc":"2.0","id":"c","method":"tasks/cancel","params":{"taskId":"t-cancel","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"extensions":{"io.modelcontextprotocol/tasks":{}}}}}}),
+            &mut HashMap::new(),
+            &mut tasks,
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert!(cancelled.get("error").is_none());
+        let mut params = modern_params();
+        params["taskId"] = Value::String("t-cancel".into());
+        let status = handle_message(
+            json!({"jsonrpc":"2.0","id":"g","method":"tasks/get","params":params}),
+            &mut HashMap::new(),
+            &mut tasks,
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(status["result"]["status"], "cancelled");
+        assert!(status["result"].get("result").is_none());
+        assert!(status["result"].get("error").is_none());
+        // A late completion landing after the cancel is discarded.
+        tasks.get_mut("t-cancel").unwrap().result = Some(json!({"ok": true}));
+        let mut params = modern_params();
+        params["taskId"] = Value::String("t-cancel".into());
+        let again = handle_message(
+            json!({"jsonrpc":"2.0","id":"g2","method":"tasks/get","params":params}),
+            &mut HashMap::new(),
+            &mut tasks,
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(again["result"]["status"], "cancelled");
+        assert!(again["result"].get("result").is_none());
+    }
+
+    #[test]
+    fn task_envelope_errors_use_public_codes() {
+        // The legacy -32000 range is grandfathered, not for new use.
+        let mut task = stub_task("t-fail");
+        task.arguments =
+            json!({"ocs_session_id":"00000000","op":"state","wait_seconds":0});
+        let failed = poll_task(
+            &mut task,
+            &mut HashMap::new(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        );
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["error"]["code"], -32603);
+    }
+
+    #[test]
+    fn schema_sync_respects_opt_out() {
+        std::env::set_var("OCS_SKIP_SCHEMA_SYNC", "1");
+        assert!(!schema_sync_enabled());
+        std::env::remove_var("OCS_SKIP_SCHEMA_SYNC");
+        assert!(schema_sync_enabled());
+    }
+
+    #[test]
+    fn stale_snapshots_never_delete_fresh_descriptors() {
+        // Regression: a cached PID snapshot predates a GUI spawn, so the
+        // newborn pid is "missing" from it. Deletion must still wait until
+        // the file is older than the grace period (slow starters write
+        // late); unknown snapshot state never deletes either.
+        assert!(!stale_snapshot_may_delete(true, Duration::from_secs(0)));
+        assert!(!stale_snapshot_may_delete(true, Duration::from_secs(59)));
+        assert!(stale_snapshot_may_delete(true, Duration::from_secs(120)));
+        assert!(stale_snapshot_may_delete(true, Duration::from_secs(3600)));
+        assert!(!stale_snapshot_may_delete(false, Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn capture_accepts_optional_request_id() {
+        // Strict clients insist on sending request_id even though capture
+        // is not idempotency-keyed: declare it optional so they can.
+        let tools = tool_definitions();
+        let capture = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "ocs_capture")
+            .unwrap();
+        let prop = &capture["inputSchema"]["properties"]["request_id"];
+        assert_eq!(prop["type"], "string");
+        assert!(
+            !capture["inputSchema"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("request_id"))
+        );
+    }
+
+    #[test]
+    fn read_op_capture_points_at_the_capture_tool() {
+        // ocs_read advertises "capture" but the GUI op needs a file path;
+        // agents hitting it bare get guidance, not a cryptic failure.
+        let guided = call_tool(
+            "ocs_read",
+            &json!({"ocs_session_id":"s","op":"capture"}),
+            &mut HashMap::new(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(guided["ok"], false);
+        assert!(guided["error"]
+            .as_str()
+            .unwrap()
+            .contains("ocs_capture"));
+    }
+
+    #[test]
+    fn malformed_requests_get_jsonrpc_errors() {
+        let unknown = handle_message(
+            json!({"jsonrpc":"2.0","id":1,"method":"frobnicate"}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(unknown["error"]["code"], -32601);
+        let nameless = handle_message(
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(nameless["error"]["code"], -32602);
+        let uriless = handle_message(
+            json!({"jsonrpc":"2.0","id":3,"method":"resources/read","params":{}}),
+            &mut HashMap::new(),
+            &mut TaskStore::default(),
+            &mut ResourceStore::default(),
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(uriless["error"]["code"], -32602);
     }
 
     #[test]
@@ -2298,6 +3576,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
@@ -2311,6 +3590,7 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(rejected["error"]["code"], -32022);
@@ -2329,11 +3609,13 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
+        assert!(called["result"].get("structuredContent").is_none());
         assert!(
-            called["result"]["structuredContent"]["error"]
+            called["result"]["content"][0]["text"]
                 .as_str()
                 .unwrap()
                 .contains("request_id")
@@ -2348,16 +3630,12 @@ mod tests {
             &mut clients,
             &mut TaskStore::default(),
             &mut ResourceStore::default(),
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
-        assert_eq!(
-            called["result"]["structuredContent"]["code"],
-            "invalid_arguments"
-        );
-        let error = called["result"]["structuredContent"]["error"]
-            .as_str()
-            .unwrap();
+        assert!(called["result"].get("structuredContent").is_none());
+        let error = called["result"]["content"][0]["text"].as_str().unwrap();
         assert!(error.contains("Missing cmd"), "{error}");
         assert!(error.contains("LINE 0,0 10,10"), "{error}");
     }
@@ -2385,6 +3663,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let res_arr = listed["result"]["resources"].as_array().unwrap();
@@ -2397,6 +3676,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let contents = read_png["result"]["contents"].as_array().unwrap();
@@ -2409,6 +3689,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(read_latest["result"]["contents"][0]["blob"], dummy_data);
@@ -2419,17 +3700,20 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let text = read_meta["result"]["contents"][0]["text"].as_str().unwrap();
         assert!(text.contains("\"width\": 100"));
 
-        // Test resources/read on non-existent resource returns -32002 error
+        // Legacy resources/read on non-existent resource keeps -32002
+        // (modern gets -32602; see resource_not_found_code_follows_era)
         let read_err = handle_message(
             json!({"jsonrpc":"2.0","id":"r-err","method":"resources/read","params":{"uri":"cad://session/sess1/snapshot/nonexistent.png"}}),
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         assert_eq!(read_err["error"]["code"], -32002);
@@ -2626,6 +3910,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let res_arr = listed["result"]["resources"].as_array().unwrap();
@@ -2638,6 +3923,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let man_contents = read_man["result"]["contents"].as_array().unwrap();
@@ -2650,6 +3936,7 @@ mod tests {
             &mut clients,
             &mut tasks,
             &mut resources,
+            &mut detached_pump(),
         )
         .unwrap();
         let tile_contents = read_tile["result"]["contents"].as_array().unwrap();
@@ -2727,6 +4014,7 @@ mod tests {
             last_updated_at: now,
             result: None,
             error: None,
+            cancelled: false,
         };
         let value = task_value(&task, "working");
         assert_eq!(value["resultType"], "complete");
@@ -2744,6 +4032,7 @@ mod tests {
             last_updated_at: iso8601_now(),
             result: None,
             error: None,
+            cancelled: false,
         };
         let t0 = Instant::now();
         let mut store = TaskStore::default();
@@ -2770,7 +4059,11 @@ mod tests {
             "error":"Refresh state before editing"
         }));
         assert_eq!(result["isError"], true);
-        assert_eq!(result["structuredContent"]["code"], "stale_state");
+        assert!(result.get("structuredContent").is_none());
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("stale_state"));
     }
 
     #[test]
@@ -2897,8 +4190,7 @@ mod tests {
     }
 
     #[test]
-    fn read_op_tools_returns_current_schemas_and_instructions() {
-        let mut clients = HashMap::new();
+    fn read_op_tools_returns_current_schemas_and_instructions() {        let mut clients = HashMap::new();
         let mut resources = ResourceStore::default();
         let req = json!({
             "name": "ocs_read",
@@ -2912,9 +4204,67 @@ mod tests {
             &req["arguments"],
             &mut clients,
             &mut resources,
+            &mut detached_pump(),
+            None,
         ).expect("ocs_read op: tools must succeed");
         assert_eq!(result["ok"], true);
         assert!(result["tools"].is_array());
         assert!(result["instructions"].is_string());
+    }
+
+    #[test]
+    fn tool_schema_digest_is_pinned() {
+        // If this fails, the MCP tool surface changed: review the diff, then
+        // update TOOL_SCHEMA_DIGEST deliberately (never blindly).
+        assert_eq!(tool_schema_digest(), TOOL_SCHEMA_DIGEST);
+    }
+
+    #[test]
+    fn bridge_identity_is_exposed_on_handshake_payloads() {
+        // Agents never see MCP serverInfo, so the build announcement must
+        // ride on payloads they do see: session states and hello/capabilities.
+        let identity = bridge_identity();
+        assert_eq!(identity["name"], "OpenCADStudio");
+        assert!(identity["version"].as_str().is_some());
+        assert!(identity["build_rev"].as_str().is_some());
+        assert!(identity["build_profile"].as_str().is_some());
+        assert_eq!(identity["tool_schema"], Value::String(tool_schema_digest()));
+
+        let stamped = with_bridge_identity(json!({"ok": true, "session_id": "s"}));
+        assert_eq!(stamped["bridge"]["name"], "OpenCADStudio");
+        assert_eq!(stamped["ok"], true);
+        // Non-objects pass through untouched.
+        assert_eq!(with_bridge_identity(json!([1, 2])), json!([1, 2]));
+    }
+
+    #[test]
+    fn startup_lock_serializes_concurrent_launches() {
+        // A fresh lock held by a live pid means another GUI is already
+        // starting: the second caller must wait, never spawn.
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-startup-lock-test-{}-{}",
+            std::process::id(),
+            random_id().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // No lock yet: first caller claims it and may spawn.
+        assert!(try_claim_startup_lock(&dir, std::process::id() as u64));
+        // Second caller sees the fresh live claim and must wait.
+        assert!(!try_claim_startup_lock(&dir, u64::MAX - 1));
+
+        // A stale lock (previous boot left it behind) is reclaimable.
+        let stale = now_unix_secs().saturating_sub(STARTUP_LOCK_TTL_SECS + 60);
+        write_startup_lock_at(&dir, 12345, stale).unwrap();
+        assert!(try_claim_startup_lock(&dir, std::process::id() as u64));
+
+        // A fresh lock from a dead pid is reclaimable (crashed starter).
+        let fresh = now_unix_secs();
+        write_startup_lock_at(&dir, u64::MAX - 2, fresh).unwrap();
+        assert!(try_claim_startup_lock(&dir, std::process::id() as u64));
+
+        release_startup_lock(&dir);
+        assert!(!startup_lock_path_for(&dir).exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

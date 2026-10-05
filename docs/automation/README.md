@@ -20,6 +20,15 @@ The server provides four tools:
 - `ocs_execute` performs one operation, an atomic record update, or a sequential batch against the real editor.
 - `ocs_capture` returns a bounded PNG of the drawing viewport or complete window.
 
+### Stale sessions clean themselves up
+
+Dead editor sessions used to leave descriptor files behind that slowed down
+session discovery. Discovery now skips processes that are gone (and removes
+their leftover files), and a bridge started from an older build exits on its
+own once it detects a rebuild so the client starts a fresh one. No action is
+needed on your side; if a client reports version errors after an upgrade,
+reconnecting its MCP servers picks up the new build.
+
 Run `python docs/automation/mcp_acceptance.py target/debug/OpenCADStudio.exe`
 for a repeatable end-to-end acceptance. It creates visible geometry through
 MCP, audits and verified-saves DWG 2000/2013/2018 plus DXF 2000, and records a

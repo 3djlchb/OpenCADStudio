@@ -2067,6 +2067,9 @@ pub struct Scene {
     pub preview_text: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
     /// Committed-segment wire drawn during multi-point commands (normal colour).
     pub interim_wire: Option<WireModel>,
+    /// Set when an entity creation or update automatically registers a novel
+    /// layer into the document layer table, signalling the UI to refresh.
+    pub layer_table_dirty: bool,
     pub camera_generation: u64,
     /// Incremented whenever geometry-affecting state changes (entities, selection,
     /// preview wires, layer visibility, layout). The GPU pipeline uses this to
@@ -2640,6 +2643,7 @@ impl Scene {
             preview_hatches: Arc::new(Vec::new()),
             preview_text: vec![],
             interim_wire: None,
+            layer_table_dirty: false,
             camera_generation: 0,
             geometry_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             projection_bounds_epoch: std::cell::Cell::new(0),

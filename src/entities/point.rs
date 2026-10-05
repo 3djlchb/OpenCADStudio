@@ -51,7 +51,7 @@ fn point_render(pt: &Point, pdmode: i16, s: f64) -> RenderEntity {
             object: RenderObject::Lines(vec![]),
             snap_pts: vec![(snap, SnapHint::Node)],
             tangent_geoms: vec![],
-            key_vertices: vec![[wx, wy, wz]],
+            key_vertices: vec![],
             fill_tris: vec![],
         };
     }
@@ -63,7 +63,8 @@ fn point_render(pt: &Point, pdmode: i16, s: f64) -> RenderEntity {
         key_vertices: if pt.thickness.abs() > 1.0e-10 {
             vec![[wx, wy, wz], [top.x, top.y, top.z]]
         } else {
-            vec![[wx, wy, wz]]
+            // Snaps as a Node only, never as an endpoint.
+            vec![]
         },
         fill_tris: vec![],
     }

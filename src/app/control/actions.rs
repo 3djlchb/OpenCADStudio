@@ -135,63 +135,130 @@ fn parse_point_2d(val: &Value) -> Result<[f64; 2], Value> {
     Ok([x, y])
 }
 
+fn parse_calibrate(
+    cal: &Value,
+    pixel_width: u32,
+    pixel_height: u32,
+) -> Result<(codec::types::Vector3, f64, f64), Value> {
+    let pt_a = cal
+        .get("point_a")
+        .or_else(|| cal.get("pixel_a"))
+        .or_else(|| cal.get("p1"))
+        .or_else(|| cal.get("source_a"));
+    let pt_b = cal
+        .get("point_b")
+        .or_else(|| cal.get("pixel_b"))
+        .or_else(|| cal.get("p2"))
+        .or_else(|| cal.get("source_b"));
+    let dist = cal
+        .get("distance")
+        .or_else(|| cal.get("real_distance"))
+        .or_else(|| cal.get("length"))
+        .and_then(Value::as_f64);
+
+    if let (Some(pa), Some(pb), Some(d_real)) = (pt_a, pt_b, dist) {
+        if !d_real.is_finite() || d_real <= 0.0 {
+            return Err(failure(
+                "invalid_distance",
+                "Calibration distance must be positive",
+            ));
+        }
+        let p1 = parse_point_2d(pa)?;
+        let p2 = parse_point_2d(pb)?;
+        let d_px = ((p2[0] - p1[0]).powi(2) + (p2[1] - p1[1]).powi(2)).sqrt();
+        if d_px <= 1e-6 {
+            return Err(failure(
+                "invalid_points",
+                "Calibration reference points must be distinct",
+            ));
+        }
+        let scale = d_real / d_px;
+        let width = pixel_width as f64 * scale;
+
+        let align_to = cal
+            .get("align_to")
+            .or_else(|| cal.get("origin"))
+            .or_else(|| cal.get("target_a"))
+            .map(parse_point_2d)
+            .transpose()?
+            .unwrap_or([0.0, 0.0]);
+
+        let x_ll = align_to[0] - p1[0] * scale;
+        let y_ll = align_to[1] - (pixel_height as f64 - p1[1]) * scale;
+        return Ok((codec::types::Vector3::new(x_ll, y_ll, 0.0), width, scale));
+    }
+
+    if let (Some(src_pts), Some(tgt_pts)) = (
+        cal.get("source_points").and_then(Value::as_array),
+        cal.get("target_points").and_then(Value::as_array),
+    ) {
+        if src_pts.len() >= 2 && tgt_pts.len() >= 2 {
+            let p_s1 = parse_point_2d(&src_pts[0])?;
+            let p_s2 = parse_point_2d(&src_pts[1])?;
+            let p_t1 = parse_point_2d(&tgt_pts[0])?;
+            let p_t2 = parse_point_2d(&tgt_pts[1])?;
+            let d_px = ((p_s2[0] - p_s1[0]).powi(2) + (p_s2[1] - p_s1[1]).powi(2)).sqrt();
+            let d_cad = ((p_t2[0] - p_t1[0]).powi(2) + (p_t2[1] - p_t1[1]).powi(2)).sqrt();
+            if d_px <= 1e-6 {
+                return Err(failure(
+                    "invalid_points",
+                    "Source calibration points must be distinct",
+                ));
+            }
+            let scale = d_cad / d_px;
+            let width = pixel_width as f64 * scale;
+            let x_ll = p_t1[0] - p_s1[0] * scale;
+            let y_ll = p_t1[1] - (pixel_height as f64 - p_s1[1]) * scale;
+            return Ok((codec::types::Vector3::new(x_ll, y_ll, 0.0), width, scale));
+        }
+    }
+
+    Err(failure(
+        "invalid_calibrate",
+        "calibrate requires point_a:[x,y], point_b:[x,y], distance:number, and optional align_to:[x,y]",
+    ))
+}
+
 impl OpenCADStudio {
-    /// `embed_image` — pack the picture at `path` into an OLE2FRAME placed
-    /// with its lower-left corner at `at` (default width ≈ pixel_width/100,
-    /// like the interactive command's Enter answer) and commit it as one
-    /// undo step. The drawing stays self-contained: no external file to lose.
-    /// Supports automatic 2-point calibration via `source_points` and `target_points`.
+    /// `embed_image` — pack the picture at `path` into an OLE2FRAME or linked RasterImage
+    /// placed with its lower-left corner at `at` (default width ≈ pixel_width/100).
+    /// Supports automatic reference scaling and calibration via `calibrate`:
+    /// `{"point_a": [px1, py1], "point_b": [px2, py2], "distance": 6500.0, "align_to": [0, 0]}`.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn control_embed_image(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         let i = self.active_tab;
         let path = string(req, "path")?;
         let image = crate::io::ole_embed::EmbeddedImage::from_file(std::path::Path::new(&path))
             .map_err(|e| failure("embed_failed", e))?;
-        let (at, width) = if let (Some(src_pts), Some(tgt_pts)) = (
+
+        let (at, width, scale) = if let Some(cal) = req.get("calibrate") {
+            parse_calibrate(cal, image.pixel_width, image.pixel_height)?
+        } else if let (Some(src_pts), Some(tgt_pts)) = (
             req.get("source_points").and_then(Value::as_array),
             req.get("target_points").and_then(Value::as_array),
         ) {
-            if src_pts.len() >= 2 && tgt_pts.len() >= 2 {
-                let p_s1 = parse_point_2d(&src_pts[0])?;
-                let p_s2 = parse_point_2d(&src_pts[1])?;
-                let p_t1 = parse_point_2d(&tgt_pts[0])?;
-                let p_t2 = parse_point_2d(&tgt_pts[1])?;
-                let d_px = ((p_s2[0] - p_s1[0]).powi(2) + (p_s2[1] - p_s1[1]).powi(2)).sqrt();
-                let d_cad = ((p_t2[0] - p_t1[0]).powi(2) + (p_t2[1] - p_t1[1]).powi(2)).sqrt();
-                if d_px <= 1e-6 {
-                    return Err(failure(
-                        "invalid_points",
-                        "Source calibration points must be distinct",
-                    ));
-                }
-                let scale = d_cad / d_px;
-                let w = image.pixel_width as f64 * scale;
-                // In image pixel coords, y is 0 at top and pixel_height at bottom.
-                // In CAD coordinates, lower-left is (x_ll, y_ll).
-                // x_target = x_ll + px * scale => x_ll = x_target - px * scale
-                // y_target = y_ll + (pixel_height - py) * scale => y_ll = y_target - (pixel_height - py) * scale
-                let x_ll = p_t1[0] - p_s1[0] * scale;
-                let y_ll = p_t1[1] - (image.pixel_height as f64 - p_s1[1]) * scale;
-                let calc_at = codec::types::Vector3::new(x_ll, y_ll, 0.0);
-                let final_at = embed_point(req).unwrap_or(calc_at);
-                let final_w = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(w);
-                (final_at, final_w)
-            } else {
-                let default_width = (image.pixel_width as f64 / 100.0).max(1.0);
-                let width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(default_width);
-                (embed_point(req)?, width)
-            }
+            let dummy = json!({"source_points": src_pts, "target_points": tgt_pts});
+            parse_calibrate(&dummy, image.pixel_width, image.pixel_height)?
         } else {
             let default_width = (image.pixel_width as f64 / 100.0).max(1.0);
             let width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(default_width);
-            (embed_point(req)?, width)
+            let scale = width / image.pixel_width as f64;
+            (embed_point(req)?, width, scale)
         };
+
+        let final_at = if req.get("calibrate").is_none() && req.get("source_points").is_none() {
+            at
+        } else {
+            embed_point(req).unwrap_or(at)
+        };
+        let final_width = req["width"].as_f64().filter(|w| *w > 0.0).unwrap_or(width);
+        let height = final_width * image.pixel_height as f64 / image.pixel_width as f64;
+
+        let layer_name = req["layer"].as_str().filter(|l| !l.is_empty());
+        let lock_layer = req["lock_layer"].as_bool().unwrap_or(false);
+
         if req["linked"].as_bool().unwrap_or(false) {
-            // Path-linked RasterImage + ImageDefinition: the drawing stores
-            // only the file path, so the picture file must travel with the
-            // drawing (unlike the embedded OLE2FRAME default below).
             self.push_undo_snapshot(i, "IMAGEATTACH");
-            let height = width * image.pixel_height as f64 / image.pixel_width as f64;
             let handle = {
                 let document = &mut self.tabs[i].scene.document;
                 let definition_handle = document.allocate_handle();
@@ -207,45 +274,91 @@ impl OpenCADStudio {
                 );
                 let mut entity = codec::entities::RasterImage::with_size(
                     path,
-                    at,
+                    final_at,
                     image.pixel_width as f64,
                     image.pixel_height as f64,
-                    width,
+                    final_width,
                     height,
                 );
                 entity.definition_handle = Some(definition_handle);
+                if let Some(l_name) = layer_name {
+                    entity.common.layer = l_name.to_string();
+                    if !document.layers.contains(l_name) {
+                        let mut layer_record = codec::tables::Layer::new(l_name.to_string());
+                        layer_record.handle = document.allocate_handle();
+                        if lock_layer {
+                            layer_record.flags.locked = true;
+                        }
+                        let _ = document.layers.add(layer_record);
+                    } else if lock_layer {
+                        if let Some(l) = document.layers.get_mut(l_name) {
+                            l.flags.locked = true;
+                        }
+                    }
+                }
                 document
                     .add_entity(codec::EntityType::RasterImage(entity))
                     .map_err(|e| failure("embed_failed", e))?
             };
             self.tabs[i].scene.populate_images_from_document();
+            if layer_name.is_some() {
+                self.refresh_layer_panel();
+            }
             self.post_ref_op(i);
             self.set_control_result(json!({
                 "handle": format!("{:X}", handle.value()),
                 "kind": "RasterImage",
                 "path": path,
-                "at": [at.x, at.y, at.z],
-                "width": width,
+                "at": [final_at.x, final_at.y, final_at.z],
+                "width": final_width,
                 "height": height,
+                "scale": scale,
                 "linked": true,
+                "layer": layer_name.unwrap_or("0"),
             }));
             return Ok(Task::none());
         }
+
         self.push_undo_snapshot(i, "IMAGEEMBED");
         let handle = crate::io::ole_embed::add_embedded_image(
             &mut self.tabs[i].scene.document,
             &image,
-            at,
-            width,
+            final_at,
+            final_width,
         )
         .map_err(|e| failure("embed_failed", e))?;
+
+        if let Some(l_name) = layer_name {
+            let document = &mut self.tabs[i].scene.document;
+            if !document.layers.contains(l_name) {
+                let mut layer_record = codec::tables::Layer::new(l_name.to_string());
+                layer_record.handle = document.allocate_handle();
+                if lock_layer {
+                    layer_record.flags.locked = true;
+                }
+                let _ = document.layers.add(layer_record);
+            } else if lock_layer {
+                if let Some(l) = document.layers.get_mut(l_name) {
+                    l.flags.locked = true;
+                }
+            }
+            if let Some(ent) = document.get_entity_mut(handle) {
+                ent.common_mut().layer = l_name.to_string();
+            }
+            self.refresh_layer_panel();
+        }
+
         self.post_ref_op(i);
         self.set_control_result(json!({
             "handle": format!("{:X}", handle.value()),
             "kind": "Ole2Frame",
             "path": path,
-            "at": [at.x, at.y, at.z],
-            "width": width,
+            "at": [final_at.x, final_at.y, final_at.z],
+            "width": final_width,
+            "height": height,
+            "scale": scale,
+            "linked": false,
+            "layer": layer_name.unwrap_or("0"),
         }));
         Ok(Task::none())
     }
@@ -363,6 +476,7 @@ impl OpenCADStudio {
         if !path.to_ascii_lowercase().ends_with(".pdf") {
             return Err(failure("invalid_path", "plot writes .pdf files"));
         }
+        self.stamp_plot_fields();
         let i = self.active_tab;
         let names = self.tabs[i].scene.layout_names();
         let requested = req["layout"].as_str().unwrap_or("Model").to_owned();
@@ -1090,6 +1204,13 @@ impl OpenCADStudio {
                     "plot_scale" => F::PlotScale(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
                     "count" => F::CountExpression(v.into()),
                     "show_instances" => F::ShowCountInstances,
+                    "placeholder" => F::PlaceholderProperty(index(codec::fields::BLOCK_PLACEHOLDER_PROPERTIES.len())?),
+                    "table_function" => F::TableFunction(
+                        ["Average", "Sum", "Count", "Cell"]
+                            .into_iter()
+                            .find(|f| f.eq_ignore_ascii_case(v))
+                            .ok_or_else(|| failure("invalid_value", "Average|Sum|Count|Cell"))?,
+                    ),
                     _ => return Err(failure("invalid_value", "Unknown field dialog key")),
                 })
             }

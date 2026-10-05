@@ -447,6 +447,8 @@ fn embedded_name(entity: Option<&codec::entities::EmbeddedEntity>) -> &'static s
         Some(codec::entities::EmbeddedEntity::Ellipse(_)) => "Ellipse",
         Some(codec::entities::EmbeddedEntity::Spline(_)) => "Spline",
         Some(codec::entities::EmbeddedEntity::LwPolyline(_)) => "Polyline",
+        // A 2D / 3D polyline profile the modeler keeps as a wire body.
+        Some(codec::entities::EmbeddedEntity::Body { .. }) => "Polyline",
         Some(codec::entities::EmbeddedEntity::Region(_)) => "Region",
         Some(codec::entities::EmbeddedEntity::Ray(_)) => "Ray",
         Some(codec::entities::EmbeddedEntity::XLine(_)) => "XLine",

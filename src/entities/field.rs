@@ -360,3 +360,68 @@ fn display_name() -> Option<String> {
     #[cfg(not(target_os = "windows"))]
     None
 }
+
+/// Copy each attribute definition's field onto the matching attribute of a
+/// new block reference (block placeholders resolve against the reference).
+/// Returns the attributes that received a field.
+pub fn attach_attribute_fields(document: &mut CadDocument, insert: Handle) -> Vec<Handle> {
+    let context = OcsFieldContext(None);
+    document.attach_attribute_fields(insert, &context)
+}
+
+/// Whether any attribute definition of `block` hosts a field.
+pub fn block_has_attribute_fields(document: &CadDocument, block: &str) -> bool {
+    let Some(record) = document.block_records.iter().find(|r| r.name.eq_ignore_ascii_case(block)) else {
+        return false;
+    };
+    record.entity_handles.iter().filter_map(|h| document.get_entity(*h)).any(|e| {
+        matches!(e, codec::entities::EntityType::AttributeDefinition(_)) && hosts_field(document, e)
+    })
+}
+
+/// Give plot-time fields (PlotDate) the plot's time; returns the hosts whose
+/// text changed.
+pub fn stamp_plot_fields(document: &mut CadDocument) -> Vec<Handle> {
+    // The context reads a snapshot of the whole drawing; most drawings hold
+    // no field, and a large one should not be copied for every plot.
+    let has_fields = document
+        .objects
+        .values()
+        .any(|object| matches!(object, codec::objects::ObjectType::Field(_)));
+    if !has_fields {
+        return Vec::new();
+    }
+    let snapshot = document.clone();
+    let context = PlotContext(OcsFieldContext(Some(&snapshot)));
+    document.stamp_plot_fields(&context)
+}
+
+/// The app context while a plot is produced.
+struct PlotContext<'a>(OcsFieldContext<'a>);
+
+impl FieldContext for PlotContext<'_> {
+    fn now_julian(&self) -> f64 {
+        self.0.now_julian()
+    }
+    fn file_times(&self) -> Option<(f64, f64)> {
+        self.0.file_times()
+    }
+    fn plotting(&self) -> bool {
+        true
+    }
+    fn login(&self) -> Option<String> {
+        self.0.login()
+    }
+    fn getvar(&self, name: &str) -> Option<String> {
+        self.0.getvar(name)
+    }
+    fn file_size(&self) -> Option<u64> {
+        self.0.file_size()
+    }
+    fn date_locale(&self) -> codec::fields::DateLocale {
+        self.0.date_locale()
+    }
+    fn getenv(&self, name: &str) -> Option<String> {
+        self.0.getenv(name)
+    }
+}

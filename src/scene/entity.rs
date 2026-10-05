@@ -143,6 +143,7 @@ impl Scene {
     /// layer 0. Auto-registering keeps it on its own layer (#252). Names are
     /// registered verbatim so the writer's (case-insensitive) lookup matches;
     /// the always-present default layer "0" and empty names are no-ops.
+    /// Flags `layer_table_dirty` so the app refreshes its layer lists.
     pub fn ensure_layer(&mut self, name: &str) {
         if name.trim().is_empty() || self.document.layers.contains(name) {
             return;
@@ -150,6 +151,8 @@ impl Scene {
         let mut layer = codec::tables::Layer::new(name);
         layer.handle = self.document.allocate_handle();
         let _ = self.document.layers.add(layer);
+        self.invalidate_layer_dependencies(&[name.to_string()]);
+        self.layer_table_dirty = true;
     }
 
     pub(crate) fn ensure_app_id(&mut self, name: &str) {

@@ -278,7 +278,7 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
     match operation {
         SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) => world_point(
             value.base.transform,
-            [value.length * 0.5, value.width * 0.5, 0.0],
+            [0.0, 0.0, -value.height * 0.5],
         ),
         SolidHistoryOperation::Sphere(value) => {
             world_point(value.base.transform, [0.0, 0.0, 0.0])
@@ -1615,9 +1615,10 @@ pub fn primitive_properties(
     ) {
         return Vec::new();
     }
-    let Some(operation) = primitive_property_operation(document, handle) else {
+    let Some(mut operation) = primitive_property_operation(document, handle) else {
         return brep_properties(document, handle);
     };
+    corner_frame(&mut operation);
     match &operation {
         SolidHistoryOperation::Box(value) => {
             rectangular_properties(document, handle, value, "Box")
@@ -2415,6 +2416,17 @@ pub fn apply_primitive_property(
     field: &str,
     value: &str,
 ) -> bool {
+    corner_frame(operation);
+    let applied = apply_primitive_property_at_corner(operation, field, value);
+    centre_frame(operation);
+    applied
+}
+
+fn apply_primitive_property_at_corner(
+    operation: &mut SolidHistoryOperation,
+    field: &str,
+    value: &str,
+) -> bool {
     if let SolidHistoryOperation::Brep(brep_value) = operation {
         if let Some(applied) = apply_brep_position_property(brep_value, field, value) {
             return applied;
@@ -2757,7 +2769,7 @@ fn embedded_entity(value: &EmbeddedEntity) -> Option<EntityType> {
         EmbeddedEntity::Region(value) => EntityType::Region(value.clone()),
         EmbeddedEntity::Ray(value) => EntityType::Ray(value.clone()),
         EmbeddedEntity::XLine(value) => EntityType::XLine(value.clone()),
-        EmbeddedEntity::Unknown { .. } => return None,
+        EmbeddedEntity::Body { .. } | EmbeddedEntity::Unknown { .. } => return None,
     })
 }
 
@@ -3460,6 +3472,9 @@ pub fn primitive_grips(
     let Some(operation) = document.solid_history_operation(handle) else {
         return Vec::new();
     };
+    let mut operation = operation.clone();
+    corner_frame(&mut operation);
+    let operation = &operation;
     if let SolidHistoryOperation::Fillet(value) = operation {
         let Some(radius) = value.radii.first().copied() else {
             return Vec::new();
@@ -3740,6 +3755,17 @@ pub fn primitive_grips(
 }
 
 pub fn apply_primitive_grip(
+    operation: &mut SolidHistoryOperation,
+    grip_id: usize,
+    apply: GripApply,
+) -> bool {
+    corner_frame(operation);
+    let applied = apply_primitive_grip_at_corner(operation, grip_id, apply);
+    centre_frame(operation);
+    applied
+}
+
+fn apply_primitive_grip_at_corner(
     operation: &mut SolidHistoryOperation,
     grip_id: usize,
     apply: GripApply,
@@ -4137,4 +4163,24 @@ pub fn chamfer_op(
         base_face,
         ..SolidHistoryChamfer::default()
     })
+}
+
+/// Box and wedge histories are framed at the centre of their bounding box,
+/// as the reference stores them; the editing code here works in the frame at
+/// the base corner. These move a box or wedge between the two frames.
+fn corner_frame(operation: &mut SolidHistoryOperation) {
+    shift_rectangular_frame(operation, -0.5);
+}
+
+fn centre_frame(operation: &mut SolidHistoryOperation) {
+    shift_rectangular_frame(operation, 0.5);
+}
+
+fn shift_rectangular_frame(operation: &mut SolidHistoryOperation, factor: f64) {
+    if let SolidHistoryOperation::Box(value) | SolidHistoryOperation::Wedge(value) = operation {
+        if let Some(current) = matrix(value.base.transform) {
+            let half = glam::DVec3::new(value.length, value.width, value.height) * factor;
+            value.base.transform = (current * glam::DMat4::from_translation(half)).to_cols_array();
+        }
+    }
 }

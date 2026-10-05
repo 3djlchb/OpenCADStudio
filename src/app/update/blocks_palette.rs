@@ -77,6 +77,10 @@ impl OpenCADStudio {
             BlockPaletteMsg::ToggleOptions => {
                 self.block_palette.options_collapsed ^= true;
             }
+            // Browsers expose no folder picker.
+            #[cfg(target_arch = "wasm32")]
+            BlockPaletteMsg::LibraryBrowse => {}
+            #[cfg(not(target_arch = "wasm32"))]
             BlockPaletteMsg::LibraryBrowse => {
                 return Task::perform(
                     async {
