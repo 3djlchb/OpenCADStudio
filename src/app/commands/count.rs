@@ -253,7 +253,7 @@ impl OpenCADStudio {
             let r = m.result(&self.tabs[i].scene.document);
             crate::scene::CountDisplay {
                 counted: r.counted.into_iter().collect(),
-                errors: r.errors.into_iter().collect(),
+                errors: r.errors.into_iter().chain(r.overlapped).collect(),
                 color: aci_rgba(self.count_palette.color),
                 error_color: aci_rgba(self.count_palette.error_color),
             }
@@ -287,7 +287,8 @@ impl OpenCADStudio {
             let doc = &self.tabs[i].scene.document;
             if doc.get_entity(h).is_some() && !boundary_in_use(doc, h) {
                 self.push_undo_snapshot(i, "COUNT");
-                self.tabs[i].scene.erase_entities(&[h]);
+                // The area layer is locked; count mode removes its own polyline.
+                self.tabs[i].scene.rollback_new_entities(&[h]);
                 self.tabs[i].dirty = true;
             }
         }
@@ -335,7 +336,7 @@ impl OpenCADStudio {
         }
     }
 
-    /// A closed polyline on `0-CountArea` (colour 152, not plotted,
+    /// A closed polyline on `0-CountArea` (locked, colour 152, not plotted,
     /// Continuous), whatever the current layer.
     fn draw_count_area(&mut self, i: usize, ring: &[[f64; 2]]) -> Option<Handle> {
         self.push_undo_snapshot(i, "COUNT");
@@ -345,6 +346,7 @@ impl OpenCADStudio {
             layer.handle = doc.allocate_handle();
             layer.color = codec::types::Color::from_index(152);
             layer.is_plottable = false;
+            layer.flags.locked = true;
             layer.line_type = "Continuous".into();
             let _ = doc.layers.add(layer);
         }
@@ -400,6 +402,8 @@ impl OpenCADStudio {
             None if targets.is_empty() => None,
             _ => Some(CountTarget::Group(targets.clone())),
         };
+        // The picked targets do not stay selected.
+        self.tabs[i].scene.deselect_all();
         let old = self.tabs[i].count.take();
         if let Some(old) = old.as_ref().filter(|o| o.boundary != boundary) {
             self.drop_count_boundary(i, old.boundary);

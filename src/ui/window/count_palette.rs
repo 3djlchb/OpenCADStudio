@@ -58,6 +58,8 @@ pub struct CountMode {
 pub struct CountResult {
     pub counted: Vec<Handle>,
     pub errors: Vec<Handle>,
+    /// The counted references a duplicate overlaps (drawn in the error colour too).
+    pub overlapped: Vec<Handle>,
 }
 
 impl CountMode {
@@ -83,6 +85,7 @@ impl CountMode {
             Some(CountTarget::Group(handles)) => CountResult {
                 counted: handles.iter().copied().filter(|h| doc.get_entity(*h).is_some()).collect(),
                 errors: Vec::new(),
+                overlapped: Vec::new(),
             },
             Some(CountTarget::Block { name, .. }) => {
                 let instances = self.instances(doc);
@@ -91,6 +94,7 @@ impl CountMode {
                 CountResult {
                     counted: instances.iter().filter(mine).filter(|i| i.duplicate_of.is_none()).map(|i| i.handle).collect(),
                     errors: instances.iter().filter(mine).filter(|i| i.duplicate_of.is_some()).map(|i| i.handle).collect(),
+                    overlapped: instances.iter().filter(mine).filter_map(|i| i.duplicate_of).collect(),
                 }
             }
         }
