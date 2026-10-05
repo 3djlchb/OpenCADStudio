@@ -3316,8 +3316,11 @@ impl OpenCADStudio {
             }
 
             // ── Layer panel messages ───────────────────────────────────────
-            Message::LayerToggleVisible(idx) => {
+            Message::LayerToggleVisible(name) => {
                 let i = self.active_tab;
+                let Some(idx) = self.layer_panel_index(i, &name) else {
+                    return Task::none();
+                };
                 // New state = toggle of the clicked row, applied to every target
                 // (the whole selection when the clicked row is part of it) (#236).
                 let on = self.tabs[i].layers.layers.get(idx).map(|l| !l.visible);
@@ -3364,8 +3367,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::LayerToggleLock(idx) => {
+            Message::LayerToggleLock(name) => {
                 let i = self.active_tab;
+                let Some(idx) = self.layer_panel_index(i, &name) else {
+                    return Task::none();
+                };
                 let locked = self.tabs[i].layers.layers.get(idx).map(|l| !l.locked);
                 let targets = self.layer_row_action_targets(i, idx);
                 if let Some(locked) = locked {
@@ -3402,8 +3408,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::LayerToggleFreeze(idx) => {
+            Message::LayerToggleFreeze(name) => {
                 let i = self.active_tab;
+                let Some(idx) = self.layer_panel_index(i, &name) else {
+                    return Task::none();
+                };
                 let frozen = self.tabs[i].layers.layers.get(idx).map(|l| !l.frozen);
                 let targets = self.layer_row_action_targets(i, idx);
                 if let Some(frozen) = frozen {
@@ -3442,8 +3451,11 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::LayerTogglePlot(idx) => {
+            Message::LayerTogglePlot(name) => {
                 let i = self.active_tab;
+                let Some(idx) = self.layer_panel_index(i, &name) else {
+                    return Task::none();
+                };
 
                 let plottable = self.tabs[i]
                     .layers
@@ -3493,8 +3505,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::LayerToggleVpFreeze(layer_idx, vp_col_idx) => {
-                self.on_layer_toggle_vp_freeze(layer_idx, vp_col_idx)
+            Message::LayerToggleVpFreeze(name, vp_col_idx) => {
+                let Some(idx) = self.layer_panel_index(self.active_tab, &name) else {
+                    return Task::none();
+                };
+                self.on_layer_toggle_vp_freeze(idx, vp_col_idx)
             }
 
             Message::LayerNew => self.on_layer_new(),
@@ -3505,8 +3520,11 @@ impl OpenCADStudio {
 
             Message::LayerSetCurrent => self.on_layer_set_current(),
 
-            Message::LayerSelect(idx) => {
+            Message::LayerSelect(name) => {
                 let i = self.active_tab;
+                let Some(idx) = self.layer_panel_index(i, &name) else {
+                    return Task::none();
+                };
                 if self.tabs[i].layers.editing.is_some() {
                     return Task::done(Message::LayerRenameCommit);
                 }
@@ -3535,8 +3553,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::LayerRenameStart(idx) => {
+            Message::LayerRenameStart(name) => {
                 let i = self.active_tab;
+                let Some(idx) = self.layer_panel_index(i, &name) else {
+                    return Task::none();
+                };
                 self.tabs[i].layers.selected = Some(idx);
                 self.tabs[i].layers.selected_multi = vec![idx];
                 if let Some(layer) = self.tabs[i].layers.layers.get(idx) {
@@ -3554,8 +3575,11 @@ impl OpenCADStudio {
 
             Message::LayerRenameCommit => self.on_layer_rename_commit(),
 
-            Message::LayerColorPickerToggle(idx) => {
+            Message::LayerColorPickerToggle(name) => {
                 let i = self.active_tab;
+                let Some(idx) = self.layer_panel_index(i, &name) else {
+                    return Task::none();
+                };
                 let panel = &mut self.tabs[i].layers;
                 if panel.color_picker_row == Some(idx) {
                     panel.color_picker_row = None;
@@ -3659,8 +3683,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::LayerTransparencyEdit(idx, s) => {
+            Message::LayerTransparencyEdit(name, s) => {
                 let i = self.active_tab;
+                let Some(idx) = self.layer_panel_index(i, &name) else {
+                    return Task::none();
+                };
                 let val = if let Ok(v) = s.parse::<i32>() {
                     Some(v.clamp(0, 90))
                 } else if s.is_empty() {

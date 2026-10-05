@@ -1226,20 +1226,24 @@ impl OpenCADStudio {
             "undo" => Message::Undo,
             "redo" => Message::Redo,
             "layer_visible" | "layer_locked" | "layer_frozen" | "layer_current" => {
-                let layer = string(req, "layer")?;
-                // The Layer* messages index the panel's (sortable) row list.
-                let index = self.tabs[self.active_tab]
+                let layer = string(req, "layer")?.to_string();
+                // The Layer* messages carry the layer name and resolve it to
+                // the current panel row at dispatch time (#22) — no index
+                // lookup here, so panel sort order cannot mistarget the CLI.
+                if !self.tabs[self.active_tab]
+                    .scene
+                    .document
                     .layers
-                    .layers
-                    .iter()
-                    .position(|l| l.name == layer)
-                    .ok_or_else(|| failure("unknown_layer", "Layer does not exist"))?;
+                    .contains(&layer)
+                {
+                    return Err(failure("unknown_layer", "Layer does not exist"));
+                }
                 match name {
-                    "layer_visible" => Message::LayerToggleVisible(index),
-                    "layer_locked" => Message::LayerToggleLock(index),
-                    "layer_frozen" => Message::LayerToggleFreeze(index),
+                    "layer_visible" => Message::LayerToggleVisible(layer),
+                    "layer_locked" => Message::LayerToggleLock(layer),
+                    "layer_frozen" => Message::LayerToggleFreeze(layer),
                     _ => {
-                        let select = self.update(Message::LayerSelect(index));
+                        let select = self.update(Message::LayerSelect(layer));
                         let current = self.update(Message::LayerSetCurrent);
                         return Ok(Task::batch([select, current]));
                     }

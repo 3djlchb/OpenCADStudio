@@ -1160,9 +1160,15 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                     Some(crate::app::ColorPickTarget::Ribbon) => {
                         Some(Message::RibbonColorChanged(color))
                     }
-                    Some(crate::app::ColorPickTarget::Layer(idx)) => {
-                        self.tabs[self.active_tab].layers.selected = Some(idx);
-                        Some(Message::LayerColorSet(color))
+                    Some(crate::app::ColorPickTarget::Layer(name)) => {
+                        let i = self.active_tab;
+                        match self.layer_panel_index(i, &name) {
+                            Some(idx) => {
+                                self.tabs[i].layers.selected = Some(idx);
+                                Some(Message::LayerColorSet(color))
+                            }
+                            None => None,
+                        }
                     }
                     Some(crate::app::ColorPickTarget::LayerState(idx)) => {
                         Some(Message::LayerStateEditorLayerColor(idx, color))

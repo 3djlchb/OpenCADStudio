@@ -1583,8 +1583,8 @@ pub enum ColorPickTarget {
     PropertiesField(String),
     /// Current creation colour (ribbon).
     Ribbon,
-    /// A layer's colour, by panel row index.
-    Layer(usize),
+    /// A layer's colour, by layer name.
+    Layer(String),
     /// A saved layer-state layer's colour, by editor row index.
     LayerState(usize),
     /// The MText editor's selection (or global) colour.
@@ -2669,28 +2669,28 @@ pub enum Message {
     XrefRowFindReplacePrompt(usize),
     XrefRowChangePathEnter,
     XrefRowChangePathLeave,
-    LayerToggleVisible(usize),
-    LayerToggleLock(usize),
-    LayerToggleFreeze(usize),
-    LayerTogglePlot(usize),
+    LayerToggleVisible(String),
+    LayerToggleLock(String),
+    LayerToggleFreeze(String),
+    LayerTogglePlot(String),
     /// Sort the Layer Manager table by a clicked column header.
     LayerSort(crate::ui::window::layers::LayerSortCol),
-    /// Toggle per-viewport freeze: (layer_index, vp_col_index)
-    LayerToggleVpFreeze(usize, usize),
+    /// Toggle per-viewport freeze: (layer_name, vp_col_index)
+    LayerToggleVpFreeze(String, usize),
     LayerNew,
     LayerDelete,
     /// Confirm deleting a non-empty layer (erases its objects too).
     LayerDeleteConfirm,
     LayerSetCurrent,
-    LayerSelect(usize),
-    LayerRenameStart(usize),
+    LayerSelect(String),
+    LayerRenameStart(String),
     LayerRenameEdit(String),
-    LayerColorPickerToggle(usize),
+    LayerColorPickerToggle(String),
     LayerColorMorePalette,
     LayerColorSet(codec::types::Color),
     LayerLinetypeSet(String),
     LayerLineweightSet(LineWeight),
-    LayerTransparencyEdit(usize, String),
+    LayerTransparencyEdit(String, String),
     LayerRenameCommit,
     // ── Layer State Manager ─────────────────────────────────────────────
     LayerStateManagerOpen,

@@ -992,11 +992,10 @@ impl Ribbon {
         let rows: Vec<Element<Message>> = self
             .layer_infos
             .iter()
-            .enumerate()
-            .filter(|(_, info)| {
+            .filter(|info| {
                 filter.is_empty() || info.name.to_lowercase().contains(&filter)
             })
-            .map(|(index, info)| {
+            .map(|info| {
                 let is_active = info.name == self.active_layer;
                 let lc = info.color;
                 let lv = info.visible;
@@ -1019,15 +1018,15 @@ impl Ribbon {
 
                 let vis = icon_btn(
                     crate::ui::icons::layer_visible(lv),
-                    Message::LayerToggleVisible(index),
+                    Message::LayerToggleVisible(info.name.clone()),
                 );
                 let freeze = icon_btn(
                     crate::ui::icons::layer_freeze(lf),
-                    Message::LayerToggleFreeze(index),
+                    Message::LayerToggleFreeze(info.name.clone()),
                 );
                 let lock = icon_btn(
                     crate::ui::icons::layer_lock(ll),
-                    Message::LayerToggleLock(index),
+                    Message::LayerToggleLock(info.name.clone()),
                 );
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_active);

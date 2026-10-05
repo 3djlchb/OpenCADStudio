@@ -1449,6 +1449,18 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
         Task::none()
     }
 
+    /// Resolve a layer name to its current panel-row index at dispatch time.
+    /// `Message::Layer*` carries the name (not the row) so a resort between
+    /// view() and handler dispatch cannot mistarget; `None`
+    /// (deleted/renamed meanwhile) lets the caller no-op gracefully (#22).
+    pub(super) fn layer_panel_index(&self, i: usize, name: &str) -> Option<usize> {
+        self.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|l| l.name == name)
+    }
+
     /// Layers a Layer-manager row toggle (visibility / lock / freeze /
     /// transparency) should affect: the whole multi-selection when the clicked
     /// row is part of it, otherwise just the clicked row — so those toggles work
@@ -4537,6 +4549,88 @@ mod layer_rename_tests {
             .scene
             .invalidate_layer_dependencies(&["Renamed".to_string()]);
         assert_ne!(app.tabs[i].scene.geometry_epoch, epoch);
+    }
+}
+
+#[cfg(test)]
+mod layer_name_target_tests {
+    // RED: `Message::LayerToggleVisible` currently carries a panel-row `usize`;
+    // these tests pass a layer `String` name and fail to compile until the
+    // #22 migration lands.
+    use crate::app::{Message, OpenCADStudio};
+    use crate::ui::window::layers::LayerSortCol;
+
+    fn rename_layer(app: &mut OpenCADStudio, old_name: &str, new_name: &str) {
+        let i = app.active_tab;
+        let idx = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|layer| layer.name == old_name)
+            .expect("layer exists in panel");
+        app.tabs[i].layers.editing = Some(idx);
+        app.tabs[i].layers.edit_buf = new_name.to_string();
+        let _ = app.on_layer_rename_commit();
+    }
+
+    fn app_with_zulu_alpha() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.on_layer_new();
+        let first = app.tabs[app.active_tab].layers.edit_buf.clone();
+        rename_layer(&mut app, &first, "ZULU");
+        let _ = app.on_layer_new();
+        let second = app.tabs[app.active_tab].layers.edit_buf.clone();
+        rename_layer(&mut app, &second, "ALPHA");
+        app
+    }
+
+    #[test]
+    fn layer_toggle_visible_targets_layer_by_name_after_resort() {
+        let mut app = app_with_zulu_alpha();
+        // Flip the panel order; a stale row index would now point at the
+        // wrong layer, but the name still resolves to ZULU.
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        let _ = app.update(Message::LayerToggleVisible("ZULU".to_string()));
+        let i = app.active_tab;
+        let zulu = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == "ZULU")
+            .expect("ZULU in panel");
+        let alpha = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == "ALPHA")
+            .expect("ALPHA in panel");
+        assert!(!zulu.visible, "ZULU should be toggled off");
+        assert!(alpha.visible, "ALPHA must be untouched");
+        assert!(
+            app.tabs[i].scene.document.layers.get("ZULU").unwrap().flags.off,
+            "document ZULU should be off"
+        );
+    }
+
+    #[test]
+    fn layer_toggle_visible_unknown_name_is_noop() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let before: Vec<(String, bool)> = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .map(|l| (l.name.clone(), l.visible))
+            .collect();
+        let _ = app.update(Message::LayerToggleVisible("DELETED".to_string()));
+        let after: Vec<(String, bool)> = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .map(|l| (l.name.clone(), l.visible))
+            .collect();
+        assert_eq!(before, after, "unknown name must change nothing");
     }
 }
 
