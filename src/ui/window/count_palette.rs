@@ -96,6 +96,15 @@ impl CountMode {
         }
     }
 
+    /// What the count shows: the counted references, or 1 for a group whose
+    /// objects all exist.
+    pub fn count(&self, doc: &CadDocument) -> usize {
+        match &self.target {
+            Some(CountTarget::Group(handles)) => usize::from(handles.iter().all(|h| doc.get_entity(*h).is_some())),
+            _ => self.result(doc).counted.len(),
+        }
+    }
+
     /// The name the toolbar and the command line show for the target.
     pub fn target_name(&self) -> Option<String> {
         match &self.target {
@@ -421,7 +430,7 @@ fn mode_view<'a>(palette: &'a CountPalette, mode: &'a CountMode, doc: &CadDocume
         let mut details = column![button(
             row![
                 crate::ui::icons::themed_success(CHECK_ICON, 12.0),
-                text(format!("{name}: {}", result.counted.len())).size(12).width(Fill),
+                text(format!("{name}: {}", mode.count(doc))).size(12).width(Fill),
             ]
             .spacing(6)
             .align_y(iced::Center),
@@ -504,7 +513,7 @@ fn bar_button<'a>(icon: Element<'a, Message>, tip: String, m: Option<CountMsg>) 
 pub fn toolbar<'a>(mode: &CountMode, doc: &CadDocument) -> Element<'a, Message> {
     let has_target = mode.target.is_some();
     let result = mode.result(doc);
-    let count = if has_target { result.counted.len().to_string() } else { "-".to_string() };
+    let count = if has_target { mode.count(doc).to_string() } else { "-".to_string() };
     let status: Element<'a, Message> = if !result.errors.is_empty() {
         crate::ui::icons::themed_warning(WARNING_ICON, 14.0)
     } else if has_target {

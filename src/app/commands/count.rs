@@ -183,7 +183,7 @@ impl OpenCADStudio {
                     .count
                     .as_ref()
                     .filter(|m| m.target.is_some())
-                    .map(|m| m.result(&self.tabs[i].scene.document).counted.len())
+                    .map(|m| m.count(&self.tabs[i].scene.document))
                     .unwrap_or(0),
             ),
             "COUNTPALETTESTATE" => Some(self.count_palette.show as usize),
@@ -374,9 +374,12 @@ impl OpenCADStudio {
                 .collect(),
             _ => Vec::new(),
         };
-        if targets.is_empty() && matches!(area_tokens.first(), Some(&"C") | Some(&"E") | None) {
+        // List all blocks: the palette, counting in the area when one was drawn.
+        if targets.is_empty() {
             self.set_count_palette(true);
-            return;
+            if matches!(area_tokens.first(), Some(&"C") | Some(&"E") | None) {
+                return;
+            }
         }
         let Some((area, boundary)) = self.resolve_count_area(i, area_tokens) else {
             return;
@@ -403,7 +406,7 @@ impl OpenCADStudio {
         }
         let mode = CountMode { area, boundary, target, cursor: None, epoch: 0 };
         if let Some(name) = mode.target_name() {
-            let n = mode.result(&self.tabs[i].scene.document).counted.len();
+            let n = mode.count(&self.tabs[i].scene.document);
             self.command_line.push_output(&format!("{name} ...... {n}"));
         }
         self.tabs[i].count = Some(mode);

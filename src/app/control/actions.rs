@@ -1088,6 +1088,8 @@ impl OpenCADStudio {
                     "link_text" => F::HyperlinkText(v.into()),
                     "link_url" => F::HyperlinkUrl(v.into()),
                     "plot_scale" => F::PlotScale(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
+                    "count" => F::CountExpression(v.into()),
+                    "show_instances" => F::ShowCountInstances,
                     _ => return Err(failure("invalid_value", "Unknown field dialog key")),
                 })
             }
