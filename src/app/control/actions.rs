@@ -1290,7 +1290,6 @@ impl OpenCADStudio {
                         let (i, v) = index_value(arg)?;
                         M::Toggle(F::CategoryBlock(i), v == "1")
                     }
-                    "add_blocks" => M::BlocksPicked(Some(std::path::PathBuf::from(arg))),
                     "add_location" => M::LocationPicked(Some(std::path::PathBuf::from(arg))),
                     "remove_location" => {
                         let id = self
@@ -1303,6 +1302,58 @@ impl OpenCADStudio {
                         M::RemoveLocation(id)
                     }
                     "open_drawing" => M::OpenDrawing(arg.into()),
+                    "toggle_drawing" => M::ToggleDrawing(arg.into()),
+                    "see_views" => M::SeeViews(arg.into()),
+                    // place=<drawing>[|<view>]
+                    "place" => {
+                        let (drawing, view) = arg.split_once('|').map_or((arg, None), |(d, v)| (d, Some(v.to_string())));
+                        M::PlaceOnSheet(drawing.into(), view)
+                    }
+                    // view=<view title or number - title>:<display|rename|label|category=<name>|callout=<block>>
+                    "view" => {
+                        use crate::ui::window::sheet_set::ViewAction as VA;
+                        let (spec, action) = arg.rsplit_once(':').ok_or_else(|| failure("invalid_value", "view=<view>:<action>"))?;
+                        let db = self.sheet_set.db().ok_or_else(|| failure("invalid_state", "No sheet set"))?;
+                        let view = db
+                            .sheets()
+                            .into_iter()
+                            .flat_map(|s| db.sheet_views(s))
+                            .find(|v| codec::sheet_set::number_and_title(v) == spec || v.prop("Title") == Some(spec))
+                            .map(|v| v.id().to_string())
+                            .ok_or_else(|| failure("invalid_value", "No such sheet view"))?;
+                        let (verb, name) = action.split_once('=').unwrap_or((action, ""));
+                        let a = match verb {
+                            "display" => VA::Display,
+                            "rename" => VA::Rename,
+                            "label" => VA::Label,
+                            "category" => VA::Category(
+                                db.view_categories()
+                                    .iter()
+                                    .find(|c| c.prop("Name") == Some(name))
+                                    .map(|c| c.id().to_string())
+                                    .ok_or_else(|| failure("invalid_value", "No such view category"))?,
+                            ),
+                            "callout" => VA::Callout(
+                                db.callout_blocks()
+                                    .iter()
+                                    .find(|b| b.prop("Name") == Some(name))
+                                    .map(|b| b.id().to_string())
+                                    .ok_or_else(|| failure("invalid_value", "No such callout block"))?,
+                            ),
+                            _ => return Err(failure("invalid_value", "display|rename|label|category=|callout=")),
+                        };
+                        M::ViewMenu(view, a)
+                    }
+                    "add_blocks" => M::AddBlocks,
+                    "block_list_select" => M::BlockListSelect(arg.parse().map_err(|_| failure("invalid_value", "index"))?),
+                    "block_list_add" => M::BlockListAdd,
+                    "block_list_delete" => M::BlockListDelete,
+                    "select_block_file" => M::SelectBlockPicked(Some(std::path::PathBuf::from(arg))),
+                    "select_block_whole" => M::SelectBlockWhole(arg == "1"),
+                    "select_block_check" => {
+                        let (i, v) = index_value(arg)?;
+                        M::SelectBlockCheck(i, v == "1")
+                    }
                     "ok" => M::Ok,
                     "cancel" => M::Cancel,
                     _ => return Err(failure("invalid_value", "Unknown sheet set action")),

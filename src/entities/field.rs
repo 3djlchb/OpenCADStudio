@@ -387,6 +387,18 @@ pub fn attach_attribute_fields(document: &mut CadDocument, insert: Handle) -> Ve
     document.attach_attribute_fields(insert, &context)
 }
 
+/// Store fresh values for the sheet set fields (after a sheet set changed).
+pub fn refresh_sheet_set_fields(document: &mut CadDocument) -> Vec<Handle> {
+    let context = OcsFieldContext(None);
+    document.refresh_sheet_set_fields(&context)
+}
+
+/// [`attach_attribute_fields`] with every field code passed through `map`.
+pub fn attach_attribute_fields_mapped(document: &mut CadDocument, insert: Handle, map: &dyn Fn(&str) -> String) -> Vec<Handle> {
+    let context = OcsFieldContext(None);
+    document.attach_attribute_fields_mapped(insert, &context, map)
+}
+
 /// Whether any attribute definition of `block` hosts a field.
 pub fn block_has_attribute_fields(document: &CadDocument, block: &str) -> bool {
     let Some(record) = document.block_records.iter().find(|r| r.name.eq_ignore_ascii_case(block)) else {

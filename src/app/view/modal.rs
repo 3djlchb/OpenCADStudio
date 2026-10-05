@@ -587,12 +587,15 @@ impl OpenCADStudio {
                     crate::ui::window::sheet_set::SsDialog::Properties(_) => (640, 700),
                     crate::ui::window::sheet_set::SsDialog::Form(f) => match f.kind {
                         crate::ui::window::sheet_set::FormKind::Rename => (560, 470),
+                        crate::ui::window::sheet_set::FormKind::RenameView => (520, 200),
                         crate::ui::window::sheet_set::FormKind::ImportLayout => (620, 470),
                         _ => (560, 420),
                     },
                     crate::ui::window::sheet_set::SsDialog::Confirm(..) => (460, 190),
                     crate::ui::window::sheet_set::SsDialog::Template(_) => (480, 400),
                     crate::ui::window::sheet_set::SsDialog::Category(_) => (480, 440),
+                    crate::ui::window::sheet_set::SsDialog::BlockList(_) => (540, 330),
+                    crate::ui::window::sheet_set::SsDialog::SelectBlock(_) => (580, 390),
                 };
                 sized_flow(ex, w, h, |flow| crate::ui::window::sheet_set::dialog_view(&self.sheet_set, flow))
             }

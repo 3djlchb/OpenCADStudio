@@ -4,9 +4,13 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::ui::window::sheet_set::{
-    Category, FieldId, Form, FormKind, FoundLayout, ImportRow, MenuAction, PropRow, Properties, RowKey, SheetSetMsg,
-    SheetStatus, SsDialog, TemplatePick, Wizard, WizardMsg,
+    BlockList, Category, FieldId, Form, FormKind, FoundLayout, ImportRow, MenuAction, Placing, PropRow, Properties,
+    RowKey, SelectBlock, SheetSetMsg, SheetStatus, SsDialog, TemplatePick, ViewAction, Wizard, WizardMsg,
 };
+use crate::command::{CadCommand, CmdOption, CmdResult};
+use codec::entities::Entity as _;
+use crate::scene::model::wire_model::WireModel;
+use glam::DVec3;
 use codec::sheet_set::{self as ss, ComponentKind, LayoutReference, SheetSetData, SheetSetDatabase};
 use iced::Task;
 use std::collections::HashSet;
@@ -113,6 +117,113 @@ pub(in crate::app) fn release_lock(path: &Path) {
     let _ = std::fs::remove_file(path.with_extension("dwl2"));
 }
 
+/// The insertion point of Place on Sheet (with the scale, picked from the
+/// right-click list) or of a callout / view label block.
+struct SheetSetPlaceCommand {
+    /// The view's size in model units (zero for a block).
+    size: (f64, f64),
+    scale: f64,
+    scales: Vec<(String, f64)>,
+}
+
+impl CadCommand for SheetSetPlaceCommand {
+    fn name(&self) -> &'static str {
+        "SSMPLACE"
+    }
+
+    fn prompt(&self) -> String {
+        "Specify insertion point:".into()
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        self.scales.iter().map(|(name, _)| CmdOption::new(name, name)).collect()
+    }
+
+    fn wants_text_input(&self) -> bool {
+        !self.scales.is_empty()
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let (_, scale) = self.scales.iter().find(|(name, _)| name.eq_ignore_ascii_case(text.trim()))?;
+        self.scale = *scale;
+        Some(CmdResult::NeedPoint)
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        CmdResult::Dispatch(format!("_SSMPLACEPOINT {} {} {}", pt.x, pt.y, self.scale))
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    /// The viewport's outline follows the cursor at its lower-left corner.
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        let (w, h) = (self.size.0 * self.scale, self.size.1 * self.scale);
+        if w <= 0.0 || h <= 0.0 {
+            return Vec::new();
+        }
+        let p = |x: f64, y: f64| [pt.x + x, pt.y + y, pt.z];
+        vec![WireModel::solid_f64(
+            "ssm_place".to_string(),
+            vec![p(0.0, 0.0), p(w, 0.0), p(w, h), p(0.0, h), p(0.0, 0.0)],
+            WireModel::CYAN,
+            false,
+        )]
+    }
+}
+
+/// A model view to place: centre (world), width, height, target, direction.
+struct ModelView {
+    center: codec::types::Vector3,
+    width: f64,
+    height: f64,
+    target: codec::types::Vector3,
+    direction: codec::types::Vector3,
+}
+
+/// Named view `view` of a model drawing, or its extents.
+// ponytail: plan views only (centre = target + view centre); a twisted or 3D
+// view would need the full DCS transform.
+fn model_view(doc: &codec::CadDocument, view: Option<&str>) -> Option<ModelView> {
+    use codec::types::Vector3;
+    if let Some(name) = view {
+        let v = doc.views.iter().find(|v| !v.paper_space && v.name.eq_ignore_ascii_case(name))?;
+        return Some(ModelView {
+            center: Vector3::new(v.target.x + v.center.x, v.target.y + v.center.y, v.target.z),
+            width: v.width.abs().max(1e-6),
+            height: v.height.abs().max(1e-6),
+            target: v.target.clone(),
+            direction: v.direction.clone(),
+        });
+    }
+    let (lo, hi) = (&doc.header.model_space_extents_min, &doc.header.model_space_extents_max);
+    let (w, h) = (hi.x - lo.x, hi.y - lo.y);
+    if !(w > 0.0 && h > 0.0 && w.is_finite() && h.is_finite()) {
+        return None;
+    }
+    Some(ModelView {
+        center: Vector3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, 0.0),
+        width: w,
+        height: h,
+        target: Vector3::ZERO,
+        direction: Vector3::new(0.0, 0.0, 1.0),
+    })
+}
+
+/// The `Database("…").SheetSet("…").Component("…").` prefix of a navigation field.
+fn component_prefix(db: &SheetSetDatabase, id: &str) -> String {
+    format!(
+        "Database(\"{}\").SheetSet(\"{}\").Component(\"{id}\").",
+        ss::native_path(db.path.as_deref().unwrap_or("")),
+        db.sheet_set().id()
+    )
+}
+
 /// Whether new sheets of `component` prompt for their template: its own
 /// "Prompt for template", else the nearest parent's.
 fn prompts_for_template(db: &SheetSetDatabase, component: &str) -> bool {
@@ -163,6 +274,18 @@ fn follow_rename(f: &mut Form) {
     }
     if f.rename[2] {
         f.file_name = format!("{}.dwg", name(f.rename[3]));
+    }
+}
+
+fn view_form(db: &SheetSetDatabase, set: usize, id: &str) -> Form {
+    let el = db.find(id);
+    Form {
+        kind: FormKind::RenameView,
+        set,
+        component: id.to_string(),
+        number: el.and_then(|e| e.prop("Number")).unwrap_or("").to_string(),
+        title: el.and_then(|e| e.prop("Title")).unwrap_or("").to_string(),
+        ..Form::default()
     }
 }
 
@@ -234,6 +357,13 @@ impl OpenCADStudio {
             }
             "NEWSHEETSET" => {
                 self.open_new_sheet_set_wizard();
+                Some(Task::none())
+            }
+            "_SSMPLACEPOINT" => {
+                let v: Vec<f64> = arg.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+                if let [x, y, scale] = v[..] {
+                    self.place_at(i, x, y, scale);
+                }
                 Some(Task::none())
             }
             "OPENSHEETSET" => {
@@ -345,6 +475,8 @@ impl OpenCADStudio {
             self.sheet_set.status.clear();
         }
         for tab in &mut self.tabs {
+            // The fields keep the new values, as when the reference updates them.
+            crate::entities::field::refresh_sheet_set_fields(&mut tab.scene.document);
             let changes: Vec<_> = tab
                 .scene
                 .document
@@ -571,6 +703,36 @@ impl OpenCADStudio {
                 self.save_current_sheet_set();
             }
             SheetSetMsg::AddBlocks => {
+                if let Some(SsDialog::Category(c)) = self.sheet_set.dialog.take() {
+                    let blocks = c.blocks.iter().map(|(id, label, _)| (id.clone(), label.clone())).collect();
+                    self.sheet_set.dialog = Some(SsDialog::BlockList(BlockList { category: Box::new(c), blocks, selected: None }));
+                }
+            }
+            SheetSetMsg::BlocksPicked(_) | SheetSetMsg::LocationPicked(None) => {}
+            SheetSetMsg::BlockListSelect(k) => {
+                if let Some(SsDialog::BlockList(b)) = self.sheet_set.dialog.as_mut() {
+                    b.selected = Some(k);
+                }
+            }
+            SheetSetMsg::BlockListDelete => {
+                if let Some(SsDialog::BlockList(b)) = self.sheet_set.dialog.as_mut() {
+                    if let Some(k) = b.selected.take().filter(|k| *k < b.blocks.len()) {
+                        b.blocks.remove(k);
+                    }
+                }
+            }
+            SheetSetMsg::BlockListAdd => {
+                if let Some(SsDialog::BlockList(b)) = self.sheet_set.dialog.take() {
+                    self.sheet_set.dialog = Some(SsDialog::SelectBlock(SelectBlock {
+                        list: Box::new(b),
+                        file: String::new(),
+                        whole: true,
+                        names: Vec::new(),
+                        error: None,
+                    }));
+                }
+            }
+            SheetSetMsg::SelectBlockBrowse => {
                 return Task::perform(
                     async {
                         crate::sys::file_dialog()
@@ -580,11 +742,36 @@ impl OpenCADStudio {
                             .await
                             .map(|h| crate::sys::handle_path(&h))
                     },
-                    |p| Message::SheetSet(SheetSetMsg::BlocksPicked(p)),
+                    |p| Message::SheetSet(SheetSetMsg::SelectBlockPicked(p)),
                 )
             }
-            SheetSetMsg::BlocksPicked(Some(path)) => self.category_add_blocks(path),
-            SheetSetMsg::BlocksPicked(None) | SheetSetMsg::LocationPicked(None) => {}
+            SheetSetMsg::SelectBlockPicked(None) => {}
+            SheetSetMsg::SelectBlockPicked(Some(path)) => self.select_block_file(path),
+            SheetSetMsg::SelectBlockWhole(v) => {
+                if let Some(SsDialog::SelectBlock(b)) = self.sheet_set.dialog.as_mut() {
+                    b.whole = v;
+                }
+            }
+            SheetSetMsg::SelectBlockCheck(k, v) => {
+                if let Some(SsDialog::SelectBlock(b)) = self.sheet_set.dialog.as_mut() {
+                    if let Some(n) = b.names.get_mut(k) {
+                        n.2 = v;
+                    }
+                }
+            }
+            SheetSetMsg::ToggleDrawing(path) => {
+                let key = ss::path_key(&path);
+                if !self.sheet_set.open_drawings.remove(&key) {
+                    self.load_model_views(&path);
+                    self.sheet_set.open_drawings.insert(key);
+                }
+            }
+            SheetSetMsg::SeeViews(path) => {
+                self.load_model_views(&path);
+                self.sheet_set.open_drawings.insert(ss::path_key(&path));
+            }
+            SheetSetMsg::PlaceOnSheet(path, view) => self.start_place_view(path, view),
+            SheetSetMsg::ViewMenu(id, action) => return self.view_menu(id, action),
             SheetSetMsg::AddLocation => {
                 return Task::perform(
                     async {
@@ -790,6 +977,8 @@ impl OpenCADStudio {
     /// the wizard goes back to it.
     pub(in crate::app) fn close_sheet_set_dialog(&mut self) {
         match self.sheet_set.dialog.take() {
+            Some(SsDialog::BlockList(b)) => self.sheet_set.dialog = Some(SsDialog::Category(*b.category)),
+            Some(SsDialog::SelectBlock(b)) => self.sheet_set.dialog = Some(SsDialog::BlockList(*b.list)),
             Some(SsDialog::Properties(p)) if p.wizard.is_some() => {
                 self.sheet_set.dialog = p.wizard.map(|w| SsDialog::Wizard(*w));
             }
@@ -936,6 +1125,9 @@ impl OpenCADStudio {
             if ss::path_key(path) == *want {
                 task = Task::done(Message::LayoutSwitch(layout.clone()));
                 self.sheet_set_pending_layout = None;
+                if let Some(view) = self.sheet_set.pending_view.take() {
+                    task = task.chain(Task::done(Message::Command(format!("VIEW RESTORE {view}"))));
+                }
             }
         }
         if self.sheet_set.settings.locate == 1 {
@@ -1030,7 +1222,7 @@ impl OpenCADStudio {
                     c.name = v;
                 }
             }
-            Some(SsDialog::Confirm(..)) | Some(SsDialog::Template(_)) => {}
+            Some(SsDialog::Confirm(..)) | Some(SsDialog::Template(_)) | Some(SsDialog::BlockList(_)) | Some(SsDialog::SelectBlock(_)) => {}
             Some(SsDialog::Form(f)) => {
                 let file_follows = f.file_name == format!("{} {}", f.number, f.title).trim();
                 match field {
@@ -1248,6 +1440,25 @@ impl OpenCADStudio {
     /// Rename & Renumber < Previous / Next >: apply, then the neighbouring sheet.
     fn rename_step(&mut self, forward: bool) {
         let Some(SsDialog::Form(f)) = self.sheet_set.dialog.take() else { return };
+        if f.kind == FormKind::RenameView {
+            let Some(db) = self.sheet_set.sets.get_mut(f.set) else { return };
+            if let Some(el) = db.find_mut(&f.component) {
+                if f.number.trim().is_empty() {
+                    el.remove_named("Number");
+                } else {
+                    el.set_prop("Number", f.number.trim());
+                }
+                el.set_prop("Title", f.title.trim());
+            }
+            let ids: Vec<String> = db.sheets().into_iter().flat_map(|s| db.sheet_views(s)).map(|v| v.id().to_string()).collect();
+            let k = ids.iter().position(|i| *i == f.component).unwrap_or(0);
+            let next = if forward { (k + 1).min(ids.len().saturating_sub(1)) } else { k.saturating_sub(1) };
+            let form = view_form(db, f.set, &ids[next]);
+            self.sheet_set.current = Some(f.set);
+            self.save_current_sheet_set();
+            self.sheet_set.dialog = Some(SsDialog::Form(form));
+            return;
+        }
         if let Err(e) = self.apply_rename(&f) {
             self.sheet_set.dialog = Some(SsDialog::Form(Form { error: Some(e), ..f }));
             return;
@@ -1279,31 +1490,8 @@ impl OpenCADStudio {
             })
             .collect();
         let name = id.as_deref().and_then(|i| db.find(i)).and_then(|c| c.prop("Name")).unwrap_or("").to_string();
-        self.sheet_set.dialog = Some(SsDialog::Category(Category { set, id, name, blocks, error: None }));
+        self.sheet_set.dialog = Some(SsDialog::Category(Category { set, id, name, blocks, removed: Vec::new(), error: None }));
         self.active_modal = Some(crate::app::ModalKind::SheetSet);
-    }
-
-    /// Add Blocks...: the named blocks of a drawing become callout blocks.
-    fn category_add_blocks(&mut self, path: PathBuf) {
-        let doc = match crate::io::load_file(&path) {
-            Ok(d) => d,
-            Err(e) => {
-                self.command_line.push_error(&format!("{}: {e}", path.display()));
-                return;
-            }
-        };
-        let file = ss::native_path(&path.to_string_lossy());
-        let Some(SsDialog::Category(c)) = self.sheet_set.dialog.as_mut() else { return };
-        let mut names: Vec<(String, String)> = doc
-            .block_records
-            .iter()
-            .filter(|b| !b.name.starts_with('*') && !b.is_layout())
-            .map(|b| (b.name.clone(), format!("{:X}", b.handle.value())))
-            .collect();
-        names.sort();
-        for (name, handle) in names {
-            c.blocks.push((format!("new:{file}|{name}|{handle}"), format!("{name} ({file})"), true));
-        }
     }
 
     fn category_ok(&mut self, mut c: Category) {
@@ -1315,6 +1503,21 @@ impl OpenCADStudio {
         }
         self.close_active_modal();
         let Some(db) = self.sheet_set.sets.get_mut(c.set) else { return };
+        // Blocks deleted in List of Blocks leave the set and every category.
+        if !c.removed.is_empty() {
+            let cats: Vec<(String, String, Vec<String>)> = db
+                .view_categories()
+                .iter()
+                .map(|k| (k.id().to_string(), k.prop("Name").unwrap_or("").to_string(), db.category_blocks(k.id())))
+                .collect();
+            for (id, name, blocks) in cats {
+                let kept: Vec<String> = blocks.into_iter().filter(|b| !c.removed.contains(b)).collect();
+                db.set_view_category(Some(&id), &name, &kept);
+            }
+            for id in &c.removed {
+                db.remove(id);
+            }
+        }
         let mut used = Vec::new();
         for (id, _, on) in &c.blocks {
             let id = match id.strip_prefix("new:") {
@@ -1335,6 +1538,280 @@ impl OpenCADStudio {
         db.set_view_category(c.id.as_deref(), &name, &used);
         self.sheet_set.current = Some(c.set);
         self.save_current_sheet_set();
+    }
+
+    /// Named model views of a drawing (read once, when its row is opened).
+    fn load_model_views(&mut self, path: &str) {
+        let key = ss::path_key(path);
+        if self.sheet_set.model_views.contains_key(&key) {
+            return;
+        }
+        let views = crate::io::load_file(Path::new(path))
+            .map(|d| d.views.iter().filter(|v| !v.paper_space).map(|v| v.name.clone()).collect())
+            .unwrap_or_default();
+        self.sheet_set.model_views.insert(key, views);
+    }
+
+    /// The current set's sheet shown by the active tab at its current layout.
+    fn current_sheet(&self) -> Option<(usize, String)> {
+        let set = self.sheet_set.current?;
+        let db = self.sheet_set.db()?;
+        let tab = &self.tabs[self.active_tab];
+        let path = tab.current_path.as_ref()?.to_string_lossy().to_string();
+        let layout = tab.scene.current_layout.clone();
+        let sheet = db.sheet_for(&path, Some(&layout))?;
+        sheet
+            .named("Layout")
+            .and_then(|r| r.prop("Name"))
+            .is_some_and(|n| n.eq_ignore_ascii_case(&layout))
+            .then(|| (set, sheet.id().to_string()))
+    }
+
+    /// Start the insertion point of Place on Sheet / a callout or label block.
+    fn start_placing(&mut self, placing: Placing, size: (f64, f64)) {
+        let i = self.active_tab;
+        let scales: Vec<(String, f64)> = if size.0 > 0.0 {
+            self.tabs[i]
+                .scene
+                .scale_list()
+                .into_iter()
+                .filter(|(_, _, factor)| *factor > 0.0)
+                .map(|(name, _, factor)| (name, factor))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.sheet_set.placing = Some(placing);
+        let command = SheetSetPlaceCommand { size, scale: 1.0, scales };
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].active_cmd = Some(Box::new(command));
+    }
+
+    /// Place on Sheet: only on a sheet of this set open at its layout.
+    fn start_place_view(&mut self, drawing: String, view: Option<String>) {
+        let Some((set, sheet)) = self.current_sheet() else {
+            self.command_line
+                .push_error(crate::t!("Open a sheet of this sheet set at its layout to place a view on it.").as_ref());
+            return;
+        };
+        let size = crate::io::load_file(Path::new(&drawing))
+            .ok()
+            .and_then(|d| model_view(&d, view.as_deref()))
+            .map(|v| (v.width, v.height));
+        let Some(size) = size else {
+            self.command_line.push_error(crate::tf!("{}: no view to place.", drawing).as_ref());
+            return;
+        };
+        self.start_placing(Placing::View { set, sheet, drawing, view }, size);
+    }
+
+    /// A sheet view's commands.
+    fn view_menu(&mut self, id: String, action: ViewAction) -> Task<Message> {
+        let Some(set) = self.sheet_set.current else { return Task::none() };
+        let Some(db) = self.sheet_set.db() else { return Task::none() };
+        let Some(sheet) = db.parent_of(&id).and_then(|v| db.parent_of(v.id())).map(|s| s.id().to_string()) else {
+            return Task::none();
+        };
+        let view_name = db.find(&id).and_then(|v| v.named("NamedView")).and_then(|r| r.prop("Name")).unwrap_or("").to_string();
+        match action {
+            ViewAction::Display => {
+                let open = db.layout_reference(&sheet, "Layout").map(|r| self.tab_showing(Path::new(&r.file_name)).is_some()).unwrap_or(false);
+                let task = self.open_sheet(&sheet);
+                if open {
+                    return task.chain(Task::done(Message::Command(format!("VIEW RESTORE {view_name}"))));
+                }
+                self.sheet_set.pending_view = Some(view_name);
+                return task;
+            }
+            ViewAction::Rename => {
+                self.sheet_set.dialog = Some(SsDialog::Form(view_form(db, set, &id)));
+                self.active_modal = Some(crate::app::ModalKind::SheetSet);
+            }
+            ViewAction::Category(category) => {
+                if let Some(db) = self.sheet_set.db_mut() {
+                    if let Some(v) = db.find_mut(&id) {
+                        let mut r = ss::object("AcSmObjectReference", ss::CLSID_OBJECT_REFERENCE, Some("Category"));
+                        r.set_prop_vt("ReferencedObject", -1, &category);
+                        v.put_named(r);
+                    }
+                }
+                self.save_current_sheet_set();
+            }
+            ViewAction::Callout(_) | ViewAction::Label if self.current_sheet().map(|s| s.1) != Some(sheet.clone()) => {
+                self.command_line
+                    .push_error(crate::t!("Open the view's sheet at its layout to place a block on it.").as_ref());
+            }
+            ViewAction::Callout(block) => {
+                let Some(b) = db.find(&block) else { return Task::none() };
+                let (file, name) = (db.resolve_file(b), b.prop("Name").unwrap_or("").to_string());
+                self.start_placing(Placing::Block { set, sheet, view: id, file, name }, (0.0, 0.0));
+            }
+            ViewAction::Label => {
+                let Some(b) = db.sheet_set().named("DefLabelBlk") else {
+                    self.command_line.push_error(crate::t!("The sheet set has no label block for views.").as_ref());
+                    return Task::none();
+                };
+                let (file, name) = (db.resolve_file(b), b.prop("Name").unwrap_or("").to_string());
+                self.start_placing(Placing::Block { set, sheet, view: id, file, name }, (0.0, 0.0));
+            }
+        }
+        Task::none()
+    }
+
+    /// Bring block `name` of drawing `file` into tab `i` (when missing) and
+    /// insert it at `at` with its attributes; their `?View.` / `?Sheet.`
+    /// fields become the view's and sheet's navigation fields.
+    fn insert_set_block(&mut self, i: usize, file: &str, name: &str, at: codec::types::Vector3, view: &str, sheet: &str, set: usize) {
+        let Ok(source) = crate::io::load_file(Path::new(file)) else {
+            self.command_line.push_error(crate::tf!("{}: cannot be read.", file).as_ref());
+            return;
+        };
+        let probe = codec::EntityType::Insert(codec::entities::Insert::new(name.to_string(), codec::types::Vector3::ZERO));
+        let deps = crate::app::ClipboardDeps::capture(&source, std::slice::from_ref(&probe));
+        self.merge_dependencies(i, &deps);
+        for def in deps.blocks {
+            let scene = &mut self.tabs[i].scene;
+            if scene.document.block_records.get(&def.name).is_none() {
+                scene.define_block_raw(&def.name, def.base_point, def.entities);
+            }
+        }
+        let units = source.block_records.get(name).map(|b| b.units).filter(|u| *u != 0).unwrap_or(source.header.insertion_units);
+        let host = self.tabs[i].scene.document.header.insertion_units;
+        let k = crate::app::properties::insert_unit_scale(host, units).unwrap_or(1.0);
+        let mut insert = codec::entities::Insert::new(name.to_string(), at).with_scale(k, k, k);
+        let transform = insert.get_transform();
+        let doc = &self.tabs[i].scene.document;
+        let attdefs: Vec<codec::entities::AttributeDefinition> = doc
+            .block_records
+            .get(name)
+            .map(|br| {
+                br.entity_handles
+                    .iter()
+                    .filter_map(|h| match doc.get_entity(*h) {
+                        Some(codec::EntityType::AttributeDefinition(d)) if !d.flags.constant => Some(d.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for d in &attdefs {
+            let mut a = codec::entities::AttributeEntity::from_definition(d, None);
+            a.apply_transform(&transform);
+            insert.attributes.push(a);
+        }
+        let handle = self.tabs[i].scene.add_entity(codec::EntityType::Insert(insert));
+        let Some(db) = self.sheet_set.sets.get(set) else { return };
+        let (view_prefix, sheet_prefix) = (component_prefix(db, view), component_prefix(db, sheet));
+        crate::entities::field::attach_attribute_fields_mapped(&mut self.tabs[i].scene.document, handle, &|code: &str| {
+            code.replace("?View.", &view_prefix).replace("?Sheet.", &sheet_prefix)
+        });
+        self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+    }
+
+    /// The insertion point was picked: place the view (xref, viewport, paper
+    /// named view, view label, sheet view record) or the block.
+    fn place_at(&mut self, i: usize, x: f64, y: f64, scale: f64) {
+        use codec::types::Vector3;
+        let Some(placing) = self.sheet_set.placing.take() else { return };
+        self.push_undo_snapshot(i, "Place on Sheet");
+        match placing {
+            Placing::Block { set, sheet, view, file, name } => {
+                self.insert_set_block(i, &file, &name, Vector3::new(x, y, 0.0), &view, &sheet, set);
+            }
+            Placing::View { set, sheet, drawing, view } => {
+                let Some(mv) = crate::io::load_file(Path::new(&drawing)).ok().and_then(|d| model_view(&d, view.as_deref())) else {
+                    return;
+                };
+                let title = view.clone().unwrap_or_else(|| {
+                    Path::new(&drawing).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()
+                });
+                // The model drawing is attached to the sheet's model space.
+                let host = self.tabs[i].current_path.clone();
+                let request = crate::modules::insert::xattach::XrefAttachRequest {
+                    path: drawing.clone(),
+                    overlay: false,
+                    path_type: crate::io::xref_model::Pathtype::Relative,
+                };
+                let scene = &mut self.tabs[i].scene;
+                let xref = crate::modules::insert::xattach::prepare_xref_definition(scene, &request, host.as_deref());
+                let model = scene.document.header.model_space_block_handle;
+                let inserted = scene.document.entities().any(|e| {
+                    e.common().owner_handle == model && matches!(e, codec::EntityType::Insert(ins) if ins.block_name.eq_ignore_ascii_case(&xref))
+                });
+                if !inserted {
+                    let saved = std::mem::replace(&mut scene.current_layout, "Model".to_string());
+                    scene.add_entity(codec::EntityType::Insert(codec::entities::Insert::new(xref, Vector3::ZERO)));
+                    scene.current_layout = saved;
+                }
+                // The viewport: lower-left corner at the point, the view at the scale.
+                let (w, h) = (mv.width * scale, mv.height * scale);
+                let mut vp = codec::entities::Viewport::new();
+                vp.center = Vector3::new(x + w / 2.0, y + h / 2.0, 0.0);
+                vp.width = w;
+                vp.height = h;
+                vp.id = 2;
+                vp.view_target = mv.target.clone();
+                vp.view_direction = mv.direction.clone();
+                vp.view_center = Vector3::new(mv.center.x - mv.target.x, mv.center.y - mv.target.y, 0.0);
+                vp.view_height = mv.height;
+                vp.custom_scale = scale;
+                scene.add_entity(codec::EntityType::Viewport(vp));
+                // A paper-space named view of the same name frames it.
+                let mut named = codec::tables::View::new(title.as_str());
+                named.handle = scene.document.allocate_handle();
+                named.paper_space = true;
+                named.center = Vector3::new(x + w / 2.0, y + h / 2.0, 0.0);
+                named.width = w;
+                named.height = h;
+                named.direction = Vector3::new(0.0, 0.0, 1.0);
+                let view_handle = format!("{:X}", named.handle.value());
+                scene.document.views.add_or_replace(named);
+                let file = host.map(|p| ss::native_path(&p.to_string_lossy())).unwrap_or_default();
+                let Some(db) = self.sheet_set.sets.get_mut(set) else { return };
+                // The view joins the set's default (unnamed) category.
+                let category = db
+                    .sheet_set()
+                    .named("ViewCategories")
+                    .and_then(|c| c.children.iter().find(|k| k.name == "AcSmViewCategory" && k.prop("Name").is_none()))
+                    .map(|k| k.id().to_string());
+                let reference = LayoutReference { file_name: file, name: title.clone(), handle: view_handle };
+                let Some(view_id) = db.add_sheet_view(&sheet, category.as_deref(), &reference, &title) else { return };
+                let label = db.sheet_set().named("DefLabelBlk").map(|b| (db.resolve_file(b), b.prop("Name").unwrap_or("").to_string()));
+                // The set is written first, so the label's fields find the new view.
+                self.sheet_set.current = Some(set);
+                self.save_current_sheet_set();
+                if let Some((file, name)) = label {
+                    self.insert_set_block(i, &file, &name, Vector3::new(x, y, 0.0), &view_id, &sheet, set);
+                }
+            }
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_xref_manager();
+    }
+
+    /// Select Block: read a drawing's named blocks.
+    fn select_block_file(&mut self, path: PathBuf) {
+        let names: Vec<(String, String, bool)> = match crate::io::load_file(&path) {
+            Ok(doc) => {
+                let mut n: Vec<(String, String, bool)> = doc
+                    .block_records
+                    .iter()
+                    .filter(|b| !b.name.starts_with('*') && !b.is_layout())
+                    .map(|b| (b.name.clone(), format!("{:X}", b.handle.value()), false))
+                    .collect();
+                n.sort();
+                n
+            }
+            Err(e) => {
+                self.command_line.push_error(&format!("{}: {e}", path.display()));
+                return;
+            }
+        };
+        if let Some(SsDialog::SelectBlock(b)) = self.sheet_set.dialog.as_mut() {
+            b.file = path.to_string_lossy().to_string();
+            b.names = names;
+            b.error = None;
+        }
     }
 
     /// Model Views: each location folder of the current set and its drawings.
@@ -1376,11 +1853,20 @@ impl OpenCADStudio {
             return;
         }
         let Some(db) = self.sheet_set.db() else { return };
+        let folder = db.path.as_deref().and_then(|p| Path::new(p).parent().map(Path::to_path_buf));
         let mut status = std::collections::HashMap::new();
         for sheet in db.sheets() {
             let Some(r) = db.layout_reference(sheet.id(), "Layout") else { continue };
             let path = Path::new(&r.file_name);
-            let state = if !path.exists() {
+            // The reference finds a sheet through its relative path: when that
+            // names no file the sheet is missing, even if the stored absolute
+            // path still exists.
+            let relative = sheet.named("Layout").and_then(|l| l.prop("Relative_FileName")).zip(folder.as_deref());
+            let found = match relative {
+                Some((rel, folder)) => folder.join(rel.replace('\\', std::path::MAIN_SEPARATOR_STR)).exists(),
+                None => path.exists(),
+            };
+            let state = if !found {
                 Some(SheetStatus::Missing)
             } else if path.with_extension("dwl").exists() {
                 Some(SheetStatus::Locked)
@@ -1447,6 +1933,46 @@ impl OpenCADStudio {
             }
             Some(SsDialog::Category(c)) => {
                 self.category_ok(c);
+                Task::none()
+            }
+            // List of Blocks: the list goes back to the View Category dialog.
+            Some(SsDialog::BlockList(b)) => {
+                let mut c = *b.category;
+                for (id, _, _) in &c.blocks {
+                    if !id.starts_with("new:") && !b.blocks.iter().any(|(k, _)| k == id) {
+                        c.removed.push(id.clone());
+                    }
+                }
+                c.blocks = b
+                    .blocks
+                    .into_iter()
+                    .map(|(id, label)| {
+                        let on = c.blocks.iter().find(|(k, _, _)| *k == id).is_none_or(|(_, _, on)| *on);
+                        (id, label, on)
+                    })
+                    .collect();
+                self.sheet_set.dialog = Some(SsDialog::Category(c));
+                Task::none()
+            }
+            // Select Block: the whole drawing or its checked blocks join the list.
+            Some(SsDialog::SelectBlock(mut b)) => {
+                if b.file.is_empty() {
+                    b.error = Some(crate::t!("Enter the drawing file name.").into_owned());
+                    self.sheet_set.dialog = Some(SsDialog::SelectBlock(b));
+                    return Task::none();
+                }
+                let file = ss::native_path(&b.file);
+                let mut list = *b.list;
+                if b.whole {
+                    let stem = Path::new(&file).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                    list.blocks.push((format!("new:{file}|{stem}|"), format!("{stem} ({file})")));
+                } else {
+                    for (name, handle, on) in b.names.into_iter().filter(|n| n.2) {
+                        let _ = on;
+                        list.blocks.push((format!("new:{file}|{name}|{handle}"), format!("{name} ({file})")));
+                    }
+                }
+                self.sheet_set.dialog = Some(SsDialog::BlockList(list));
                 Task::none()
             }
             None => Task::none(),
@@ -1592,6 +2118,16 @@ impl OpenCADStudio {
                 }
             }
             FormKind::NewSheet => return self.create_sheet(f),
+            FormKind::RenameView => {
+                if let Some(el) = db.find_mut(&f.component) {
+                    if f.number.trim().is_empty() {
+                        el.remove_named("Number");
+                    } else {
+                        el.set_prop("Number", f.number.trim());
+                    }
+                    el.set_prop("Title", f.title.trim());
+                }
+            }
         }
         self.close_active_modal();
         self.sheet_set.current = Some(f.set);
