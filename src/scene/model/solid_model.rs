@@ -372,7 +372,7 @@ pub fn planar_face_normal(body: &Body, face: FaceKey) -> Option<[f64; 3]> {
     Some(if face.forward { normal } else { -normal }.to_array())
 }
 
-/// Construct a UCS aligned with a solid's planar face matching AutoCAD's UCS Face behavior:
+/// Construct a UCS aligned with a solid's planar face:
 /// - Origin snaps to the face vertex closest to the pick point.
 /// - X-axis aligns along the boundary edge emanating from that vertex closest to the pick point.
 /// - Z-axis is the face's outward normal.

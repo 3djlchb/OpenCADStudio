@@ -107,7 +107,7 @@ fn ucs_pick_command_enables_solid_face_picking() {
 }
 
 #[test]
-fn autocad_style_face_ucs_snaps_origin_and_aligns_axes_on_box() {
+fn face_ucs_snaps_origin_and_aligns_axes_on_box() {
     let box_body = solid_model::box_solid([0.0, 0.0, 0.0], 10.0, 20.0, 30.0)
         .expect("box_solid constructs successfully");
 
@@ -159,7 +159,7 @@ fn autocad_style_face_ucs_snaps_origin_and_aligns_axes_on_box() {
 }
 
 #[test]
-fn autocad_style_face_ucs_on_puck() {
+fn face_ucs_on_puck() {
     let body = puck();
     let top_face = solid_model::nearest_planar_face(&body, [60.0, -25.0, 10.0]).unwrap();
     let ucs = solid_model::planar_face_ucs(&body, top_face, [60.0, -25.0, 10.0]).unwrap();
