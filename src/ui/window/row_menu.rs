@@ -16,7 +16,7 @@ const FLYOUT_GAP: f32 = 2.0;
 pub(crate) struct RowMenu<'a> {
     underlay: Element<'a, Message>,
     main: Element<'a, Message>,
-    /// Per entry of the menu's column: a submenu entry (pressing it keeps the menu open).
+    /// Per child of the menu's column: a submenu entry or a separator (a click on it keeps the menu open).
     keep_open: Vec<bool>,
     /// The open fly-out: its entry's index in the column, and its content.
     flyout: Option<(usize, Element<'a, Message>)>,
@@ -259,11 +259,13 @@ impl overlay::Overlay<Message, Theme, Renderer> for MenuOverlay<'_, '_> {
             flyout.as_widget_mut().update(tree, event, fly, cursor, renderer, shell, &viewport);
         }
         if let Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event {
-            // A chosen entry closes the menu; a submenu entry opens its fly-out instead.
-            let on_submenu = entries(main)
-                .zip(self.keep_open.iter())
-                .any(|(e, keep)| *keep && cursor.is_over(e.bounds()));
-            if over && !on_submenu {
+            // Only a chosen entry closes the menu: a submenu entry opens its
+            // fly-out, and separators, gaps and padding do nothing.
+            let chosen = match entries(main).zip(self.keep_open.iter()).find(|(e, _)| cursor.is_over(e.bounds())) {
+                Some((_, keep)) => !keep,
+                None => fly.is_some_and(|f| entries(f).any(|e| cursor.is_over(e.bounds()))),
+            };
+            if chosen {
                 self.close(shell);
             }
         }

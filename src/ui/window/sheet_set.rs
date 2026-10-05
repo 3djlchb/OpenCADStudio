@@ -653,7 +653,7 @@ fn menu_box<'b>(items: Vec<Element<'b, Message>>) -> Element<'b, Message> {
         .into()
 }
 
-/// A row menu: the menu box, which of its entries open a fly-out, and the
+/// A row menu: the menu box, which children keep it open when clicked (submenu entries, separators), and the
 /// open fly-out (its entry index and items). Hovering, pressing or right
 /// pressing a submenu entry opens its fly-out.
 fn menu_panel(menu: &[Mi], open: Option<&str>) -> (Element<'static, Message>, Vec<bool>, Option<(usize, Element<'static, Message>)>) {
@@ -676,7 +676,7 @@ fn menu_panel(menu: &[Mi], open: Option<&str>) -> (Element<'static, Message>, Ve
                 items.push(mouse_area(entry).on_enter(open_msg.clone()).on_right_press(open_msg).into());
             }
         }
-        keep_open.push(matches!(item, Mi::Sub(..)));
+        keep_open.push(matches!(item, Mi::Sub(..) | Mi::Sep));
     }
     (menu_box(items), keep_open, flyout)
 }
