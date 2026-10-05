@@ -744,6 +744,7 @@ impl OpenCADStudio {
             block_mru_list: self.block_mru_list,
             block_redefine_mode: self.block_redefine_mode,
             block_navigate: self.block_navigate.clone(),
+            sheet_set: self.sheet_set.settings,
         }
     }
 
@@ -874,6 +875,7 @@ impl OpenCADStudio {
         self.block_mru_list = s.block_mru_list.min(100);
         self.block_redefine_mode = s.block_redefine_mode.min(2);
         self.block_navigate = s.block_navigate.clone();
+        self.sheet_set.settings = s.sheet_set;
         self.block_palette.recent = s.block_recent.clone();
         self.block_palette.favorites = s.block_favorites.clone();
         self.block_palette.libraries = s.block_libraries.clone();
@@ -2044,7 +2046,8 @@ impl OpenCADStudio {
         } else {
             Task::none()
         };
-        Task::batch([thumbs_task, pending_open_task, interaction_task, startup_script_task])
+        let sheet_set_task = self.sheet_set_after_open(i);
+        Task::batch([thumbs_task, pending_open_task, interaction_task, startup_script_task, sheet_set_task])
     }
 
     pub(super) fn on_wblock_save_result_some(
@@ -2149,6 +2152,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.document.header.user_real1 = self.tabs[i].scene.annotation_scale as f64;
         self.sync_solid_models_for_save(i);
         self.tabs[i].scene.sync_native_parametric_graph();
+        self.stamp_sheet_set_data(i);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -46,6 +46,13 @@ impl OpenCADStudio {
             .iter()
             .map(|f| self.field_value(&format!("\\AcVar Date \\f \"{f}\""), &[]))
             .collect();
+        if let Some(db) = self.sheet_set.db() {
+            let custom = codec::sheet_set::custom_properties(db.sheet_set());
+            let names = |flag: i32| custom.iter().filter(|(_, _, f)| f & flag != 0).map(|(n, _, _)| n.clone()).collect();
+            state.ss_sheet_custom = names(codec::sheet_set::CUSTOM_SHEET_PROP);
+            state.ss_set_custom = names(codec::sheet_set::CUSTOM_SHEET_SET_PROP);
+            state.ss_set_name = db.name().to_string();
+        }
         self.field_dialog = Some(state);
         self.fill_named_objects();
         self.refresh_field_preview();
@@ -113,8 +120,16 @@ impl OpenCADStudio {
             }
             FieldDialogMsg::Name(n) => {
                 state.name = n;
-                state.text_case = 0;
+                // Sheet set fields start in Title case.
+                state.text_case = if crate::ui::window::field_dialog::SHEET_SET_FIELDS.contains(&n) { 4 } else { 0 };
+                state.ss_custom.clear();
             }
+            FieldDialogMsg::SsCustom(name) => state.ss_custom = name,
+            FieldDialogMsg::SsPlaceholder(k) => {
+                state.ss_placeholder = k;
+                state.ss_custom.clear();
+            }
+            FieldDialogMsg::SsScaleFormat(k) => state.ss_scale_format = k,
             FieldDialogMsg::DateFormat(f) => state.date_format = f,
             FieldDialogMsg::DateExample(k) => {
                 if let Some(f) = DATE_FORMATS.get(k) {

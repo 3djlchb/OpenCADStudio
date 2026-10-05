@@ -21,6 +21,7 @@ mod pc_colormap;
 mod pc_extract;
 mod pdf_underlay;
 mod pdf_dialogs;
+pub(crate) mod sheet_set;
 mod xclip;
 mod blockvars;
 mod plotvars;
@@ -291,6 +292,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_attdef(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_sheet_set(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_field(cmd, i) {
@@ -854,6 +858,15 @@ inventory::submit!(crate::command::CommandRegistration {
         "CREATESKETCH",
         "FINISHSKETCH",
         "SHEETSET",
+        "SHEETSETHIDE",
+        "NEWSHEETSET",
+        "OPENSHEETSET",
+        "SSMAUTOOPEN",
+        "SSLOCATE",
+        "SSMPOLLTIME",
+        "SSMSHEETSTATUS",
+        "SSMSTATE",
+        "SSFOUND",
         "SHORTCUTS",
         "SSM",
         "STEPOUT",

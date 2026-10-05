@@ -71,6 +71,14 @@ impl FieldContext for OcsFieldContext<'_> {
         os_date_locale()
     }
 
+    fn sheet_sets(
+        &self,
+        f: &mut dyn FnMut(&codec::sheet_set::SheetSetDatabase) -> Option<String>,
+    ) -> Option<String> {
+        let sets = SHEET_SETS.read().ok()?;
+        sets.iter().find_map(|db| f(db))
+    }
+
     fn getenv(&self, name: &str) -> Option<String> {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -81,6 +89,16 @@ impl FieldContext for OcsFieldContext<'_> {
             let _ = name;
             None
         }
+    }
+}
+
+/// The sheet sets open in the Sheet Set Manager, for `\AcSm` fields. The
+/// manager replaces the list whenever a set opens, closes or changes.
+static SHEET_SETS: std::sync::RwLock<Vec<codec::sheet_set::SheetSetDatabase>> = std::sync::RwLock::new(Vec::new());
+
+pub fn set_sheet_sets(sets: Vec<codec::sheet_set::SheetSetDatabase>) {
+    if let Ok(mut guard) = SHEET_SETS.write() {
+        *guard = sets;
     }
 }
 

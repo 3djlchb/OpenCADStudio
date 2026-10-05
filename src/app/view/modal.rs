@@ -75,6 +75,7 @@ impl OpenCADStudio {
             Some(K::RecoveryPrompt) => crate::tr!("modal", "recovery-prompt"),
             Some(K::GpuWarning) => crate::tr!("gpu", "title"),
             Some(K::XrefHelp) => crate::t!("Reference Manager Help").into_owned(),
+            Some(K::SheetSet) => self.sheet_set.dialog.as_ref().map(|d| d.title()).unwrap_or_default(),
             None => String::new(),
         }
     }
@@ -579,6 +580,14 @@ impl OpenCADStudio {
             super::super::ModalKind::AttDef => {
                 let state = self.attdef_dialog.as_ref()?;
                 sized_flow(ex, 720, 520, |flow| crate::ui::window::attdef_dialog::view(state, flow))
+            }
+            super::super::ModalKind::SheetSet => {
+                let (w, h) = match self.sheet_set.dialog.as_ref()? {
+                    crate::ui::window::sheet_set::SsDialog::Wizard(_) => (720, 560),
+                    crate::ui::window::sheet_set::SsDialog::Properties(_) => (640, 700),
+                    crate::ui::window::sheet_set::SsDialog::Form(_) => (560, 420),
+                };
+                sized_flow(ex, w, h, |flow| crate::ui::window::sheet_set::dialog_view(&self.sheet_set, flow))
             }
             super::super::ModalKind::Field => {
                 let state = self.field_dialog.as_ref()?;

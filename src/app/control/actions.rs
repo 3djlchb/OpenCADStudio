@@ -82,6 +82,7 @@ pub(super) const NAMES: &[&str] = &[
     "dialog_ok",
     "attdef_dialog",
     "field_dialog",
+    "sheet_set",
     "close_document",
     "toggle_properties",
     "toggle_layers",
@@ -1019,7 +1020,101 @@ impl OpenCADStudio {
                     "link_text" => F::HyperlinkText(v.into()),
                     "link_url" => F::HyperlinkUrl(v.into()),
                     "plot_scale" => F::PlotScale(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
+                    "ss_custom" => F::SsCustom(v.into()),
+                    "ss_placeholder" => F::SsPlaceholder(index(fd::PLACEHOLDER_TYPES.len())?),
+                    "ss_scale" => F::SsScaleFormat(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
                     _ => return Err(failure("invalid_value", "Unknown field dialog key")),
+                })
+            }
+            // Sheet Set Manager and its dialogs: "open=<dst>", "tab=list|views|model",
+            // "select=<target>", "activate=<target>", "menu=<action>:<target>"
+            // (open, new_sheet, new_subset, import, rename, remove, properties,
+            // close; a target is a sheet number or title, a subset name or
+            // "set"), "import_file=<dwg>", "new" (wizard), "existing=0|1",
+            // "step=<n>", "name=", "description=", "folder=", "hierarchy=0|1",
+            // "add_folder=<dir>", "layout=<i>:0|1", "wizard_props",
+            // "row=<i>:<value>", "prompt=0|1:<row>", "template=<file>",
+            // "custom=<i>:<value>", "add_custom", "custom_name=", "custom_default=",
+            // "custom_owner=0|1", "add_custom_ok", "number=", "title=",
+            // "file_name=", "pick_layout=<i>", "ok", "cancel".
+            "sheet_set" => {
+                use crate::ui::window::sheet_set::{FieldId as F, MenuAction as A, SheetSetMsg as M, SsmTab, WizardMsg as W};
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                let target = |app: &Self, spec: &str| {
+                    app.sheet_set_target(spec).ok_or_else(|| failure("invalid_value", "No such sheet set component"))
+                };
+                let index_value = |spec: &str| -> Result<(usize, String), Value> {
+                    let (i, v) = spec.split_once(':').unwrap_or((spec, ""));
+                    Ok((i.parse().map_err(|_| failure("invalid_value", "Expected <index>:<value>"))?, v.to_string()))
+                };
+                Message::SheetSet(match key {
+                    "open" => M::OpenPicked(Some(std::path::PathBuf::from(arg))),
+                    "import_file" => M::ImportPicked(Some(std::path::PathBuf::from(arg))),
+                    "tab" => M::Tab(match arg {
+                        "views" => SsmTab::SheetViews,
+                        "model" => SsmTab::ModelViews,
+                        _ => SsmTab::SheetList,
+                    }),
+                    "select" => M::Select(target(self, arg)?),
+                    "activate" => M::Activate(target(self, arg)?),
+                    "menu" => {
+                        let (action, spec) = arg.split_once(':').unwrap_or((arg, "set"));
+                        let action = match action {
+                            "open" => A::Open,
+                            "new_sheet" => A::NewSheet,
+                            "new_subset" => A::NewSubset,
+                            "import" => A::ImportLayout,
+                            "rename" => A::Rename,
+                            "remove" => A::Remove,
+                            "properties" => A::Properties,
+                            "close" => A::Close,
+                            _ => return Err(failure("invalid_value", "Unknown sheet set menu action")),
+                        };
+                        if action == A::ImportLayout {
+                            self.sheet_set_import_parent = Some(target(self, spec)?);
+                            return Ok(Task::none());
+                        }
+                        M::Menu(target(self, spec)?, action)
+                    }
+                    "new" => return Ok(self.dispatch_command("NEWSHEETSET")),
+                    "existing" => M::Wizard(W::Existing(arg == "1")),
+                    "step" => M::Wizard(W::Step(arg.parse().map_err(|_| failure("invalid_value", "step"))?)),
+                    "layout" => {
+                        let (i, v) = index_value(arg)?;
+                        M::Wizard(W::LayoutOn(i, v == "1"))
+                    }
+                    "name" => M::Input(F::Name, arg.into()),
+                    "description" => M::Input(F::Description, arg.into()),
+                    "folder" => M::Input(F::Folder, arg.into()),
+                    "hierarchy" => M::Toggle(F::Hierarchy, arg == "1"),
+                    "add_folder" => M::FolderPicked(F::AddFolder, Some(std::path::PathBuf::from(arg))),
+                    "wizard_props" => M::WizardProperties,
+                    "row" => {
+                        let (i, v) = index_value(arg)?;
+                        M::Input(F::Row(i), v)
+                    }
+                    "prompt" => {
+                        let (i, v) = index_value(arg)?;
+                        M::Choose(F::Row(i), usize::from(v != "1"))
+                    }
+                    "template" => M::TemplatePicked(Some(std::path::PathBuf::from(arg))),
+                    "custom" => {
+                        let (i, v) = index_value(arg)?;
+                        M::CustomValue(i, v)
+                    }
+                    "add_custom" => M::AddCustom,
+                    "custom_name" => M::Input(F::CustomName, arg.into()),
+                    "custom_default" => M::Input(F::CustomDefault, arg.into()),
+                    "custom_owner" => M::Choose(F::CustomOwner, usize::from(arg == "1")),
+                    "add_custom_ok" => M::AddCustomOk,
+                    "number" => M::Input(F::Number, arg.into()),
+                    "title" => M::Input(F::Title, arg.into()),
+                    "file_name" => M::Input(F::FileName, arg.into()),
+                    "pick_layout" => M::Choose(F::Layout, arg.parse().map_err(|_| failure("invalid_value", "index"))?),
+                    "ok" => M::Ok,
+                    "cancel" => M::Cancel,
+                    _ => return Err(failure("invalid_value", "Unknown sheet set action")),
                 })
             }
             "ribbon_dropdown" => Message::ToggleRibbonDropdown(string(req, "value")?.into()),
@@ -1047,6 +1142,9 @@ impl OpenCADStudio {
                 ),
                 Some(crate::app::ModalKind::AttDefEdit) => Message::AttdefDialog(
                     crate::ui::window::attdef_dialog::AttdefDialogMsg::EditOk,
+                ),
+                Some(crate::app::ModalKind::SheetSet) => Message::SheetSet(
+                    crate::ui::window::sheet_set::SheetSetMsg::Ok,
                 ),
                 Some(crate::app::ModalKind::Field) => Message::FieldDialog(
                     crate::ui::window::field_dialog::FieldDialogMsg::Ok,
