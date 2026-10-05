@@ -612,7 +612,7 @@ fn plain_row<'a>(
     fold: Option<(bool, Message)>,
     double: Option<Message>,
     menu: Vec<Mi>,
-    open_sub: Option<(String, bool)>,
+    open_sub: Option<String>,
 ) -> Element<'a, Message> {
     let arrow: Element<'a, Message> = match fold {
         Some((open, m)) => button(if open { crate::ui::icons::themed_arrow_down(10.0) } else { crate::ui::icons::themed_arrow_right(10.0) })
@@ -637,12 +637,9 @@ fn plain_row<'a>(
     if menu.is_empty() {
         return area.into();
     }
-    iced_aw::ContextMenu::new(area, move || menu_panel(&menu, open_sub.as_ref())).into()
+    let (main, keep_open, flyout) = menu_panel(&menu, open_sub.as_deref());
+    crate::ui::window::row_menu::RowMenu::new(area, main, keep_open, flyout, msg(SheetSetMsg::Submenu(None))).into()
 }
-
-/// Height of a menu entry and of a separator (with the column spacing).
-const MENU_ENTRY_H: f32 = 27.0;
-const MENU_SEP_H: f32 = 2.0;
 
 fn menu_box<'b>(items: Vec<Element<'b, Message>>) -> Element<'b, Message> {
     container(iced::widget::Column::with_children(items).spacing(1))
@@ -656,48 +653,32 @@ fn menu_box<'b>(items: Vec<Element<'b, Message>>) -> Element<'b, Message> {
         .into()
 }
 
-/// A row menu; hovering a submenu entry opens its items beside it (`open`:
-/// key and whether the fly-out goes on the left).
-fn menu_panel(menu: &[Mi], open: Option<&(String, bool)>) -> Element<'static, Message> {
+/// A row menu: the menu box, which of its entries open a fly-out, and the
+/// open fly-out (its entry index and items). Hovering, pressing or right
+/// pressing a submenu entry opens its fly-out.
+fn menu_panel(menu: &[Mi], open: Option<&str>) -> (Element<'static, Message>, Vec<bool>, Option<(usize, Element<'static, Message>)>) {
     let mut items: Vec<Element<'static, Message>> = Vec::new();
-    let mut flyout: Option<(f32, Element<'static, Message>)> = None;
-    let mut y = 0.0;
+    let mut keep_open = Vec::new();
+    let mut flyout = None;
     for item in menu {
         match item {
-            Mi::Sep => {
-                items.push(menu_separator());
-                y += MENU_SEP_H;
-            }
+            Mi::Sep => items.push(menu_separator()),
             Mi::Entry(label, m) => {
                 items.push(mouse_area(menu_entry(label.clone(), m.clone())).on_enter(msg(SheetSetMsg::Submenu(None))).into());
-                y += MENU_ENTRY_H;
             }
             Mi::Sub(label, key, sub) => {
-                let open_here = open.is_some_and(|(k, _)| k == key);
-                // Hover (or a right press) opens the fly-out; a click closes the menu.
-                let entry = menu_entry(format!("{label}  ▸"), Some(msg(SheetSetMsg::Submenu(None))));
                 let open_msg = msg(SheetSetMsg::Submenu(Some(key.clone())));
-                items.push(mouse_area(entry).on_enter(open_msg.clone()).on_right_press(open_msg).into());
-                if open_here {
+                let entry = menu_entry(format!("{label}  ▸"), Some(open_msg.clone()));
+                if open == Some(key.as_str()) {
                     let subs = sub.iter().map(|(l, m)| menu_entry(l.clone(), m.clone())).collect();
-                    flyout = Some((y, menu_box(subs)));
+                    flyout = Some((items.len(), menu_box(subs)));
                 }
-                y += MENU_ENTRY_H;
+                items.push(mouse_area(entry).on_enter(open_msg.clone()).on_right_press(open_msg).into());
             }
         }
+        keep_open.push(matches!(item, Mi::Sub(..)));
     }
-    let main = menu_box(items);
-    match flyout {
-        Some((offset, sub)) => {
-            let sub = column![Space::new().height(Length::Fixed(offset)), sub];
-            // A menu opened from a right-docked palette sits left of the cursor
-            // (the overlay flips it at the window edge); its fly-out opens to
-            // the left so the menu itself does not move.
-            // ponytail: side from the dock, not the menu's actual position.
-            if open.is_some_and(|(_, left)| *left) { row![sub, main] } else { row![main, sub] }.spacing(2).into()
-        }
-        None => main,
-    }
+    (menu_box(items), keep_open, flyout)
 }
 
 /// A menu item: translated label and message (an empty label is a separator).
@@ -782,7 +763,7 @@ fn push_tree<'a>(
 /// A sheet view row and its menu: Display, Rename & Renumber, Set category
 /// (the categories as sub-items), Place Callout Block (the set's callout
 /// blocks as sub-items) and Place View Label Block.
-fn view_row<'a>(state: &SheetSetManager, db: &SheetSetDatabase, view: &SsElement, depth: u16, left: bool) -> Element<'a, Message> {
+fn view_row<'a>(state: &SheetSetManager, db: &SheetSetDatabase, view: &SsElement, depth: u16) -> Element<'a, Message> {
     let id = view.id().to_string();
     let act = |a: ViewAction| Some(msg(SheetSetMsg::ViewMenu(id.clone(), a)));
     let categories = db.view_categories().iter().map(|c| (c.prop("Name").unwrap_or("").to_string(), act(ViewAction::Category(c.id().to_string())))).collect();
@@ -795,11 +776,11 @@ fn view_row<'a>(state: &SheetSetManager, db: &SheetSetDatabase, view: &SsElement
         Mi::Sub(t!("Place Callout Block").into_owned(), format!("{id}|callout"), callouts),
         mi("Place View Label Block", act(ViewAction::Label)),
     ];
-    plain_row(depth, crate::ui::icons::DOC, ss::number_and_title(view), None, act(ViewAction::Display), menu, state.submenu.clone().map(|k| (k, left)))
+    plain_row(depth, crate::ui::icons::DOC, ss::number_and_title(view), None, act(ViewAction::Display), menu, state.submenu.clone())
 }
 
 /// The Sheet Views page: the set, then its view categories (or sheets) and their views.
-fn sheet_views_rows<'a>(state: &SheetSetManager, db: &SheetSetDatabase, left: bool) -> Vec<Element<'a, Message>> {
+fn sheet_views_rows<'a>(state: &SheetSetManager, db: &SheetSetDatabase) -> Vec<Element<'a, Message>> {
     let new_category = || mi("New View Category...", Some(msg(SheetSetMsg::NewCategory)));
     let mut rows = vec![plain_row(0, SET_ICON, db.name().to_string(), None, None, vec![new_category()], None)];
     let views: Vec<&SsElement> = db.sheets().into_iter().flat_map(|s| db.sheet_views(s)).collect();
@@ -807,7 +788,7 @@ fn sheet_views_rows<'a>(state: &SheetSetManager, db: &SheetSetDatabase, left: bo
         let named = db.view_categories();
         // Views of the unnamed (default) category sit directly under the set.
         for v in views.iter().filter(|v| !SheetSetDatabase::view_category_of(v).is_some_and(|c| named.iter().any(|n| n.id() == c))) {
-            rows.push(view_row(state, db, v, 1, left));
+            rows.push(view_row(state, db, v, 1));
         }
         for c in named {
             let id = c.id().to_string();
@@ -825,7 +806,7 @@ fn sheet_views_rows<'a>(state: &SheetSetManager, db: &SheetSetDatabase, left: bo
                 None,
             ));
             for v in views.iter().filter(|v| SheetSetDatabase::view_category_of(v) == Some(id.as_str())) {
-                rows.push(view_row(state, db, v, 2, left));
+                rows.push(view_row(state, db, v, 2));
             }
         }
     } else {
@@ -836,7 +817,7 @@ fn sheet_views_rows<'a>(state: &SheetSetManager, db: &SheetSetDatabase, left: bo
             }
             rows.push(plain_row(1, crate::ui::icons::DOC, ss::number_and_title(sheet), None, None, vec![], None));
             for v in views {
-                rows.push(view_row(state, db, v, 2, left));
+                rows.push(view_row(state, db, v, 2));
             }
         }
     }
@@ -919,8 +900,7 @@ fn heading(label: &str) -> Element<'static, Message> {
         .into()
 }
 
-/// `dock_right`: the palette is docked on the right (fly-outs open leftwards).
-pub fn view<'a>(state: &'a SheetSetManager, width: f32, auto_collapse: bool, dock_right: bool) -> Element<'a, Message> {
+pub fn view<'a>(state: &'a SheetSetManager, width: f32, auto_collapse: bool) -> Element<'a, Message> {
     let title_bar =
         crate::ui::dock::title_bar(PanelId::SheetSetManager, t!("Sheet Set Manager").into_owned(), auto_collapse);
     let mut picks: Vec<Pick> =
@@ -986,7 +966,7 @@ pub fn view<'a>(state: &'a SheetSetManager, width: f32, auto_collapse: bool, doc
             ]
             .spacing(4)
             .align_y(iced::Center);
-            column![header, scrollable(iced::widget::Column::with_children(sheet_views_rows(state, db, dock_right)).spacing(1)).height(Fill)]
+            column![header, scrollable(iced::widget::Column::with_children(sheet_views_rows(state, db)).spacing(1)).height(Fill)]
                 .spacing(6)
                 .into()
         }
