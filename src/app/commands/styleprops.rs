@@ -1086,6 +1086,7 @@ impl OpenCADStudio {
                     | "CONSTRAINTNAMEFORMAT"
                     | "DYNCONSTRAINTDISPLAY"
                     | "CCONSTRAINTFORM"
+                    | "DYNMODE"
             ) =>
             {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
@@ -1110,7 +1111,7 @@ impl OpenCADStudio {
                     self.command_line.push_info(&super::plotvars::setvar_listing());
                     self.command_line.push_info(&super::blockvars::setvar_listing());
                     self.command_line.push_info(
-                        crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
+                        crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY DYNMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
                     // Point cloud settings, kept with the drawing.
@@ -1702,6 +1703,17 @@ impl OpenCADStudio {
                                     })
                                     .ok_or_else(|| "SETVAR: 0 or 1 required.".into()),
                                 None => Ok((format!("MIRRTEXT = {}", h.mirror_text as i32), false)),
+                            },
+                            "DYNMODE" => match &value {
+                                Some(v) => match v.parse::<i16>() {
+                                    Ok(mode) if (-3..=3).contains(&mode) => {
+                                        self.dyn_mode = mode;
+                                        self.dyn_input = mode > 0;
+                                        Ok((format!("DYNMODE = {mode}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from -3 to 3 required.".into()),
+                                },
+                                None => Ok((format!("DYNMODE = {}", self.dyn_mode), false)),
                             },
                             "ZOOMWHEEL" => match &value {
                                 Some(v) => match parse_bool(v) {
@@ -2685,6 +2697,7 @@ impl OpenCADStudio {
                                         // Without this it marked the drawing
                                         // modified instead of persisting.
                                         | "TEXTFILL"
+                                        | "DYNMODE"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {
@@ -3781,6 +3794,51 @@ mod tests {
 
         let _ = app.run_command_line("SETVAR DELOBJ 4");
         assert_eq!(app.delete_objects, 3);
+    }
+
+    #[test]
+    fn dynmode_direct_and_setvar_toggles_dynamic_input() {
+        let mut app = fresh_app();
+        assert!(app.dyn_input);
+        assert_eq!(app.dyn_mode, 3);
+
+        // Turn off via direct command: DYNMODE 0
+        let _ = app.run_command_line("DYNMODE 0");
+        assert!(!app.dyn_input);
+        assert_eq!(app.dyn_mode, 0);
+
+        // Turn on via direct command: DYNMODE 3
+        let _ = app.run_command_line("DYNMODE 3");
+        assert!(app.dyn_input);
+        assert_eq!(app.dyn_mode, 3);
+
+        // Turn off via SETVAR: SETVAR DYNMODE 0
+        let _ = app.run_command_line("SETVAR DYNMODE 0");
+        assert!(!app.dyn_input);
+        assert_eq!(app.dyn_mode, 0);
+
+        // Turn on via SETVAR: SETVAR DYNMODE 1 (pointer input only)
+        let _ = app.run_command_line("SETVAR DYNMODE 1");
+        assert!(app.dyn_input);
+        assert_eq!(app.dyn_mode, 1);
+
+        // Out of range rejected
+        let _ = app.run_command_line("DYNMODE 5");
+        assert_eq!(app.dyn_mode, 1);
+        assert!(app.dyn_input);
+
+        let _ = app.run_command_line("DYNMODE -5");
+        assert_eq!(app.dyn_mode, 1);
+        assert!(app.dyn_input);
+
+        // F12 turns it off temporarily (negative) and restores the mode.
+        let _ = app.update(crate::app::Message::ToggleDynInput);
+        assert!(!app.dyn_input);
+        assert_eq!(app.dyn_mode, -1);
+
+        let _ = app.update(crate::app::Message::ToggleDynInput);
+        assert!(app.dyn_input);
+        assert_eq!(app.dyn_mode, 1);
     }
 }
 

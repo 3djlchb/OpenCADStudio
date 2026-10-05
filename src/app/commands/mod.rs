@@ -93,7 +93,26 @@ impl OpenCADStudio {
     }
 
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
-        self.dispatch_command_inner(cmd, false)
+        let task = self.dispatch_command_inner(cmd, false);
+        self.clear_idle_tool_highlight();
+        task
+    }
+
+    /// Turn the ribbon highlight off when the command just dispatched left
+    /// nothing running: no interactive command, dialog or navigation mode.
+    /// One-shot commands (view changes, clipboard, toggles, audits…) would
+    /// otherwise leave it lit forever; interactive commands and dialog owners
+    /// keep theirs until the command end / modal close clears it. (#355)
+    pub(in crate::app) fn clear_idle_tool_highlight(&mut self) {
+        let i = self.active_tab;
+        if self.tabs[i].active_cmd.is_none()
+            && self.active_modal.is_none()
+            && !self.tabs[i].pan_mode
+            && !self.tabs[i].orbit_mode
+            && !self.tabs[i].zoom_dynamic_mode
+        {
+            self.ribbon.deactivate_tool();
+        }
     }
 
     /// Dispatch a verb typed at the interactive command line, falling back to
@@ -105,7 +124,9 @@ impl OpenCADStudio {
     /// callers (ribbon, plugins, headless automation) use `dispatch_command`
     /// and never get silent substitution.
     pub(super) fn dispatch_command_or_suggest(&mut self, cmd: &str) -> Task<Message> {
-        self.dispatch_command_inner(cmd, true)
+        let task = self.dispatch_command_inner(cmd, true);
+        self.clear_idle_tool_highlight();
+        task
     }
 
     fn dispatch_command_inner(&mut self, cmd: &str, allow_suggest: bool) -> Task<Message> {
@@ -205,6 +226,13 @@ impl OpenCADStudio {
                 .push_info(crate::t!("No drawing open. Use NEW or OPEN to start a drawing.").as_ref());
             return Task::none();
         }
+
+        // Light the ribbon button of the command now starting, however it was
+        // started (typed, alias, shortcut, Repeat), so the user sees where it
+        // lives. A transparent command returned above and leaves the running
+        // command's highlight alone.
+        self.ribbon
+            .show_command(strip_command_prefixes(cmd).unwrap_or(cmd));
 
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             // try_dispatch returns true for both finished commands and interactive
@@ -1083,4 +1111,45 @@ mod marquee_cancel_tests {
 fn strip_command_prefixes(cmd: &str) -> Option<&str> {
     let bare = cmd.trim_start_matches(['_', '.']);
     (bare.len() != cmd.len() && !bare.is_empty()).then_some(bare)
+}
+
+#[cfg(test)]
+mod ribbon_highlight_tests {
+    use crate::app::OpenCADStudio;
+
+    fn fresh() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    #[test]
+    fn a_typed_alias_lights_the_button_of_the_command_it_starts() {
+        let mut app = fresh();
+        let _ = app.dispatch_command_or_suggest("O");
+        assert!(app.tabs[app.active_tab].active_cmd.is_some());
+        assert_eq!(app.ribbon.active_tool(), Some("OFFSET"));
+        let _ = app.dispatch_command_or_suggest("L");
+        assert_eq!(app.ribbon.active_tool(), Some("LINE"));
+    }
+
+    #[test]
+    fn a_transparent_command_keeps_the_running_command_lit() {
+        let mut app = fresh();
+        let _ = app.dispatch_command_or_suggest("LINE");
+        let _ = app.dispatch_command_or_suggest("'ZOOM E");
+        assert!(app.tabs[app.active_tab].active_cmd.is_some());
+        assert_eq!(app.ribbon.active_tool(), Some("LINE"));
+    }
+
+    #[test]
+    fn a_one_shot_command_leaves_nothing_lit() {
+        // REGEN cancels the running LINE and finishes at once, so neither
+        // its own button nor LINE's may stay lit.
+        let mut app = fresh();
+        let _ = app.dispatch_command_or_suggest("LINE");
+        let _ = app.dispatch_command_or_suggest("REGEN");
+        assert!(app.tabs[app.active_tab].active_cmd.is_none());
+        assert_eq!(app.ribbon.active_tool(), None);
+    }
 }

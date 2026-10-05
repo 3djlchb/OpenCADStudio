@@ -1268,7 +1268,8 @@ impl OpenCADStudio {
                     })
                     .collect();
                 // Pick-first (#422): with offsettable objects already selected,
-                // skip the pick step and go straight to distance / side.
+                // skip the distance and pick steps and open on the live side
+                // preview.
                 let preselected: Vec<_> = self.tabs[i]
                     .scene
                     .selected_entities()

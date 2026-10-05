@@ -178,7 +178,6 @@ pub fn extract_to_png(input: &std::path::Path, output: &std::path::Path, size: u
 /// Read a DWG's embedded preview and decode it to an iced image handle for the
 /// Start page's recent-file thumbnails. `None` for DXF/other files, a missing
 /// preview, or an undecodable format (WMF).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn read_handle(path: &std::path::Path) -> Option<iced::widget::image::Handle> {
     let img = dwg_thumbnailer::extract(path, MAX_DIM)?;
     let (w, h) = (img.width(), img.height());

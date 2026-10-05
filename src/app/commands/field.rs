@@ -3,7 +3,7 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::command::CadCommand;
-use crate::modules::annotate::field_cmd::{FieldObjectPickCommand, FieldPlaceCommand};
+use crate::modules::annotate::field_cmd::{FieldObjectPickCommand, FieldPlaceCommand, FieldTablePickCommand};
 use crate::ui::window::field_dialog::{
     fields_of, object_properties, FieldDialogMsg, FieldDialogState, FieldTarget, DATE_FORMATS,
     NAMED_TYPES,
@@ -35,13 +35,70 @@ impl OpenCADStudio {
                 }
                 Some(Task::none())
             }
+            cmd if cmd == "_FIELD_CELL" || cmd.starts_with("_FIELD_CELL ") => {
+                let parts: Vec<&str> = cmd.split_whitespace().skip(1).collect();
+                if let Some(expression) = self.table_cell_expression(i, &parts) {
+                    if let Some(state) = self.field_dialog.as_mut() {
+                        // The reference appends at the end, with no operator.
+                        state.formula.push_str(&expression);
+                    }
+                    self.refresh_field_preview();
+                    // A real result gets the Decimal format, as the reference picks it.
+                    if let Some(state) = self.field_dialog.as_mut() {
+                        if state.formula_format == 0 && state.preview.contains('.') {
+                            state.formula_format = 2;
+                        }
+                    }
+                }
+                if self.field_dialog.is_some() {
+                    self.active_modal = Some(crate::app::ModalKind::Field);
+                    self.refresh_field_preview();
+                }
+                Some(Task::none())
+            }
             _ => None,
         }
+    }
+
+    /// The formula text for a picked table cell or cell range:
+    /// `Table(%<\_ObjId H>%).B4` or `Table(%<\_ObjId H>%).Evaluate(Sum(A3:B5))`.
+    fn table_cell_expression(&self, i: usize, parts: &[&str]) -> Option<String> {
+        let function = *parts.first()?;
+        let cell = |at: &[&str]| -> Option<(codec::Handle, usize, usize)> {
+            let handle = codec::Handle::new(u64::from_str_radix(at.first()?, 16).ok()?);
+            let point = glam::DVec3::new(at.get(1)?.parse().ok()?, at.get(2)?.parse().ok()?, at.get(3)?.parse().ok()?);
+            let document = &self.tabs[i].scene.document;
+            let codec::EntityType::Table(table) = document.get_entity(handle)? else {
+                return None;
+            };
+            let hit = crate::modules::annotate::table_cmd::table_cell_at(table, None, point)?;
+            Some((handle, hit.row, hit.column))
+        };
+        let name = |row: usize, column: usize| format!("{}{}", column_letters(column), row + 1);
+        let (table, row, column) = cell(parts.get(1..5)?)?;
+        if function == "Cell" {
+            return Some(format!("Table(%<\\_ObjId {:X}>%).{}", table.value(), name(row, column)));
+        }
+        let (second_table, row2, column2) = cell(parts.get(5..9)?)?;
+        if second_table != table {
+            return None;
+        }
+        Some(format!(
+            "Table(%<\\_ObjId {:X}>%).Evaluate({function}({}:{}))",
+            table.value(),
+            name(row.min(row2), column.min(column2)),
+            name(row.max(row2), column.max(column2)),
+        ))
     }
 
     /// Open the Field dialog for `target`.
     pub(in crate::app) fn open_field_dialog(&mut self, target: FieldTarget) {
         let mut state = FieldDialogState::new(target);
+        if !matches!(target, FieldTarget::NewText) {
+            state.placeholder_block = self.tabs[self.active_tab]
+                .active_block_edit_session()
+                .map(|session| session.block_name.clone());
+        }
         state.examples = DATE_FORMATS
             .iter()
             .map(|f| self.field_value(&format!("\\AcVar Date \\f \"{f}\""), &[]))
@@ -69,7 +126,17 @@ impl OpenCADStudio {
             return;
         };
         let (code, objects) = state.code();
-        let preview = if state.complete() { self.field_value(&code, &objects) } else { String::new() };
+        let preview = if state.complete() {
+            if state.name == "BlockPlaceholder" {
+                // A placeholder shows its property name until a block reference resolves it.
+                let (label, _, _) = codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
+                text_case(label, state.text_case)
+            } else {
+                self.field_value(&code, &objects)
+            }
+        } else {
+            String::new()
+        };
         if let Some(state) = self.field_dialog.as_mut() {
             state.preview = preview;
         }
@@ -170,6 +237,18 @@ impl OpenCADStudio {
                 );
             }
             FieldDialogMsg::PlotScale(k) => state.plot_scale = k,
+            FieldDialogMsg::PlaceholderProperty(k) => {
+                state.placeholder_property = k;
+                state.text_case = 0;
+            }
+            FieldDialogMsg::TableFunction(function) => {
+                // The dialog waits while the cells are picked.
+                self.active_modal = None;
+                let command = FieldTablePickCommand::new(function);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                return Task::none();
+            }
             FieldDialogMsg::SelectObject => {
                 // The dialog waits while one object is picked.
                 self.active_modal = None;
@@ -239,5 +318,42 @@ impl OpenCADStudio {
             Some(FieldTarget::AttdefEdit) if self.attdef_edit.is_some() => Some(crate::app::ModalKind::AttDefEdit),
             _ => None,
         };
+    }
+}
+
+/// Spreadsheet column letters: A … Z, AA, AB …
+fn column_letters(mut column: usize) -> String {
+    let mut letters = Vec::new();
+    loop {
+        letters.push(b'A' + (column % 26) as u8);
+        if column < 26 {
+            break;
+        }
+        column = column / 26 - 1;
+    }
+    letters.reverse();
+    String::from_utf8(letters).unwrap_or_default()
+}
+
+/// The Field dialog's text cases: (none), Uppercase, Lowercase, First capital, Title case.
+fn text_case(value: &str, case: usize) -> String {
+    match case {
+        1 => value.to_uppercase(),
+        2 => value.to_lowercase(),
+        3 => {
+            let lower = value.to_lowercase();
+            let mut chars = lower.chars();
+            chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+        }
+        4 => value
+            .split(' ')
+            .map(|word| {
+                let lower = word.to_lowercase();
+                let mut chars = lower.chars();
+                chars.next().map(|c| c.to_uppercase().chain(chars).collect::<String>()).unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => value.to_string(),
     }
 }

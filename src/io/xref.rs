@@ -513,8 +513,8 @@ pub(crate) fn ensure_block_entities(doc: &mut CadDocument, block_name: &str) {
 /// - Kept verbatim (audited, benign): linetype handles (the name carries the
 ///   lookup), Leader `annotation_handle`, Hatch `boundary_handles`,
 ///   `attdef_handle`, reactors, xdata, extension dictionaries, graphic data,
-///   Dimension anonymous-block names (`*D…` — geometry regenerates from the
-///   style), Hatch pattern names (no pattern table exists), Shape style
+///   Dimension anonymous-block names on BIND (`*D…` — geometry regenerates
+///   from the style), Hatch pattern names (no pattern table exists), Shape style
 ///   names, MultiLeader line-type/arrowhead handles, Table cell internals
 ///   (rows/cells keep xref text-style names), Viewport visual-style handles,
 ///   SectionSymbol style handles, `Extended` entities.
@@ -717,8 +717,21 @@ fn import_xref_symbols(
 
     // Nested block records: prefixed clones with cleared membership, detached
     // layout pointer, fresh handles (same shape as the load path always made).
+    // The load path also takes the anonymous pictures (`*D` dimensions, `*U`
+    // block representations): a dimension draws from its block by name, and
+    // without the copy it falls back to a host block of the same name or a
+    // regeneration that misses the file's own overrides. BIND keeps skipping
+    // them, as a `$N$` prefix would make an invalid anonymous name.
+    let take_anonymous = matches!(naming, SymbolNaming::MergePipe { .. });
     for br in xref_doc.block_records.iter() {
-        if br.name.starts_with('*') || br.flags.is_xref || br.flags.is_xref_overlay {
+        let anonymous = br.name.starts_with('*');
+        let layout_block = br.is_layout()
+            || br.name.eq_ignore_ascii_case("*Model_Space")
+            || br.name.to_ascii_lowercase().starts_with("*paper_space");
+        if (anonymous && (!take_anonymous || layout_block))
+            || br.flags.is_xref
+            || br.flags.is_xref_overlay
+        {
             continue;
         }
         let old = br.name.clone();
@@ -831,8 +844,11 @@ fn remap_xref_entity(
                 remap_mtext_style(m, maps);
             }
         }
-        // ── Dim-style names (+ anonymous-block refs stay verbatim) ──
-        EntityType::Dimension(d) => rename(&maps.dim_styles, &mut d.base_mut().style_name),
+        // ── Dim-style names + the dimension's picture block ──
+        EntityType::Dimension(d) => {
+            rename(&maps.dim_styles, &mut d.base_mut().style_name);
+            rename(&maps.blocks, &mut d.base_mut().block_name);
+        }
         EntityType::Leader(l) => rename(&maps.dim_styles, &mut l.dimension_style),
         EntityType::Tolerance(t) => {
             rename(&maps.dim_styles, &mut t.dimension_style_name);

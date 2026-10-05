@@ -32,7 +32,7 @@ pub const CATEGORIES: &[(&str, &[&str])] = &[
         &["Author", "Comments", "Filename", "Filesize", "HyperlinkBase", "Keywords", "LastSavedBy", "Subject", "Title"],
     ),
     ("Linked", &["Hyperlink"]),
-    ("Objects", &["Formula", "NamedObject", "Object"]),
+    ("Objects", &["BlockPlaceholder", "Formula", "NamedObject", "Object"]),
     ("Other", &["DieselExpression", "SystemVariable"]),
     (
         "Plot",
@@ -159,6 +159,7 @@ pub enum FieldKind {
     SheetSetPlaceholder,
     /// SheetSet / SheetView: a component picked in a sheet set.
     SheetSetNavigation,
+    BlockPlaceholder,
 }
 
 /// Formula precisions: the current one, then 0 to 8 decimals.
@@ -181,6 +182,7 @@ pub fn kind_of(name: &str) -> FieldKind {
         "SheetSetPlaceholder" => FieldKind::SheetSetPlaceholder,
         "SheetSet" | "SheetView" => FieldKind::SheetSetNavigation,
         n if SHEET_SET_FIELDS.contains(&n) => FieldKind::SheetSet,
+        "BlockPlaceholder" => FieldKind::BlockPlaceholder,
         _ => FieldKind::Text,
     }
 }
@@ -214,6 +216,11 @@ pub struct FieldDialogState {
     pub hyperlink_url: String,
     /// Index into codec PLOT_SCALE_FORMATS.
     pub plot_scale: usize,
+    /// The block being edited in the block editor; block placeholders are
+    /// only offered there.
+    pub placeholder_block: Option<String>,
+    /// Index into codec BLOCK_PLACEHOLDER_PROPERTIES.
+    pub placeholder_property: usize,
     pub preview: String,
     /// Sheet set fields: the open set's sheet (flags 2) and set (flags 1)
     /// custom property names, the chosen one, the placeholder type and the
@@ -254,6 +261,8 @@ impl FieldDialogState {
             hyperlink_text: String::new(),
             hyperlink_url: String::new(),
             plot_scale: 0,
+            placeholder_block: None,
+            placeholder_property: 7,
             preview: String::new(),
             ss_sheet_custom: Vec::new(),
             ss_set_custom: Vec::new(),
@@ -297,10 +306,11 @@ impl FieldDialogState {
                     0 => String::new(),
                     n => format!("%pr{}", n - 1),
                 };
-                let body = format!("\\AcExpr ({})", self.formula.trim());
+                let (formula, objects) = indexed_object_ids(self.formula.trim());
+                let body = format!("\\AcExpr ({formula})");
                 match format!("{format}{precision}") {
-                    f if f.is_empty() => (body, vec![]),
-                    f => (format!("{body} \\f \"{f}\""), vec![]),
+                    f if f.is_empty() => (body, objects),
+                    f => (format!("{body} \\f \"{f}\""), objects),
                 }
             }
             FieldKind::Hyperlink => (
@@ -328,6 +338,21 @@ impl FieldDialogState {
                     (case(base), vec![])
                 }
             }
+            FieldKind::BlockPlaceholder => {
+                let (_, property, format) = codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[self.placeholder_property];
+                // Text properties take the chosen case; the others keep their own format.
+                let format = match (format, self.text_case) {
+                    ("%tc4", 0) => String::new(),
+                    ("%tc4", n) => format!("%tc{n}"),
+                    (other, _) => other.to_string(),
+                };
+                let code = format!("\\AcObjProp.16.2 Object(?BlockRefId,1).{property}");
+                if format.is_empty() {
+                    (code, vec![])
+                } else {
+                    (format!("{code} \\f \"{format}\""), vec![])
+                }
+            }
             FieldKind::SystemVariable => (format!("\\AcVar {}", self.sysvar), vec![]),
             FieldKind::Diesel => (format!("\\AcDiesel {}", self.diesel), vec![]),
             FieldKind::NamedObject => match self.named.and_then(|i| self.named_names.get(i)) {
@@ -352,9 +377,33 @@ impl FieldDialogState {
             FieldKind::Diesel => !self.diesel.trim().is_empty(),
             FieldKind::Formula => !self.formula.trim().is_empty(),
             FieldKind::Hyperlink => !self.hyperlink_url.trim().is_empty(),
+            FieldKind::BlockPlaceholder => self.placeholder_block.is_some(),
             _ => true,
         }
     }
+}
+
+/// Table references in a formula are typed as `%<\_ObjId HANDLE>%`; the stored
+/// code numbers them (`%<\_ObjIdx n>%`) and lists the objects.
+fn indexed_object_ids(formula: &str) -> (String, Vec<codec::Handle>) {
+    let mut out = String::new();
+    let mut objects: Vec<codec::Handle> = Vec::new();
+    let mut rest = formula;
+    while let Some(start) = rest.find("%<\\_ObjId ") {
+        let after = &rest[start + "%<\\_ObjId ".len()..];
+        let Some(end) = after.find(">%") else { break };
+        let Ok(value) = u64::from_str_radix(after[..end].trim(), 16) else { break };
+        let handle = codec::Handle::new(value);
+        let index = objects.iter().position(|h| *h == handle).unwrap_or_else(|| {
+            objects.push(handle);
+            objects.len() - 1
+        });
+        out.push_str(&rest[..start]);
+        out.push_str(&format!("%<\\_ObjIdx {index}>%"));
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    (out, objects)
 }
 
 /// The geometric properties a field can show for an object of this type.
@@ -391,6 +440,9 @@ pub enum FieldDialogMsg {
     FormulaFormat(usize),
     FormulaPrecision(usize),
     Evaluate,
+    /// Sum / Average / Count of a cell range, or one Cell, picked in a table.
+    TableFunction(&'static str),
+    PlaceholderProperty(usize),
     HyperlinkText(String),
     HyperlinkUrl(String),
     BrowseHyperlink,
@@ -452,6 +504,14 @@ impl IntoContainer for text_input::Style {
             ..Default::default()
         }
     }
+}
+
+fn table_button<'a>(label: String, function: &'static str) -> Element<'a, Message> {
+    button(text(label).size(12))
+        .on_press(msg(FieldDialogMsg::TableFunction(function)))
+        .style(button_style(false))
+        .padding([5, 10])
+        .into()
 }
 
 fn case_list<'a>(state: &FieldDialogState) -> Element<'a, Message> {
@@ -649,6 +709,36 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         ]
         .spacing(8)
         .into(),
+        FieldKind::BlockPlaceholder => match &state.placeholder_block {
+            None => column![text(t!("Only accessible in the block editor")).size(12).style(muted_style)].into(),
+            Some(block) => {
+                let (_, _, format) = codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
+                let mut panel = column![
+                    row![
+                        text(t!("Block name")).size(12).width(Length::Fixed(110.0)),
+                        container(text(block.clone()).size(12).style(muted_style)).padding([5, 8]).width(Fill),
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Center),
+                    text(t!("Block reference property")).size(12),
+                    list(
+                        codec::fields::BLOCK_PLACEHOLDER_PROPERTIES
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (label, _, _))| {
+                                (t!(*label).into_owned(), state.placeholder_property == i, FieldDialogMsg::PlaceholderProperty(i))
+                            })
+                            .collect(),
+                        150.0,
+                    ),
+                ]
+                .spacing(8);
+                if format == "%tc4" {
+                    panel = panel.push(text(t!("Format")).size(12)).push(case_list(state));
+                }
+                panel.into()
+            }
+        },
         FieldKind::PlotScale => column![
             text(t!("Format")).size(12),
             list(
@@ -803,10 +893,18 @@ pub fn view<'a>(
                         .font(iced::Font::MONOSPACE)
                         .style(field_style)
                         .on_input(|v| msg(FieldDialogMsg::Formula(v))),
-                    button(text(t!("Evaluate")).size(12))
-                        .on_press(msg(FieldDialogMsg::Evaluate))
-                        .style(button_style(false))
-                        .padding([5, 14]),
+                    row![
+                        table_button(t!("Average").into_owned(), "Average"),
+                        table_button(t!("Sum").into_owned(), "Sum"),
+                        table_button(t!("Count").into_owned(), "Count"),
+                        table_button(t!("Cell").into_owned(), "Cell"),
+                        Space::new().width(Fill),
+                        button(text(t!("Evaluate")).size(12))
+                            .on_press(msg(FieldDialogMsg::Evaluate))
+                            .style(button_style(false))
+                            .padding([5, 14]),
+                    ]
+                    .spacing(6),
                 ]
                 .spacing(8),
             ),
@@ -815,6 +913,7 @@ pub fn view<'a>(
         ]
         .spacing(10),
         FieldKind::Hyperlink => column![card(t!("Hyperlink").into_owned(), format_panel(state)), preview].spacing(10),
+        FieldKind::BlockPlaceholder => column![card(t!("Block placeholder").into_owned(), format_panel(state)), preview].spacing(10),
         _ => column![card(t!("Format").into_owned(), format_panel(state)), preview].spacing(10),
     };
     let (code, _) = state.code();

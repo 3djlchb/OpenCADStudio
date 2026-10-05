@@ -621,6 +621,23 @@ fn append_pdf_page(
         draw_items.push((image.image.draw_depth, 1u8, sequence, DrawItem::Image(image)));
         sequence += 1;
     }
+    // Everything outside the export window would only be clipped away, yet
+    // still written: a window over a corner of a large drawing came out as a
+    // blank page of several megabytes. Drop items whose ink misses the window.
+    if let Some((cx, cy, cw, ch)) = clip {
+        let marker_h = paper_h as f64 / scale.max(1e-6) as f64;
+        let window = [cx as f64, cy as f64, (cx + cw) as f64, (cy + ch) as f64];
+        draw_items.retain(|(_, _, _, item)| {
+            let bounds = match item {
+                DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
+                    wire_sheet_bounds(&wire.wire, ox, oy, marker_h)
+                }
+                DrawItem::Hatch(hatch) => hatch_sheet_bounds(hatch, ox, oy),
+                DrawItem::Image(_) => None,
+            };
+            bounds.is_none_or(|b| sheet_overlaps(b, window))
+        });
+    }
     draw_items.sort_by(|a, b| {
         a.0.total_cmp(&b.0)
             .then_with(|| a.1.cmp(&b.1))
@@ -926,6 +943,70 @@ fn append_pdf_page(
     let page = PdfPage::new(Mm(paper_w), Mm(paper_h), ops);
     doc.pages.push(page);
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// Slack around the export window, in sheet mm, so a stroke whose centreline
+/// sits just outside still contributes its width.
+const CULL_MARGIN_MM: f64 = 10.0;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sheet_overlaps(b: [f64; 4], window: [f64; 4]) -> bool {
+    b[0] <= window[2] + CULL_MARGIN_MM
+        && b[2] >= window[0] - CULL_MARGIN_MM
+        && b[1] <= window[3] + CULL_MARGIN_MM
+        && b[3] >= window[1] - CULL_MARGIN_MM
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn grow(bounds: &mut Option<[f64; 4]>, x: f64, y: f64) {
+    if !x.is_finite() || !y.is_finite() {
+        return;
+    }
+    let b = bounds.get_or_insert([x, y, x, y]);
+    b[0] = b[0].min(x);
+    b[1] = b[1].min(y);
+    b[2] = b[2].max(x);
+    b[3] = b[3].max(y);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// Sheet-mm bounds of everything a wire inks (strokes, glyphs, fills).
+fn wire_sheet_bounds(wire: &WireModel, ox: f64, oy: f64, marker_h: f64) -> Option<[f64; 4]> {
+    let mut bounds = None;
+    for (index, point) in wire.points.iter().enumerate() {
+        if point[0].is_finite() && point[1].is_finite() {
+            let world = wire.point_world(index, marker_h);
+            grow(&mut bounds, world.x + ox, world.y + oy);
+        }
+    }
+    for vertex in &wire.text_verts {
+        let [x, y] = glyph_world_xy(vertex);
+        grow(&mut bounds, x + ox, y + oy);
+    }
+    for (index, point) in wire.fill_tris.iter().enumerate() {
+        let low = wire.fill_tris_low.get(index).copied().unwrap_or([0.0; 3]);
+        grow(
+            &mut bounds,
+            point[0] as f64 + low[0] as f64 + ox,
+            point[1] as f64 + low[1] as f64 + oy,
+        );
+    }
+    bounds
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// Sheet-mm bounds of a hatch, resolved the way `emit_hatch` places it.
+fn hatch_sheet_bounds(hatch: &HatchModel, ox: f64, oy: f64) -> Option<[f64; 4]> {
+    let mut bounds = None;
+    for &[x, y] in hatch.boundary.iter() {
+        grow(
+            &mut bounds,
+            x as f64 + hatch.world_origin[0] + ox,
+            y as f64 + hatch.world_origin[1] + oy,
+        );
+    }
+    bounds
 }
 
 /// Build a PDF dash array (in points) from a WireModel linetype pattern.

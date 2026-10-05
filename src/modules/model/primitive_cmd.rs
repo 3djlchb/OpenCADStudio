@@ -1894,7 +1894,7 @@ impl PrimitiveCommand {
         Some((
             placed,
             solid_history::box_op(
-                self.history_transform_axes(origin, x_axis, y_axis),
+                self.history_transform_axes(box_centre(origin, x_axis, y_axis, length, width, height), x_axis, y_axis),
                 length,
                 width,
                 height,
@@ -2024,7 +2024,7 @@ impl PrimitiveCommand {
         Some((
             placed,
             solid_history::wedge_op(
-                self.history_transform_axes(origin, x_axis, y_axis),
+                self.history_transform_axes(box_centre(origin, x_axis, y_axis, length, width, height), x_axis, y_axis),
                 length,
                 width,
                 height,
@@ -3713,4 +3713,10 @@ fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
     
         ..Default::default()
 }
+}
+
+/// Box and wedge histories are framed at the centre of their bounding box,
+/// as the reference stores them (lengths stay positive).
+fn box_centre(origin: DVec3, x_axis: DVec3, y_axis: DVec3, length: f64, width: f64, height: f64) -> DVec3 {
+    origin + x_axis * (length * 0.5) + y_axis * (width * 0.5) + DVec3::Z * (height * 0.5)
 }

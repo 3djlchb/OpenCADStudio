@@ -659,6 +659,7 @@ impl OpenCADStudio {
         crate::app::settings::UserSettings {
             spacemouse: self.spacemouse_preferences,
             dyn_input: self.dyn_input,
+            dyn_mode: self.dyn_mode,
             polar: self.polar_mode,
             polar_increment_deg: self.polar_increment_deg,
             zoom_wheel_reversed: self.zoom_wheel_reversed,
@@ -750,7 +751,8 @@ impl OpenCADStudio {
 
     /// Apply restored preferences to live state.
     pub(in crate::app) fn apply_settings(&mut self, s: &crate::app::settings::UserSettings) {
-        self.dyn_input = s.dyn_input;
+        self.dyn_mode = s.dyn_mode;
+        self.set_dyn_input(s.dyn_input);
         self.polar_mode = s.polar;
         self.polar_increment_deg = s.polar_increment_deg;
         self.zoom_wheel_reversed = s.zoom_wheel_reversed;
@@ -3768,7 +3770,20 @@ impl OpenCADStudio {
         task
     }
 
+    /// A plot gives its fields (PlotDate) the plot time, as the reference
+    /// stores it; the hosts are redrawn before the plot reads the scene.
+    pub(in crate::app) fn stamp_plot_fields(&mut self) {
+        let i = self.active_tab;
+        let hosts = crate::entities::field::stamp_plot_fields(&mut self.tabs[i].scene.document);
+        if !hosts.is_empty() {
+            let changes: Vec<_> = hosts.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
+            self.tabs[i].scene.bump_entities(&changes);
+            self.tabs[i].dirty = true;
+        }
+    }
+
     fn print_all_pages(&mut self) -> Result<Vec<crate::io::pdf_export::PdfPageInput>, String> {
+        self.stamp_plot_fields();
         let available = self.tabs[self.active_tab].scene.layout_names();
         let selected: Vec<String> = self
             .print_all_layouts
@@ -5341,6 +5356,9 @@ impl OpenCADStudio {
         }
         self.active_modal = None;
         self.reset_modal_geometry();
+        if !preview {
+            self.stamp_plot_fields();
+        }
 
         // Extents, Window and Display use one plot path in both spaces. Only
         // Paper-space Layout is special: it uses the physical sheet bounds.

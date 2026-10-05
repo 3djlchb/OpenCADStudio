@@ -4197,7 +4197,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ToggleDynInput => {
-                self.dyn_input ^= true;
+                self.set_dyn_input(!self.dyn_input);
                 Task::none()
             }
             Message::ToggleViewCube => {

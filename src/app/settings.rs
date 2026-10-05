@@ -383,6 +383,7 @@ pub const MAX_SELECTED_GRIPS: usize = 4096;
 pub struct UserSettings {
     pub spacemouse: crate::input::spacemouse::Preferences,
     pub dyn_input: bool,
+    pub dyn_mode: i16,
     pub polar: bool,
     pub polar_increment_deg: f32,
     pub zoom_wheel_reversed: bool,
@@ -774,6 +775,7 @@ impl Default for UserSettings {
         Self {
             spacemouse: crate::input::spacemouse::Preferences::default(),
             dyn_input: true,
+            dyn_mode: 3,
             polar: false,
             polar_increment_deg: 45.0,
             zoom_wheel_reversed: false,

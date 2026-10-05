@@ -528,6 +528,7 @@ impl OpenCADStudio {
                 Task::none(),
             );
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if op == "tools" {
             return (
                 json!({

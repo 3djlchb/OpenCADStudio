@@ -381,8 +381,7 @@ impl OpenCADStudio {
                 .document
                 .get_entity(handle)
                 .map(|entity| entity.common().owner_handle);
-            self.tabs[tab].scene.erase_entities(&[handle]);
-            entities
+            let pieces: Vec<Handle> = entities
                 .into_iter()
                 .map(|mut entity| {
                     entity.common_mut().handle = Handle::NULL;
@@ -391,7 +390,11 @@ impl OpenCADStudio {
                     }
                     self.tabs[tab].scene.add_entity(entity)
                 })
-                .collect()
+                .collect();
+            // Hand the hatch associations over before the original goes.
+            self.tabs[tab].scene.split_hatch_source(handle, &pieces);
+            self.tabs[tab].scene.erase_entities(&[handle]);
+            pieces
         };
         for &updated in &handles {
             if matches!(
@@ -507,7 +510,7 @@ impl OpenCADStudio {
                 self.handle_copy_to_clipboard(handles, base);
             }
             CmdResult::CommitAndExit(entity) => {
-                if let Some(task) = self.handle_commit_and_exit(entity) {
+                if let Some(task) = self.handle_commit_and_exit(entity, preserve_commit_layer) {
                     return task;
                 }
             }
