@@ -3248,6 +3248,7 @@ layers =
     .usage-view-list-view-save-name-view-restore-na = 用法： VIEW LIST | VIEW SAVE <name> | VIEW RESTORE <name> | VIEW DELETE <name>
     .usage-view-restore-name = 用法： VIEW RESTORE <name>
     .usage-view-save-name = 用法： VIEW SAVE <name>
+    .usage-view-window = Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>
     .usage-prefix-font-style-font-file = 用法： __ocs_fmt_0__ FONT <style> <font_file>
     .usage-prefix-list-new-name-font-style-file-wid = 用法： __ocs_fmt_0__ LIST | NEW <name> | FONT <style> <file> | WIDTH <style> <factor> | OBLIQUE <style> <angle>
     .usage-prefix-new-name = 用法： __ocs_fmt_0__ NEW <name>

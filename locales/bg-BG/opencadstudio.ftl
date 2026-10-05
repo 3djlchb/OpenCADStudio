@@ -3260,6 +3260,7 @@ layers =
     .usage-view-list-view-save-name-view-restore-na = Употреба: VIEW LIST | VIEW SAVE <име> | VIEW RESTORE <име> | VIEW DELETE <име>
     .usage-view-restore-name = Употреба: VIEW RESTORE <име>
     .usage-view-save-name = Употреба: VIEW SAVE <име>
+    .usage-view-window = Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>
     .usage-prefix-font-style-font-file = Употреба: __ocs_fmt_0__ FONT <стил> <файл_шрифт>
     .usage-prefix-list-new-name-font-style-file-wid = Употреба: __ocs_fmt_0__ LIST | NEW <име> | FONT <стил> <файл> | WIDTH <стил> <фактор> | OBLIQUE <стил> <ъгъл>
     .usage-prefix-new-name = Употреба: __ocs_fmt_0__ NEW <име>

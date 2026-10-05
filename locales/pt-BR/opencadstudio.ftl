@@ -3261,6 +3261,7 @@ layers =
     .usage-view-list-view-save-name-view-restore-na = Uso: VIEW LIST | VIEW SAVE <nome> | VIEW RESTORE <nome> | VIEW DELETE <nome>
     .usage-view-restore-name = Uso: VIEW RESTORE <nome>
     .usage-view-save-name = Uso: VIEW SAVE <nome>
+    .usage-view-window = Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>
     .usage-prefix-font-style-font-file = Uso: __ocs_fmt_0__ FONT <estilo> <arquivo_fonte>
     .usage-prefix-list-new-name-font-style-file-wid = Uso: __ocs_fmt_0__ LIST | NEW <nome> | FONT <estilo> <arquivo> | WIDTH <estilo> <fator> | OBLIQUE <estilo> <ângulo>
     .usage-prefix-new-name = Uso: __ocs_fmt_0__ NEW <nome>

@@ -475,18 +475,7 @@ impl OpenCADStudio {
             self.sheet_set.status.clear();
         }
         for tab in &mut self.tabs {
-            // The fields keep the new values, as when the reference updates them.
-            crate::entities::field::refresh_sheet_set_fields(&mut tab.scene.document);
-            let changes: Vec<_> = tab
-                .scene
-                .document
-                .entities()
-                .filter(|e| crate::entities::field::hosts_field(&tab.scene.document, e))
-                .map(|e| (e.common().handle, crate::scene::ChangeKind::Modified))
-                .collect();
-            if !changes.is_empty() {
-                tab.scene.bump_entities(&changes);
-            }
+            refresh_sheet_fields(&mut tab.scene);
         }
     }
 
@@ -1148,6 +1137,10 @@ impl OpenCADStudio {
     /// and locate the sheet set the drawing names (SSLOCATE / SSMAUTOOPEN).
     pub(in crate::app) fn sheet_set_after_open(&mut self, i: usize) -> Task<Message> {
         let mut task = Task::none();
+        // A sheet's fields show its current values once it is open.
+        if !self.sheet_set.sets.is_empty() {
+            refresh_sheet_fields(&mut self.tabs[i].scene);
+        }
         let path = self.tabs[i].current_path.as_ref().map(|p| p.to_string_lossy().to_string());
         if let (Some(path), Some((want, layout))) = (path.as_ref(), self.sheet_set_pending_layout.as_ref()) {
             if ss::path_key(path) == *want {
@@ -2515,3 +2508,17 @@ fn write_properties(db: &mut SheetSetDatabase, p: &Properties) {
     }
 }
 
+/// Store fresh values for a drawing's sheet set fields (the fields keep them,
+/// as when the reference updates them) and redraw their hosts.
+fn refresh_sheet_fields(scene: &mut crate::scene::Scene) {
+    crate::entities::field::refresh_sheet_set_fields(&mut scene.document);
+    let changes: Vec<_> = scene
+        .document
+        .entities()
+        .filter(|e| crate::entities::field::hosts_field(&scene.document, e))
+        .map(|e| (e.common().handle, crate::scene::ChangeKind::Modified))
+        .collect();
+    if !changes.is_empty() {
+        scene.bump_entities(&changes);
+    }
+}

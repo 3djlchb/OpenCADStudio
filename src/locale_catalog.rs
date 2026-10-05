@@ -3469,6 +3469,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Usage: VIEW LIST | VIEW SAVE <name> | VIEW RESTORE <name> | VIEW DELETE <name>" => Some(("layers", "usage-view-list-view-save-name-view-restore-na")),
         "Usage: VIEW RESTORE <name>" => Some(("layers", "usage-view-restore-name")),
         "Usage: VIEW SAVE <name>" => Some(("layers", "usage-view-save-name")),
+        "Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>" => Some(("layers", "usage-view-window")),
         "Usage: XDATA LIST | SET <app> <value> | CLEAR [app]" => Some(("view", "usage-xdata-list-set-app-value-clear-app")),
         "Usage: {prefix} FONT <style> <font_file>" => Some(("layers", "usage-prefix-font-style-font-file")),
         "Usage: {prefix} LIST | NEW <name> | FONT <style> <file> | WIDTH <style> <factor> | OBLIQUE <style> <angle>" => Some(("layers", "usage-prefix-list-new-name-font-style-file-wid")),

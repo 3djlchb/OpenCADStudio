@@ -3260,6 +3260,7 @@ layers =
     .usage-view-list-view-save-name-view-restore-na = Használat: VIEW LIST | VIEW SAVE <name> | VIEW RESTORE <name> | VIEW DELETE <name>
     .usage-view-restore-name = Használat: VIEW RESTORE <name>
     .usage-view-save-name = Használat: VIEW SAVE <name>
+    .usage-view-window = Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>
     .usage-prefix-font-style-font-file = Használat: __ocs_fmt_0__ FONT <style> <font_file>
     .usage-prefix-list-new-name-font-style-file-wid = Használat: __ocs_fmt_0__ LIST | NEW <name> | FONT <style> <file> | WIDTH <style> <factor> | OBLIQUE <style> <angle>
     .usage-prefix-new-name = Használat: __ocs_fmt_0__ NEW <name>

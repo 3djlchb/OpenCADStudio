@@ -3241,6 +3241,7 @@ layers =
     .usage-view-list-view-save-name-view-restore-na = Kullanım: VIEW LIST | VIEW SAVE <name> | VIEW RESTORE <name> | VIEW DELETE <name>
     .usage-view-restore-name = Kullanım: VIEW RESTORE <name>
     .usage-view-save-name = Kullanım: VIEW SAVE <name>
+    .usage-view-window = Kullanım: VIEW WINDOW <name> <x1,y1> <x2,y2>
     .usage-prefix-font-style-font-file = Kullanım: __ocs_fmt_0__ FONT <style> <font_file>
     .usage-prefix-list-new-name-font-style-file-wid = Kullanım: __ocs_fmt_0__ LIST | NEW <name> | FONT <style> <file> | WIDTH <style> <factor> | OBLIQUE <style> <angle>
     .usage-prefix-new-name = Kullanım: __ocs_fmt_0__ NEW <name>

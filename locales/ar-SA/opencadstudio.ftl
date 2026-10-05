@@ -3273,6 +3273,7 @@ layers =
     .usage-view-list-view-save-name-view-restore-na = الاستخدام: VIEW LIST | VIEW SAVE <name> | VIEW RESTORE <name> | VIEW DELETE <name>
     .usage-view-restore-name = الاستخدام: VIEW RESTORE <name>
     .usage-view-save-name = الاستخدام: VIEW SAVE <name>
+    .usage-view-window = Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>
     .usage-prefix-font-style-font-file = الاستخدام: __ocs_fmt_0__ FONT <style> <font_file>
     .usage-prefix-list-new-name-font-style-file-wid = الاستخدام: __ocs_fmt_0__ LIST | NEW <name> | FONT <style> <file> | WIDTH <style> <factor> | OBLIQUE <style> <angle>
     .usage-prefix-new-name = الاستخدام: __ocs_fmt_0__ NEW <name>

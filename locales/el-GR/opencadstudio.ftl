@@ -3261,6 +3261,7 @@ layers =
     .usage-view-list-view-save-name-view-restore-na = Χρήση: VIEW LIST | VIEW SAVE <όνομα> | VIEW RESTORE <όνομα> | VIEW DELETE <όνομα>
     .usage-view-restore-name = Χρήση: VIEW RESTORE <όνομα>
     .usage-view-save-name = Χρήση: VIEW SAVE <όνομα>
+    .usage-view-window = Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>
     .usage-prefix-font-style-font-file = Χρήση: __ocs_fmt_0__ FONT <στυλ> <αρχείο_γραμματοσειράς>
     .usage-prefix-list-new-name-font-style-file-wid = Χρήση: __ocs_fmt_0__ LIST | NEW <όνομα> | FONT <στυλ> <αρχείο> | WIDTH <στυλ> <συντελεστής> | OBLIQUE <στυλ> <γωνία>
     .usage-prefix-new-name = Χρήση: __ocs_fmt_0__ NEW <όνομα>
