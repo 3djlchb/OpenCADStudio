@@ -1135,6 +1135,21 @@ impl OpenCADStudio {
                     "link_url" => F::HyperlinkUrl(v.into()),
                     "plot_scale" => F::PlotScale(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
                     "ss_custom" => F::SsCustom(v.into()),
+                    "ss_set" => F::SsSet(v.parse().map_err(|_| failure("invalid_value", "index"))?),
+                    "ss_dst" => F::SsPicked(Some(std::path::PathBuf::from(v))),
+                    "ss_node" => {
+                        let state = self.field_dialog.as_ref().ok_or_else(|| failure("invalid_state", "No Field dialog"))?;
+                        let db = state.ss_sets.get(state.ss_set).ok_or_else(|| failure("invalid_state", "No sheet set"))?;
+                        let views = state.name == "SheetView";
+                        let id = fd::nav_nodes(db, views)
+                            .into_iter()
+                            .find(|(_, id, label, _)| label == v || id == v)
+                            .map(|(_, id, _, _)| id)
+                            .ok_or_else(|| failure("invalid_value", "No such node"))?;
+                        F::SsNode(id)
+                    }
+                    "ss_prop" => F::SsProp(v.into()),
+                    "ss_href" => F::SsHref(v == "1"),
                     "ss_placeholder" => F::SsPlaceholder(index(fd::PLACEHOLDER_TYPES.len())?),
                     "ss_scale" => F::SsScaleFormat(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
                     "placeholder" => F::PlaceholderProperty(index(codec::fields::BLOCK_PLACEHOLDER_PROPERTIES.len())?),
@@ -1233,6 +1248,61 @@ impl OpenCADStudio {
                     "title" => M::Input(F::Title, arg.into()),
                     "file_name" => M::Input(F::FileName, arg.into()),
                     "pick_layout" => M::Choose(F::Layout, arg.parse().map_err(|_| failure("invalid_value", "index"))?),
+                    "refresh" => M::Refresh,
+                    "open_after" => M::Toggle(F::OpenAfter, arg == "1"),
+                    "row_toggle" => {
+                        let (i, v) = index_value(arg)?;
+                        M::Toggle(F::Row(i), v == "1")
+                    }
+                    "publish" => M::Toggle(F::Publish, arg == "1"),
+                    "layout_name" => M::Input(F::LayoutName, arg.into()),
+                    "rename_opt" => {
+                        let (i, v) = index_value(arg)?;
+                        M::Toggle(F::RenameOption(i.min(3)), v == "1")
+                    }
+                    "import_add" => M::ImportAdd(arg.split('|').map(std::path::PathBuf::from).collect()),
+                    "import_row" => {
+                        let (i, v) = index_value(arg)?;
+                        M::Toggle(F::ImportRow(i), v == "1")
+                    }
+                    "prefix" => M::Toggle(F::ImportPrefix, arg == "1"),
+                    "previous" => M::Previous,
+                    "next" => M::Next,
+                    "views_by_category" => M::ViewsByCategory(arg == "1"),
+                    "new_category" => M::NewCategory,
+                    "category" => {
+                        let id = self
+                            .sheet_set
+                            .db()
+                            .and_then(|db| db.view_categories().iter().find(|c| c.prop("Name") == Some(arg)).map(|c| c.id().to_string()))
+                            .ok_or_else(|| failure("invalid_value", "No such view category"))?;
+                        M::CategoryProperties(id)
+                    }
+                    "remove_category" => {
+                        let id = self
+                            .sheet_set
+                            .db()
+                            .and_then(|db| db.view_categories().iter().find(|c| c.prop("Name") == Some(arg)).map(|c| c.id().to_string()))
+                            .ok_or_else(|| failure("invalid_value", "No such view category"))?;
+                        M::CategoryRemove(id)
+                    }
+                    "category_block" => {
+                        let (i, v) = index_value(arg)?;
+                        M::Toggle(F::CategoryBlock(i), v == "1")
+                    }
+                    "add_blocks" => M::BlocksPicked(Some(std::path::PathBuf::from(arg))),
+                    "add_location" => M::LocationPicked(Some(std::path::PathBuf::from(arg))),
+                    "remove_location" => {
+                        let id = self
+                            .sheet_set
+                            .locations
+                            .iter()
+                            .find(|(_, folder, _)| codec::sheet_set::path_key(folder) == codec::sheet_set::path_key(arg))
+                            .map(|(id, _, _)| id.clone())
+                            .ok_or_else(|| failure("invalid_value", "No such location"))?;
+                        M::RemoveLocation(id)
+                    }
+                    "open_drawing" => M::OpenDrawing(arg.into()),
                     "ok" => M::Ok,
                     "cancel" => M::Cancel,
                     _ => return Err(failure("invalid_value", "Unknown sheet set action")),

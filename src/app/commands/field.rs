@@ -4,7 +4,7 @@
 use crate::app::{Message, OpenCADStudio};
 use crate::command::CadCommand;
 use crate::modules::annotate::field_cmd::{FieldObjectPickCommand, FieldPlaceCommand, FieldTablePickCommand};
-use crate::ui::window::field_dialog::{
+use crate::ui::window::field_dialog::{nav_props, 
     fields_of, object_properties, FieldDialogMsg, FieldDialogState, FieldTarget, DATE_FORMATS,
     NAMED_TYPES,
 };
@@ -110,6 +110,8 @@ impl OpenCADStudio {
             state.ss_set_custom = names(codec::sheet_set::CUSTOM_SHEET_SET_PROP);
             state.ss_set_name = db.name().to_string();
         }
+        state.ss_sets = self.sheet_set.sets.clone();
+        state.ss_set = self.sheet_set.current.unwrap_or(0);
         self.field_dialog = Some(state);
         self.fill_named_objects();
         self.refresh_field_preview();
@@ -190,8 +192,57 @@ impl OpenCADStudio {
                 // Sheet set fields start in Title case.
                 state.text_case = if crate::ui::window::field_dialog::SHEET_SET_FIELDS.contains(&n) { 4 } else { 0 };
                 state.ss_custom.clear();
+                state.ss_node.clear();
+                state.ss_prop.clear();
+                // SheetSet starts on the set and its first property; SheetView on nothing.
+                if n == "SheetSet" {
+                    if let Some(db) = state.ss_sets.get(state.ss_set) {
+                        state.ss_node = db.sheet_set().id().to_string();
+                        state.ss_prop = nav_props(db, &state.ss_node).first().map(|p| p.0.clone()).unwrap_or_default();
+                    }
+                }
             }
             FieldDialogMsg::SsCustom(name) => state.ss_custom = name,
+            FieldDialogMsg::SsSet(k) => {
+                state.ss_set = k;
+                state.ss_node.clear();
+                state.ss_prop.clear();
+            }
+            FieldDialogMsg::SsNode(id) => {
+                state.ss_prop = state.ss_sets.get(state.ss_set).and_then(|db| nav_props(db, &id).first().map(|p| p.0.clone())).unwrap_or_default();
+                state.ss_node = id;
+            }
+            FieldDialogMsg::SsProp(p) => state.ss_prop = p,
+            FieldDialogMsg::SsHref(v) => state.ss_href = v,
+            FieldDialogMsg::SsBrowse => {
+                return Task::perform(
+                    async {
+                        crate::sys::file_dialog()
+                            .set_title(crate::t!("Open Sheet Set").as_ref())
+                            .add_filter(crate::t!("Sheet Set (*.dst)").as_ref(), &["dst", "DST"])
+                            .pick_file()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h))
+                    },
+                    |p| Message::FieldDialog(FieldDialogMsg::SsPicked(p)),
+                );
+            }
+            FieldDialogMsg::SsPicked(None) => {}
+            FieldDialogMsg::SsPicked(Some(path)) => match codec::sheet_set::SheetSetDatabase::read(&path.to_string_lossy()) {
+                Ok(db) => {
+                    let key = codec::sheet_set::path_key(&path.to_string_lossy());
+                    state.ss_set = match state.ss_sets.iter().position(|d| d.path.as_deref().is_some_and(|p| codec::sheet_set::path_key(p) == key)) {
+                        Some(k) => k,
+                        None => {
+                            state.ss_sets.push(db);
+                            state.ss_sets.len() - 1
+                        }
+                    };
+                    state.ss_node.clear();
+                    state.ss_prop.clear();
+                }
+                Err(e) => self.command_line.push_error(&format!("{}: {e}", path.display())),
+            },
             FieldDialogMsg::SsPlaceholder(k) => {
                 state.ss_placeholder = k;
                 state.ss_custom.clear();

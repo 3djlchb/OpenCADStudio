@@ -759,7 +759,8 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<CadDocument, String> {
         ext.as_str()
     };
     match format {
-        "dwg" => {
+        // Templates (.dwt) and standards (.dws) are drawings in the DWG format.
+        "dwg" | "dwt" | "dws" => {
             let mut doc = DwgReader::from_stream(Cursor::new(bytes))
                 .read()
                 .map_err(|e| e.to_string())?;
@@ -1022,7 +1023,7 @@ fn read_file_attempt(
     };
 
     match effective.as_str() {
-        "dwg" => read_dwg_path(path, progress, failsafe),
+        "dwg" | "dwt" | "dws" => read_dwg_path(path, progress, failsafe),
         "dxf" => read_dxf_path(path, failsafe),
         _ => Err(ReaderFailure::terminal(format!(
             "Unsupported file format: .{ext}"

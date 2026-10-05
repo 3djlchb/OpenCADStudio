@@ -65,6 +65,20 @@ pub struct SheetSetManager {
     pub dialog: Option<SsDialog>,
     /// Last seen modification time of each open `.dst` (by path key).
     pub seen: std::collections::HashMap<String, std::time::SystemTime>,
+    /// Sheet status by sheet id (SSMSHEETSTATUS) and when it was taken.
+    pub status: std::collections::HashMap<String, SheetStatus>,
+    pub status_at: Option<std::time::Instant>,
+    /// Sheet Views: by category (else by sheet).
+    pub by_category: bool,
+    /// Model Views: location id, folder and its drawings.
+    pub locations: Vec<(String, String, Vec<String>)>,
+}
+
+/// A sheet whose drawing is missing, or open (a `.dwl` lock file, or a tab here).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SheetStatus {
+    Missing,
+    Locked,
 }
 
 impl SheetSetManager {
@@ -103,6 +117,24 @@ pub enum SheetSetMsg {
     Refresh,
     /// Once a second: reload sets whose `.dst` changed on disk.
     Poll,
+    /// Import: Browse for Drawings and the drawings picked.
+    BrowseDrawings,
+    ImportAdd(Vec<std::path::PathBuf>),
+    /// Rename & Renumber: apply and go to the previous / next sheet.
+    Previous,
+    Next,
+    /// Sheet Views: by category or by sheet.
+    ViewsByCategory(bool),
+    NewCategory,
+    CategoryProperties(String),
+    CategoryRemove(String),
+    AddBlocks,
+    BlocksPicked(Option<std::path::PathBuf>),
+    /// Model Views.
+    AddLocation,
+    LocationPicked(Option<std::path::PathBuf>),
+    RemoveLocation(String),
+    OpenDrawing(String),
     /// A `.dst` picked by Open (or given by automation).
     OpenPicked(Option<std::path::PathBuf>),
     /// A drawing picked by Import Layout as Sheet.
@@ -161,6 +193,15 @@ pub enum FieldId {
     AddFolder,
     /// Prompt for template (Properties).
     PromptTemplate,
+    OpenAfter,
+    Publish,
+    LayoutName,
+    /// Rename option 0..4.
+    RenameOption(usize),
+    ImportRow(usize),
+    ImportPrefix,
+    /// View Category: a callout block's check box.
+    CategoryBlock(usize),
 }
 
 /// What a Properties row edits.
@@ -175,6 +216,8 @@ pub enum RowKey {
     Template,
     /// Yes / No: prompt for template.
     PromptTemplate,
+    /// Publish Sheets in Subset (`OverrideSheetPublish`).
+    Publish,
     /// Shown only.
     ReadOnly,
 }
@@ -236,15 +279,27 @@ pub struct Wizard {
 }
 
 /// New Sheet, New Subset, Rename & Renumber and Import Layout as Sheet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FormKind {
+    #[default]
     NewSheet,
     NewSubset,
     Rename,
     ImportLayout,
 }
 
+/// One layout of Import Layouts as Sheets.
 #[derive(Debug, Clone)]
+pub struct ImportRow {
+    pub drawing: String,
+    pub layout: String,
+    pub handle: String,
+    /// The sheet set the layout already belongs to (cannot be imported).
+    pub owner: Option<String>,
+    pub on: bool,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct Form {
     pub kind: FormKind,
     pub set: usize,
@@ -254,10 +309,42 @@ pub struct Form {
     pub title: String,
     pub file_name: String,
     pub folder: String,
-    /// Import: the drawing and its layouts (name, handle).
+    /// The sheet template picked when the subset prompts for one (file, layout).
     pub drawing: String,
-    pub layouts: Vec<(String, String)>,
+    pub template: Option<(String, String)>,
+    /// New Sheet: open the new sheet afterwards.
+    pub open_after: bool,
+    /// New Subset: folder hierarchy; publish sheets by their own setting.
+    pub hierarchy: bool,
+    pub publish: bool,
+    /// Rename & Renumber: layout name and the four rename options
+    /// (layout = title, layout prefix, file = title, file prefix).
+    pub layout_name: String,
+    pub rename: [bool; 4],
+    /// Import: the layouts found and "prefix sheet titles with file name".
+    pub rows: Vec<ImportRow>,
+    pub prefix: bool,
+    pub error: Option<String>,
+}
+
+/// Select Layout as Sheet Template (a subset that prompts for its template).
+#[derive(Debug, Clone)]
+pub struct TemplatePick {
+    pub form: Form,
+    pub file: String,
+    pub layouts: Vec<String>,
     pub layout: usize,
+}
+
+/// The View Category dialog.
+#[derive(Debug, Clone)]
+pub struct Category {
+    pub set: usize,
+    /// `None` creates a category.
+    pub id: Option<String>,
+    pub name: String,
+    /// Callout block id, label, used.
+    pub blocks: Vec<(String, String, bool)>,
     pub error: Option<String>,
 }
 
@@ -266,6 +353,10 @@ pub enum SsDialog {
     Wizard(Wizard),
     Properties(Properties),
     Form(Form),
+    /// Remove Sheets confirmation: set, sheet id, question.
+    Confirm(usize, String, String),
+    Template(TemplatePick),
+    Category(Category),
 }
 
 impl SsDialog {
@@ -277,8 +368,11 @@ impl SsDialog {
                 FormKind::NewSheet => t!("New Sheet").into_owned(),
                 FormKind::NewSubset => t!("Subset Properties").into_owned(),
                 FormKind::Rename => t!("Rename & Renumber Sheet").into_owned(),
-                FormKind::ImportLayout => t!("Import Layout as Sheet").into_owned(),
+                FormKind::ImportLayout => t!("Import Layouts as Sheets").into_owned(),
             },
+            SsDialog::Confirm(..) => t!("Remove Sheets").into_owned(),
+            SsDialog::Template(_) => t!("Select Layout as Sheet Template").into_owned(),
+            SsDialog::Category(_) => t!("View Category").into_owned(),
         }
     }
 }
@@ -369,6 +463,63 @@ fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Me
         .into()
 }
 
+/// A small status badge after a sheet name.
+fn badge<'a>(prefix: &str, label: &str, warn: bool) -> Element<'a, Message> {
+    container(text(format!("{prefix}{}", t!(label))).size(10))
+        .padding([0, 5])
+        .style(move |theme: &Theme| {
+            let p = theme.palette();
+            let c = if warn { p.warning.base } else { p.secondary.base };
+            container::Style {
+                background: Some(Background::Color(c.color)),
+                text_color: Some(c.text),
+                border: Border { radius: 7.0.into(), ..Default::default() },
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+/// A tree row of the Sheet Views / Model Views pages with its own menu.
+fn plain_row<'a>(
+    depth: u16,
+    icon: &'static [u8],
+    label: String,
+    double: Option<Message>,
+    menu: Vec<(&'static str, Option<Message>)>,
+) -> Element<'a, Message> {
+    let cells = row![
+        Space::new().width(Length::Fixed(f32::from(depth) * 16.0 + 14.0)),
+        crate::ui::icons::semantic(icon, 14.0),
+        text(label).size(12).width(Fill),
+    ]
+    .spacing(5)
+    .align_y(iced::Center);
+    let mut area = mouse_area(container(cells).width(Fill).padding([3, 6]));
+    if let Some(m) = double {
+        area = area.on_double_click(m);
+    }
+    if menu.is_empty() {
+        return area.into();
+    }
+    iced_aw::ContextMenu::new(area, move || {
+        let items: Vec<Element<'static, Message>> = menu
+            .iter()
+            .map(|(label, m)| if label.is_empty() { menu_separator() } else { menu_entry(t!(*label).into_owned(), m.clone()) })
+            .collect();
+        container(iced::widget::Column::with_children(items).spacing(1))
+            .padding(4)
+            .width(Length::Fixed(220.0))
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.weak.color)),
+                border: Border { color: theme.palette().background.neutral.color, width: 1.0, radius: 4.0.into() },
+                ..Default::default()
+            })
+            .into()
+    })
+    .into()
+}
+
 fn tree_row<'a>(
     state: &SheetSetManager,
     el: &SsElement,
@@ -392,14 +543,23 @@ fn tree_row<'a>(
         None => Space::new().width(14).into(),
     };
     let selected = state.selected.as_deref() == Some(id.as_str());
-    let cells = row![
+    let status = state.status.get(&id).copied();
+    let mut cells = row![
         Space::new().width(Length::Fixed(f32::from(depth) * 16.0)),
         arrow,
         crate::ui::icons::semantic(icon, 14.0),
-        text(label).size(12).width(Fill),
     ]
     .spacing(5)
     .align_y(iced::Center);
+    let name = text(label).size(12);
+    cells = match status {
+        // A missing drawing: grey with a "? missing" badge; an open one: a lock badge.
+        Some(SheetStatus::Missing) => {
+            cells.push(name.style(muted_style)).push(badge("? ", "missing", true)).push(Space::new().width(Fill))
+        }
+        Some(SheetStatus::Locked) => cells.push(name).push(badge("", "open", false)).push(Space::new().width(Fill)),
+        None => cells.push(name.width(Fill)),
+    };
     let area = mouse_area(container(cells).width(Fill).padding([3, 6]).style(move |theme: &Theme| container::Style {
         background: selected.then(|| Background::Color(theme.palette().primary.weak.color)),
         text_color: selected.then(|| theme.palette().primary.weak.text),
@@ -434,31 +594,102 @@ fn push_tree<'a>(
     }
 }
 
-/// Sheet views of the set: each sheet's `AcSmSheetView` children.
-fn sheet_views(db: &SheetSetDatabase) -> Vec<String> {
-    db.sheets()
+/// A sheet's views (`AcSmSheetView`): label and the category it references.
+fn views_of(sheet: &SsElement) -> Vec<(String, String)> {
+    sheet
+        .named("SheetViews")
+        .map(|v| v.children.iter().filter(|c| c.name == "AcSmSheetView").collect::<Vec<_>>())
+        .unwrap_or_default()
         .into_iter()
-        .flat_map(|sheet| {
-            sheet
-                .named("SheetViews")
-                .map(|v| v.children.iter().filter(|c| c.name == "AcSmSheetView").collect::<Vec<_>>())
-                .unwrap_or_default()
-                .into_iter()
-                .map(|v| {
-                    let number = v.prop("Number").unwrap_or("");
-                    let title = v.prop("Title").unwrap_or("");
-                    if number.is_empty() { title.to_string() } else { format!("{number} - {title}") }
-                })
+        .map(|v| {
+            let number = v.prop("Number").unwrap_or("");
+            let title = v.prop("Title").unwrap_or("");
+            let label = if number.is_empty() { title.to_string() } else { format!("{number} - {title}") };
+            let category = v.named("Category").and_then(|c| c.prop("ReferencedObject")).unwrap_or("").to_string();
+            (label, category)
         })
         .collect()
 }
 
-/// Model view locations (`Resources`) of the set.
-fn model_views(db: &SheetSetDatabase) -> Vec<String> {
-    db.sheet_set()
-        .named("Resources")
-        .map(|r| r.children.iter().map(|c| db.resolve_file(c)).collect())
-        .unwrap_or_default()
+/// The Sheet Views page: the set, then its view categories (or sheets) and their views.
+fn sheet_views_rows<'a>(state: &SheetSetManager, db: &SheetSetDatabase) -> Vec<Element<'a, Message>> {
+    let mut rows = vec![plain_row(
+        0,
+        SET_ICON,
+        db.name().to_string(),
+        None,
+        vec![("New View Category...", Some(msg(SheetSetMsg::NewCategory)))],
+    )];
+    if state.by_category {
+        let views: Vec<(String, String)> = db.sheets().into_iter().flat_map(views_of).collect();
+        for c in db.view_categories() {
+            let id = c.id().to_string();
+            rows.push(plain_row(
+                1,
+                crate::ui::icons::FOLDER_OPEN,
+                c.prop("Name").unwrap_or("").to_string(),
+                Some(msg(SheetSetMsg::CategoryProperties(id.clone()))),
+                vec![
+                    ("New View Category...", Some(msg(SheetSetMsg::NewCategory))),
+                    ("Properties...", Some(msg(SheetSetMsg::CategoryProperties(id.clone())))),
+                    ("Remove", Some(msg(SheetSetMsg::CategoryRemove(id.clone())))),
+                ],
+            ));
+            for (label, _) in views.iter().filter(|(_, cat)| *cat == id) {
+                rows.push(plain_row(2, crate::ui::icons::DOC, label.clone(), None, vec![]));
+            }
+        }
+    } else {
+        for sheet in db.sheets() {
+            let views = views_of(sheet);
+            if views.is_empty() {
+                continue;
+            }
+            rows.push(plain_row(1, crate::ui::icons::DOC, ss::number_and_title(sheet), None, vec![]));
+            for (label, _) in views {
+                rows.push(plain_row(2, crate::ui::icons::DOC, label, None, vec![]));
+            }
+        }
+    }
+    rows
+}
+
+/// The Model Views page: each location folder and its drawings.
+fn model_views_rows<'a>(state: &SheetSetManager) -> Vec<Element<'a, Message>> {
+    let mut rows = Vec::new();
+    // A location shows relative to the set's folder when it can.
+    let base = state.db().and_then(|db| db.path.as_deref()).and_then(|p| std::path::Path::new(p).parent().map(|p| p.to_path_buf()));
+    for (id, folder, files) in &state.locations {
+        let label = base.as_deref().and_then(|b| ss::relative_path(b, std::path::Path::new(folder))).unwrap_or_else(|| folder.clone());
+        rows.push(plain_row(
+            0,
+            crate::ui::icons::FOLDER_OPEN,
+            label,
+            None,
+            vec![
+                ("Add New Location...", Some(msg(SheetSetMsg::AddLocation))),
+                ("Remove Location", Some(msg(SheetSetMsg::RemoveLocation(id.clone())))),
+            ],
+        ));
+        for file in files {
+            let path = std::path::Path::new(folder).join(file).to_string_lossy().to_string();
+            rows.push(plain_row(
+                1,
+                crate::ui::icons::DOC,
+                file.clone(),
+                Some(msg(SheetSetMsg::OpenDrawing(path.clone()))),
+                vec![("Open", Some(msg(SheetSetMsg::OpenDrawing(path))))],
+            ));
+        }
+    }
+    rows.push(
+        button(text(format!("+ {}", t!("Add New Location..."))).size(12).style(muted_style))
+            .on_press(msg(SheetSetMsg::AddLocation))
+            .style(button::text)
+            .padding([3, 6])
+            .into(),
+    );
+    rows
 }
 
 fn heading(label: &str) -> Element<'static, Message> {
@@ -522,24 +753,38 @@ pub fn view<'a>(state: &'a SheetSetManager, width: f32, auto_collapse: bool) -> 
                 .into()
         }
         (Some(db), SsmTab::SheetViews) => {
-            let views = sheet_views(db);
-            let list: Element<'a, Message> = if views.is_empty() {
-                text(t!("No sheet views.").into_owned()).size(12).style(muted_style).into()
-            } else {
-                iced::widget::Column::with_children(views.into_iter().map(|v| text(v).size(12).into())).spacing(3).into()
-            };
-            column![heading("Views by sheet"), list].spacing(6).into()
+            let by = state.by_category;
+            let header = row![
+                heading(if by { "View by category" } else { "View by sheet" }),
+                button(text(format!("{} ⇄", t!(if by { "View by sheet" } else { "View by category" }))).size(11))
+                    .on_press(msg(SheetSetMsg::ViewsByCategory(!by)))
+                    .style(button::subtle)
+                    .padding([2, 4]),
+                button(crate::ui::icons::semantic(crate::ui::icons::PLUS, 12.0))
+                    .on_press(msg(SheetSetMsg::NewCategory))
+                    .style(button::subtle)
+                    .padding([2, 4]),
+            ]
+            .spacing(4)
+            .align_y(iced::Center);
+            column![header, scrollable(iced::widget::Column::with_children(sheet_views_rows(state, db)).spacing(1)).height(Fill)]
+                .spacing(6)
+                .into()
         }
-        (Some(db), SsmTab::ModelViews) => {
-            let locations = model_views(db);
-            let list: Element<'a, Message> = if locations.is_empty() {
-                text(t!("No locations.").into_owned()).size(12).style(muted_style).into()
-            } else {
-                iced::widget::Column::with_children(locations.into_iter().map(|v| text(v).size(12).into()))
-                    .spacing(3)
-                    .into()
-            };
-            column![heading("Locations"), list].spacing(6).into()
+        (Some(_), SsmTab::ModelViews) => {
+            let header = row![
+                heading("Locations"),
+                button(text("↻").size(13)).on_press(msg(SheetSetMsg::Refresh)).style(button::subtle).padding([2, 4]),
+                button(crate::ui::icons::semantic(crate::ui::icons::PLUS, 12.0))
+                    .on_press(msg(SheetSetMsg::AddLocation))
+                    .style(button::subtle)
+                    .padding([2, 4]),
+            ]
+            .spacing(4)
+            .align_y(iced::Center);
+            column![header, scrollable(iced::widget::Column::with_children(model_views_rows(state)).spacing(1)).height(Fill)]
+                .spacing(6)
+                .into()
         }
     };
     let card = container(body).padding(6).width(Fill).height(Fill).style(|theme: &Theme| container::Style {
@@ -813,6 +1058,12 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
                     .width(Fill)
                     .into()
             }
+            RowKey::Publish => yes_no(
+                r.value != "Do Not Publish Sheets",
+                FieldId::Row(i),
+                "Publish by Sheet 'Include for Publish' Setting",
+                "Do Not Publish Sheets",
+            ),
             RowKey::Prop(_) => input(&r.value, FieldId::Row(i)),
         };
         rows.push(labeled(r.label, control));
@@ -906,71 +1157,264 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
     .into()
 }
 
-fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
-    let body: Element<'a, Message> = match f.kind {
-        FormKind::NewSheet => column![
-            labeled("Number", input(&f.number, FieldId::Number)),
-            labeled("Sheet title", input(&f.title, FieldId::Title)),
-            labeled("File name", input(&f.file_name, FieldId::FileName)),
-            labeled("Folder path", container(text(f.folder.clone()).size(12).style(muted_style)).padding([5, 8])),
-            labeled("Sheet template", container(text(f.drawing.clone()).size(12).style(muted_style)).padding([5, 8])),
-        ]
-        .spacing(8)
-        .into(),
-        FormKind::NewSubset => column![
-            labeled("Subset name", input(&f.title, FieldId::Title)),
-            labeled(
-                "New sheet location",
-                row![input(&f.folder, FieldId::Folder), browse(SheetSetMsg::Browse(FieldId::Folder))].spacing(6)
-            ),
-        ]
-        .spacing(8)
-        .into(),
-        FormKind::Rename => column![
-            labeled("Number", input(&f.number, FieldId::Number)),
-            labeled("Sheet title", input(&f.title, FieldId::Title)),
-        ]
-        .spacing(8)
-        .into(),
-        FormKind::ImportLayout => {
-            let rows = f.layouts.iter().enumerate().map(|(i, (name, _))| {
-                button(text(name.clone()).size(12))
-                    .on_press(msg(SheetSetMsg::Choose(FieldId::Layout, i)))
-                    .style(button_style(f.layout == i))
-                    .padding([3, 8])
-                    .width(Fill)
-                    .into()
-            });
-            column![
-                labeled("Drawing", container(text(f.drawing.clone()).size(12).style(muted_style)).padding([5, 8])),
-                text(t!("Layouts").into_owned()).size(12),
-                container(scrollable(iced::widget::Column::with_children(rows.collect::<Vec<_>>()).spacing(1)))
-                    .height(Length::Fixed(160.0)),
-            ]
-            .spacing(8)
-            .into()
-        }
-    };
-    let mut col = column![card(
-        match f.kind {
-            FormKind::NewSheet => "Sheet",
-            FormKind::NewSubset => "Subset",
-            FormKind::Rename => "Sheet",
-            FormKind::ImportLayout => "Import Layout as Sheet",
-        },
-        body
-    )]
-    .spacing(10);
-    if let Some(e) = error_band(&f.error) {
-        col = col.push(e);
+fn check<'a>(on: bool, label: &str, field: FieldId, enabled: bool) -> Element<'a, Message> {
+    let c = checkbox(on).label(t!(label).into_owned()).text_size(12).size(14);
+    if enabled {
+        c.on_toggle(move |v| msg(SheetSetMsg::Toggle(field, v))).into()
+    } else {
+        c.into()
     }
-    col.push(footer(
+}
+
+fn read_only<'a>(value: &str) -> Element<'a, Message> {
+    container(text(value.to_string()).size(12).style(muted_style)).padding([5, 8]).width(Fill).into()
+}
+
+fn ok_cancel<'a>(ok: &str) -> Element<'a, Message> {
+    footer(
         vec![],
         vec![
             dialog_button(t!("Cancel"), msg(SheetSetMsg::Cancel), false).into(),
-            dialog_button(t!("OK"), msg(SheetSetMsg::Ok), true).into(),
+            dialog_button(t!(ok), msg(SheetSetMsg::Ok), true).into(),
         ],
-    ))
+    )
+}
+
+fn yes_no<'a>(yes: bool, field: FieldId, a: &str, b: &str) -> Element<'a, Message> {
+    let opts = vec![t!(a).into_owned(), t!(b).into_owned()];
+    let first = opts[0].clone();
+    pick_list(Some(opts[if yes { 0 } else { 1 }].clone()), opts, |s: &String| s.clone())
+        .on_select(move |s: String| msg(SheetSetMsg::Toggle(field, s == first)))
+        .text_size(12)
+        .padding([5, 8])
+        .width(Fill)
+        .into()
+}
+
+fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
+    let number_title = row![
+        text(t!("Number").into_owned()).size(12).width(Length::Fixed(96.0)),
+        container(input(&f.number, FieldId::Number)).width(Length::Fixed(110.0)),
+        text(t!("Sheet title").into_owned()).size(12),
+        input(&f.title, FieldId::Title),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+    let short = |label: &str, control: Element<'a, Message>| -> Element<'a, Message> {
+        row![text(t!(label).into_owned()).size(12).width(Length::Fixed(96.0)), control].spacing(8).align_y(iced::Center).into()
+    };
+    let cards: Vec<Element<'a, Message>> = match f.kind {
+        FormKind::NewSheet => vec![card(
+            "Sheet",
+            column![
+                number_title,
+                short("File name", input(&f.file_name, FieldId::FileName)),
+                short("Folder path", read_only(&f.folder)),
+                short("Sheet template", read_only(&f.drawing)),
+                row![Space::new().width(Length::Fixed(104.0)), check(f.open_after, "Open in drawing editor", FieldId::OpenAfter, true)],
+            ]
+            .spacing(8),
+        )],
+        FormKind::NewSubset => vec![card(
+            "Subset",
+            column![
+                labeled("Subset name", input(&f.title, FieldId::Title)),
+                labeled("Create folder hierarchy", yes_no(f.hierarchy, FieldId::Hierarchy, "Yes", "No")),
+                labeled(
+                    "Publish sheets in subset",
+                    yes_no(f.publish, FieldId::Publish, "Publish by Sheet 'Include for Publish' Setting", "Do Not Publish Sheets")
+                ),
+                labeled(
+                    "New sheet location",
+                    if f.hierarchy {
+                        read_only(&f.folder)
+                    } else {
+                        row![input(&f.folder, FieldId::Folder), browse(SheetSetMsg::Browse(FieldId::Folder))].spacing(6).into()
+                    }
+                ),
+            ]
+            .spacing(8),
+        )],
+        FormKind::Rename => {
+            let layout: Element<'a, Message> = if f.rename[0] { read_only(&f.layout_name) } else { input(&f.layout_name, FieldId::LayoutName) };
+            let file: Element<'a, Message> = if f.rename[2] { read_only(&f.file_name) } else { input(&f.file_name, FieldId::FileName) };
+            vec![
+                card(
+                    "Sheet",
+                    column![number_title, short("Layout name", layout), short("File name", file), short("Folder path", read_only(&f.folder))]
+                        .spacing(8),
+                ),
+                card(
+                    "Rename options",
+                    row![
+                        column![
+                            text(t!("Rename layout to match:").into_owned()).size(12),
+                            check(f.rename[0], "Sheet title", FieldId::RenameOption(0), true),
+                            row![Space::new().width(22), check(f.rename[1], "Prefix with sheet number", FieldId::RenameOption(1), f.rename[0])],
+                        ]
+                        .spacing(6)
+                        .width(Fill),
+                        column![
+                            text(t!("Rename drawing file to match:").into_owned()).size(12),
+                            check(f.rename[2], "Sheet title", FieldId::RenameOption(2), true),
+                            row![Space::new().width(22), check(f.rename[3], "Prefix with sheet number", FieldId::RenameOption(3), f.rename[2])],
+                        ]
+                        .spacing(6)
+                        .width(Fill),
+                    ]
+                    .spacing(16),
+                ),
+            ]
+        }
+        FormKind::ImportLayout => {
+            let head = row![
+                Space::new().width(22),
+                text(t!("Layout name").into_owned()).size(11).width(Fill),
+                text(t!("Drawing").into_owned()).size(11).width(Fill),
+                text(t!("Status").into_owned()).size(11).width(Fill),
+            ]
+            .spacing(6);
+            let mut list = vec![head.into()];
+            for (k, r) in f.rows.iter().enumerate() {
+                let file = std::path::Path::new(&r.drawing).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let status: Element<'a, Message> = match &r.owner {
+                    None => text(t!("Available for import").into_owned()).size(12).style(|t: &Theme| text::Style { color: Some(t.palette().success.base.color) }).into(),
+                    Some(owner) => text(crate::tf!("Belongs to sheet set {}", owner).into_owned()).size(12).style(|t: &Theme| text::Style { color: Some(t.palette().warning.base.color) }).into(),
+                };
+                let enabled = r.owner.is_none();
+                let cb = checkbox(r.on).size(14);
+                let cb: Element<'a, Message> = if enabled { cb.on_toggle(move |v| msg(SheetSetMsg::Toggle(FieldId::ImportRow(k), v))).into() } else { cb.into() };
+                let name = text(r.layout.clone()).size(12).width(Fill);
+                let file = text(file).size(12).width(Fill);
+                list.push(
+                    row![cb, if enabled { name } else { name.style(muted_style) }, if enabled { file } else { file.style(muted_style) }, container(status).width(Fill)]
+                        .spacing(6)
+                        .align_y(iced::Center)
+                        .into(),
+                );
+            }
+            vec![card(
+                "Drawings",
+                column![
+                    row![
+                        text(t!("Select drawing files containing layouts").into_owned()).size(12).width(Fill),
+                        button(text(t!("Browse for Drawings...").into_owned()).size(12))
+                            .on_press(msg(SheetSetMsg::BrowseDrawings))
+                            .style(button_style(false))
+                            .padding([5, 12]),
+                    ]
+                    .align_y(iced::Center),
+                    text(t!("A layout can belong to only one sheet set. If a layout already belongs to a sheet set, you must create a copy of the layout to import it.").into_owned())
+                        .size(11)
+                        .style(muted_style),
+                    container(scrollable(iced::widget::Column::with_children(list).spacing(4)))
+                        .padding(6)
+                        .height(Length::Fixed(150.0))
+                        .style(card_style),
+                    check(f.prefix, "Prefix sheet titles with file name", FieldId::ImportPrefix, true),
+                ]
+                .spacing(8),
+            )]
+        }
+    };
+    let mut col = iced::widget::Column::with_children(cards).spacing(10);
+    if let Some(e) = error_band(&f.error) {
+        col = col.push(e);
+    }
+    let foot = match f.kind {
+        FormKind::Rename => footer(
+            vec![
+                button(text(format!("‹ {}", t!("Previous"))).size(12)).on_press(msg(SheetSetMsg::Previous)).style(button_style(false)).padding([5, 12]).into(),
+                button(text(format!("{} ›", t!("Next"))).size(12)).on_press(msg(SheetSetMsg::Next)).style(button_style(false)).padding([5, 12]).into(),
+            ],
+            vec![
+                dialog_button(t!("Cancel"), msg(SheetSetMsg::Cancel), false).into(),
+                dialog_button(t!("OK"), msg(SheetSetMsg::Ok), true).into(),
+            ],
+        ),
+        FormKind::ImportLayout => ok_cancel("Import Checked"),
+        _ => ok_cancel("OK"),
+    };
+    col.push(foot).into()
+}
+
+fn template_view<'a>(t: &'a TemplatePick) -> Element<'a, Message> {
+    let rows = t.layouts.iter().enumerate().map(|(i, name)| {
+        button(text(name.clone()).size(12))
+            .on_press(msg(SheetSetMsg::Choose(FieldId::Layout, i)))
+            .style(button_style(t.layout == i))
+            .padding([3, 8])
+            .width(Fill)
+            .into()
+    });
+    column![
+        card(
+            "Template",
+            column![
+                text(t!("Drawing template file name").into_owned()).size(12),
+                row![read_only(&t.file), browse(SheetSetMsg::BrowseTemplate)].spacing(6).align_y(iced::Center),
+                text(t!("Select a layout to create new sheets").into_owned()).size(12),
+                container(scrollable(iced::widget::Column::with_children(rows.collect::<Vec<_>>()).spacing(1)))
+                    .padding(4)
+                    .height(Length::Fixed(130.0))
+                    .style(card_style),
+            ]
+            .spacing(8)
+        ),
+        ok_cancel("OK"),
+    ]
+    .spacing(10)
+    .into()
+}
+
+fn category_view<'a>(c: &'a Category) -> Element<'a, Message> {
+    let blocks = c.blocks.iter().enumerate().map(|(i, (_, label, on))| check(*on, label, FieldId::CategoryBlock(i), true));
+    let mut col = column![card(
+        "Category",
+        column![
+            labeled("Category name", input(&c.name, FieldId::Name)),
+            text(t!("Select the callout blocks to be used in this category").into_owned()).size(12),
+            container(scrollable(iced::widget::Column::with_children(blocks.collect::<Vec<_>>()).spacing(4)))
+                .padding(6)
+                .height(Length::Fixed(90.0))
+                .width(Fill)
+                .style(card_style),
+            text(t!("Selected blocks will be available for selection when you insert a callout block from the view tab.").into_owned())
+                .size(11)
+                .style(muted_style),
+            button(text(t!("Add Blocks...").into_owned()).size(12))
+                .on_press(msg(SheetSetMsg::AddBlocks))
+                .style(button_style(false))
+                .padding([5, 12]),
+        ]
+        .spacing(8)
+    )]
+    .spacing(10);
+    if let Some(e) = error_band(&c.error) {
+        col = col.push(e);
+    }
+    col.push(ok_cancel("OK")).into()
+}
+
+fn confirm_view<'a>(question: &'a str) -> Element<'a, Message> {
+    column![
+        row![
+            text("?").size(22).style(accent_text),
+            column![
+                text(question.to_string()).size(12),
+                text(t!("(The layout and the drawing file will not be deleted.)").into_owned()).size(12).style(muted_style),
+            ]
+            .spacing(4),
+        ]
+        .spacing(14),
+        row![
+            Space::new().width(Fill),
+            dialog_button(t!("Cancel"), msg(SheetSetMsg::Cancel), false),
+            dialog_button(t!("Remove"), msg(SheetSetMsg::Ok), true),
+        ]
+        .spacing(6),
+    ]
+    .spacing(14)
     .into()
 }
 
@@ -979,6 +1423,9 @@ pub fn dialog_view<'a>(state: &'a SheetSetManager, sizing: crate::ui::modal::Mod
         Some(SsDialog::Wizard(w)) => wizard_view(w),
         Some(SsDialog::Properties(p)) => properties_view(p),
         Some(SsDialog::Form(f)) => form_view(f),
+        Some(SsDialog::Confirm(_, _, q)) => confirm_view(q),
+        Some(SsDialog::Template(t)) => template_view(t),
+        Some(SsDialog::Category(c)) => category_view(c),
         None => Space::new().into(),
     };
     container(body).padding([10, 12]).width(sizing.width).into()

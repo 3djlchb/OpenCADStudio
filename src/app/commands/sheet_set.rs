@@ -4,8 +4,8 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::ui::window::sheet_set::{
-    FieldId, Form, FormKind, FoundLayout, MenuAction, PropRow, Properties, RowKey, SheetSetMsg, SsDialog,
-    Wizard, WizardMsg,
+    Category, FieldId, Form, FormKind, FoundLayout, ImportRow, MenuAction, PropRow, Properties, RowKey, SheetSetMsg,
+    SheetStatus, SsDialog, TemplatePick, Wizard, WizardMsg,
 };
 use codec::sheet_set::{self as ss, ComponentKind, LayoutReference, SheetSetData, SheetSetDatabase};
 use iced::Task;
@@ -63,6 +63,77 @@ fn folder_of(path: &str) -> String {
 
 /// Template of a component for new sheets: its own `DefDwtLayout`, else
 /// the nearest parent's.
+/// Whether new sheets of `component` prompt for their template: its own
+/// "Prompt for template", else the nearest parent's.
+fn prompts_for_template(db: &SheetSetDatabase, component: &str) -> bool {
+    let mut id = component.to_string();
+    for _ in 0..32 {
+        let Some(el) = db.find(&id) else { return false };
+        if let Some(v) = el.prop("PromptForDwt") {
+            return !matches!(v.trim(), "" | "0");
+        }
+        match db.parent_of(&id) {
+            Some(p) => id = p.id().to_string(),
+            None => return false,
+        }
+    }
+    false
+}
+
+/// The layouts of a drawing that can become sheets, each with the sheet set
+/// it already belongs to: the drawing's sheet link, or this set.
+fn import_rows(path: &Path, db: &SheetSetDatabase) -> Result<Vec<ImportRow>, String> {
+    let doc = crate::io::load_file(path).map_err(|e| e.to_string())?;
+    let drawing = path.to_string_lossy().to_string();
+    let link = doc.sheet_set_data();
+    Ok(paper_layouts(&doc)
+        .into_iter()
+        .map(|(layout, handle)| {
+            let mine = db.sheet_for(&drawing, Some(&layout)).is_some_and(|s| {
+                s.named("Layout").and_then(|r| r.prop("Name")).is_some_and(|n| n.eq_ignore_ascii_case(&layout))
+            });
+            let owner = if mine {
+                Some(db.name().to_string())
+            } else {
+                link.as_ref().filter(|l| l.layout_name.eq_ignore_ascii_case(&layout) && !l.sheet_set_file_name.is_empty()).map(|l| {
+                    SheetSetDatabase::read(&l.sheet_set_file_name)
+                        .map(|d| d.name().to_string())
+                        .unwrap_or_else(|_| Path::new(&l.sheet_set_file_name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default())
+                })
+            };
+            ImportRow { drawing: drawing.clone(), layout, handle, on: owner.is_none(), owner }
+        })
+        .collect())
+}
+
+/// Rename & Renumber: layout and file names follow the options.
+fn follow_rename(f: &mut Form) {
+    let name = |prefix: bool| if prefix { format!("{} {}", f.number.trim(), f.title.trim()).trim().to_string() } else { f.title.trim().to_string() };
+    if f.rename[0] {
+        f.layout_name = name(f.rename[1]);
+    }
+    if f.rename[2] {
+        f.file_name = format!("{}.dwg", name(f.rename[3]));
+    }
+}
+
+fn rename_form(db: &SheetSetDatabase, set: usize, id: &str) -> Form {
+    let el = db.find(id);
+    let reference = db.layout_reference(id, "Layout").unwrap_or_default();
+    let file = Path::new(&reference.file_name);
+    Form {
+        kind: FormKind::Rename,
+        set,
+        component: id.to_string(),
+        number: el.and_then(|e| e.prop("Number")).unwrap_or("").to_string(),
+        title: el.and_then(|e| e.prop("Title")).unwrap_or("").to_string(),
+        layout_name: reference.name.clone(),
+        file_name: file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+        folder: file.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+        ..Form::default()
+    }
+}
+
 fn template_of(db: &SheetSetDatabase, component: &str) -> Option<LayoutReference> {
     let mut id = component.to_string();
     for _ in 0..32 {
@@ -218,6 +289,12 @@ impl OpenCADStudio {
     /// Publish the open sets to the field engine and redraw every field.
     fn sheet_sets_changed(&mut self) {
         crate::entities::field::set_sheet_sets(self.sheet_set.sets.clone());
+        self.refresh_locations();
+        if self.sheet_set.settings.sheet_status >= 1 {
+            self.refresh_sheet_status();
+        } else {
+            self.sheet_set.status.clear();
+        }
         for tab in &mut self.tabs {
             let changes: Vec<_> = tab
                 .scene
@@ -365,6 +442,7 @@ impl OpenCADStudio {
             SheetSetMsg::PickSet(Some(k)) => {
                 if k < self.sheet_set.sets.len() {
                     self.sheet_set.current = Some(k);
+                    self.sheet_sets_changed();
                 }
             }
             SheetSetMsg::PickSet(None) => return self.dispatch_command("OPENSHEETSET"),
@@ -384,7 +462,80 @@ impl OpenCADStudio {
                     self.sheet_set.collapsed.insert(id);
                 }
             }
-            SheetSetMsg::Poll => self.poll_sheet_sets(),
+            SheetSetMsg::Poll => {
+                self.poll_sheet_sets();
+                // SSMSHEETSTATUS 2: the status is taken again every SSMPOLLTIME seconds.
+                let every = std::time::Duration::from_secs(u64::from(self.sheet_set.settings.poll_time.max(20)));
+                if self.sheet_set.settings.sheet_status == 2 && self.sheet_set.status_at.is_none_or(|t| t.elapsed() >= every) {
+                    self.refresh_sheet_status();
+                }
+            }
+            SheetSetMsg::BrowseDrawings => {
+                return Task::perform(
+                    async {
+                        crate::sys::file_dialog()
+                            .set_title(crate::t!("Select Drawing").as_ref())
+                            .add_filter(crate::t!("Drawing (*.dwg)").as_ref(), &["dwg", "DWG"])
+                            .pick_files()
+                            .await
+                            .map(|hs| hs.iter().map(crate::sys::handle_path).collect::<Vec<_>>())
+                            .unwrap_or_default()
+                    },
+                    |p| Message::SheetSet(SheetSetMsg::ImportAdd(p)),
+                )
+            }
+            SheetSetMsg::ImportAdd(paths) => self.import_add(paths),
+            SheetSetMsg::Previous => self.rename_step(false),
+            SheetSetMsg::Next => self.rename_step(true),
+            SheetSetMsg::ViewsByCategory(v) => self.sheet_set.by_category = v,
+            SheetSetMsg::NewCategory => self.open_category(None),
+            SheetSetMsg::CategoryProperties(id) => self.open_category(Some(id)),
+            SheetSetMsg::CategoryRemove(id) => {
+                if let Some(db) = self.sheet_set.db_mut() {
+                    db.remove(&id);
+                }
+                self.save_current_sheet_set();
+            }
+            SheetSetMsg::AddBlocks => {
+                return Task::perform(
+                    async {
+                        crate::sys::file_dialog()
+                            .set_title(crate::t!("Select Drawing").as_ref())
+                            .add_filter(crate::t!("Drawing (*.dwg)").as_ref(), &["dwg", "DWG", "dwt", "DWT"])
+                            .pick_file()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h))
+                    },
+                    |p| Message::SheetSet(SheetSetMsg::BlocksPicked(p)),
+                )
+            }
+            SheetSetMsg::BlocksPicked(Some(path)) => self.category_add_blocks(path),
+            SheetSetMsg::BlocksPicked(None) | SheetSetMsg::LocationPicked(None) => {}
+            SheetSetMsg::AddLocation => {
+                return Task::perform(
+                    async {
+                        crate::sys::file_dialog()
+                            .set_title(crate::t!("Browse for Folder").as_ref())
+                            .pick_folder()
+                            .await
+                            .map(|h| crate::sys::handle_path(&h))
+                    },
+                    |p| Message::SheetSet(SheetSetMsg::LocationPicked(p)),
+                )
+            }
+            SheetSetMsg::LocationPicked(Some(path)) => {
+                if let Some(db) = self.sheet_set.db_mut() {
+                    db.add_resource(&path.to_string_lossy());
+                }
+                self.save_current_sheet_set();
+            }
+            SheetSetMsg::RemoveLocation(id) => {
+                if let Some(db) = self.sheet_set.db_mut() {
+                    db.remove(&id);
+                }
+                self.save_current_sheet_set();
+            }
+            SheetSetMsg::OpenDrawing(path) => return self.update(Message::OpenRecent(PathBuf::from(path))),
             SheetSetMsg::Refresh => {
                 if let Some(path) = self.sheet_set.db().and_then(|db| db.path.clone()) {
                     match SheetSetDatabase::read(&path) {
@@ -437,12 +588,52 @@ impl OpenCADStudio {
             }
             SheetSetMsg::Input(field, v) => self.dialog_input(field, v),
             SheetSetMsg::Toggle(field, v) => {
-                if let (FieldId::Hierarchy, Some(SsDialog::Wizard(w))) = (field, self.sheet_set.dialog.as_mut()) {
-                    w.hierarchy = v;
+                let parent_folder = match self.sheet_set.dialog.as_ref() {
+                    Some(SsDialog::Form(f)) if f.kind == FormKind::NewSubset => {
+                        self.sheet_set.sets.get(f.set).map(|db| sheet_folder_of(db, &f.component)).unwrap_or_default()
+                    }
+                    _ => String::new(),
+                };
+                match (field, self.sheet_set.dialog.as_mut()) {
+                    (FieldId::Hierarchy, Some(SsDialog::Wizard(w))) => w.hierarchy = v,
+                    (FieldId::Hierarchy, Some(SsDialog::Form(f))) => {
+                        f.hierarchy = v;
+                        f.folder = if v { Path::new(&parent_folder).join(f.title.trim()).to_string_lossy().to_string() } else { parent_folder };
+                    }
+                    (FieldId::Publish, Some(SsDialog::Form(f))) => f.publish = v,
+                    (FieldId::OpenAfter, Some(SsDialog::Form(f))) => f.open_after = v,
+                    (FieldId::ImportPrefix, Some(SsDialog::Form(f))) => f.prefix = v,
+                    (FieldId::ImportRow(k), Some(SsDialog::Form(f))) => {
+                        if let Some(r) = f.rows.get_mut(k) {
+                            r.on = v && r.owner.is_none();
+                        }
+                    }
+                    (FieldId::RenameOption(k), Some(SsDialog::Form(f))) => {
+                        f.rename[k] = v;
+                        // A prefix needs its "Sheet title" option.
+                        if !f.rename[0] {
+                            f.rename[1] = false;
+                        }
+                        if !f.rename[2] {
+                            f.rename[3] = false;
+                        }
+                        follow_rename(f);
+                    }
+                    (FieldId::CategoryBlock(k), Some(SsDialog::Category(c))) => {
+                        if let Some(b) = c.blocks.get_mut(k) {
+                            b.2 = v;
+                        }
+                    }
+                    (FieldId::Row(r), Some(SsDialog::Properties(p))) => {
+                        if let Some(row) = p.rows.get_mut(r) {
+                            row.value = if v { "Publish by Sheet 'Include for Publish' Setting" } else { "Do Not Publish Sheets" }.into();
+                        }
+                    }
+                    _ => {}
                 }
             }
             SheetSetMsg::Choose(field, k) => match (field, self.sheet_set.dialog.as_mut()) {
-                (FieldId::Layout, Some(SsDialog::Form(f))) => f.layout = k,
+                (FieldId::Layout, Some(SsDialog::Template(t))) => t.layout = k,
                 (FieldId::CustomOwner, Some(SsDialog::Properties(p))) => {
                     if let Some(a) = p.adding.as_mut() {
                         a.2 = k == 1;
@@ -552,23 +743,26 @@ impl OpenCADStudio {
         match action {
             MenuAction::Open => return self.open_sheet(&id),
             MenuAction::NewSheet => {
-                // Next number: the last sheet's number + 1 when it ends in digits.
-                let template = template_of(db, &id)
-                    .map(|t| format!("{} ({})", t.name, t.file_name))
-                    .unwrap_or_else(|| crate::t!("(default new drawing)").into_owned());
-                self.sheet_set.dialog = Some(SsDialog::Form(Form {
+                let template = template_of(db, &id);
+                let form = Form {
                     kind: FormKind::NewSheet,
                     set,
                     component: id.clone(),
-                    number: String::new(),
-                    title: String::new(),
-                    file_name: String::new(),
                     folder: sheet_folder_of(db, &id),
-                    drawing: template,
-                    layouts: Vec::new(),
-                    layout: 0,
-                    error: None,
-                }));
+                    drawing: template
+                        .as_ref()
+                        .map(|t| format!("{} ({})", t.name, t.file_name))
+                        .unwrap_or_else(|| crate::t!("(default new drawing)").into_owned()),
+                    ..Form::default()
+                };
+                // A subset that prompts for its template asks for it first.
+                if prompts_for_template(db, &id) {
+                    let file = template.map(|t| t.file_name).unwrap_or_default();
+                    let layouts = crate::io::load_file(Path::new(&file)).map(|d| paper_layouts(&d).into_iter().map(|(n, _)| n).collect()).unwrap_or_default();
+                    self.sheet_set.dialog = Some(SsDialog::Template(TemplatePick { form, file, layouts, layout: 0 }));
+                } else {
+                    self.sheet_set.dialog = Some(SsDialog::Form(form));
+                }
                 self.active_modal = Some(crate::app::ModalKind::SheetSet);
             }
             MenuAction::NewSubset => {
@@ -583,14 +777,10 @@ impl OpenCADStudio {
                     kind: FormKind::NewSubset,
                     set,
                     component: id.clone(),
-                    number: String::new(),
                     title: format!("New Subset ({n})"),
-                    file_name: String::new(),
                     folder: sheet_folder_of(db, &id),
-                    drawing: String::new(),
-                    layouts: Vec::new(),
-                    layout: 0,
-                    error: None,
+                    publish: true,
+                    ..Form::default()
                 }));
                 self.active_modal = Some(crate::app::ModalKind::SheetSet);
             }
@@ -609,28 +799,23 @@ impl OpenCADStudio {
                 );
             }
             MenuAction::Rename => {
-                let el = db.find(&id);
-                self.sheet_set.dialog = Some(SsDialog::Form(Form {
-                    kind: FormKind::Rename,
-                    set,
-                    component: id.clone(),
-                    number: el.and_then(|e| e.prop("Number")).unwrap_or("").to_string(),
-                    title: el.and_then(|e| e.prop("Title")).unwrap_or("").to_string(),
-                    file_name: String::new(),
-                    folder: String::new(),
-                    drawing: String::new(),
-                    layouts: Vec::new(),
-                    layout: 0,
-                    error: None,
-                }));
+                self.sheet_set.dialog = Some(SsDialog::Form(rename_form(db, set, &id)));
                 self.active_modal = Some(crate::app::ModalKind::SheetSet);
             }
             MenuAction::Remove => {
-                if let Some(db) = self.sheet_set.db_mut() {
-                    db.remove(&id);
+                // A sheet asks first; a subset can only be removed while empty.
+                if db.find(&id).and_then(ComponentKind::of) == Some(ComponentKind::Sheet) {
+                    let sheet = db.find(&id).map(ss::number_and_title).unwrap_or_default();
+                    let question = crate::tf!("Are you sure that you want to remove {} Sheet from {} Sheet Set?", sheet, db.name()).into_owned();
+                    self.sheet_set.dialog = Some(SsDialog::Confirm(set, id.clone(), question));
+                    self.active_modal = Some(crate::app::ModalKind::SheetSet);
+                } else if db.find(&id).is_some_and(|el| el.children.iter().all(|c| ComponentKind::of(c).is_none())) {
+                    if let Some(db) = self.sheet_set.db_mut() {
+                        db.remove(&id);
+                    }
+                    self.sheet_set.selected = None;
+                    self.save_current_sheet_set();
                 }
-                self.sheet_set.selected = None;
-                self.save_current_sheet_set();
             }
             MenuAction::Properties => {
                 let p = build_properties(db, &id, Some(set));
@@ -766,14 +951,32 @@ impl OpenCADStudio {
                 }
                 _ => {}
             },
+            Some(SsDialog::Category(c)) => {
+                if field == FieldId::Name {
+                    c.name = v;
+                }
+            }
+            Some(SsDialog::Confirm(..)) | Some(SsDialog::Template(_)) => {}
             Some(SsDialog::Form(f)) => {
                 let file_follows = f.file_name == format!("{} {}", f.number, f.title).trim();
                 match field {
                     FieldId::Number => f.number = v,
-                    FieldId::Title => f.title = v,
+                    FieldId::Title => {
+                        // A folder hierarchy follows the subset name.
+                        if f.kind == FormKind::NewSubset && f.hierarchy {
+                            if let Some(parent) = Path::new(&f.folder).parent() {
+                                f.folder = parent.join(v.trim()).to_string_lossy().to_string();
+                            }
+                        }
+                        f.title = v
+                    }
                     FieldId::FileName => f.file_name = v,
                     FieldId::Folder => f.folder = v,
+                    FieldId::LayoutName => f.layout_name = v,
                     _ => {}
+                }
+                if f.kind == FormKind::Rename {
+                    follow_rename(f);
                 }
                 // The file name follows "Number Title" until edited.
                 if f.kind == FormKind::NewSheet && file_follows && field != FieldId::FileName {
@@ -865,8 +1068,9 @@ impl OpenCADStudio {
         let (Some(set), Some(parent)) = (self.sheet_set.current, self.sheet_set_import_parent.take()) else {
             return;
         };
-        let layouts = match crate::io::load_file(&path) {
-            Ok(doc) => paper_layouts(&doc),
+        let Some(db) = self.sheet_set.db() else { return };
+        let rows = match import_rows(&path, db) {
+            Ok(rows) => rows,
             Err(e) => {
                 self.command_line.push_error(&format!("{}: {e}", path.display()));
                 return;
@@ -876,20 +1080,255 @@ impl OpenCADStudio {
             kind: FormKind::ImportLayout,
             set,
             component: parent,
-            number: String::new(),
-            title: String::new(),
-            file_name: String::new(),
-            folder: String::new(),
-            drawing: path.to_string_lossy().to_string(),
-            layouts,
-            layout: 0,
-            error: None,
+            rows,
+            prefix: true,
+            ..Form::default()
         }));
         self.active_modal = Some(crate::app::ModalKind::SheetSet);
     }
 
+    /// Browse for Drawings of the open Import dialog: add their layouts.
+    fn import_add(&mut self, paths: Vec<PathBuf>) {
+        let Some(SsDialog::Form(f)) = self.sheet_set.dialog.as_ref() else { return };
+        let Some(db) = self.sheet_set.sets.get(f.set) else { return };
+        let mut added = Vec::new();
+        for p in paths {
+            match import_rows(&p, db) {
+                Ok(rows) => added.extend(rows),
+                Err(e) => self.command_line.push_error(&format!("{}: {e}", p.display())),
+            }
+        }
+        if let Some(SsDialog::Form(f)) = self.sheet_set.dialog.as_mut() {
+            for r in added {
+                if !f.rows.iter().any(|o| ss::path_key(&o.drawing) == ss::path_key(&r.drawing) && o.layout == r.layout) {
+                    f.rows.push(r);
+                }
+            }
+        }
+    }
+
+    /// Rename & Renumber: number and title into the set, and the layout and
+    /// drawing file renamed when they changed.
+    fn apply_rename(&mut self, f: &Form) -> Result<(), String> {
+        let Some(db) = self.sheet_set.sets.get(f.set) else { return Ok(()) };
+        let old = db.layout_reference(&f.component, "Layout").unwrap_or_default();
+        let new_layout = f.layout_name.trim().to_string();
+        let new_file = if old.file_name.is_empty() || f.file_name.trim().is_empty() {
+            old.file_name.clone()
+        } else {
+            Path::new(&f.folder).join(f.file_name.trim()).to_string_lossy().to_string()
+        };
+        let file_changed = !old.file_name.is_empty() && ss::path_key(&new_file) != ss::path_key(&old.file_name);
+        let layout_changed = !old.name.is_empty() && !new_layout.is_empty() && new_layout != old.name;
+        let open_tab = self.tab_showing(Path::new(&old.file_name));
+        if file_changed {
+            if open_tab.is_some() {
+                return Err(crate::t!("The drawing is open; close it to rename its file.").into_owned());
+            }
+            if Path::new(&new_file).exists() {
+                return Err(crate::tf!("{} already exists.", new_file).into_owned());
+            }
+        }
+        if layout_changed {
+            match open_tab {
+                Some(k) => {
+                    self.tabs[k].scene.rename_layout(&old.name, &new_layout);
+                    if let Some(mut link) = self.tabs[k].scene.document.sheet_set_data() {
+                        link.layout_name = new_layout.clone();
+                        self.tabs[k].scene.document.set_sheet_set_data(&link);
+                    }
+                }
+                None => {
+                    let mut scene = crate::scene::Scene::new();
+                    scene.document = crate::io::load_file(Path::new(&old.file_name)).map_err(|e| e.to_string())?;
+                    scene.rename_layout(&old.name, &new_layout);
+                    if let Some(mut link) = scene.document.sheet_set_data() {
+                        link.layout_name = new_layout.clone();
+                        scene.document.set_sheet_set_data(&link);
+                    }
+                    crate::io::save(&scene.document, Path::new(&old.file_name)).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        if file_changed {
+            std::fs::rename(&old.file_name, &new_file).map_err(|e| e.to_string())?;
+        }
+        let Some(db) = self.sheet_set.sets.get_mut(f.set) else { return Ok(()) };
+        if let Some(el) = db.find_mut(&f.component) {
+            el.set_prop("Number", f.number.trim());
+            el.set_prop("Title", f.title.trim());
+        }
+        if layout_changed || file_changed {
+            db.set_layout_reference(
+                &f.component,
+                "Layout",
+                &LayoutReference {
+                    file_name: ss::native_path(&new_file),
+                    name: if layout_changed { new_layout } else { old.name },
+                    handle: old.handle,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Rename & Renumber < Previous / Next >: apply, then the neighbouring sheet.
+    fn rename_step(&mut self, forward: bool) {
+        let Some(SsDialog::Form(f)) = self.sheet_set.dialog.take() else { return };
+        if let Err(e) = self.apply_rename(&f) {
+            self.sheet_set.dialog = Some(SsDialog::Form(Form { error: Some(e), ..f }));
+            return;
+        }
+        self.sheet_set.current = Some(f.set);
+        self.save_current_sheet_set();
+        let Some(db) = self.sheet_set.sets.get(f.set) else { return };
+        let ids: Vec<String> = db.sheets().iter().map(|s| s.id().to_string()).collect();
+        let k = ids.iter().position(|i| *i == f.component).unwrap_or(0);
+        let next = if forward { (k + 1).min(ids.len().saturating_sub(1)) } else { k.saturating_sub(1) };
+        let mut form = rename_form(db, f.set, &ids[next]);
+        form.rename = f.rename;
+        follow_rename(&mut form);
+        self.sheet_set.selected = Some(ids[next].clone());
+        self.sheet_set.dialog = Some(SsDialog::Form(form));
+    }
+
+    /// The View Category dialog for a new (`None`) or existing category.
+    fn open_category(&mut self, id: Option<String>) {
+        let (Some(set), Some(db)) = (self.sheet_set.current, self.sheet_set.db()) else { return };
+        let used = id.as_deref().map(|i| db.category_blocks(i));
+        let blocks = db
+            .callout_blocks()
+            .iter()
+            .map(|b| {
+                let label = format!("{} ({})", b.prop("Name").unwrap_or(""), db.resolve_file(b));
+                let on = used.as_ref().is_none_or(|u| u.iter().any(|x| x == b.id()));
+                (b.id().to_string(), label, on)
+            })
+            .collect();
+        let name = id.as_deref().and_then(|i| db.find(i)).and_then(|c| c.prop("Name")).unwrap_or("").to_string();
+        self.sheet_set.dialog = Some(SsDialog::Category(Category { set, id, name, blocks, error: None }));
+        self.active_modal = Some(crate::app::ModalKind::SheetSet);
+    }
+
+    /// Add Blocks...: the named blocks of a drawing become callout blocks.
+    fn category_add_blocks(&mut self, path: PathBuf) {
+        let doc = match crate::io::load_file(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                self.command_line.push_error(&format!("{}: {e}", path.display()));
+                return;
+            }
+        };
+        let file = ss::native_path(&path.to_string_lossy());
+        let Some(SsDialog::Category(c)) = self.sheet_set.dialog.as_mut() else { return };
+        let mut names: Vec<(String, String)> = doc
+            .block_records
+            .iter()
+            .filter(|b| !b.name.starts_with('*') && !b.is_layout())
+            .map(|b| (b.name.clone(), format!("{:X}", b.handle.value())))
+            .collect();
+        names.sort();
+        for (name, handle) in names {
+            c.blocks.push((format!("new:{file}|{name}|{handle}"), format!("{name} ({file})"), true));
+        }
+    }
+
+    fn category_ok(&mut self, mut c: Category) {
+        let name = c.name.trim().to_string();
+        if name.is_empty() {
+            c.error = Some(crate::t!("The category name cannot be empty.").into_owned());
+            self.sheet_set.dialog = Some(SsDialog::Category(c));
+            return;
+        }
+        self.close_active_modal();
+        let Some(db) = self.sheet_set.sets.get_mut(c.set) else { return };
+        let mut used = Vec::new();
+        for (id, _, on) in &c.blocks {
+            let id = match id.strip_prefix("new:") {
+                Some(spec) => {
+                    let mut p = spec.splitn(3, '|');
+                    let (file, block, handle) = (p.next().unwrap_or(""), p.next().unwrap_or(""), p.next().unwrap_or(""));
+                    match db.add_callout_block(file, block, handle) {
+                        Some(id) => id,
+                        None => continue,
+                    }
+                }
+                None => id.clone(),
+            };
+            if *on {
+                used.push(id);
+            }
+        }
+        db.set_view_category(c.id.as_deref(), &name, &used);
+        self.sheet_set.current = Some(c.set);
+        self.save_current_sheet_set();
+    }
+
+    /// Model Views: each location folder of the current set and its drawings.
+    pub(in crate::app) fn refresh_locations(&mut self) {
+        let Some(db) = self.sheet_set.db() else {
+            self.sheet_set.locations.clear();
+            return;
+        };
+        self.sheet_set.locations = db
+            .sheet_set()
+            .named("Resources")
+            .map(|r| {
+                r.children
+                    .iter()
+                    .map(|c| {
+                        let folder = db.resolve_file(c);
+                        let mut files: Vec<String> = std::fs::read_dir(&folder)
+                            .map(|d| {
+                                d.filter_map(|e| e.ok())
+                                    .map(|e| e.file_name().to_string_lossy().to_string())
+                                    .filter(|n| n.to_ascii_lowercase().ends_with(".dwg"))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        files.sort_by_key(|n| n.to_lowercase());
+                        (c.id().to_string(), folder, files)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+
+    /// SSMSHEETSTATUS: a sheet whose drawing is missing, or open (its `.dwl`
+    /// lock file, or a tab of this application).
+    pub(in crate::app) fn refresh_sheet_status(&mut self) {
+        self.sheet_set.status_at = Some(std::time::Instant::now());
+        self.sheet_set.status.clear();
+        if self.sheet_set.settings.sheet_status == 0 {
+            return;
+        }
+        let Some(db) = self.sheet_set.db() else { return };
+        let mut status = std::collections::HashMap::new();
+        for sheet in db.sheets() {
+            let Some(r) = db.layout_reference(sheet.id(), "Layout") else { continue };
+            let path = Path::new(&r.file_name);
+            let state = if !path.exists() {
+                Some(SheetStatus::Missing)
+            } else if path.with_extension("dwl").exists() || self.tab_showing(path).is_some() {
+                Some(SheetStatus::Locked)
+            } else {
+                None
+            };
+            if let Some(st) = state {
+                status.insert(sheet.id().to_string(), st);
+            }
+        }
+        self.sheet_set.status = status;
+    }
+
     fn properties_template(&mut self, path: PathBuf) {
         let layouts = crate::io::load_file(&path).map(|d| paper_layouts(&d)).unwrap_or_default();
+        if let Some(SsDialog::Template(t)) = self.sheet_set.dialog.as_mut() {
+            t.file = path.to_string_lossy().to_string();
+            t.layouts = layouts.into_iter().map(|(n, _)| n).collect();
+            t.layout = 0;
+            return;
+        }
         let Some(SsDialog::Properties(p)) = self.sheet_set.dialog.as_mut() else {
             return;
         };
@@ -914,6 +1353,29 @@ impl OpenCADStudio {
                 Task::none()
             }
             Some(SsDialog::Form(f)) => self.form_ok(f),
+            Some(SsDialog::Confirm(set, id, _)) => {
+                self.close_active_modal();
+                if let Some(db) = self.sheet_set.sets.get_mut(set) {
+                    db.remove(&id);
+                }
+                self.sheet_set.current = Some(set);
+                self.sheet_set.selected = None;
+                self.save_current_sheet_set();
+                Task::none()
+            }
+            Some(SsDialog::Template(t)) => {
+                let mut form = t.form;
+                if let Some(layout) = t.layouts.get(t.layout) {
+                    form.drawing = format!("{layout} ({})", t.file);
+                    form.template = Some((t.file, layout.clone()));
+                }
+                self.sheet_set.dialog = Some(SsDialog::Form(form));
+                Task::none()
+            }
+            Some(SsDialog::Category(c)) => {
+                self.category_ok(c);
+                Task::none()
+            }
             None => Task::none(),
         }
     }
@@ -1004,9 +1466,10 @@ impl OpenCADStudio {
         };
         match f.kind {
             FormKind::Rename => {
-                if let Some(el) = db.find_mut(&f.component) {
-                    el.set_prop("Number", f.number.trim());
-                    el.set_prop("Title", f.title.trim());
+                if let Err(e) = self.apply_rename(&f) {
+                    f.error = Some(e);
+                    self.sheet_set.dialog = Some(SsDialog::Form(f));
+                    return Task::none();
                 }
             }
             FormKind::NewSubset => {
@@ -1016,32 +1479,43 @@ impl OpenCADStudio {
                     self.sheet_set.dialog = Some(SsDialog::Form(f));
                     return Task::none();
                 }
-                if let Some(sub) = db.add_subset(&f.component, &name, "") {
-                    if !f.folder.trim().is_empty() {
-                        db.set_file_reference(&sub, "NewSheetLocation", f.folder.trim());
+                let parent_folder = sheet_folder_of(db, &f.component);
+                if let Some(sub) = db.add_subset(&f.component, &name, "New subset added") {
+                    // Folder hierarchy: the parent's location + the subset name, created now.
+                    let folder = if f.hierarchy {
+                        let folder = Path::new(&parent_folder).join(&name);
+                        let _ = std::fs::create_dir_all(&folder);
+                        folder.to_string_lossy().to_string()
+                    } else {
+                        f.folder.trim().to_string()
+                    };
+                    if !folder.is_empty() {
+                        db.set_file_reference(&sub, "NewSheetLocation", &folder);
+                    }
+                    if !f.publish {
+                        if let Some(el) = db.find_mut(&sub) {
+                            el.set_prop_vt("OverrideSheetPublish", 2, "-1");
+                        }
                     }
                 }
             }
             FormKind::ImportLayout => {
-                let Some((layout, handle)) = f.layouts.get(f.layout).cloned() else {
+                let chosen: Vec<&ImportRow> = f.rows.iter().filter(|r| r.on && r.owner.is_none()).collect();
+                if chosen.is_empty() {
                     f.error = Some(crate::t!("The drawing has no layout to import.").into_owned());
                     self.sheet_set.dialog = Some(SsDialog::Form(f));
                     return Task::none();
-                };
-                if db.sheet_for(&f.drawing, Some(&layout)).is_some_and(|s| {
-                    s.named("Layout").and_then(|r| r.prop("Name")).is_some_and(|n| n.eq_ignore_ascii_case(&layout))
-                }) {
-                    f.error = Some(crate::t!("The layout is already a sheet of this sheet set.").into_owned());
-                    self.sheet_set.dialog = Some(SsDialog::Form(f));
-                    return Task::none();
                 }
-                let stem = Path::new(&f.drawing).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-                if let Some(sheet) = db.add_sheet(&f.component, "", &format!("{stem} - {layout}"), "") {
-                    db.set_layout_reference(
-                        &sheet,
-                        "Layout",
-                        &LayoutReference { file_name: f.drawing.clone(), name: layout, handle },
-                    );
+                for r in chosen {
+                    let stem = Path::new(&r.drawing).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                    let title = if f.prefix { format!("{stem} - {}", r.layout) } else { r.layout.clone() };
+                    if let Some(sheet) = db.add_sheet(&f.component, "", &title, "") {
+                        db.set_layout_reference(
+                            &sheet,
+                            "Layout",
+                            &LayoutReference { file_name: r.drawing.clone(), name: r.layout.clone(), handle: r.handle.clone() },
+                        );
+                    }
                 }
             }
             FormKind::NewSheet => return self.create_sheet(f),
@@ -1080,7 +1554,10 @@ impl OpenCADStudio {
             return fail(self, f, crate::tf!("{} already exists.", path.display()).into_owned());
         }
         let layout_name = format!("{} {}", f.number.trim(), title).trim().to_string();
-        let template = self.sheet_set.sets.get(f.set).and_then(|db| template_of(db, &f.component));
+        let template = match f.template.clone() {
+            Some((file_name, name)) => Some(LayoutReference { file_name, name, handle: String::new() }),
+            None => self.sheet_set.sets.get(f.set).and_then(|db| template_of(db, &f.component)),
+        };
         let mut scene = crate::scene::Scene::new();
         let source_layout = match template.as_ref().and_then(|t| crate::io::load_file(Path::new(&t.file_name)).ok().map(|d| (d, t.name.clone()))) {
             Some((doc, name)) => {
@@ -1134,11 +1611,14 @@ impl OpenCADStudio {
         if let Err(e) = crate::io::save(&scene.document, &path) {
             self.command_line.push_error(&format!("{file}: {e}"));
         }
-        // The new sheet is not opened ("Open in drawing editor" is off by default).
+        // "Open in drawing editor" (off by default) opens the new sheet.
         self.close_active_modal();
         self.sheet_set.current = Some(f.set);
-        self.sheet_set.selected = Some(sheet);
+        self.sheet_set.selected = Some(sheet.clone());
         self.sheet_sets_changed();
+        if f.open_after {
+            return self.open_sheet(&sheet);
+        }
         Task::none()
     }
 }
@@ -1218,7 +1698,12 @@ pub(in crate::app) fn build_properties(db: &SheetSetDatabase, id: &str, set: Opt
         ComponentKind::Subset => {
             title = format!("{} - {}", crate::t!("Subset Properties"), prop("Name"));
             rows.push(row("Subset", "Subset name", RowKey::Prop("Name"), prop("Name")));
-            rows.push(row("Subset", "Description", RowKey::Prop("Desc"), prop("Desc")));
+            let publish = if el.prop("OverrideSheetPublish").is_some_and(|v| v.trim() == "-1") {
+                "Do Not Publish Sheets"
+            } else {
+                "Publish by Sheet 'Include for Publish' Setting"
+            };
+            rows.push(row("Subset", "Publish sheets in subset", RowKey::Publish, publish.to_string()));
             rows.push(row("Subset", "New sheet location", RowKey::Folder("NewSheetLocation"), named_file("NewSheetLocation")));
             rows.push(row("Subset", "Sheet creation template", RowKey::Template, template()));
             rows.push(row("Subset", "Prompt for template", RowKey::PromptTemplate, prompt()));
@@ -1284,11 +1769,22 @@ fn write_properties(db: &mut SheetSetDatabase, p: &Properties) {
                 db.set_file_reference(&p.component, name, r.value.trim());
             }
             RowKey::PromptTemplate => {
+                // The set keeps it as an int (1), a subset as a short (-1).
                 if let Some(el) = db.find_mut(&p.component) {
-                    if r.value == "Yes" {
-                        el.set_prop_vt("PromptForDwt", 3, "1");
+                    el.remove_named("PromptForDwt");
+                    match (r.value == "Yes", p.kind) {
+                        (true, ComponentKind::SheetSet) => el.set_prop_vt("PromptForDwt", 3, "1"),
+                        (true, _) => el.set_prop_vt("PromptForDwt", 2, "-1"),
+                        _ => {}
+                    }
+                }
+            }
+            RowKey::Publish => {
+                if let Some(el) = db.find_mut(&p.component) {
+                    if r.value == "Do Not Publish Sheets" {
+                        el.set_prop_vt("OverrideSheetPublish", 2, "-1");
                     } else {
-                        el.remove_named("PromptForDwt");
+                        el.remove_named("OverrideSheetPublish");
                     }
                 }
             }
