@@ -3,7 +3,7 @@
 //   Specify first corner point of the count area or
 //     [Current area/Entire model space/Object/Polygonal] <Current area>:
 //   Specify opposite corner:                (Polygonal: Specify start point: /
-//                                            Specify next point:; Object:
+//                                            Specify next point; Object:
 //                                            Select object as count area boundary:)
 //   Select target objects or [List all blocks] <List all blocks>:   (COUNT)
 //
@@ -109,7 +109,8 @@ impl CadCommand for CountCommand {
             Step::Area => "Specify first corner point of the count area or [Current area/Entire model space/Object/Polygonal] <Current area>:".into(),
             Step::Corner => "Specify opposite corner:".into(),
             Step::PolyStart => "Specify start point:".into(),
-            Step::PolyNext => "Specify next point:".into(),
+            // The reference shows this one without a colon.
+            Step::PolyNext => "Specify next point".into(),
             Step::Object => "Select object as count area boundary:".into(),
             Step::Targets => "Select target objects or [List all blocks] <List all blocks>:".into(),
         }

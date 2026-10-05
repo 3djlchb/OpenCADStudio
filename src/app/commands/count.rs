@@ -530,10 +530,42 @@ impl OpenCADStudio {
             .column_width(3.6)
             .build();
         table.set_column_width(1, 1.08);
+        // As the reference writes it: no title row, data rows centred
+        // (table and cell overrides), header cells without overrides.
+        table.value_flags = 22;
+        table.legacy_style_override = Some(codec::entities::table::LegacyTableStyleOverride {
+            flags: 0x10001,
+            title_suppressed: Some(true),
+            row_alignments: vec![5],
+            ..Default::default()
+        });
         table.set_cell_text(0, 0, "Item");
         table.set_cell_text(0, 1, "Count");
         for (r, name) in names.iter().enumerate() {
             table.set_cell_text(r + 1, 0, name);
+            if let Some(cell) = table.cell_mut(r + 1, 1) {
+                // The count comes from the field; the cell keeps no text.
+                let mut content = codec::entities::table::CellContent::text("");
+                content.value.flags = 1;
+                cell.contents = vec![content];
+                cell.cell_type = codec::entities::table::CellType::Text;
+            }
+        }
+        for (r, row) in table.rows.iter_mut().enumerate() {
+            for cell in &mut row.cells {
+                if let Some(content) = cell.contents.first_mut().filter(|c| c.value.flags != 1) {
+                    content.value.flags = 6;
+                }
+                if r == 0 {
+                    cell.flag = 0x40000;
+                } else {
+                    cell.flag = 0x40001;
+                    let mut style = codec::entities::CellStyle::new();
+                    style.override_flags = 0x01;
+                    style.alignment = 5;
+                    cell.style = Some(style);
+                }
+            }
         }
         let codes: Vec<String> =
             names.iter().map(|n| self.block_field_code(i, n, &CountKey::default())).collect();
@@ -541,26 +573,18 @@ impl OpenCADStudio {
         let Some(handle) = self.commit_entity_handle(EntityType::Table(Box::new(table))) else {
             return;
         };
+        // The table's graphics block holds one MTEXT per cell; each count
+        // cell's MTEXT owns its field, which the cell refers to.
         let doc = &mut self.tabs[i].scene.document;
-        let mut fields = Vec::new();
-        for code in &codes {
-            let value = crate::entities::field::evaluate(doc, code, &[], None).unwrap_or_else(|| "####".into());
-            let field = doc.new_table_cell_field(handle, "%<\\_FldIdx 0>%", vec![codec::fields::NewField::new(code.clone(), value.clone())]);
-            fields.push((field, value));
-        }
-        if let Some(EntityType::Table(table)) = doc.get_entity_mut(handle) {
-            for (r, (field, value)) in fields.into_iter().enumerate() {
-                let Some(field) = field else { continue };
-                if let Some(cell) = table.cell_mut(r + 1, 1) {
-                    let mut content = codec::entities::table::CellContent::text(&value);
-                    content.field_handle = Some(field);
-                    cell.contents.clear();
-                    cell.contents.push(content);
-                    cell.cell_type = codec::entities::table::CellType::Text;
-                }
-                table.field_handles.push(field);
-            }
-        }
+        let fields = codes
+            .iter()
+            .enumerate()
+            .map(|(r, code)| {
+                let value = crate::entities::field::evaluate(doc, code, &[], None).unwrap_or_else(|| "####".into());
+                (r + 1, 1, r"%<\_FldIdx 0>%".to_string(), vec![codec::fields::NewField::new(code.clone(), value)])
+            })
+            .collect();
+        doc.build_table_block(handle, fields);
         self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
         self.tabs[i].dirty = true;
     }
@@ -570,11 +594,11 @@ impl OpenCADStudio {
         let doc = &self.tabs[i].scene.document;
         let Some(entity) = doc.get_entity(h) else { return };
         let outline = codec::count::entity_outline(doc, entity);
-        if outline.iter().all(|part| part.is_empty()) {
+        if outline.is_empty() {
             return;
         }
         let (mut lo, mut hi) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
-        for c in outline.into_iter().flatten() {
+        for c in outline.iter().flat_map(codec::count::Piece::points) {
             let p = glam::Vec3::new(c.x as f32, c.y as f32, c.z as f32);
             lo = lo.min(p);
             hi = hi.max(p);
