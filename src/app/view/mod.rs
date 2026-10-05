@@ -2644,6 +2644,16 @@ impl OpenCADStudio {
         };
         #[cfg(target_arch = "wasm32")]
         let plugin_drain = Subscription::none();
+        // Open sheet sets reload when their .dst changes on disk.
+        #[cfg(not(target_arch = "wasm32"))]
+        let sheet_set_poll = if self.sheet_set.sets.is_empty() {
+            Subscription::none()
+        } else {
+            iced::time::every(std::time::Duration::from_secs(1))
+                .map(|_| Message::SheetSet(crate::ui::window::sheet_set::SheetSetMsg::Poll))
+        };
+        #[cfg(target_arch = "wasm32")]
+        let sheet_set_poll = Subscription::none();
         let hatch_pattern_keys = if self.tabs[self.active_tab]
             .properties
             .hatch_pattern_picker_open
@@ -2845,6 +2855,7 @@ impl OpenCADStudio {
             web_fonts,
             autosave,
             plugin_drain,
+            sheet_set_poll,
             single_instance,
             hatch_pattern_keys,
             keyboard_events,

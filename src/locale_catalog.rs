@@ -49,6 +49,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Subset name" => Some(("view", "ss-subset-name")),
         "New sheet location" => Some(("view", "ss-new-sheet-location")),
         "Remove Subset" => Some(("view", "ss-remove-subset")),
+        "Rename Subset..." => Some(("view", "ss-rename-subset")),
         "Remove Sheet" => Some(("view", "ss-remove-sheet")),
         "Lets you specify one or more folders containing drawings. The layouts from these drawings can be automatically imported into the sheet set." => Some(("view", "ss-lets-you-specify-one-or-more-folders-containing-drawings-the")),
         "Creates a sheet set with no subsets or sheets." => Some(("view", "ss-creates-a-sheet-set-with-no-subsets-or-sheets")),

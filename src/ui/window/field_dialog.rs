@@ -328,14 +328,18 @@ impl FieldDialogState {
             FieldKind::SheetSetPlaceholder => {
                 let (label, target, version) = PLACEHOLDER_TYPES[self.ss_placeholder.min(PLACEHOLDER_TYPES.len() - 1)];
                 let target = if label == "Custom" { format!("{target}{}", self.ss_custom) } else { target.to_string() };
-                let base = format!("\\AcSm{version} {target}");
                 if label == "ViewportScale" {
+                    // The version follows the format, as for PlotScale.
+                    let version = codec::fields::PLOT_SCALE_FORMATS
+                        .get(self.ss_scale_format)
+                        .map_or("", |(_, code)| if code.starts_with("\\AcVar.16.2") { ".16.2" } else { "" });
+                    let base = format!("\\AcSm{version} {target}");
                     match viewport_scale_picture(self.ss_scale_format) {
                         f if f.is_empty() => (base, vec![]),
                         f => (format!("{base} {f}"), vec![]),
                     }
                 } else {
-                    (case(base), vec![])
+                    (case(format!("\\AcSm{version} {target}")), vec![])
                 }
             }
             FieldKind::BlockPlaceholder => {

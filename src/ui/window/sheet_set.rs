@@ -63,6 +63,8 @@ pub struct SheetSetManager {
     pub found: String,
     /// The open dialog (shown in the `SheetSet` modal).
     pub dialog: Option<SsDialog>,
+    /// Last seen modification time of each open `.dst` (by path key).
+    pub seen: std::collections::HashMap<String, std::time::SystemTime>,
 }
 
 impl SheetSetManager {
@@ -99,6 +101,8 @@ pub enum SheetSetMsg {
     Activate(String),
     Menu(String, MenuAction),
     Refresh,
+    /// Once a second: reload sets whose `.dst` changed on disk.
+    Poll,
     /// A `.dst` picked by Open (or given by automation).
     OpenPicked(Option<std::path::PathBuf>),
     /// A drawing picked by Import Layout as Sheet.
@@ -322,23 +326,35 @@ fn menu_separator() -> Element<'static, Message> {
 }
 
 /// A row's right-click menu.
-fn row_menu(id: String, kind: ComponentKind) -> Element<'static, Message> {
+/// The reference's order per row kind; a sheet's New Sheet / Import work on
+/// its subset, and only an empty subset can be removed.
+fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Message> {
     let entry = |label: &str, action: MenuAction, on: bool| {
         menu_entry(t!(label).into_owned(), on.then(|| msg(SheetSetMsg::Menu(id.clone(), action))))
     };
-    let sheet = kind == ComponentKind::Sheet;
-    let mut items = vec![
-        entry("Open", MenuAction::Open, sheet),
-        menu_separator(),
-        entry("New Sheet...", MenuAction::NewSheet, !sheet),
-        entry("New Subset...", MenuAction::NewSubset, !sheet),
-        entry("Import Layout as Sheet...", MenuAction::ImportLayout, !sheet),
-        menu_separator(),
-        entry("Rename & Renumber...", MenuAction::Rename, sheet),
-        entry(if kind == ComponentKind::Subset { "Remove Subset" } else { "Remove Sheet" }, MenuAction::Remove, kind != ComponentKind::SheetSet),
-    ];
-    if kind == ComponentKind::SheetSet {
-        items.push(entry("Close Sheet Set", MenuAction::Close, true));
+    let mut items = Vec::new();
+    match kind {
+        ComponentKind::SheetSet => items.extend([entry("Close Sheet Set", MenuAction::Close, true), menu_separator()]),
+        ComponentKind::Sheet => items.extend([entry("Open", MenuAction::Open, true), menu_separator()]),
+        ComponentKind::Subset => {}
+    }
+    items.push(entry("New Sheet...", MenuAction::NewSheet, true));
+    if kind != ComponentKind::Sheet {
+        items.push(entry("New Subset...", MenuAction::NewSubset, true));
+    }
+    items.push(entry("Import Layout as Sheet...", MenuAction::ImportLayout, true));
+    match kind {
+        ComponentKind::SheetSet => {}
+        ComponentKind::Subset => items.extend([
+            menu_separator(),
+            entry("Rename Subset...", MenuAction::Properties, true),
+            entry("Remove Subset", MenuAction::Remove, empty),
+        ]),
+        ComponentKind::Sheet => items.extend([
+            menu_separator(),
+            entry("Rename & Renumber...", MenuAction::Rename, true),
+            entry("Remove Sheet", MenuAction::Remove, true),
+        ]),
     }
     items.push(menu_separator());
     items.push(entry("Properties...", MenuAction::Properties, true));
@@ -391,7 +407,8 @@ fn tree_row<'a>(
     }))
     .on_press(msg(SheetSetMsg::Select(id.clone())))
     .on_double_click(msg(SheetSetMsg::Activate(id.clone())));
-    iced_aw::ContextMenu::new(area, move || row_menu(id.clone(), kind)).into()
+    let empty = !el.children.iter().any(|c| matches!(ComponentKind::of(c), Some(ComponentKind::Subset | ComponentKind::Sheet)));
+    iced_aw::ContextMenu::new(area, move || row_menu(id.clone(), kind, empty)).into()
 }
 
 fn push_tree<'a>(

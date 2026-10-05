@@ -4389,6 +4389,7 @@ view =
     .ss-subset-name = Subset name
     .ss-new-sheet-location = New sheet location
     .ss-remove-subset = Remove Subset
+    .ss-rename-subset = Rename Subset...
     .ss-remove-sheet = Remove Sheet
     .ss-lets-you-specify-one-or-more-folders-containing-drawings-the = Lets you specify one or more folders containing drawings. The layouts from these drawings can be automatically imported into the sheet set.
     .ss-creates-a-sheet-set-with-no-subsets-or-sheets = Creates a sheet set with no subsets or sheets.

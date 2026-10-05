@@ -254,6 +254,32 @@ impl OpenCADStudio {
         Ok(())
     }
 
+    /// Reload every open set whose `.dst` was changed by someone else.
+    fn poll_sheet_sets(&mut self) {
+        let mut changed = false;
+        for db in &mut self.sheet_set.sets {
+            let Some(path) = db.path.clone() else {
+                continue;
+            };
+            let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) else {
+                continue;
+            };
+            let key = ss::path_key(&path);
+            if self.sheet_set.seen.insert(key, modified).is_none_or(|t| t == modified) {
+                continue;
+            }
+            if let Ok(fresh) = SheetSetDatabase::read(&path) {
+                if fresh.root != db.root {
+                    *db = fresh;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.sheet_sets_changed();
+        }
+    }
+
     /// Write the current set back to its `.dst`.
     fn save_current_sheet_set(&mut self) {
         let Some(db) = self.sheet_set.db_mut() else {
@@ -358,6 +384,7 @@ impl OpenCADStudio {
                     self.sheet_set.collapsed.insert(id);
                 }
             }
+            SheetSetMsg::Poll => self.poll_sheet_sets(),
             SheetSetMsg::Refresh => {
                 if let Some(path) = self.sheet_set.db().and_then(|db| db.path.clone()) {
                     match SheetSetDatabase::read(&path) {
@@ -512,6 +539,15 @@ impl OpenCADStudio {
         self.sheet_set.selected = Some(id.clone());
         let Some(db) = self.sheet_set.db() else {
             return Task::none();
+        };
+        // On a sheet, New Sheet and Import work on the subset holding it.
+        let id = match action {
+            MenuAction::NewSheet | MenuAction::ImportLayout
+                if db.find(&id).and_then(ComponentKind::of) == Some(ComponentKind::Sheet) =>
+            {
+                db.parent_of(&id).map_or(id, |p| p.id().to_string())
+            }
+            _ => id,
         };
         match action {
             MenuAction::Open => return self.open_sheet(&id),
@@ -1098,11 +1134,12 @@ impl OpenCADStudio {
         if let Err(e) = crate::io::save(&scene.document, &path) {
             self.command_line.push_error(&format!("{file}: {e}"));
         }
+        // The new sheet is not opened ("Open in drawing editor" is off by default).
         self.close_active_modal();
         self.sheet_set.current = Some(f.set);
-        self.sheet_set.selected = Some(sheet.clone());
+        self.sheet_set.selected = Some(sheet);
         self.sheet_sets_changed();
-        self.open_sheet(&sheet)
+        Task::none()
     }
 }
 

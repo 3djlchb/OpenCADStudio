@@ -4354,6 +4354,7 @@ view =
     .ss-subset-name = Alt küme adı
     .ss-new-sheet-location = Yeni sayfa konumu
     .ss-remove-subset = Alt Kümeyi Kaldır
+    .ss-rename-subset = Alt Kümeyi Yeniden Adlandır...
     .ss-remove-sheet = Sayfayı Kaldır
     .ss-lets-you-specify-one-or-more-folders-containing-drawings-the = Çizim içeren bir veya daha fazla klasör belirtmenizi sağlar. Bu çizimlerdeki düzenler sayfa kümesine otomatik olarak aktarılabilir.
     .ss-creates-a-sheet-set-with-no-subsets-or-sheets = Alt kümesi ve sayfası olmayan bir sayfa kümesi oluşturur.
