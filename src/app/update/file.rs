@@ -2170,6 +2170,7 @@ impl OpenCADStudio {
 
     /// Bring the drawing state the file stores up to date, without the save
     /// event an autosave does not raise.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn prepare_snapshot_save(&mut self, i: usize) {
         self.sync_view_state_for_save(i);
         sync_annotation_scale_header(&mut self.tabs[i].scene);
