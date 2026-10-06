@@ -672,8 +672,7 @@ fn plain_row<'a>(
     if menu.is_empty() {
         return area.into();
     }
-    let (main, keep_open, flyout) = menu_panel(&menu, open_sub.as_deref());
-    crate::ui::window::row_menu::RowMenu::new(area, main, keep_open, flyout, msg(SheetSetMsg::Submenu(None))).into()
+    iced_aw::ContextMenu::new(area, move || menu_panel(&menu, open_sub.as_deref())).into()
 }
 
 fn menu_box<'b>(items: Vec<Element<'b, Message>>) -> Element<'b, Message> {
@@ -688,32 +687,34 @@ fn menu_box<'b>(items: Vec<Element<'b, Message>>) -> Element<'b, Message> {
         .into()
 }
 
-/// A row menu: the menu box, which children keep it open when clicked (submenu entries, separators), and the
-/// open fly-out (its entry index and items). Hovering, pressing or right
-/// pressing a submenu entry opens its fly-out.
-fn menu_panel(menu: &[Mi], open: Option<&str>) -> (Element<'static, Message>, Vec<bool>, Option<(usize, Element<'static, Message>)>) {
+/// A row's right-click menu. A submenu expands in place below its entry
+/// while hovered (a click would close the menu).
+fn menu_panel(menu: &[Mi], open: Option<&str>) -> Element<'static, Message> {
     let mut items: Vec<Element<'static, Message>> = Vec::new();
-    let mut keep_open = Vec::new();
-    let mut flyout = None;
     for item in menu {
         match item {
             Mi::Sep => items.push(menu_separator()),
-            Mi::Entry(label, m) => {
-                items.push(mouse_area(menu_entry(label.clone(), m.clone())).on_enter(msg(SheetSetMsg::Submenu(None))).into());
-            }
+            Mi::Entry(label, m) => items.push(menu_entry(label.clone(), m.clone())),
             Mi::Sub(label, key, sub) => {
-                let open_msg = msg(SheetSetMsg::Submenu(Some(key.clone())));
-                let entry = menu_entry(format!("{label}  ▸"), Some(open_msg.clone()));
-                if open == Some(key.as_str()) {
-                    let subs = sub.iter().map(|(l, m)| menu_entry(l.clone(), m.clone())).collect();
-                    flyout = Some((items.len(), menu_box(subs)));
+                let expanded = open == Some(key.as_str());
+                let arrow = if expanded {
+                    crate::ui::icons::themed_arrow_down(9.0)
+                } else {
+                    crate::ui::icons::themed_arrow_right(9.0)
+                };
+                let header = container(row![text(label.clone()).size(12).width(Fill), arrow].align_y(iced::Center))
+                    .width(Fill)
+                    .padding([5, 12]);
+                items.push(mouse_area(header).on_enter(msg(SheetSetMsg::Submenu(Some(key.clone())))).into());
+                if expanded {
+                    for (l, m) in sub {
+                        items.push(container(menu_entry(l.clone(), m.clone())).padding(iced::Padding::ZERO.left(12)).into());
+                    }
                 }
-                items.push(mouse_area(entry).on_enter(open_msg.clone()).on_right_press(open_msg).into());
             }
         }
-        keep_open.push(matches!(item, Mi::Sub(..) | Mi::Sep));
     }
-    (menu_box(items), keep_open, flyout)
+    menu_box(items)
 }
 
 /// A menu item: translated label and message (an empty label is a separator).
@@ -976,7 +977,7 @@ pub fn view<'a>(state: &'a SheetSetManager, width: f32, auto_collapse: bool) -> 
             }
             let header = row![
                 heading("Sheets"),
-                button(text("↻").size(13))
+                button(crate::ui::icons::themed(crate::ui::icons::REFRESH, 13.0))
                     .on_press(msg(SheetSetMsg::Refresh))
                     .style(button::subtle)
                     .padding([2, 4]),
@@ -990,8 +991,15 @@ pub fn view<'a>(state: &'a SheetSetManager, width: f32, auto_collapse: bool) -> 
             let by = state.by_category;
             let header = row![
                 heading(if by { "View by category" } else { "View by sheet" }),
-                button(text(format!("{} ⇄", t!(if by { "View by sheet" } else { "View by category" }))).size(11))
-                    .on_press(msg(SheetSetMsg::ViewsByCategory(!by)))
+                button(
+                    row![
+                        text(t!(if by { "View by sheet" } else { "View by category" }).into_owned()).size(11),
+                        crate::ui::icons::themed(crate::ui::icons::SWAP, 11.0),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Center),
+                )
+                .on_press(msg(SheetSetMsg::ViewsByCategory(!by)))
                     .style(button::subtle)
                     .padding([2, 4]),
                 button(crate::ui::icons::semantic(crate::ui::icons::PLUS, 12.0))
@@ -1008,7 +1016,10 @@ pub fn view<'a>(state: &'a SheetSetManager, width: f32, auto_collapse: bool) -> 
         (Some(_), SsmTab::ModelViews) => {
             let header = row![
                 heading("Locations"),
-                button(text("↻").size(13)).on_press(msg(SheetSetMsg::Refresh)).style(button::subtle).padding([2, 4]),
+                button(crate::ui::icons::themed(crate::ui::icons::REFRESH, 13.0))
+                    .on_press(msg(SheetSetMsg::Refresh))
+                    .style(button::subtle)
+                    .padding([2, 4]),
                 button(crate::ui::icons::semantic(crate::ui::icons::PLUS, 12.0))
                     .on_press(msg(SheetSetMsg::AddLocation))
                     .style(button::subtle)
@@ -1168,7 +1179,7 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
             let folders = w.folders.iter().enumerate().map(|(i, f)| {
                 row![
                     text(f.clone()).size(12).width(Fill),
-                    button(text("×").size(12))
+                    button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
                         .on_press(msg(SheetSetMsg::Wizard(WizardMsg::RemoveFolder(i))))
                         .style(button::text)
                         .padding([0, 6]),
@@ -1228,12 +1239,12 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
         (1, _) => Some(0),
         _ => None,
     };
-    let back = button(text(format!("‹ {}", t!("Back"))).size(12))
+    let back = button(text(t!("Back").into_owned()).size(12))
         .on_press_maybe(back_step.map(|s| msg(SheetSetMsg::Wizard(WizardMsg::Step(s)))))
         .style(button_style(false))
         .padding([6, 14]);
     let next: Element<'a, Message> = match next_step {
-        Some(s) => button(text(format!("{} ›", t!("Next"))).size(12))
+        Some(s) => button(text(t!("Next").into_owned()).size(12))
             .on_press(msg(SheetSetMsg::Wizard(WizardMsg::Step(s))))
             .style(button_style(true))
             .padding([6, 14])
@@ -1578,8 +1589,16 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
     let foot = match f.kind {
         FormKind::Rename | FormKind::RenameView => footer(
             vec![
-                button(text(format!("‹ {}", t!("Previous"))).size(12)).on_press(msg(SheetSetMsg::Previous)).style(button_style(false)).padding([5, 12]).into(),
-                button(text(format!("{} ›", t!("Next"))).size(12)).on_press(msg(SheetSetMsg::Next)).style(button_style(false)).padding([5, 12]).into(),
+                button(text(t!("Previous").into_owned()).size(12))
+                    .on_press(msg(SheetSetMsg::Previous))
+                    .style(button_style(false))
+                    .padding([5, 12])
+                    .into(),
+                button(text(t!("Next").into_owned()).size(12))
+                    .on_press(msg(SheetSetMsg::Next))
+                    .style(button_style(false))
+                    .padding([5, 12])
+                    .into(),
             ],
             vec![
                 dialog_button(t!("Cancel"), msg(SheetSetMsg::Cancel), false).into(),

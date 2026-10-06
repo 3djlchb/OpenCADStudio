@@ -27,7 +27,6 @@ pub mod alias_editor;
 pub mod find_replace;
 pub mod named_parameters;
 pub mod pc_manager;
-pub mod row_menu;
 pub mod sheet_set;
 pub mod pdf_dialogs;
 pub mod xref_attach;
