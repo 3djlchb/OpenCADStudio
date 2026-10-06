@@ -315,7 +315,7 @@ fn history_operation_text(operation: &SolidHistoryOperation) -> String {
             value.base_face
         ),
         SolidHistoryOperation::Sweep(value) | SolidHistoryOperation::Extrusion(value) => format!(
-            "{}; sweep {}; path {}; direction {:.6},{:.6},{:.6}; draft {:.6}; scale {:.6}; twist {:.6}; align {:.6}; bank {}; intersections {}",
+            "{}; sweep {}; path {}; direction {:.6},{:.6},{:.6}; draft {:.6}; scale {:.6}; twist {:.6}; align {:.6}; align start {}; bank {}",
             history_base_text(&value.base),
             embedded_name(value.sweep_entity.as_ref()),
             embedded_name(value.path_entity.as_ref()),
@@ -326,8 +326,8 @@ fn history_operation_text(operation: &SolidHistoryOperation) -> String {
             value.scale_factor,
             value.twist_angle,
             value.align_angle,
-            value.bank,
-            value.check_intersections
+            value.align_start,
+            value.bank
         ),
         SolidHistoryOperation::Loft(value) => format!(
             "{}; cross sections {}; guides {}",
