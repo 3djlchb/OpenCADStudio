@@ -4350,6 +4350,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = __ocs_fmt_0__에서 __ocs_fmt_1__ 사이의 정수가 필요합니다.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4630,7 +4631,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD 새로운 축척 비율(예: 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: 1:50과 같은 비율을 사용합니다.
     .scalelistedit-delete-scale-ratio-to-remove = 제거할 SCALELISTEDIT DELETE 축척 비율:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: 시트 세트 관리자가 아직 구현되지 않았습니다.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: 마스터가 뷰포트가 아닙니다.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: __ocs_fmt_0__ 뷰포트를 마스터에 동기화했습니다.
     .scale-arg-already-exists = 스케일 __ocs_fmt_0__가 이미 존재합니다.

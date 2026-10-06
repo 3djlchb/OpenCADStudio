@@ -4351,6 +4351,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Απαιτείται ακέραιος αριθμός μεταξύ __ocs_fmt_0__ και __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4625,7 +4626,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  νέος λόγος κλίμακας (π.χ. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: χρησιμοποιήστε λόγο της μορφής 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  λόγος κλίμακας προς αφαίρεση:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: η Διαχείριση συνόλων φύλλων δεν έχει υλοποιηθεί ακόμη.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: η κύρια δεν είναι θύρα προβολής.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: συγχρονίστηκαν __ocs_fmt_0__ θύρα(ες) προβολής με την κύρια.
     .scale-arg-already-exists = Η κλίμακα __ocs_fmt_0__ υπάρχει ήδη.

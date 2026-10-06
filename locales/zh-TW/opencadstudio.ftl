@@ -4346,6 +4346,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = 需要介於 __ocs_fmt_0__ 和 __ocs_fmt_1__ 之間的整數。
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4626,7 +4627,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  新比額表比率(如1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDITADD:使用比例如1:50。
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  要刪除的縮放比例 :
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET:工作表集管理器尚未實作 。
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS:主人不是觀光港.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS：已將 __ocs_fmt_0__ 個視口與主視口同步。
     .scale-arg-already-exists = 縮放 __ocs_fmt_0__ 已經存在 。

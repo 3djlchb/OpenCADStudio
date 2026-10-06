@@ -4352,6 +4352,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Требуется целое число от __ocs_fmt_0__ до __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4632,7 +4633,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD Новое соотношение масштаба (например, 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: использовать соотношение 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE Удаляемое соотношение масштаба:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: Диспетчер наборов листов еще не реализован.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: главный объект не является видовым экраном.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: с главным экраном синхронизировано видовых экранов: __ocs_fmt_0__.
     .scale-arg-already-exists = Масштаб __ocs_fmt_0__ уже существует.

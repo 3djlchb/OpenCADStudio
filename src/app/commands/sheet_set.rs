@@ -192,7 +192,7 @@ impl CadCommand for SheetSetPlaceCommand {
     }
 
     fn prompt(&self) -> String {
-        "Specify insertion point:".into()
+        crate::t!("Specify insertion point:").into_owned()
     }
 
     fn options(&self) -> Vec<CmdOption> {
@@ -506,7 +506,11 @@ impl OpenCADStudio {
     }
 
     fn dispatch_sheet_set_vars(&mut self, cmd: &str, _i: usize) -> Option<Task<Message>> {
-        let rest = cmd.strip_prefix("SETVAR ").map(str::trim).unwrap_or(cmd);
+        let cmd = cmd.trim();
+        let rest = match cmd.get(..7) {
+            Some(prefix) if prefix.eq_ignore_ascii_case("SETVAR ") => cmd[7..].trim(),
+            _ => cmd,
+        };
         let mut parts = rest.splitn(2, char::is_whitespace);
         let name = parts.next().unwrap_or("").to_ascii_uppercase();
         if !SHEET_SET_SYSVARS.contains(&name.as_str()) {
@@ -517,11 +521,11 @@ impl OpenCADStudio {
         match name.as_str() {
             "SSMSTATE" => {
                 let v = u8::from(self.sheet_set.show);
-                self.command_line.push_output(&format!("SSMSTATE = {v} (read only)"));
+                self.command_line.push_output(&format!("SSMSTATE = {v} ({})", crate::t!("Read-only")));
             }
             "SSFOUND" => {
                 let v = self.sheet_set.found.clone();
-                self.command_line.push_output(&format!("SSFOUND = \"{v}\" (read only)"));
+                self.command_line.push_output(&format!("SSFOUND = \"{v}\" ({})", crate::t!("Read-only")));
             }
             _ => {
                 let (current, min, max) = match name.as_str() {
@@ -531,22 +535,22 @@ impl OpenCADStudio {
                     _ => (i32::from(s.sheet_status), 0, 2),
                 };
                 let ask = |app: &mut Self, name: String| {
-                    app.command_line.push_output(&format!("Enter new value for {name} <{current}>:"));
+                    app.command_line.push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
                     app.pending_setvar = Some(name);
                 };
                 match value {
                     None => ask(self, name),
                     Some(v) => match v.parse::<i32>() {
-                        Err(_) => {
-                            self.command_line.push_error("Requires an integer value.");
-                            ask(self, name);
-                        }
                         Ok(n) if !(min..=max).contains(&n) => {
                             self.command_line.push_error(&if max == 1 {
-                                "Requires 0 or 1 only.".to_string()
+                                crate::t!("Requires 0 or 1").into_owned()
                             } else {
-                                format!("Requires an integer between {min} and {max}.")
+                                crate::tf!("Requires an integer between {min} and {max}.").into_owned()
                             });
+                            ask(self, name);
+                        }
+                        Err(_) => {
+                            self.command_line.push_error(&crate::tf!("Requires an integer between {min} and {max}."));
                             ask(self, name);
                         }
                         Ok(n) => {

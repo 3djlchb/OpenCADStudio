@@ -4339,6 +4339,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = __ocs_fmt_0__ から __ocs_fmt_1__ までの整数が必要です。
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4619,7 +4620,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  新しい尺度比（例: 1:50）:
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: 1:50 のような比率を使用してください。
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  削除する尺度比:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: シートセット管理は未実装です。
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: マスターはビューポートではありません。
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: __ocs_fmt_0__ 個のビューポートをマスターに同期しました。
     .scale-arg-already-exists = 尺度 __ocs_fmt_0__ は既に存在します。

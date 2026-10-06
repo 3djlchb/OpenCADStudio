@@ -4363,6 +4363,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = يتطلب عددًا صحيحًا بين __ocs_fmt_0__ و __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4643,7 +4644,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  نسبة المقياس الجديدة (مثلًا 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: استخدم نسبة مثل 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  نسبة المقياس المراد إزالتها:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: لم يُنفّذ مدير مجموعات الأوراق بعد.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: المصدر ليس منفذ عرض.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: تمت مزامنة __ocs_fmt_0__ منفذ عرض مع المصدر.
     .scale-arg-already-exists = المقياس __ocs_fmt_0__ موجود بالفعل.

@@ -4351,6 +4351,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Nécessite un nombre entier compris entre __ocs_fmt_0__ et __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4631,7 +4632,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  nouveau rapport d'échelle (par exemple 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD : utiliser un rapport comme 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  rapport d'échelle à supprimer:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: Gestionnaire de la série de feuilles non encore implémenté.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS : l’objet maître n’est pas une fenêtre.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS : __ocs_fmt_0__ fenêtre(s) synchronisée(s) avec la fenêtre maître.
     .scale-arg-already-exists = L'échelle __ocs_fmt_0__ existe déjà.

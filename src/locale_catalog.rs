@@ -4,6 +4,7 @@
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
         "Create Sheet Set" => Some(("view", "ss-create-sheet-set")),
+        "Requires an integer between {min} and {max}." => Some(("view", "ss-requires-integer-between")),
         "New Sheet" => Some(("view", "ss-new-sheet")),
         "Subset Properties" => Some(("view", "ss-subset-properties")),
         "Rename & Renumber Sheet" => Some(("view", "ss-rename-renumber-sheet")),
@@ -2727,7 +2728,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "SETVAR  new value (blank to read):" => Some(("styles", "setvar-new-value-blank-to-read")),
         "SETVAR  variable name:" => Some(("styles", "setvar-variable-name")),
         "SETVAR: {name} requires 0, 1, or 2." => Some(("draw", "setvar-frame-range")),
-        "SHEETSET: Sheet Set Manager not yet implemented." => Some(("view", "sheetset-sheet-set-manager-not-yet-implemented")),
         "SHX" => Some(("properties", "shx")),
         "Connect" => Some(("draw", "sketch-connect")),
         "Exit" => Some(("draw", "sketch-exit")),

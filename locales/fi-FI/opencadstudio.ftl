@@ -4350,6 +4350,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Vaatii kokonaisluvun väliltä __ocs_fmt_0__–__ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4630,7 +4631,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD uusi mittasuhde (esim. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: käytä suhdetta kuten 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE irrotettava asteikkosuhde:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: Sheet Set Manager ei ole vielä otettu käyttöön.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: isäntä ei ole näkymä.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: synkronoitu __ocs_fmt_0__-näkymä(t) isäntälaitteeseen.
     .scale-arg-already-exists = Asteikko __ocs_fmt_0__ on jo olemassa.

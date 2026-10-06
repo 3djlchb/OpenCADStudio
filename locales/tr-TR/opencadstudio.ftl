@@ -4311,6 +4311,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Sayfa Kümesi Oluştur
+    .ss-requires-integer-between = __ocs_fmt_0__ ile __ocs_fmt_1__ arasında bir tam sayı gerekir.
     .ss-new-sheet = Yeni Sayfa
     .ss-subset-properties = Alt Küme Özellikleri
     .ss-rename-renumber-sheet = Sayfayı Yeniden Adlandır ve Numaralandır
@@ -4581,7 +4582,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  Yeni ölçek oranı (ör. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: 1:50 gibi bir oran kullanın.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  Kaldırılacak ölçek oranı:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: Pafta Seti Yöneticisi henüz uygulanmadı.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: Ana nesne bir görünüm alanı değil.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: __ocs_fmt_0__ görünüm alanı ana görünüm alanıyla eşitlendi.
     .scale-arg-already-exists = __ocs_fmt_0__ ölçeği zaten var.

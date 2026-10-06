@@ -4351,6 +4351,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Requiere un número entero entre __ocs_fmt_0__ y __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4631,7 +4632,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  nueva relación de escala (p. ej., 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: use una relación como 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  relación de escala que eliminar:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: el Administrador de conjuntos de planos aún no está implementado.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: el principal no es una ventana gráfica.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: se sincronizaron __ocs_fmt_0__ ventanas gráficas con la principal.
     .scale-arg-already-exists = La escala __ocs_fmt_0__ ya existe.

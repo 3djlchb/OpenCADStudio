@@ -4350,6 +4350,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = __ocs_fmt_0__ és __ocs_fmt_1__ közötti egész szám szükséges.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4630,7 +4631,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD új méretarány (pl. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: használjon 1:50-hez hasonló arányt.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE méretarány az eltávolításhoz:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: A Lapkészlet-kezelő még nincs implementálva.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: a mester nem nézetablak.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: a __ocs_fmt_0__ nézetablak(ok) szinkronizálva a mesterrel.
     .scale-arg-already-exists = A __ocs_fmt_0__ skála már létezik.

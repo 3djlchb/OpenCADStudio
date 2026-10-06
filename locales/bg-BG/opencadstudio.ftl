@@ -4350,6 +4350,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Изисква се цяло число между __ocs_fmt_0__ и __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4630,7 +4631,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  ново съотношение на мащаб (напр. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: използвай съотношение като 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  съотношение на мащаб за премахване:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: Мениджърът на комплекти листове все още не е реализиран.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: главният не е изглед.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: синхронизирани __ocs_fmt_0__ изглед(а) с главния.
     .scale-arg-already-exists = Мащаб __ocs_fmt_0__ вече съществува.

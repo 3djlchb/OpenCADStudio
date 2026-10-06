@@ -4348,6 +4348,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Vyžaduje celé číslo mezi __ocs_fmt_0__ a __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4628,7 +4629,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD nový poměr měřítka (např. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: použijte poměr jako 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE měřítko pro odstranění:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: Správce sady listů dosud není implementován.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: hlavní není výřez.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: synchronizované výřezy __ocs_fmt_0__ s hlavním serverem.
     .scale-arg-already-exists = Měřítko __ocs_fmt_0__ již existuje.

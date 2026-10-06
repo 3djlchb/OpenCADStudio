@@ -4349,6 +4349,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Vereist een geheel getal tussen __ocs_fmt_0__ en __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4629,7 +4630,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  nieuwe schaalverhouding (bv. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: gebruik een verhouding als 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  schaalverhouding te verwijderen:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: beheer van bladsets is nog niet geïmplementeerd.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: master is geen weergavevenster.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: gesynchroniseerd __ocs_fmt_0__ weergavevenster(s) naar de master.
     .scale-arg-already-exists = Schaal __ocs_fmt_0__ bestaat al.

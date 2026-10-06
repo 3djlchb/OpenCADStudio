@@ -4350,6 +4350,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Wymagana liczba całkowita z zakresu od __ocs_fmt_0__ do __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4630,7 +4631,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD nowa skala (np. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: użyj proporcji np. 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE współczynnik skali do usunięcia:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: Menedżer zestawów arkuszy nie został jeszcze zaimplementowany.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: master nie jest rzutnią.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: zsynchronizowane rzutnie __ocs_fmt_0__ z wzorcem.
     .scale-arg-already-exists = Skala __ocs_fmt_0__ już istnieje.

@@ -4350,6 +4350,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = Richiede un numero intero compreso tra __ocs_fmt_0__ e __ocs_fmt_1__.
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4630,7 +4631,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD nuovo rapporto di scala (es. 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: utilizzare un rapporto come 1:50.
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE rapporto di scala da rimuovere:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: Gestione set di fogli non ancora implementata.
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: master non è un viewport.
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: finestre __ocs_fmt_0__ sincronizzate con il master.
     .scale-arg-already-exists = La scala __ocs_fmt_0__ esiste già.

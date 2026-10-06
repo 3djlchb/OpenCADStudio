@@ -4339,6 +4339,7 @@ layout =
 
 view =
     .ss-create-sheet-set = Create Sheet Set
+    .ss-requires-integer-between = __ocs_fmt_0__ और __ocs_fmt_1__ के बीच एक पूर्णांक आवश्यक है।
     .ss-new-sheet = New Sheet
     .ss-subset-properties = Subset Properties
     .ss-rename-renumber-sheet = Rename & Renumber Sheet
@@ -4619,7 +4620,6 @@ view =
     .scalelistedit-add-new-scale-ratio-e-g-1-50 = SCALELISTEDIT ADD  नया स्केल अनुपात (जैसे 1:50):
     .scalelistedit-add-use-a-ratio-like-1-50 = SCALELISTEDIT ADD: 1:50 की तरह अनुपात का उपयोग करें।
     .scalelistedit-delete-scale-ratio-to-remove = SCALELISTEDIT DELETE  हटाने के लिए पैमाने अनुपात:
-    .sheetset-sheet-set-manager-not-yet-implemented = SHEETSET: शीट सेट मैनेजर अभी तक लागू नहीं हुआ।
     .syncpviewports-master-is-not-a-viewport = SYNCPVIEWPORTS: मास्टर ऑब्जेक्ट व्यूपोर्ट नहीं है।
     .syncpviewports-synced-n-viewport-s-to-the-mast = SYNCPVIEWPORTS: __ocs_fmt_0__ व्यूपोर्ट मास्टर से सिंक किए गए।
     .scale-arg-already-exists = स्केल __ocs_fmt_0__ पहले से मौजूद है।
