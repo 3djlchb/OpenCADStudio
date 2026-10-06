@@ -73,6 +73,7 @@ pub(super) const NAMES: &[&str] = &[
     "pdf_layer_toggle",
     "pc_manager_toggle",
     "pc_manager",
+    "count_palette",
     "blocks_palette",
     "pdf_page_select",
     "pc_colormap",
@@ -925,6 +926,78 @@ impl OpenCADStudio {
                 };
                 Message::PcManager(PcManagerMsg::Toggle(handle, row))
             }
+            // Count palette and count mode: "search=<text>", "sort=name|count",
+            // "open=NAME", "child=NAME:<n>" (an expanded row), "menu=<review|field|
+            // layer|scale|mirror>:NAME", "create_table", "check=NAME:1",
+            // "all=1", "table_cancel", "table_insert", "back", "match=<0|1|2>:1",
+            // "details", "errors", "error=<n>", "area", "prev", "next", "select",
+            // "field", "close", "invalid_undo", "invalid_continue", "invalid_always=1".
+            "count_palette" => {
+                use crate::ui::window::count_palette::{CountMsg as M, RowAction};
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                let flag = |s: &str| s == "1" || s.eq_ignore_ascii_case("true");
+                let bad = || failure("invalid_value", "Unknown count palette edit");
+                Message::Count(match key {
+                    "search" => M::Search(arg.into()),
+                    "sort" => M::Sort(arg == "count"),
+                    "open" => M::Open(arg.into(), codec::count::CountKey::default()),
+                    "child" => {
+                        let (name, n) = arg.rsplit_once(':').ok_or_else(bad)?;
+                        let n: usize = n.parse().map_err(|_| bad())?;
+                        let [l, s, m] = self.count_palette.expansion(name).ok_or_else(bad)?;
+                        let i = self.active_tab;
+                        let area = self.tabs[i].count.as_ref().and_then(|c| c.area.clone());
+                        let instances = codec::count::block_instances(&self.tabs[i].scene.document, area.as_deref());
+                        let (k, _) = codec::count::expanded_counts(&instances, name, l, s, m).into_iter().nth(n).ok_or_else(bad)?;
+                        M::Open(name.into(), k)
+                    }
+                    "menu" => {
+                        let (action, name) = arg.split_once(':').ok_or_else(bad)?;
+                        let action = match action {
+                            "review" => RowAction::Review,
+                            "field" => RowAction::Field,
+                            "layer" => RowAction::Expand(0),
+                            "scale" => RowAction::Expand(1),
+                            "mirror" => RowAction::Expand(2),
+                            _ => return Err(bad()),
+                        };
+                        M::Menu(name.into(), codec::count::CountKey::default(), action)
+                    }
+                    "create_table" => M::CreateTable,
+                    "check" => {
+                        let (name, on) = arg.rsplit_once(':').unwrap_or((arg, "1"));
+                        M::TableCheck(name.into(), flag(on))
+                    }
+                    "all" => M::TableAll(flag(arg)),
+                    "table_cancel" => M::TableCancel,
+                    "table_insert" => M::TableInsert,
+                    "back" => M::Back,
+                    "match" => {
+                        let (k, on) = arg.split_once(':').unwrap_or((arg, "1"));
+                        M::Match(k.parse::<usize>().ok().filter(|k| *k < 3).ok_or_else(bad)?, flag(on))
+                    }
+                    "details" => M::ToggleDetails,
+                    "errors" => M::ToggleErrors,
+                    "error" => {
+                        let i = self.active_tab;
+                        let n: usize = arg.parse().map_err(|_| bad())?;
+                        let mode = self.tabs[i].count.as_ref().ok_or_else(bad)?;
+                        M::ShowError(*mode.result(&self.tabs[i].scene.document).errors.get(n).ok_or_else(bad)?)
+                    }
+                    "area" => M::Area,
+                    "prev" => M::Prev,
+                    "next" => M::Next,
+                    "select" => M::Select,
+                    "field" => M::Field,
+                    "close" => M::Close,
+                    // The Invalid Area dialog.
+                    "invalid_undo" => M::InvalidUndo,
+                    "invalid_continue" => M::InvalidContinue,
+                    "invalid_always" => M::InvalidAlways(arg == "1"),
+                    _ => return Err(bad()),
+                })
+            }
             // Point Cloud Manager tree: "search=<text>", "collapse", "expand",
             // "toggle_node=<key>" or "select=<key>".
             "pc_manager" => {
@@ -1133,6 +1206,8 @@ impl OpenCADStudio {
                     "link_text" => F::HyperlinkText(v.into()),
                     "link_url" => F::HyperlinkUrl(v.into()),
                     "plot_scale" => F::PlotScale(index(codec::fields::PLOT_SCALE_FORMATS.len())?),
+                    "count" => F::CountExpression(v.into()),
+                    "show_instances" => F::ShowCountInstances,
                     "placeholder" => F::PlaceholderProperty(index(codec::fields::BLOCK_PLACEHOLDER_PROPERTIES.len())?),
                     "table_function" => F::TableFunction(
                         ["Average", "Sum", "Count", "Cell"]

@@ -1451,6 +1451,10 @@ impl Scene {
                         }
                     }
                 }
+                m.color = self.count_color(handle, m.color, self.current_bg());
+                if let Some(b) = &mut backdrop {
+                    b.color = self.count_color(handle, b.color, self.current_bg());
+                }
                 if tint_selected && self.selected.contains(&handle) {
                     m.color = [0.15, 0.55, 1.00, m.color[3]];
                 }
@@ -1752,6 +1756,7 @@ impl Scene {
                         )
                     });
                 }
+                model.color = self.count_color(context.root_handle, model.color, hatch_bg);
                 if tint_selected && self.selected.contains(&context.root_handle) {
                     model.color = [0.15, 0.55, 1.00, model.color[3]];
                 }

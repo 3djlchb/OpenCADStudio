@@ -48,6 +48,8 @@ pub enum PanelId {
     NodeGraph,
     /// Regions and scans of the drawing's point clouds.
     PointCloudManager,
+    /// Block counts (COUNTLIST).
+    Count,
 }
 
 impl PanelId {
@@ -60,6 +62,7 @@ impl PanelId {
             PanelId::Browser => "Browser",
             PanelId::NodeGraph => "Node Graph",
             PanelId::PointCloudManager => "Point Cloud Manager",
+            PanelId::Count => "Count",
         }
     }
 
@@ -72,6 +75,7 @@ impl PanelId {
             PanelId::Browser => 230.0,
             PanelId::NodeGraph => 220.0,
             PanelId::PointCloudManager => 280.0,
+            PanelId::Count => 280.0,
         }
     }
 
@@ -162,6 +166,7 @@ impl DockState {
             PanelId::Browser,
             PanelId::NodeGraph,
             PanelId::PointCloudManager,
+            PanelId::Count,
         ] {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         }

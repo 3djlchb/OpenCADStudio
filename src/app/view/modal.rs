@@ -40,6 +40,7 @@ impl OpenCADStudio {
             Some(K::GeometricTolerance) => crate::t!("Geometric Tolerance").into_owned(),
             Some(K::AttDef) => crate::t!("Attribute Definition").into_owned(),
             Some(K::AttDefEdit) => crate::t!("Edit Attribute Definition").into_owned(),
+            Some(K::CountInvalidArea) => crate::t!("Count - Invalid Area").into_owned(),
             Some(K::Field) => crate::t!("Field").into_owned(),
             Some(K::DraftingSettings) => crate::t!("Drafting Settings").into_owned(),
             Some(K::AutoConstrainSettings) => crate::t!("Constraint Settings").into_owned(),
@@ -583,6 +584,9 @@ impl OpenCADStudio {
             super::super::ModalKind::Field => {
                 let state = self.field_dialog.as_ref()?;
                 sized_flow(ex, 760, 660, |flow| crate::ui::window::field_dialog::view(state, flow))
+            }
+            super::super::ModalKind::CountInvalidArea => {
+                sized_flow(ex, 520, 260, |flow| crate::ui::window::count_palette::invalid_area_view(&self.count_palette, flow))
             }
             super::super::ModalKind::AttDefEdit => {
                 let state = self.attdef_edit.as_ref()?;

@@ -179,6 +179,8 @@ impl OpenCADStudio {
                     else {
                         continue;
                     };
+                    // `changed` tracks this table while the action runs.
+                    let changed_before = std::mem::take(&mut changed);
                     match &action {
                         TableAction::Cell(row, column, text) => {
                             if let Some(cell) = table.cell_mut(*row, *column) {
@@ -321,6 +323,12 @@ impl OpenCADStudio {
                         }
                         _ => {}
                     }
+                    if changed {
+                        // The stored picture no longer shows the cells: draw
+                        // from them, and redraw the picture.
+                        table.block_record_handle = None;
+                    }
+                    changed |= changed_before;
                 }
                 if changed {
                     self.invalidate_property_targets(i, &selected_handles);
