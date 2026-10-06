@@ -2779,20 +2779,30 @@ mod tests {
     // identical in both (zero visual change — the layer only adds bytes).
     #[test]
     fn searchable_layer_coexists_with_outlines() {
-        let mut outline_only = text_wire("HELLO", [20.0, 20.0, 0.0]);
-        outline_only.wire.searchable_text.clear();
-        let mut searchable = text_wire("HELLO", [20.0, 20.0, 0.0]);
-        searchable.wire.searchable_text =
-            searchable_wire("HELLO", [20.0, 20.0, 0.0]).wire.searchable_text;
+        use crate::scene::text::sdf_atlas;
+        // Other tests share the glyph atlas; a re-bake between laying out the
+        // glyphs and exporting them moves the outline lookups, so build and
+        // export under one atlas generation.
+        let (outline_bytes, searchable_bytes) = loop {
+            let generation = sdf_atlas::generation();
+            let mut outline_only = text_wire("HELLO", [20.0, 20.0, 0.0]);
+            outline_only.wire.searchable_text.clear();
+            let mut searchable = text_wire("HELLO", [20.0, 20.0, 0.0]);
+            searchable.wire.searchable_text =
+                searchable_wire("HELLO", [20.0, 20.0, 0.0]).wire.searchable_text;
 
-        // Outlines are never suppressed: both wires keep their glyph quads.
-        assert!(
-            !searchable.wire.text_verts.is_empty(),
-            "searchable wire must keep its outline quads"
-        );
+            // Outlines are never suppressed: both wires keep their glyph quads.
+            assert!(
+                !searchable.wire.text_verts.is_empty(),
+                "searchable wire must keep its outline quads"
+            );
 
-        let outline_bytes = build_pdf_pages(&[test_page(vec![outline_only])], None).unwrap();
-        let searchable_bytes = build_pdf_pages(&[test_page(vec![searchable])], None).unwrap();
+            let outline_bytes = build_pdf_pages(&[test_page(vec![outline_only])], None).unwrap();
+            let searchable_bytes = build_pdf_pages(&[test_page(vec![searchable])], None).unwrap();
+            if sdf_atlas::generation() == generation {
+                break (outline_bytes, searchable_bytes);
+            }
+        };
         let outline_stream = pdf_stream_text(&outline_bytes);
         let searchable_stream = pdf_stream_text(&searchable_bytes);
 

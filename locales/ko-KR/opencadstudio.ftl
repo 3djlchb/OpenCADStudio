@@ -6116,7 +6116,6 @@ count-feature =
     .area-active = 개수 영역이 활성화되었습니다.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (읽기 전용)
     .requires-0-or-1 = 0 또는 1만 입력할 수 있습니다.
-    .requires-int-range = __ocs_fmt_0__에서 __ocs_fmt_1__ 사이의 정수가 필요합니다.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT 현재 문자 스타일:  "__ocs_fmt_0__"  문자 높이:  __ocs_fmt_1__
     .fields-found = 필드 __ocs_fmt_0__개를 찾았습니다.

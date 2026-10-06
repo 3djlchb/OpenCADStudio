@@ -6117,7 +6117,6 @@ count-feature =
     .area-active = A área de contagem está ativa.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (somente leitura)
     .requires-0-or-1 = Requer apenas 0 ou 1.
-    .requires-int-range = Requer um número inteiro entre __ocs_fmt_0__ e __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Estilo de texto atual:  "__ocs_fmt_0__"  Altura do texto:  __ocs_fmt_1__
     .fields-found = __ocs_fmt_0__ campo(s) encontrado(s).

@@ -6112,7 +6112,6 @@ count-feature =
     .area-active = 計數區域已啟用。
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__（唯讀）
     .requires-0-or-1 = 只能為 0 或 1。
-    .requires-int-range = 需要介於 __ocs_fmt_0__ 與 __ocs_fmt_1__ 之間的整數。
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT 目前文字型式:  "__ocs_fmt_0__"  文字高度:  __ocs_fmt_1__
     .fields-found = 找到 __ocs_fmt_0__ 個欄位。

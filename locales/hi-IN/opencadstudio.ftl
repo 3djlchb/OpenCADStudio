@@ -6105,7 +6105,6 @@ count-feature =
     .area-active = गणना क्षेत्र सक्रिय है।
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (केवल पढ़ने के लिए)
     .requires-0-or-1 = केवल 0 या 1 आवश्यक है।
-    .requires-int-range = __ocs_fmt_0__ और __ocs_fmt_1__ के बीच पूर्णांक आवश्यक है।
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT वर्तमान टेक्स्ट शैली:  "__ocs_fmt_0__"  टेक्स्ट ऊँचाई:  __ocs_fmt_1__
     .fields-found = __ocs_fmt_0__ फ़ील्ड मिले।

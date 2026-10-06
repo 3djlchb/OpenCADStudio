@@ -6117,7 +6117,6 @@ count-feature =
     .area-active = Областта за преброяване е активна.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (само за четене)
     .requires-0-or-1 = Изисква се само 0 или 1.
-    .requires-int-range = Изисква се цяло число между __ocs_fmt_0__ и __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Текущ текстов стил:  "__ocs_fmt_0__"  Височина на текста:  __ocs_fmt_1__
     .fields-found = Намерени полета: __ocs_fmt_0__.

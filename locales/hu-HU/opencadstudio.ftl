@@ -6116,7 +6116,6 @@ count-feature =
     .area-active = A számlálási terület aktív.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (csak olvasható)
     .requires-0-or-1 = Csak 0 vagy 1 adható meg.
-    .requires-int-range = __ocs_fmt_0__ és __ocs_fmt_1__ közötti egész szám szükséges.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Aktuális szövegstílus:  "__ocs_fmt_0__"  Szövegmagasság:  __ocs_fmt_1__
     .fields-found = __ocs_fmt_0__ mező található.

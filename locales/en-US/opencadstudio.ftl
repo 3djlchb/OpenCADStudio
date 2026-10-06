@@ -6118,7 +6118,6 @@ count-feature =
     .area-active = count area is active.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (read only)
     .requires-0-or-1 = Requires 0 or 1 only.
-    .requires-int-range = Requires an integer between __ocs_fmt_0__ and __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Current text style:  "__ocs_fmt_0__"  Text height:  __ocs_fmt_1__
     .fields-found = __ocs_fmt_0__ field(s) found.

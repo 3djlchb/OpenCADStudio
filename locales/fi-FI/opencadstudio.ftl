@@ -6114,7 +6114,6 @@ count-feature =
     .area-active = Laskenta-alue on aktiivinen.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (vain luku)
     .requires-0-or-1 = Vain 0 tai 1 sallitaan.
-    .requires-int-range = Vaaditaan kokonaisluku väliltä __ocs_fmt_0__–__ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Nykyinen tekstityyli:  "__ocs_fmt_0__"  Tekstin korkeus:  __ocs_fmt_1__
     .fields-found = Kenttiä löytyi: __ocs_fmt_0__.

@@ -6129,7 +6129,6 @@ count-feature =
     .area-active = منطقة العد نشطة.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (للقراءة فقط)
     .requires-0-or-1 = يتطلب 0 أو 1 فقط.
-    .requires-int-range = يتطلب عددًا صحيحًا بين __ocs_fmt_0__ و __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT نمط النص الحالي:  "__ocs_fmt_0__"  ارتفاع النص:  __ocs_fmt_1__
     .fields-found = تم العثور على __ocs_fmt_0__ من الحقول.

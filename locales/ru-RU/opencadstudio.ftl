@@ -6118,7 +6118,6 @@ count-feature =
     .area-active = Область подсчёта активна.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (только чтение)
     .requires-0-or-1 = Допускается только 0 или 1.
-    .requires-int-range = Требуется целое число от __ocs_fmt_0__ до __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Текущий текстовый стиль:  "__ocs_fmt_0__"  Высота текста:  __ocs_fmt_1__
     .fields-found = Найдено полей: __ocs_fmt_0__.

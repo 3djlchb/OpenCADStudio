@@ -6114,7 +6114,6 @@ count-feature =
     .area-active = Oblast počítání je aktivní.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (jen pro čtení)
     .requires-0-or-1 = Vyžaduje pouze 0 nebo 1.
-    .requires-int-range = Vyžaduje celé číslo mezi __ocs_fmt_0__ a __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Aktuální styl textu:  "__ocs_fmt_0__"  Výška textu:  __ocs_fmt_1__
     .fields-found = Nalezeno polí: __ocs_fmt_0__.

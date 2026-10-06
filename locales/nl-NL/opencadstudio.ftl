@@ -6115,7 +6115,6 @@ count-feature =
     .area-active = Telgebied is actief.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (alleen-lezen)
     .requires-0-or-1 = Alleen 0 of 1 toegestaan.
-    .requires-int-range = Vereist een geheel getal tussen __ocs_fmt_0__ en __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Huidige tekststijl:  "__ocs_fmt_0__"  Teksthoogte:  __ocs_fmt_1__
     .fields-found = __ocs_fmt_0__ veld(en) gevonden.

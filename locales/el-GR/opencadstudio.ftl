@@ -6117,7 +6117,6 @@ count-feature =
     .area-active = Η περιοχή καταμέτρησης είναι ενεργή.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (μόνο για ανάγνωση)
     .requires-0-or-1 = Απαιτείται μόνο 0 ή 1.
-    .requires-int-range = Απαιτείται ακέραιος μεταξύ __ocs_fmt_0__ και __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Τρέχον στυλ κειμένου:  "__ocs_fmt_0__"  Ύψος κειμένου:  __ocs_fmt_1__
     .fields-found = Βρέθηκαν πεδία: __ocs_fmt_0__.

@@ -6115,7 +6115,6 @@ count-feature =
     .area-active = Zählbereich ist aktiv.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (schreibgeschützt)
     .requires-0-or-1 = Nur 0 oder 1 zulässig.
-    .requires-int-range = Erfordert eine ganze Zahl zwischen __ocs_fmt_0__ und __ocs_fmt_1__.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Aktueller Textstil:  "__ocs_fmt_0__"  Texthöhe:  __ocs_fmt_1__
     .fields-found = __ocs_fmt_0__ Feld(er) gefunden.

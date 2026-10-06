@@ -6040,7 +6040,6 @@ count-feature =
     .area-active = Sayım alanı etkin.
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (salt okunur)
     .requires-0-or-1 = Yalnızca 0 veya 1 girilebilir.
-    .requires-int-range = __ocs_fmt_0__ ile __ocs_fmt_1__ arasında bir tamsayı gerekir.
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT Geçerli metin stili:  "__ocs_fmt_0__"  Metin yüksekliği:  __ocs_fmt_1__
     .fields-found = __ocs_fmt_0__ alan bulundu.

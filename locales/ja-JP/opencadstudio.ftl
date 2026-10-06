@@ -6105,7 +6105,6 @@ count-feature =
     .area-active = カウント領域が有効です。
     .read-only-value = __ocs_fmt_0__ = __ocs_fmt_1__ (読み取り専用)
     .requires-0-or-1 = 0 または 1 のみ指定できます。
-    .requires-int-range = __ocs_fmt_0__ から __ocs_fmt_1__ までの整数を指定してください。
     .target-count = __ocs_fmt_0__ ...... __ocs_fmt_1__
     .mtext-current-style = MTEXT 現在の文字スタイル:  "__ocs_fmt_0__"  文字の高さ:  __ocs_fmt_1__
     .fields-found = __ocs_fmt_0__ 個のフィールドが見つかりました。
