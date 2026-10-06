@@ -976,7 +976,29 @@ impl OpenCADStudio {
                 } else {
                     self.tabs[i].scene.wire_models_for(&handles)
                 };
-                let new_cmd = StretchCommand::new(handles, wires);
+                // Selected by a crossing window just before: stretch through
+                // that window, no second one asked for (#1068). Every picked
+                // object must touch it, or the selection was changed since.
+                let window = self.tabs[i].last_crossing_window.and_then(|(lo, hi)| {
+                    let touches = |wire: &crate::scene::WireModel| {
+                        let [x0, y0, x1, y1] = wire.aabb.map(f64::from);
+                        x0 <= hi[0] && x1 >= lo[0] && y0 <= hi[1] && y1 >= lo[1]
+                    };
+                    (!handles.is_empty()
+                        && handles.iter().all(|h| {
+                            self.tabs[i].scene.wire_models_for(&[*h]).iter().any(touches)
+                        }))
+                    .then(|| {
+                        (
+                            glam::DVec3::new(lo[0], lo[1], f64::NEG_INFINITY),
+                            glam::DVec3::new(hi[0], hi[1], f64::INFINITY),
+                        )
+                    })
+                });
+                let new_cmd = match window {
+                    Some(window) => StretchCommand::preselected(handles, wires, window),
+                    None => StretchCommand::new(handles, wires),
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

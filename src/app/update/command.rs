@@ -269,7 +269,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     let dyn_field_char = !s.is_empty()
                         && s.chars().all(|c| {
                             c.is_ascii_digit()
-                                || matches!(c, '.' | '-' | '+' | '*' | '/' | '^' | '%' | '(' | ')')
+                                || matches!(c, '.' | '-' | '+' | '*' | '/' | '^' | '%' | '(' | ')' | '\'' | '"')
                         });
                     if dyn_field_char
                         && self.command_line.input.is_empty()

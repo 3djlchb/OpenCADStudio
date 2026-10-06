@@ -268,6 +268,9 @@ pub(super) struct DocumentTab {
     /// `suspended_cmd` was parked by a transparent command (`'ZOOM`) and is
     /// restored as soon as the transparent one ends.
     pub(super) transparent_resume: bool,
+    /// Model-space corners of the last crossing window drawn with no command
+    /// running: STRETCH on that selection stretches through it (#1068).
+    pub(super) last_crossing_window: Option<([f64; 2], [f64; 2])>,
 }
 
 impl DocumentTab {
@@ -669,6 +672,7 @@ impl DocumentTab {
             plugin_state: HashMap::new(),
             suspended_cmd: None,
             transparent_resume: false,
+            last_crossing_window: None,
         }
     }
 

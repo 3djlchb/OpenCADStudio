@@ -4728,6 +4728,9 @@ impl OpenCADStudio {
                 };
 
                 if let Some((fence, window)) = drag_geometry {
+                    if self.tabs[i].active_cmd.is_none() {
+                        self.tabs[i].last_crossing_window = window.filter(|_| box_crossing);
+                    }
                     let result = self.tabs[i].active_cmd.as_mut().and_then(|command| {
                         command.set_shift(self.shift_down);
                         command.on_drag_selection(&fence, window)

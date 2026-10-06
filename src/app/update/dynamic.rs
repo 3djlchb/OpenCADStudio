@@ -191,7 +191,9 @@ impl OpenCADStudio {
         let picks_object = self.tabs[i]
             .active_cmd
             .as_ref()
-            .map(|c| c.needs_entity_pick() || c.needs_structure_point_pick())
+            .map(|c| {
+                c.needs_entity_pick() || c.needs_structure_point_pick() || c.selects_by_window()
+            })
             .unwrap_or(false);
         let has_base = self.last_point.is_some();
         // While aligned to an OTRACK ray, the point step reads a single

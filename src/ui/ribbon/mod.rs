@@ -1569,7 +1569,7 @@ fn collapse_button<'a>(
                         .size(9)
                         .width(Fill)
                         .align_x(iced::Center)
-                        .wrapping(iced::advanced::text::Wrapping::WordOrGlyph)
+                        .wrapping(iced::advanced::text::Wrapping::Word)
                         .style(muted_text_style),
                     crate::ui::icons::themed_secondary_arrow_down(8.0),
                 ]
@@ -1640,7 +1640,7 @@ fn collapse_button<'a>(
                 .size(9)
                 .width(Fill)
                 .align_x(iced::Center)
-                .wrapping(iced::advanced::text::Wrapping::WordOrGlyph)
+                .wrapping(iced::advanced::text::Wrapping::Word)
                 .style(muted_text_style),
             crate::ui::icons::themed_secondary_arrow_down(8.0),
         ]
