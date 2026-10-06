@@ -512,6 +512,8 @@ impl OpenCADStudio {
             }
             // Rebuild tessellation caches without modifying the document.
             "REGEN" | "REGENALL" => {
+                // A regen is a field evaluation event (FIELDEVAL bit 16).
+                self.tabs[i].scene.update_fields(16, None);
                 self.tabs[i].scene.populate_meshes_from_document();
                 self.command_line.push_output(crate::t!("REGEN: regenerated model.").as_ref());
                 return Some(Task::none());

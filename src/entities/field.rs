@@ -108,12 +108,36 @@ pub fn resolve(document: &CadDocument, host: Handle) -> Option<String> {
     codec::fields::resolve(document, host, &OcsFieldContext(Some(document)))
 }
 
-pub fn resolve_handle(
-    document: &CadDocument,
-    field: Handle,
-    host: Handle,
-) -> Option<String> {
-    codec::fields::resolve_handle(document, field, host, &OcsFieldContext(Some(document)))
+/// FIELDEVAL of the drawing (kept in its variable dictionary; default 31):
+/// the events that update fields — 1 open, 2 save, 4 plot, 8 eTransmit,
+/// 16 regen.
+pub fn fieldeval(document: &CadDocument) -> i32 {
+    crate::io::drawing_variable(document, "FIELDEVAL")
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(31)
+}
+
+/// Update the fields an event evaluates and store their values in the host
+/// texts: `event` 1 open, 2 save or 16 regen (masked with FIELDEVAL), or 32
+/// an explicit UPDATEFIELD. `hosts` limits it to those hosts. Returns the
+/// hosts whose text changed and the number of fields the hosts hold.
+pub fn update_fields(
+    document: &mut CadDocument,
+    event: i32,
+    hosts: Option<&[Handle]>,
+) -> (Vec<Handle>, usize) {
+    let event = if event == 32 { event } else { event & fieldeval(document) };
+    if event == 0 || document.fields.is_empty() {
+        return (Vec::new(), 0);
+    }
+    let snapshot = document.clone();
+    document.update_fields(&OcsFieldContext(Some(&snapshot)), event, hosts)
+}
+
+/// The text a table cell shows for its field: a formula is evaluated live
+/// (it reads other cells), any other field shows its stored value.
+pub fn cell_text(document: &CadDocument, field: Handle, table: Handle) -> Option<String> {
+    codec::fields::cell_field_text(document, field, table, &OcsFieldContext(Some(document)))
 }
 
 /// Evaluate one field code (`\AcVar Date \f "yyyy-MM-dd"`, or the `%<…>%`
@@ -477,7 +501,7 @@ pub fn stamp_plot_fields(document: &mut CadDocument) -> Vec<Handle> {
         .objects
         .values()
         .any(|object| matches!(object, codec::objects::ObjectType::Field(_)));
-    if !has_fields {
+    if !has_fields || fieldeval(document) & 4 == 0 {
         return Vec::new();
     }
     let snapshot = document.clone();

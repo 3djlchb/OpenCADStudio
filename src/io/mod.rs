@@ -797,6 +797,8 @@ pub fn load_bytes_finalized(path: &Path, bytes: Vec<u8>) -> Result<(CadDocument,
     normalize_block_origins(&mut doc);
     resolve_raster_image_paths(&mut doc, path.parent());
     doc.source_path = Some(path.to_string_lossy().into_owned());
+    // Opening is a field evaluation event (FIELDEVAL bit 1).
+    crate::entities::field::update_fields(&mut doc, 1, None);
     let dropped = purge_corrupt_entities(&mut doc);
     Ok((doc, dropped))
 }
@@ -1050,6 +1052,8 @@ fn finalize_loaded_outcome(
     crate::entities::field::local_header_dates(doc);
     resolve_raster_image_paths(doc, path.parent());
     doc.source_path = Some(path.to_string_lossy().into_owned());
+    // Opening is a field evaluation event (FIELDEVAL bit 1).
+    crate::entities::field::update_fields(doc, 1, None);
     Ok(outcome)
 }
 

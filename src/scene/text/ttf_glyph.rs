@@ -577,6 +577,30 @@ pub struct ShapedRun {
     pub glyphs: Vec<PlacedGlyph>,
     /// Total pen advance of the run (9-unit).
     pub advance: f32,
+    /// Every laid-out glyph (blank ones too) as the byte range of the text it
+    /// shows and its visual [left, right] pen cell, 9-unit.
+    pub cells: Vec<(usize, usize, f32, f32)>,
+}
+
+/// Each character's visual [left, right] cell (9-unit) in logical order:
+/// the cell of the glyph that shows it; a glyph showing several characters
+/// shares its cell among them in reading order.
+pub fn char_cells(run: &ShapedRun, text: &str) -> Vec<(f32, f32)> {
+    text.char_indices()
+        .map(|(byte, _)| {
+            let Some(&(start, end, x0, x1)) =
+                run.cells.iter().find(|(start, end, _, _)| (*start..(*end).max(start + 1)).contains(&byte))
+            else {
+                return (0.0, 0.0);
+            };
+            let chars: Vec<usize> = text[start..end.min(text.len())].char_indices().map(|(i, _)| start + i).collect();
+            let (n, k) = (chars.len().max(1), chars.iter().position(|&b| b == byte).unwrap_or(0));
+            let rtl = text[start..end.min(text.len())].chars().any(crate::entities::text_support::is_rtl_char);
+            let slot = (x1 - x0) / n as f32;
+            let k = if rtl { n - 1 - k } else { k };
+            (x0 + slot * k as f32, x0 + slot * (k + 1) as f32)
+        })
+        .collect()
 }
 
 type ShapeCache = HashMap<(String, String), Option<Arc<ShapedRun>>>;
@@ -881,10 +905,12 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
     buffer.shape_until_scroll(&mut font_system, false);
 
     let mut glyphs = Vec::new();
+    let mut cells = Vec::new();
     let mut advance = 0.0_f32;
     for run in buffer.layout_runs() {
         advance = advance.max(run.line_w * px_to_9);
         for glyph in run.glyphs.iter() {
+            cells.push((glyph.start, glyph.end, glyph.x * px_to_9, (glyph.x + glyph.w) * px_to_9));
             let face_index = font_system
                 .db_mut()
                 .face(glyph.font_id)
@@ -923,7 +949,7 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
     if advance <= 0.0 && glyphs.is_empty() {
         None
     } else {
-        Some(ShapedRun { glyphs, advance })
+        Some(ShapedRun { glyphs, advance, cells })
     }
 }
 
@@ -986,10 +1012,12 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     let px_to_9 = CAP_UNITS * upem_p / (SHAPE_FS * cap_p);
 
     let mut glyphs: Vec<PlacedGlyph> = Vec::new();
+    let mut cells = Vec::new();
     let mut advance = 0.0_f32;
     for run in buf.layout_runs() {
         advance = advance.max(run.line_w * px_to_9);
         for g in run.glyphs.iter() {
+            cells.push((g.start, g.end, g.x * px_to_9, (g.x + g.w) * px_to_9));
             let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
             let Some(font) = fs.get_font(g.font_id, g.font_weight) else {
                 continue;
@@ -1028,7 +1056,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     if advance <= 0.0 && glyphs.is_empty() {
         return None;
     }
-    Some(ShapedRun { glyphs, advance })
+    Some(ShapedRun { glyphs, advance, cells })
 }
 
 #[cfg(test)]

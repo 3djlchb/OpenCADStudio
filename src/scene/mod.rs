@@ -568,6 +568,9 @@ struct SceneDependencyIndex {
     text_geometry: DependencyTargets,
     annotation_geometry: DependencyTargets,
     signatures: HashMap<Handle, u64>,
+    /// Block name (normalised) → the layout entities that draw it, nested
+    /// references included.
+    block_roots: HashMap<String, HashSet<Handle>>,
 }
 
 fn hatch_interaction_aabb(hatch: &model::hatch_model::HatchModel) -> Option<[f64; 4]> {
@@ -3406,6 +3409,64 @@ impl Scene {
 
     pub fn bump_entities(&mut self, changes: &[(Handle, ChangeKind)]) {
         self.bump_entities_with_parametric_policy(changes, &[], false);
+    }
+
+    /// Update the fields an evaluation event re-evaluates (see
+    /// [`crate::entities::field::update_fields`]) and redraw the hosts whose
+    /// text changed. Returns the number of fields the hosts hold.
+    pub fn update_fields(&mut self, event: i32, hosts: Option<&[Handle]>) -> usize {
+        let (changed, found) = crate::entities::field::update_fields(&mut self.document, event, hosts);
+        if !changed.is_empty() {
+            self.bump_text_hosts(&changed);
+        }
+        found
+    }
+
+    /// Redraw text hosts whose stored text changed (re-evaluated fields). An
+    /// attribute is drawn by its INSERT, and a host inside a block definition
+    /// by every reference to that block, so those redraw instead of the host;
+    /// nothing else re-tessellates.
+    pub fn bump_text_hosts(&mut self, hosts: &[Handle]) {
+        if self.dependency_index_cache.borrow().is_none() {
+            *self.dependency_index_cache.borrow_mut() = Some(self.rebuild_dependency_index());
+        }
+        let mut targets = DependencyTargets::default();
+        for &host in hosts {
+            let drawn = match self.document.get_entity(host) {
+                Some(entity) => entity,
+                None => match self.document.entities().find(|e| {
+                    matches!(e, EntityType::Insert(i) if i.attributes.iter().any(|a| a.common.handle == host))
+                }) {
+                    Some(insert) => insert,
+                    None => continue,
+                },
+            };
+            let handle = drawn.common().handle;
+            let owner = drawn.common().owner_handle;
+            if !self.changes_touch_block_definition(&[(handle, ChangeKind::Modified)]) {
+                targets.render_handles.insert(handle);
+                continue;
+            }
+            let Some(record) = self.document.block_records.iter().find(|r| {
+                r.handle == owner || r.entity_handles.contains(&handle)
+            }) else {
+                continue;
+            };
+            let name = normalize_name(&record.name);
+            if let Some(index) = self.dependency_index_cache.borrow().as_ref() {
+                if let Some(users) = index.block_roots.get(&name) {
+                    targets.render_handles.extend(users.iter().copied());
+                }
+            }
+            // A table draws its cells from its own block of cell texts.
+            let record_handle = record.handle;
+            targets.render_handles.extend(self.document.entities().filter_map(|e| match e {
+                EntityType::Table(t) if t.block_record_handle == Some(record_handle) => Some(t.common.handle),
+                _ => None,
+            }));
+            targets.touches_block_definition = true;
+        }
+        self.invalidate_dependency_targets(targets);
     }
 
     pub fn bump_entities_with_parametric_driven(
@@ -11727,6 +11788,7 @@ vis_index={:.1} visible_probe={:.1}",
                 _ => {}
             }
         }
+        index.block_roots = roots;
         index
     }
 

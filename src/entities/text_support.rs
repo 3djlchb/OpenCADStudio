@@ -237,6 +237,42 @@ pub fn text_local_bounds(
     }
 }
 
+/// Each character's [left, right] pen cell along a TEXT line (DXF specials
+/// already resolved), measured as [`text_local_bounds`] lays the line out:
+/// the shaper's glyph cells for a TrueType font or a script that needs
+/// shaping, else the stroke font's advances.
+pub fn text_char_cells(font_name: &str, text: &str, height: f32, width_factor: f32) -> Vec<(f32, f32)> {
+    let face = Face::resolve(font_name);
+    let scale = height / 9.0;
+    let wf = width_factor.abs().clamp(0.01, 100.0);
+    let shaping_family = face.ttf_family().or_else(|| {
+        crate::scene::text::web_font::requires_shaping(text)
+            .then(|| crate::scene::text::web_font::primary_script().family())
+    });
+    if let Some(run) = shaping_family.and_then(|family| crate::scene::text::ttf_glyph::shape_run(family, text)) {
+        return crate::scene::text::ttf_glyph::char_cells(&run, text)
+            .into_iter()
+            .map(|(x0, x1)| (x0 * scale * wf, x1 * scale * wf))
+            .collect();
+    }
+    let mut cursor = 0.0_f32;
+    text.chars()
+        .map(|ch| {
+            let advance = if ch == ' ' {
+                face.word_spacing()
+            } else {
+                match face.glyph(ch) {
+                    Some(glyph) => glyph.advance + face.spacing_after(ch),
+                    None => 6.0 + face.letter_spacing(),
+                }
+            };
+            let cell = (cursor * scale * wf, (cursor + advance) * scale * wf);
+            cursor += advance;
+            cell
+        })
+        .collect()
+}
+
 /// Expand DXF `%%x` special-character sequences that appear in both TEXT and MTEXT values:
 /// - `%%d` / `%%D` → `°`
 /// - `%%p` / `%%P` → `±`
@@ -486,6 +522,33 @@ fn font_stem(name: &str) -> String {
         .next()
         .unwrap_or(name)
         .to_string()
+}
+
+/// The visible-character offset that follows the MTEXT string `s` — the
+/// `vis` index [`layout_mtext`]'s glyph boxes give the first character of
+/// whatever comes after `s` in a longer string: every laid-out character,
+/// a tab or stack slot, and one per paragraph break.
+pub fn mtext_visible_count(s: &str) -> usize {
+    adapt_mtext_paragraphs(s, 1.0, false)
+        .iter()
+        .enumerate()
+        .map(|(i, para)| {
+            usize::from(i > 0)
+                + para
+                    .runs
+                    .iter()
+                    .map(|run| match &run.kind {
+                        MTextRunKind::Glyphs(text) => text.chars().count(),
+                        MTextRunKind::Tab => 1,
+                        MTextRunKind::Stack { numerator, denominator, .. } => {
+                            numerator.chars().count()
+                                + denominator.chars().count()
+                                + usize::from(!denominator.is_empty())
+                        }
+                    })
+                    .sum::<usize>()
+        })
+        .sum()
 }
 
 /// Parse an MTEXT string into the layout's `Vec<MTextLine>`, using opencadcodec's
@@ -971,6 +1034,34 @@ pub fn measure_word(
     w
 }
 
+/// Per-character cells of a word laid out by the shaper — the visual
+/// [left, right] of each character in logical order, from the word start,
+/// in drawing units — when the word is shaped (a TrueType font or a script
+/// that needs shaping), as [`measure_word`] measures it. A glyph that
+/// covers several characters (a ligature) shares its cell among them.
+pub fn word_cells(
+    text: &str,
+    state: &RunState,
+    entity_h: f32,
+    base_wf: f32,
+    base_font: &str,
+) -> Option<Vec<(f32, f32)>> {
+    let scale = run_scale(state, entity_h, base_wf);
+    let font_name = resolve_font(state, base_font);
+    let face = Face::resolve(&font_name);
+    let family = face.ttf_family().or_else(|| {
+        crate::scene::text::web_font::requires_shaping(text)
+            .then(|| crate::scene::text::web_font::primary_script().family())
+    })?;
+    let run = crate::scene::text::ttf_glyph::shape_run(family, text)?;
+    Some(
+        crate::scene::text::ttf_glyph::char_cells(&run, text)
+            .into_iter()
+            .map(|(x0, x1)| (x0 * scale, x1 * scale))
+            .collect(),
+    )
+}
+
 pub fn measure_space(state: &RunState, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
@@ -1329,6 +1420,10 @@ pub struct GlyphBox {
     pub ymin: f32,
     pub ymax: f32,
     pub is_rtl: bool,
+    /// The same cell unrotated, relative to the insertion point
+    /// [left, bottom, right, top]: exact for rotated text, where the world
+    /// box above is only the bounds of two corners.
+    pub local: [f32; 4],
 }
 
 /// Output of [`layout_mtext`]: stroke groups + the geometry the caller
@@ -2071,6 +2166,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 ymin: ay.min(by),
                 ymax: ay.max(by),
                 is_rtl: sub.is_rtl,
+                local: [line_lx + cursor_start, line_ly, line_lx + cursor_start, line_ly + caret_h],
             });
             vis += 1;
         }
@@ -2297,25 +2393,41 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             } else {
                                 measure_word(text, &atom.state, entity_h, base_wf, &base_font_name)
                             };
+                            // The shaper's own glyph cells (visual positions,
+                            // per character in logical order); evenly divided
+                            // slots only when the word is not shaped.
                             let slot_w = word_w / count as f32;
-                            for ci in 0..count {
-                                let cx = cursor_x + ci as f32 * slot_w;
-                                let (ax, ay) = to_world(line_base_x, line_base_y, cx, ly);
-                                let (bx, by) = to_world(line_base_x, line_base_y, cx + slot_w, ly + run_h);
+                            let cells = word_cells(text, &atom.state, entity_h, base_wf, &base_font_name)
+                                .unwrap_or_else(|| {
+                                    (0..count)
+                                        .map(|ci| {
+                                            let x = (count - 1 - ci) as f32 * slot_w;
+                                            (x, x + slot_w)
+                                        })
+                                        .collect()
+                                });
+                            for (ci, (x0, x1)) in cells.into_iter().enumerate() {
+                                let (cx0, cx1) = (cursor_x + x0, cursor_x + x1);
+                                let (ax, ay) = to_world(line_base_x, line_base_y, cx0, ly);
+                                let (bx, by) = to_world(line_base_x, line_base_y, cx1, ly + run_h);
                                 glyph_boxes.push(GlyphBox {
-                                    vis: atom.char_offset + count - 1 - ci,
+                                    vis: atom.char_offset + ci,
                                     xmin: ax.min(bx),
                                     xmax: ax.max(bx),
                                     ymin: ay.min(by),
                                     ymax: ay.max(by),
                                     is_rtl: true,
+                                    local: [line_lx + cx0, line_ly + ly, line_lx + cx1, line_ly + ly + run_h],
                                 });
                             }
                         } else {
                             // Per-character boxes, advancing exactly as
                             // `measure_word` does so they track the glyphs.
+                            // A shaped word (TrueType or a complex script)
+                            // takes the shaper's cells, as it draws.
                             let scale = run_scale(&atom.state, entity_h, base_wf);
                             let face = Face::resolve(&font_name);
+                            let shaped = word_cells(text, &atom.state, entity_h, base_wf, &base_font_name);
                             let mut cx = cursor_x;
                             for (ci, ch) in text.chars().enumerate() {
                                 let adv = match face.glyph(ch) {
@@ -2324,8 +2436,12 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     }
                                     None => (6.0 + face.letter_spacing() * tracking) * scale,
                                 };
-                                let (ax, ay) = to_world(line_base_x, line_base_y, cx, ly);
-                                let (bx, by) = to_world(line_base_x, line_base_y, cx + adv, ly + run_h);
+                                let (cx0, cx1) = match shaped.as_ref().and_then(|cells| cells.get(ci)) {
+                                    Some(&(x0, x1)) => (cursor_x + x0, cursor_x + x1),
+                                    None => (cx, cx + adv),
+                                };
+                                let (ax, ay) = to_world(line_base_x, line_base_y, cx0, ly);
+                                let (bx, by) = to_world(line_base_x, line_base_y, cx1, ly + run_h);
                                 glyph_boxes.push(GlyphBox {
                                     vis: atom.char_offset + ci,
                                     xmin: ax.min(bx),
@@ -2333,6 +2449,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     ymin: ay.min(by),
                                     ymax: ay.max(by),
                                     is_rtl: false,
+                                    local: [line_lx + cx0, line_ly + ly, line_lx + cx1, line_ly + ly + run_h],
                                 });
                                 cx += adv;
                             }
@@ -2460,6 +2577,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     ymin,
                                     ymax,
                                     is_rtl: false,
+                                    local: [line_lx + x0, line_ly + valign_dy, line_lx + x1, line_ly + top],
                                 });
                             }
                         }
@@ -2576,6 +2694,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             ymin: ay.min(by),
                             ymax: ay.max(by),
                             is_rtl: false,
+                            local: [line_lx + cursor_x, line_ly, line_lx + cursor_x + adv, line_ly + run_h],
                         });
                     }
                     cursor_x += adv;
