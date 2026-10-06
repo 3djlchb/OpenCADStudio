@@ -101,12 +101,15 @@ pub(crate) fn style_for_property<'a>(
     cell: &'a codec::entities::table::TableCell,
     property: codec::entities::table::CellStylePropertyFlags,
 ) -> Option<&'a codec::entities::table::CellStyle> {
+    // The cell's own overrides, as either layout (DXF or binary) states them.
+    if let Some(style) = cell.style.as_ref().filter(|style| style.sets(property)) {
+        return Some(style);
+    }
     let column_style = table
         .columns
         .get(column)
         .and_then(|column| column.style.as_ref());
     for style in [
-        cell.style.as_ref(),
         row.style.as_ref(),
         column_style,
         table.base_style.as_ref(),
@@ -132,7 +135,7 @@ fn cell_text_height(
     content: &codec::entities::table::CellContent,
 ) -> Option<f64> {
     use codec::entities::table::CellStylePropertyFlags as P;
-    let own = content.format_property_flags & P::TEXT_HEIGHT.bits() as i32 != 0;
+    let own = content.sets(P::TEXT_HEIGHT);
     own.then_some(content.text_height)
         .or_else(|| style_for_property(table, row, column, cell, P::TEXT_HEIGHT).map(|s| s.text_height))
         .or(Some(content.text_height))
