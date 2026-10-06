@@ -13,7 +13,6 @@ use crate::scene::model::wire_model::WireModel;
 use glam::DVec3;
 use codec::sheet_set::{self as ss, ComponentKind, LayoutReference, SheetSetData, SheetSetDatabase};
 use iced::Task;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// The variables this family answers for.
@@ -38,8 +37,8 @@ fn paper_layouts(doc: &codec::CadDocument) -> Vec<(String, String)> {
 
 /// UTC now as the reference stamps `UpdateTime`: `yyyy/MM/dd HH:mm:ss.fff`.
 fn utc_stamp() -> String {
-    let ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let ms = iced::time::SystemTime::now()
+        .duration_since(iced::time::SystemTime::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
     let (days, rem) = (ms.div_euclid(86_400_000), ms.rem_euclid(86_400_000));
@@ -66,55 +65,116 @@ fn folder_of(path: &str) -> String {
     Path::new(path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
 }
 
-/// Template of a component for new sheets: its own `DefDwtLayout`, else
-/// the nearest parent's.
-/// The lock files' date: the long date of the user's locale, two spaces and
-/// the 24-hour time (`5 Ekim 2026 Pazartesi  09:26:39`).
-#[cfg(windows)]
-fn lock_stamp() -> String {
-    use windows_sys::Win32::Globalization::{GetDateFormatEx, GetTimeFormatEx, DATE_LONGDATE};
-    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-    let mut date = [0u16; 128];
-    let mut time = [0u16; 64];
-    let format = wide("HH:mm:ss");
-    // SAFETY: the buffers outlive the calls and their lengths are passed.
-    let (d, t) = unsafe {
-        (
-            GetDateFormatEx(std::ptr::null(), DATE_LONGDATE, std::ptr::null(), std::ptr::null(), date.as_mut_ptr(), date.len() as i32, std::ptr::null()),
-            GetTimeFormatEx(std::ptr::null(), 0, std::ptr::null(), format.as_ptr(), time.as_mut_ptr(), time.len() as i32),
-        )
-    };
-    let text = |b: &[u16], n: i32| String::from_utf16_lossy(&b[..(n.max(1) as usize - 1)]);
-    format!("{}  {}", text(&date, d), text(&time, t))
+/// `.dst` access: native only (a browser has no file paths to read or write).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn read_set(path: &str) -> Result<SheetSetDatabase, String> {
+    SheetSetDatabase::read(path)
 }
 
-#[cfg(not(windows))]
-fn lock_stamp() -> String {
-    String::new()
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn read_set(_path: &str) -> Result<SheetSetDatabase, String> {
+    Err(crate::t!("Not available").into_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_set(db: &mut SheetSetDatabase, path: &str) -> Result<(), String> {
+    db.write(path)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn write_set(_db: &mut SheetSetDatabase, _path: &str) -> Result<(), String> {
+    Err(crate::t!("Not available").into_owned())
+}
+
+/// The user and machine names a lock file carries.
+#[cfg(not(target_arch = "wasm32"))]
+fn lock_owner() -> (String, String) {
+    let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
+    let machine = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|h| h.trim().to_string()))
+        .unwrap_or_default();
+    (user, machine)
+}
+
+/// The drawings whose lock files this application wrote, with the writing
+/// process id, kept in the config folder so a crashed session's locks can
+/// be told from someone else's and taken back.
+#[cfg(not(target_arch = "wasm32"))]
+fn lock_record() -> Option<PathBuf> {
+    Some(crate::config::config_dir()?.join("sheet_set_locks.txt"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn recorded_locks() -> Vec<(u32, PathBuf)> {
+    let text = lock_record().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    text.lines()
+        .filter_map(|l| {
+            let (pid, path) = l.split_once('\t')?;
+            Some((pid.parse().ok()?, PathBuf::from(path)))
+        })
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn record_lock(path: &Path, held: bool) {
+    let Some(record) = lock_record() else { return };
+    let mut locks = recorded_locks();
+    locks.retain(|(_, p)| p != path);
+    if held {
+        locks.push((std::process::id(), path.to_path_buf()));
+    }
+    let text: String = locks.iter().map(|(pid, p)| format!("{pid}\t{}\n", p.display())).collect();
+    if let Some(dir) = record.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(record, text);
+}
+
+/// Whether the `.dwl` next to `path` is one an earlier session of this
+/// application left behind (it crashed): recorded by another process, and
+/// still naming this user and machine.
+// ponytail: the recorded process is assumed gone (the app is single
+// instance); check it is alive if several instances ever share a profile.
+#[cfg(not(target_arch = "wasm32"))]
+fn stale_own_lock(path: &Path) -> bool {
+    let me = std::process::id();
+    if !recorded_locks().iter().any(|(pid, p)| p == path && *pid != me) {
+        return false;
+    }
+    let text = std::fs::read_to_string(path.with_extension("dwl")).unwrap_or_default();
+    let mut lines = text.lines().map(str::trim);
+    let (user, machine) = lock_owner();
+    lines.next() == Some(user.as_str()) && lines.next() == Some(machine.as_str())
 }
 
 /// `<drawing>.dwl` (user, machine, date lines) and `<drawing>.dwl2` (the same
-/// as XML), as the reference writes them for a drawing it has open.
+/// as XML), as the reference writes them for a drawing it has open. The date
+/// is the OS long date, two spaces and the 24-hour time.
 // ponytail: .dwl is written as UTF-8; the reference's encoding of non-ASCII
 // day names was not measured.
 #[cfg(not(target_arch = "wasm32"))]
 fn write_lock(path: &Path) -> std::io::Result<()> {
-    let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
-    let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
-    let stamp = lock_stamp();
+    let (user, machine) = lock_owner();
+    let stamp = crate::entities::field::long_date_time_now();
     std::fs::write(path.with_extension("dwl"), format!("{user}\n{machine} \n{stamp}"))?;
     std::fs::write(
         path.with_extension("dwl2"),
         format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\">\n<whprops>\n<username>{user}</username>\n<machinename>{machine} </machinename>\n<fullname></fullname>\n<datetime>{stamp}</datetime>\n</whprops>"
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<whprops>\n<username>{user}</username>\n\
+             <machinename>{machine} </machinename>\n<fullname></fullname>\n<datetime>{stamp}</datetime>\n</whprops>"
         ),
-    )
+    )?;
+    record_lock(path, true);
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) fn release_lock(path: &Path) {
     let _ = std::fs::remove_file(path.with_extension("dwl"));
     let _ = std::fs::remove_file(path.with_extension("dwl2"));
+    record_lock(path, false);
 }
 
 /// The insertion point of Place on Sheet (with the scale, picked from the
@@ -306,6 +366,8 @@ fn rename_form(db: &SheetSetDatabase, set: usize, id: &str) -> Form {
     }
 }
 
+/// Template of a component for new sheets: its own `DefDwtLayout`, else
+/// the nearest parent's.
 fn template_of(db: &SheetSetDatabase, component: &str) -> Option<LayoutReference> {
     let mut id = component.to_string();
     for _ in 0..32 {
@@ -468,6 +530,7 @@ impl OpenCADStudio {
     /// Publish the open sets to the field engine and redraw every field.
     fn sheet_sets_changed(&mut self) {
         crate::entities::field::set_sheet_sets(self.sheet_set.sets.clone());
+        self.sync_drawing_locks();
         self.refresh_locations();
         if self.sheet_set.settings.sheet_status >= 1 {
             self.refresh_sheet_status();
@@ -475,7 +538,9 @@ impl OpenCADStudio {
             self.sheet_set.status.clear();
         }
         for tab in &mut self.tabs {
-            refresh_sheet_fields(&mut tab.scene);
+            if refresh_sheet_fields(&mut tab.scene) {
+                tab.dirty = true;
+            }
         }
     }
 
@@ -490,7 +555,7 @@ impl OpenCADStudio {
         {
             self.sheet_set.current = Some(k);
         } else {
-            let db = SheetSetDatabase::read(&path.to_string_lossy())?;
+            let db = read_set(&path.to_string_lossy())?;
             self.sheet_set.sets.push(db);
             self.sheet_set.current = Some(self.sheet_set.sets.len() - 1);
         }
@@ -501,19 +566,31 @@ impl OpenCADStudio {
         Ok(())
     }
 
-    /// Lock files for the drawings open in tabs, as other instances expect
-    /// them (the sheet status shows such a sheet as open); a drawing that
-    /// already has someone else's lock file is left alone.
+    /// Lock files for the sheets of the open sets that are open in tabs, as
+    /// other instances expect them (the sheet status shows such a sheet as
+    /// open). A drawing with someone else's lock file is left alone; a lock
+    /// a crashed session of this application left is taken back. With no set
+    /// open every lock is released.
     #[cfg(not(target_arch = "wasm32"))]
     fn sync_drawing_locks(&mut self) {
-        let open: HashSet<PathBuf> = self.tabs.iter().filter_map(|t| t.current_path.clone()).filter(|p| p.exists()).collect();
+        let sets = &self.sheet_set.sets;
+        let open: std::collections::HashSet<PathBuf> = self
+            .tabs
+            .iter()
+            .filter_map(|t| t.current_path.clone())
+            .filter(|p| {
+                let drawing = p.to_string_lossy();
+                sets.iter().any(|db| db.sheet_for(&drawing, None).is_some())
+            })
+            .filter(|p| p.exists())
+            .collect();
         let gone: Vec<PathBuf> = self.sheet_set.locks.difference(&open).cloned().collect();
         for p in gone {
             release_lock(&p);
             self.sheet_set.locks.remove(&p);
         }
         for p in open {
-            if self.sheet_set.locks.contains(&p) || p.with_extension("dwl").exists() {
+            if self.sheet_set.locks.contains(&p) || (p.with_extension("dwl").exists() && !stale_own_lock(&p)) {
                 continue;
             }
             if write_lock(&p).is_ok() {
@@ -521,9 +598,6 @@ impl OpenCADStudio {
             }
         }
     }
-
-    #[cfg(target_arch = "wasm32")]
-    fn sync_drawing_locks(&mut self) {}
 
     /// Reload every open set whose `.dst` was changed by someone else.
     fn poll_sheet_sets(&mut self) {
@@ -539,7 +613,7 @@ impl OpenCADStudio {
             if self.sheet_set.seen.insert(key, modified).is_none_or(|t| t == modified) {
                 continue;
             }
-            if let Ok(fresh) = SheetSetDatabase::read(&path) {
+            if let Ok(fresh) = read_set(&path) {
                 if fresh.root != db.root {
                     *db = fresh;
                     changed = true;
@@ -559,7 +633,7 @@ impl OpenCADStudio {
         let Some(path) = db.path.clone() else {
             return;
         };
-        if let Err(e) = db.write(&path) {
+        if let Err(e) = write_set(db, &path) {
             self.command_line.push_error(&format!("{path}: {e}"));
         }
         self.sheet_sets_changed();
@@ -660,7 +734,7 @@ impl OpenCADStudio {
                 self.sync_drawing_locks();
                 self.poll_sheet_sets();
                 // SSMSHEETSTATUS 2: the status is taken again every SSMPOLLTIME seconds.
-                let every = std::time::Duration::from_secs(u64::from(self.sheet_set.settings.poll_time.max(20)));
+                let every = iced::time::Duration::from_secs(u64::from(self.sheet_set.settings.poll_time.max(20)));
                 if self.sheet_set.settings.sheet_status == 2 && self.sheet_set.status_at.is_none_or(|t| t.elapsed() >= every) {
                     self.refresh_sheet_status();
                 }
@@ -789,6 +863,10 @@ impl OpenCADStudio {
                 self.sheet_set.submenu = None;
                 return self.view_menu(id, action);
             }
+            // Browsers expose no folder picker.
+            #[cfg(target_arch = "wasm32")]
+            SheetSetMsg::AddLocation | SheetSetMsg::Browse(_) => {}
+            #[cfg(not(target_arch = "wasm32"))]
             SheetSetMsg::AddLocation => {
                 return Task::perform(
                     async {
@@ -816,7 +894,7 @@ impl OpenCADStudio {
             SheetSetMsg::OpenDrawing(path) => return self.update(Message::OpenRecent(PathBuf::from(path))),
             SheetSetMsg::Refresh => {
                 if let Some(path) = self.sheet_set.db().and_then(|db| db.path.clone()) {
-                    match SheetSetDatabase::read(&path) {
+                    match read_set(&path) {
                         Ok(db) => {
                             if let Some(slot) = self.sheet_set.db_mut() {
                                 *slot = db;
@@ -838,6 +916,7 @@ impl OpenCADStudio {
             SheetSetMsg::FolderPicked(field, Some(path)) => self.dialog_folder(field, path),
             SheetSetMsg::FolderPicked(_, None) => {}
             SheetSetMsg::TemplatePicked(Some(path)) => self.properties_template(path),
+            #[cfg(not(target_arch = "wasm32"))]
             SheetSetMsg::Browse(field) => {
                 return Task::perform(
                     async {
@@ -1138,8 +1217,8 @@ impl OpenCADStudio {
     pub(in crate::app) fn sheet_set_after_open(&mut self, i: usize) -> Task<Message> {
         let mut task = Task::none();
         // A sheet's fields show its current values once it is open.
-        if !self.sheet_set.sets.is_empty() {
-            refresh_sheet_fields(&mut self.tabs[i].scene);
+        if !self.sheet_set.sets.is_empty() && refresh_sheet_fields(&mut self.tabs[i].scene) {
+            self.tabs[i].dirty = true;
         }
         let path = self.tabs[i].current_path.as_ref().map(|p| p.to_string_lossy().to_string());
         if let (Some(path), Some((want, layout))) = (path.as_ref(), self.sheet_set_pending_layout.as_ref()) {
@@ -1925,7 +2004,7 @@ impl OpenCADStudio {
     /// SSMSHEETSTATUS: a sheet whose drawing is missing, or open (its `.dwl`
     /// lock file, or a tab of this application).
     pub(in crate::app) fn refresh_sheet_status(&mut self) {
-        self.sheet_set.status_at = Some(std::time::Instant::now());
+        self.sheet_set.status_at = Some(iced::time::Instant::now());
         self.sheet_set.status.clear();
         if self.sheet_set.settings.sheet_status == 0 {
             return;
@@ -2105,7 +2184,7 @@ impl OpenCADStudio {
                 }
             }
         }
-        if let Err(e) = db.write(&path) {
+        if let Err(e) = write_set(&mut db, &path) {
             w.error = Some(e);
             self.sheet_set.dialog = Some(SsDialog::Wizard(w));
             return Task::none();
@@ -2509,16 +2588,15 @@ fn write_properties(db: &mut SheetSetDatabase, p: &Properties) {
 }
 
 /// Store fresh values for a drawing's sheet set fields (the fields keep them,
-/// as when the reference updates them) and redraw their hosts.
-fn refresh_sheet_fields(scene: &mut crate::scene::Scene) {
-    crate::entities::field::refresh_sheet_set_fields(&mut scene.document);
-    let changes: Vec<_> = scene
-        .document
-        .entities()
-        .filter(|e| crate::entities::field::hosts_field(&scene.document, e))
-        .map(|e| (e.common().handle, crate::scene::ChangeKind::Modified))
+/// as when the reference updates them) and redraw the hosts that changed;
+/// whether any did.
+fn refresh_sheet_fields(scene: &mut crate::scene::Scene) -> bool {
+    let changes: Vec<_> = crate::entities::field::refresh_sheet_set_fields(&mut scene.document)
+        .into_iter()
+        .map(|h| (h, crate::scene::ChangeKind::Modified))
         .collect();
     if !changes.is_empty() {
         scene.bump_entities(&changes);
     }
+    !changes.is_empty()
 }

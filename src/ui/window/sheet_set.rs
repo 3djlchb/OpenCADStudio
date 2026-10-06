@@ -67,7 +67,7 @@ pub struct SheetSetManager {
     pub seen: std::collections::HashMap<String, std::time::SystemTime>,
     /// Sheet status by sheet id (SSMSHEETSTATUS) and when it was taken.
     pub status: std::collections::HashMap<String, SheetStatus>,
-    pub status_at: Option<std::time::Instant>,
+    pub status_at: Option<iced::time::Instant>,
     /// Sheet Views: by category (else by sheet).
     pub by_category: bool,
     /// Model Views: location id, folder and its drawings.

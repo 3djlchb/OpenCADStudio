@@ -4,8 +4,8 @@
 use crate::app::{Message, OpenCADStudio};
 use crate::command::CadCommand;
 use crate::modules::annotate::field_cmd::{FieldObjectPickCommand, FieldPlaceCommand, FieldTablePickCommand};
-use crate::ui::window::field_dialog::{nav_props, 
-    fields_of, object_properties, FieldDialogMsg, FieldDialogState, FieldTarget, DATE_FORMATS,
+use crate::ui::window::field_dialog::{
+    fields_of, nav_props, object_properties, FieldDialogMsg, FieldDialogState, FieldTarget, DATE_FORMATS,
     NAMED_TYPES,
 };
 use iced::Task;
@@ -209,7 +209,11 @@ impl OpenCADStudio {
                 state.ss_prop.clear();
             }
             FieldDialogMsg::SsNode(id) => {
-                state.ss_prop = state.ss_sets.get(state.ss_set).and_then(|db| nav_props(db, &id).first().map(|p| p.0.clone())).unwrap_or_default();
+                state.ss_prop = state
+                    .ss_sets
+                    .get(state.ss_set)
+                    .and_then(|db| nav_props(db, &id).first().map(|p| p.0.clone()))
+                    .unwrap_or_default();
                 state.ss_node = id;
             }
             FieldDialogMsg::SsProp(p) => state.ss_prop = p,
@@ -228,10 +232,14 @@ impl OpenCADStudio {
                 );
             }
             FieldDialogMsg::SsPicked(None) => {}
-            FieldDialogMsg::SsPicked(Some(path)) => match codec::sheet_set::SheetSetDatabase::read(&path.to_string_lossy()) {
+            FieldDialogMsg::SsPicked(Some(path)) => match crate::app::commands::sheet_set::read_set(&path.to_string_lossy()) {
                 Ok(db) => {
                     let key = codec::sheet_set::path_key(&path.to_string_lossy());
-                    state.ss_set = match state.ss_sets.iter().position(|d| d.path.as_deref().is_some_and(|p| codec::sheet_set::path_key(p) == key)) {
+                    let open = state
+                        .ss_sets
+                        .iter()
+                        .position(|d| d.path.as_deref().is_some_and(|p| codec::sheet_set::path_key(p) == key));
+                    state.ss_set = match open {
                         Some(k) => k,
                         None => {
                             state.ss_sets.push(db);
