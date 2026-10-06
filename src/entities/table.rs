@@ -101,12 +101,15 @@ pub(crate) fn style_for_property<'a>(
     cell: &'a codec::entities::table::TableCell,
     property: codec::entities::table::CellStylePropertyFlags,
 ) -> Option<&'a codec::entities::table::CellStyle> {
+    // The cell's own overrides, as either layout (DXF or binary) states them.
+    if let Some(style) = cell.style.as_ref().filter(|style| style.sets(property)) {
+        return Some(style);
+    }
     let column_style = table
         .columns
         .get(column)
         .and_then(|column| column.style.as_ref());
     for style in [
-        cell.style.as_ref(),
         row.style.as_ref(),
         column_style,
         table.base_style.as_ref(),
@@ -119,6 +122,48 @@ pub(crate) fn style_for_property<'a>(
         }
     }
     None
+}
+
+/// A cell's text height: the content's own format when it overrides it,
+/// else the cell, row, column or table style that sets it, else the
+/// content's value.
+fn cell_text_height(
+    table: &Table,
+    row: &codec::entities::table::TableRow,
+    column: usize,
+    cell: &codec::entities::table::TableCell,
+    content: &codec::entities::table::CellContent,
+) -> Option<f64> {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    let own = content.sets(P::TEXT_HEIGHT);
+    own.then_some(content.text_height)
+        .or_else(|| style_for_property(table, row, column, cell, P::TEXT_HEIGHT).map(|s| s.text_height))
+        .or(Some(content.text_height))
+        .filter(|h| *h > 1e-6)
+}
+
+/// A cell's text style: the content's own, else the cell, row, column or
+/// table style that sets it (by handle, or by name for a cell override).
+fn cell_text_style(
+    document: &codec::CadDocument,
+    table: &Table,
+    row: &codec::entities::table::TableRow,
+    column: usize,
+    cell: &codec::entities::table::TableCell,
+    content: Option<&codec::entities::table::CellContent>,
+) -> Option<codec::Handle> {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    content.and_then(|c| c.text_style_handle).or_else(|| {
+        let style = style_for_property(table, row, column, cell, P::TEXT_STYLE)?;
+        style.text_style_handle.or_else(|| {
+            let name = style.text_style_name.trim();
+            document
+                .text_styles
+                .iter()
+                .find(|s| !name.is_empty() && s.name.eq_ignore_ascii_case(name))
+                .map(|s| s.handle)
+        })
+    })
 }
 
 fn style_for_border<'a>(
@@ -1250,8 +1295,7 @@ impl RenderConvertible for Table {
                 // Resolve text height: content → cell-style → row-style → 0.18.
                 let content = cell.contents.first();
                 let cell_h = content
-                    .map(|c| c.text_height)
-                    .filter(|h| *h > 1e-6)
+                    .and_then(|c| cell_text_height(self, row, ci, cell, c))
                     .or_else(|| {
                         cell.style
                             .as_ref()
@@ -1264,8 +1308,7 @@ impl RenderConvertible for Table {
                 let margin = cell_h * 0.5_f32;
 
                 // Resolve text-style handle: content → cell-style → row-style.
-                let style_handle = content
-                    .and_then(|c| c.text_style_handle)
+                let style_handle = cell_text_style(document, self, row, ci, cell, content)
                     .or_else(|| cell.style.as_ref().and_then(|s| s.text_style_handle))
                     .or_else(|| row_style.and_then(|s| s.text_style_handle));
                 let font_owned = font_for_handle(style_handle).unwrap_or_else(|| "txt".to_string());
@@ -1485,6 +1528,7 @@ pub fn tessellate_table(
 
     // Accumulators keyed by quantised colour (+ weight for borders).
     let mut fills: HashMap<[u8; 4], ([f32; 4], Vec<[f32; 3]>)> = HashMap::default();
+    let mut field_fills: Vec<[f32; 3]> = Vec::new();
     // SDF cell text: glyph quads (per-vertex coloured) collected across all
     // cells; emitted as one text-carrying wire at the end.
     let mut text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
@@ -1761,11 +1805,8 @@ pub fn tessellate_table(
             let fallback_sizes: Vec<_> = value_contents
                 .iter()
                 .map(|(_, content, text)| {
-                    let height = if content.text_height > 1e-6 {
-                        content.text_height as f32 * anno_scale
-                    } else {
-                        fallback_text_height
-                    };
+                    let height = cell_text_height(tab, row, ci, cell, content)
+                        .map_or(fallback_text_height, |h| h as f32 * anno_scale);
                     let mut max_chars = 0usize;
                     let mut line_count = 0usize;
                     for line in text.split("\\P") {
@@ -1794,20 +1835,7 @@ pub fn tessellate_table(
             for (slot_index, (content_index, content, text)) in
                 value_contents.iter().enumerate()
             {
-                let text_height_style = style_for_property(
-                    tab,
-                    row,
-                    ci,
-                    cell,
-                    codec::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
-                );
-                let cell_h = (content.text_height > 1e-6)
-                    .then_some(content.text_height)
-                    .or_else(|| {
-                        text_height_style
-                            .map(|style| style.text_height)
-                            .filter(|height| *height > 1e-6)
-                    })
+                let cell_h = cell_text_height(tab, row, ci, cell, content)
                     .or_else(|| {
                         row_style
                             .map(|style| style.text_height)
@@ -1856,16 +1884,7 @@ pub fn tessellate_table(
                     .map(|style| style.margin_bottom as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
                     .unwrap_or_else(|| v_margin.max(cell_h * 0.5));
-                let style_handle = content.text_style_handle.or_else(|| {
-                    style_for_property(
-                        tab,
-                        row,
-                        ci,
-                        cell,
-                        codec::entities::table::CellStylePropertyFlags::TEXT_STYLE,
-                    )
-                    .and_then(|style| style.text_style_handle)
-                })
+                let style_handle = cell_text_style(document, tab, row, ci, cell, Some(content))
                     .or_else(|| row_style.and_then(|style| style.text_style_handle));
                 let font_owned =
                     font_for_handle(style_handle).unwrap_or_else(|| "txt".to_string());
@@ -1957,6 +1976,50 @@ pub fn tessellate_table(
                     vertical_text: false,
                     want_glyph_boxes: false,
                 });
+                // FIELDDISPLAY: a field cell's text on a gray box, one per line,
+                // from the same layout's character cells (screen only).
+                if content.field_handle.is_some() && crate::entities::field::display() {
+                    let cells = layout_mtext(&MTextRenderOpts {
+                        columns: Default::default(),
+                        value: text,
+                        insertion: [to.x as f64, to.y as f64, to.z as f64],
+                        height: cell_h,
+                        rect_w: (col_width - margin_left - margin_right).max(0.0),
+                        rotation: rot,
+                        style: &resolved,
+                        attach_h_anchor,
+                        v_anchor,
+                        line_spacing_factor: 1.0,
+                        exact_line_spacing: false,
+                        rectangle_height: 0.0,
+                        vertical_text: false,
+                        want_glyph_boxes: true,
+                    })
+                        .glyph_boxes;
+                    let (sin_r, cos_r) = (rot as f64).sin_cos();
+                    let mut lines: Vec<[f64; 4]> = Vec::new();
+                    for b in &cells {
+                        let [l, base, r, top] = b.local.map(|v| v as f64);
+                        match lines.last_mut() {
+                            Some(c) if (c[1] - base).abs() <= 1e-3 * (top - base).max(c[3]) => {
+                                c[0] = c[0].min(l);
+                                c[2] = c[2].max(r);
+                                c[3] = c[3].max(top - base);
+                            }
+                            _ => lines.push([l, base, r, top - base]),
+                        }
+                    }
+                    for [l, base, r, h] in lines.into_iter().filter(|[l, _, r, _]| r > l) {
+                        let (b, t) = (base - crate::entities::field::BOX_BELOW * h, base + crate::entities::field::BOX_ABOVE * h);
+                        let w = |x: f64, y: f64| [
+                            (to.x as f64 + x * cos_r - y * sin_r) as f32,
+                            (to.y as f64 + x * sin_r + y * cos_r) as f32,
+                            to.z as f32,
+                        ];
+                        let q = [w(l, b), w(r, b), w(r, t), w(l, t)];
+                        field_fills.extend([q[0], q[1], q[2], q[0], q[2], q[3]]);
+                    }
+                }
                 let tcol = if selected {
                     sel_col
                 } else if !matches!(
@@ -2115,6 +2178,11 @@ pub fn tessellate_table(
         if !tris.is_empty() {
             out.push(mk(color, vec![], tris, 1.0));
         }
+    }
+    if !field_fills.is_empty() {
+        let mut background = mk(crate::entities::field::BACKGROUND, vec![], field_fills, 1.0);
+        background.plot_visible = false;
+        out.push(background);
     }
     for (_, (color, lw, pts)) in borders {
         if !pts.is_empty() {

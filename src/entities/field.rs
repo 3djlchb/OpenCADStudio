@@ -134,6 +134,16 @@ pub fn update_fields(
     document.update_fields(&OcsFieldContext(Some(&snapshot)), event, hosts)
 }
 
+/// Recompute a table's cell formulas into its block after the table changed;
+/// returns the cell texts that changed.
+pub fn refresh_table_formulas(document: &mut CadDocument, table: Handle) -> Vec<Handle> {
+    if document.fields.is_empty() {
+        return Vec::new();
+    }
+    let snapshot = document.clone();
+    document.refresh_table_formulas(&OcsFieldContext(Some(&snapshot)), table)
+}
+
 /// The text a table cell shows for its field: a formula is evaluated live
 /// (it reads other cells), any other field shows its stored value.
 pub fn cell_text(document: &CadDocument, field: Handle, table: Handle) -> Option<String> {
@@ -323,6 +333,12 @@ pub fn set_display(on: bool) {
 }
 
 /// The gray the reference draws behind a field.
+/// FIELDDISPLAY box extent around a line of field text, in text heights:
+/// from a third of the height below the baseline to 1.19 heights above it
+/// (the reference's box, measured at 2.5 and 10 unit text).
+pub const BOX_BELOW: f64 = 0.345;
+pub const BOX_ABOVE: f64 = 1.19;
+
 pub const BACKGROUND: [f32; 4] = [203.0 / 255.0, 203.0 / 255.0, 203.0 / 255.0, 1.0];
 
 /// Whether `entity` hosts a field: its extension dictionary has ACAD_FIELD.

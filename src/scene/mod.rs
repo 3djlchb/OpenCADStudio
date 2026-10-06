@@ -3695,6 +3695,20 @@ impl Scene {
                 }
             }
         }
+        // An edited table lets go of its block; rebuild it from the cells so
+        // the drawing shows and saves the cell texts and grid it now holds.
+        let mut rebuilt_table_block = false;
+        for (handle, kind) in &changes {
+            if !matches!(kind, ChangeKind::Removed)
+                && matches!(self.document.get_entity(*handle), Some(EntityType::Table(t)) if t.block_record_handle.is_none())
+            {
+                rebuilt_table_block |= self.document.refresh_table_block(*handle);
+                rebuilt_table_block |= !crate::entities::field::refresh_table_formulas(&mut self.document, *handle).is_empty();
+            }
+        }
+        if rebuilt_table_block {
+            self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+        }
         if !changes.is_empty() {
             self.refresh_dependency_index_for_changes(&changes);
         }
