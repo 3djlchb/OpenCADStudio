@@ -2781,7 +2781,10 @@ pub(crate) fn arrow_from_block_with_deferred_hatch(
         .unwrap_or_else(|| arrow_from_block_name(None, dimasz))
 }
 
-fn arrow_from_block_name(name: Option<&str>, dimasz: f32) -> ArrowKind {
+/// Canonical block-name → arrow-kind mapping shared by the renderer and the
+/// dimstyle preview so both agree on what a named arrowhead looks like.
+/// Unknown / empty names fall back to the standard filled triangle.
+pub(crate) fn arrow_from_block_name(name: Option<&str>, dimasz: f32) -> ArrowKind {
     name.and_then(|name| builtin_arrow_from_block_name(name, dimasz))
         .unwrap_or(ArrowKind::Triangle {
             size: dimasz,
@@ -3452,6 +3455,36 @@ pub(crate) fn normalized_or(v: Vec3, fallback: Vec3) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arrow_name_mapping_covers_preview_kinds() {
+        // Pins the shared name→kind contract the dimstyle preview relies on.
+        assert!(matches!(
+            arrow_from_block_name(Some("OPEN"), 1.0),
+            ArrowKind::Open { .. }
+        ));
+        assert!(matches!(
+            arrow_from_block_name(Some("DOT"), 1.0),
+            ArrowKind::Dot { filled: true, .. }
+        ));
+        assert!(matches!(
+            arrow_from_block_name(Some("ARCHTICK"), 1.0),
+            ArrowKind::Tick { .. }
+        ));
+        assert!(matches!(
+            arrow_from_block_name(Some("NONE"), 1.0),
+            ArrowKind::None
+        ));
+        // Unknown / empty names fall back to the standard filled triangle.
+        assert!(matches!(
+            arrow_from_block_name(Some("NOPE"), 1.0),
+            ArrowKind::Triangle { filled: true, .. }
+        ));
+        assert!(matches!(
+            arrow_from_block_name(None, 1.0),
+            ArrowKind::Triangle { filled: true, .. }
+        ));
+    }
 
     #[test]
     fn test_split_mixed_polyline_straight_lines_have_taper_widths() {
