@@ -128,7 +128,6 @@ dependencies = [
  "cfg-if",
  "getrandom 0.3.4",
  "once_cell",
- "serde",
  "version_check",
  "zerocopy",
 ]
@@ -4205,15 +4204,15 @@ dependencies = [
 
 [[package]]
 name = "opencadcodec"
-version = "0.5.5"
-source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=04b26f2#04b26f2c992110c1da4ed6bc0491d76906fbf4e5"
+version = "0.6.0"
+source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=1ca7d33#1ca7d3360a34384b59297ffe8aa18b157d2701d9"
 dependencies = [
- "ahash 0.8.12",
  "anyhow",
  "bitflags 2.13.1",
  "byteorder",
  "encoding_rs",
  "flate2",
+ "foldhash 0.2.0",
  "indexmap",
  "itoa",
  "memmap2",
@@ -4222,14 +4221,14 @@ dependencies = [
  "rayon",
  "ryu",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "web-time",
 ]
 
 [[package]]
 name = "opencadgraph"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadgraph.git?rev=e7f8b45#e7f8b456b462a2b71b923674798876ef27d10d3c"
+source = "git+https://github.com/HakanSeven12/opencadgraph.git?rev=d7908a8#d7908a8d24a42896b03f7f83b3a1c0187692043a"
 dependencies = [
  "opencadkernel",
  "serde_json",
@@ -4238,7 +4237,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=16059db#16059dbdbef0ecbc7310c2f5d1a32615c67ee6e2"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7fb0abb#7fb0abb4ee8e4266a770eb673ac7757c71321513"
 dependencies = [
  "cavalier_contours",
  "opencadcodec",
@@ -4249,7 +4248,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=16059db#16059dbdbef0ecbc7310c2f5d1a32615c67ee6e2"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7fb0abb#7fb0abb4ee8e4266a770eb673ac7757c71321513"
 dependencies = [
  "nalgebra",
 ]

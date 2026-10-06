@@ -693,6 +693,14 @@ fn gen_struct(name: &str, info: &TypeInfo, registry: &TypeRegistry, required: &[
         .map(|field| format!("\"{field}\""))
         .collect::<Vec<_>>()
         .join(", ");
+    // Fields the codec keeps out of serde (`#[serde(skip)]`) are invisible to
+    // the traced registry; entity records default them through their own
+    // `Default` instead of failing to construct.
+    let rest = if info.fields.iter().any(|f| f.type_id.as_str() == "EntityCommon") {
+        "        ..Default::default()\n"
+    } else {
+        ""
+    };
     for f in &info.fields {
         if f.type_id.as_str() == "EntityCommon" {
             // A sub-record's own common data (layer, XDATA, handles) is not part
@@ -750,14 +758,16 @@ fn dict_to_{snake}(value: PyObjectRef, vm: &VirtualMachine) -> PyResult<{path}> 
             return Err(vm.new_value_error(format!("{name} needs {{required}}")));
         }}
     }}
+    #[allow(clippy::needless_update)]
     Ok({path} {{
-{from_dict_fields}    }})
+{from_dict_fields}{rest}    }})
 }}
 
 #[allow(dead_code)]
 fn default_{snake}() -> {path} {{
+    #[allow(clippy::needless_update)]
     {path} {{
-{default_fields}    }}
+{default_fields}{rest}    }}
 }}
 
 "#
