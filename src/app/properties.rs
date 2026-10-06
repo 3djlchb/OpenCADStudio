@@ -2065,7 +2065,7 @@ impl OpenCADStudio {
                     let doc = &scene.document;
                     let header = &doc.header;
                     let camera = scene.camera.borrow();
-                    let (viewport_width, viewport_height) = scene.selection.borrow().vp_size;
+                    let (viewport_width, viewport_height) = scene.selection.borrow().view.vp_size;
                     let aspect = if viewport_height > 0.0 {
                         viewport_width as f64 / viewport_height as f64
                     } else {

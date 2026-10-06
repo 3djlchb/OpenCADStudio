@@ -1757,7 +1757,7 @@ mod tests {
         );
         assert_eq!(text["added"], 1, "{text}");
 
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (1600.0, 800.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
         app.tabs[i].scene.fit_all();
         let (_, max) = app.tabs[i]
             .scene
@@ -2775,7 +2775,7 @@ mod tests {
             app.pick_add = add;
             app.pick_drag_rect = rect;
             let _ = app.run_command_line("LINE 0,0 10,10");
-            app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+            app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             let _ = app.run_command_line("ZOOM EXTENTS");
             // Both directions. Crossing = a right → left diagonal sweep (the
             // freeform path may be degenerate — crossing counts hits).
@@ -2819,16 +2819,16 @@ mod tests {
             }
             {
                 let sel = app.tabs[i].scene.selection.borrow();
-                assert!(sel.left_dragging, "drag must start (add={add} rect={rect})");
+                assert!(sel.input.left_dragging, "drag must start (add={add} rect={rect})");
                 if rect {
                     // Rectangle mode drives the box machinery, not the lasso.
                     assert!(
-                        sel.box_anchor.is_some() && sel.box_current.is_some() && !sel.poly_active,
+                        sel.gesture.box_anchor.is_some() && sel.gesture.box_current.is_some() && !sel.gesture.poly_active,
                         "rect marquee must arm the box (add={add})"
                     );
                 } else {
-                    assert!(sel.poly_active, "lasso must start (add={add})");
-                    assert!(sel.poly_points.len() >= 3, "lasso points (add={add})");
+                    assert!(sel.gesture.poly_active, "lasso must start (add={add})");
+                    assert!(sel.gesture.poly_points.len() >= 3, "lasso points (add={add})");
                 }
             }
             let _ = app.update(Message::ViewportLeftRelease);
@@ -3157,7 +3157,7 @@ mod tests {
                 let mut app = OpenCADStudio::new_for_test();
                 app.automation_op(r#"{"op":"new"}"#);
                 {
-                    app.tabs[0].scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+                    app.tabs[0].scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
                     app.tabs[0].scene.sync_tiles_from_panes(1920.0, 1080.0);
                 }
 
@@ -3226,7 +3226,7 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         {
-            app.tabs[0].scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+            app.tabs[0].scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
             app.tabs[0].scene.sync_tiles_from_panes(1920.0, 1080.0);
         }
 

@@ -441,7 +441,7 @@ impl OpenCADStudio {
             .abs();
         if !self.point_size_relative && mag == 0.0 {
             let wpp = self.tabs[i].scene.world_per_pixel().unwrap_or(0.0);
-            let viewport_height = self.tabs[i].scene.selection.borrow().vp_size.1;
+            let viewport_height = self.tabs[i].scene.selection.borrow().view.vp_size.1;
             mag = if wpp > 0.0 {
                 crate::entities::point::relative_world_size(0.0, wpp, viewport_height)
             } else {
@@ -800,7 +800,7 @@ impl OpenCADStudio {
             self.grip_popup = None;
             return;
         }
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         let bounds = iced::Rectangle {
             x: 0.0,
             y: 0.0,
@@ -1024,7 +1024,7 @@ impl OpenCADStudio {
         {
             return Task::none();
         }
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         let (ox, oy) = match self.tabs[i]
             .scene
             .active_viewport
@@ -1121,7 +1121,7 @@ impl OpenCADStudio {
         // slide the origin / rotate the axis. Short-circuits pan & snap.
         if let Some(kind) = self.ucs_grip_drag {
             self.drag_ucs_grip(i, kind, p);
-            self.tabs[i].scene.selection.borrow_mut().last_move_pos = Some(p);
+            self.tabs[i].scene.selection.borrow_mut().input.last_move_pos = Some(p);
             return Task::none();
         }
 
@@ -1129,7 +1129,7 @@ impl OpenCADStudio {
         // hit-area overlay and moves over the rest of the viewport.
         // `hover_id` returns None outside the cube box, which clears
         // any stale highlight from the previous `CursorMoved`.
-        let (svw, svh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (svw, svh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         let cube_tile = match self.tabs[i]
             .scene
             .active_viewport
@@ -1148,7 +1148,7 @@ impl OpenCADStudio {
             VIEWCUBE_PX,
         ));
 
-        let navigating = self.tabs[i].scene.selection.borrow().middle_down;
+        let navigating = self.tabs[i].scene.selection.borrow().input.middle_down;
         if navigating {
             self.clear_navigation_hover(i);
         } else {
@@ -1166,61 +1166,61 @@ impl OpenCADStudio {
         }
 
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        sel.last_move_pos = Some(p);
+        sel.input.last_move_pos = Some(p);
 
-        if sel.left_down {
-            let press = sel.left_press_pos.unwrap_or(p);
+        if sel.input.left_down {
+            let press = sel.input.left_press_pos.unwrap_or(p);
             let dx = p.x - press.x;
             let dy = p.y - press.y;
             let dist2 = dx * dx + dy * dy;
             let elapsed_ms = sel
-                .left_press_time
+                .input.left_press_time
                 .map(|t| Instant::now().duration_since(t).as_millis())
                 .unwrap_or(u128::MAX);
-            if !sel.left_dragging && elapsed_ms >= POLY_START_DELAY_MS && dist2 > 9.0 {
-                sel.left_dragging = true;
+            if !sel.input.left_dragging && elapsed_ms >= POLY_START_DELAY_MS && dist2 > 9.0 {
+                sel.input.left_dragging = true;
                 if self.pick_drag_rect {
                     // PICKDRAG 1 (#226): press-drag spans a RECTANGLE
                     // marquee — drive the existing box machinery (its
                     // overlay and completion) instead of the lasso.
-                    sel.box_anchor = Some(press);
-                    sel.box_current = Some(p);
-                    if !sel.box_crossing_locked {
-                        sel.box_crossing = p.x < press.x;
+                    sel.gesture.box_anchor = Some(press);
+                    sel.gesture.box_current = Some(p);
+                    if !sel.gesture.box_crossing_locked {
+                        sel.gesture.box_crossing = p.x < press.x;
                     }
                 } else {
-                    sel.poly_active = true;
-                    sel.poly_crossing = p.x < press.x;
-                    sel.poly_points.clear();
-                    sel.poly_points.push(press);
-                    sel.poly_points.push(p);
+                    sel.gesture.poly_active = true;
+                    sel.gesture.poly_crossing = p.x < press.x;
+                    sel.gesture.poly_points.clear();
+                    sel.gesture.poly_points.push(press);
+                    sel.gesture.poly_points.push(p);
                 }
-            } else if sel.left_dragging && sel.poly_active {
-                if sel.poly_points.last().map_or(true, |lp| {
+            } else if sel.input.left_dragging && sel.gesture.poly_active {
+                if sel.gesture.poly_points.last().map_or(true, |lp| {
                     let ddx = p.x - lp.x;
                     let ddy = p.y - lp.y;
                     ddx * ddx + ddy * ddy > 16.0
                 }) {
-                    sel.poly_points.push(p);
+                    sel.gesture.poly_points.push(p);
                 }
-            } else if sel.left_dragging {
-                if let Some(a) = sel.box_anchor {
-                    sel.box_current = Some(p);
-                    if !sel.box_crossing_locked {
-                        sel.box_crossing = p.x < a.x;
+            } else if sel.input.left_dragging {
+                if let Some(a) = sel.gesture.box_anchor {
+                    sel.gesture.box_current = Some(p);
+                    if !sel.gesture.box_crossing_locked {
+                        sel.gesture.box_crossing = p.x < a.x;
                     }
                 }
             }
-        } else if sel.box_anchor.is_some() {
-            sel.box_current = Some(p);
-            if let Some(a) = sel.box_anchor {
-                if !sel.box_crossing_locked {
-                    sel.box_crossing = p.x < a.x;
+        } else if sel.gesture.box_anchor.is_some() {
+            sel.gesture.box_current = Some(p);
+            if let Some(a) = sel.gesture.box_anchor {
+                if !sel.gesture.box_crossing_locked {
+                    sel.gesture.box_crossing = p.x < a.x;
                 }
             }
         }
 
-        let (mid_down, mid_last, vp_size) = (sel.middle_down, sel.middle_last_pos, sel.vp_size);
+        let (mid_down, mid_last, vp_size) = (sel.input.middle_down, sel.input.middle_last_pos, sel.view.vp_size);
         if mid_down {
             if let Some(last) = mid_last {
                 let (dx, dy) = (p.x - last.x, p.y - last.y);
@@ -1257,9 +1257,9 @@ impl OpenCADStudio {
                     // zone keeps the +/- glyph from strobing when a slow drag
                     // wobbles a pixel either side of where it started.
                     if dy.abs() >= ZOOM_DIR_FLIP_PX {
-                        sel.zoom_dir_out = dy > 0.0;
+                        sel.input.zoom_dir_out = dy > 0.0;
                     }
-                    sel.middle_last_pos = Some(p);
+                    sel.input.middle_last_pos = Some(p);
                     return Task::none();
                 }
                 // Shift+MMB drag orbits the model view instead of panning
@@ -1275,20 +1275,20 @@ impl OpenCADStudio {
                         self.tabs[i]
                             .scene
                             .record_nav_perf(crate::scene::NavPerfOp::Rotate, move_started);
-                        self.tabs[i].scene.selection.borrow_mut().middle_last_pos = Some(p);
+                        self.tabs[i].scene.selection.borrow_mut().input.middle_last_pos = Some(p);
                         return Task::none();
                     } else if self.tabs[i].scene.current_layout == "Model" {
-                        if sel.orbit_pivot.is_none() {
+                        if sel.orbit.pivot.is_none() {
                             let scene = &self.tabs[i].scene;
                             let bounds = scene.active_model_tile_bounds(vp_size.0, vp_size.1);
-                            sel.orbit_pivot = Some(
+                            sel.orbit.pivot = Some(
                                 scene
                                     .orbit_pivot()
                                     .or_else(|| scene.view_center_surface_pivot(bounds))
                                     .unwrap_or_else(|| scene.camera.borrow().target),
                             );
                         }
-                        let pivot = sel.orbit_pivot;
+                        let pivot = sel.orbit.pivot;
                         drop(sel);
                         self.tabs[i].scene.refresh_projection_bounds();
                         self.tabs[i].scene.camera.borrow_mut().orbit(dx, dy, pivot);
@@ -1296,27 +1296,27 @@ impl OpenCADStudio {
                         self.tabs[i]
                             .scene
                             .record_nav_perf(crate::scene::NavPerfOp::Rotate, move_started);
-                        self.tabs[i].scene.selection.borrow_mut().middle_last_pos = Some(p);
+                        self.tabs[i].scene.selection.borrow_mut().input.middle_last_pos = Some(p);
                         return Task::none();
                     }
                     // Paper sheet is top-locked. Shift+MMB keeps its existing
                     // pan fallback; the explicit orbit tool does nothing here.
                     if self.tabs[i].orbit_mode {
-                        sel.middle_last_pos = Some(p);
+                        sel.input.middle_last_pos = Some(p);
                         return Task::none();
                     }
                 }
                 // Drop `sel` before calling mutable scene methods.
                 drop(sel);
                 self.pan_active_view(i, dx, dy, move_started);
-                self.tabs[i].scene.selection.borrow_mut().middle_last_pos = Some(p);
+                self.tabs[i].scene.selection.borrow_mut().input.middle_last_pos = Some(p);
                 return Task::none();
             }
-            sel.middle_last_pos = Some(p);
+            sel.input.middle_last_pos = Some(p);
         }
 
-        let dragging = sel.left_down || sel.right_down || sel.middle_down;
-        let vp_size = sel.vp_size;
+        let dragging = sel.input.left_down || sel.input.right_down || sel.input.middle_down;
+        let vp_size = sel.view.vp_size;
         drop(sel);
 
         // The active pane already follows the cursor (each pane's own
@@ -2593,7 +2593,7 @@ impl OpenCADStudio {
                 .active_cmd
                 .as_ref()
                 .and_then(|c| c.window_first_corner());
-            self.tabs[i].scene.selection.borrow_mut().preview_box = if is_window_corner {
+            self.tabs[i].scene.selection.borrow_mut().gesture.preview_box = if is_window_corner {
                 window_first.map(|c1| (proj(c1), p_full, true))
             } else {
                 None
@@ -2957,27 +2957,27 @@ impl OpenCADStudio {
             self.tabs[i].scene.clear_preview_wire();
         }
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        sel.left_down = false;
-        sel.left_press_pos = None;
-        sel.left_press_time = None;
-        sel.left_dragging = false;
-        sel.right_down = false;
-        sel.right_press_pos = None;
-        sel.right_press_time = None;
-        sel.right_last_pos = None;
-        sel.right_dragging = false;
-        sel.right_click_entered = false;
-        sel.middle_down = false;
-        sel.middle_last_pos = None;
-        sel.orbit_pivot = None;
-        sel.box_anchor = None;
-        sel.box_anchor_world = None;
-        sel.box_current = None;
-        sel.box_crossing = false;
-        sel.box_crossing_locked = false;
-        sel.poly_active = false;
-        sel.poly_points.clear();
-        sel.poly_crossing = false;
+        sel.input.left_down = false;
+        sel.input.left_press_pos = None;
+        sel.input.left_press_time = None;
+        sel.input.left_dragging = false;
+        sel.input.right_down = false;
+        sel.input.right_press_pos = None;
+        sel.input.right_press_time = None;
+        sel.input.right_last_pos = None;
+        sel.input.right_dragging = false;
+        sel.input.right_click_entered = false;
+        sel.input.middle_down = false;
+        sel.input.middle_last_pos = None;
+        sel.orbit.pivot = None;
+        sel.gesture.box_anchor = None;
+        sel.gesture.box_anchor_world = None;
+        sel.gesture.box_current = None;
+        sel.gesture.box_crossing = false;
+        sel.gesture.box_crossing_locked = false;
+        sel.gesture.poly_active = false;
+        sel.gesture.poly_points.clear();
+        sel.gesture.poly_crossing = false;
         drop(sel);
         // Clear the rollover highlight when the cursor leaves the
         // viewport so it doesn't stick while the mouse is over the
@@ -3045,7 +3045,7 @@ impl OpenCADStudio {
         world: glam::DVec3,
         from: Option<glam::DVec3>,
     ) -> Option<crate::snap::SnapResult> {
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         if vw <= 1.0 || vh <= 1.0 {
             return None;
         }
@@ -3088,7 +3088,7 @@ impl OpenCADStudio {
     /// or rotate the chosen axis to point at it, keeping a right-handed frame
     /// with Z fixed. Live — the commit (persist) happens on release.
     fn drag_ucs_grip(&mut self, i: usize, kind: crate::app::UcsGripKind, p_full: Point) {
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         if vw <= 1.0 || vh <= 1.0 {
             return;
         }
@@ -3312,7 +3312,7 @@ impl OpenCADStudio {
     /// canvas-relative point the viewport handlers expect.
     pub(super) fn pane_canvas_point(&self, idx: usize, local: Point) -> Point {
         let i = self.active_tab;
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         let o = self.tabs[i].scene.pane_origin_px(idx, vw, vh);
         Point::new(o.x + local.x, o.y + local.y)
     }
@@ -3323,7 +3323,7 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         let i = self.active_tab;
         self.tabs[i].scene.model_panes.resize(ev.split, ev.ratio);
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         self.tabs[i].scene.sync_tiles_from_panes(vw, vh);
         self.tabs[i].scene.camera_generation += 1;
         Task::none()
@@ -3344,7 +3344,7 @@ impl OpenCADStudio {
         if let iced::widget::pane_grid::DragEvent::Dropped { pane, target } = ev {
             let i = self.active_tab;
             self.tabs[i].scene.model_panes.drop(pane, target);
-            let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+            let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
             self.tabs[i].scene.sync_tiles_from_panes(vw, vh);
             self.tabs[i].scene.camera_generation += 1;
         }
@@ -3362,7 +3362,7 @@ impl OpenCADStudio {
         if self.tabs[i].scene.current_layout != "Model" {
             return None;
         }
-        let vp_size = self.tabs[i].scene.selection.borrow().vp_size;
+        let vp_size = self.tabs[i].scene.selection.borrow().view.vp_size;
         let scope = self.tabs[i].current_parametric_scope();
         let id = self.tabs[i].scene.constraint_glyph_hit(
             scope,
@@ -3391,7 +3391,7 @@ impl OpenCADStudio {
             .scene
             .selection
             .borrow_mut()
-            .right_click_entered = false;
+            .input.right_click_entered = false;
         // A click in the viewport dismisses any open ribbon dropdown
         // (e.g. the annotation style combo), which has no backdrop of
         // its own to catch outside clicks.
@@ -3419,7 +3419,7 @@ impl OpenCADStudio {
         // reaches here is outside the menu.
         {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            if sel.context_menu.take().is_some() {
+            if sel.menu.open_at.take().is_some() {
                 return Task::none();
             }
         }
@@ -3441,11 +3441,11 @@ impl OpenCADStudio {
         }
         let (p, vp_size) = {
             let sel = self.tabs[i].scene.selection.borrow();
-            let p = match sel.last_move_pos {
+            let p = match sel.input.last_move_pos {
                 Some(p) => p,
                 None => return Task::none(),
             };
-            (p, sel.vp_size)
+            (p, sel.view.vp_size)
         };
         let (vw, vh) = vp_size;
 
@@ -3488,16 +3488,16 @@ impl OpenCADStudio {
             self.clear_navigation_hover(i);
             self.tabs[i].scene.remember_current_view();
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            sel.middle_down = true;
-            sel.middle_last_pos = Some(p);
+            sel.input.middle_down = true;
+            sel.input.middle_last_pos = Some(p);
             if self.tabs[i].zoom_dynamic_mode {
-                sel.box_anchor = Some(p);
-                sel.box_current = Some(p);
-                sel.box_crossing = false;
-                sel.box_crossing_locked = true;
+                sel.gesture.box_anchor = Some(p);
+                sel.gesture.box_current = Some(p);
+                sel.gesture.box_crossing = false;
+                sel.gesture.box_crossing_locked = true;
                 // A fresh drag starts neutral: the magnifier shows "+" until
                 // the pointer has actually moved far enough to mean zoom out.
-                sel.zoom_dir_out = false;
+                sel.input.zoom_dir_out = false;
             }
             return Task::none();
         }
@@ -3743,15 +3743,15 @@ impl OpenCADStudio {
         // Selection steps and drag-fence picks still wait for the release.
         let picks_on_press = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
             !command.is_selection_gathering() && !command.accepts_drag_selection()
-        }) && self.tabs[i].scene.selection.borrow().box_anchor.is_none();
+        }) && self.tabs[i].scene.selection.borrow().gesture.box_anchor.is_none();
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        sel.left_down = true;
+        sel.input.left_down = true;
         // Stored in full-canvas space (like ViewportMove's cursor and
         // the overlay box / lasso drawing); release maps it into the
         // active tile. Tile-local here would double-offset the anchor.
-        sel.left_press_pos = Some(p_full);
-        sel.left_press_time = Some(Instant::now());
-        sel.left_dragging = false;
+        sel.input.left_press_pos = Some(p_full);
+        sel.input.left_press_time = Some(Instant::now());
+        sel.input.left_dragging = false;
         drop(sel);
         if picks_on_press {
             // The command path clears `left_down`, so the real release
@@ -3776,14 +3776,14 @@ impl OpenCADStudio {
         // left drag (exit is Esc / another command). Mirror of the press.
         if self.tabs[i].orbit_mode || self.tabs[i].pan_mode || self.tabs[i].zoom_dynamic_mode {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            sel.middle_down = false;
-            sel.middle_last_pos = None;
-            sel.orbit_pivot = None;
-            sel.box_anchor = None;
-            sel.box_anchor_world = None;
-            sel.box_current = None;
-            sel.box_crossing_locked = false;
-            sel.zoom_dir_out = false;
+            sel.input.middle_down = false;
+            sel.input.middle_last_pos = None;
+            sel.orbit.pivot = None;
+            sel.gesture.box_anchor = None;
+            sel.gesture.box_anchor_world = None;
+            sel.gesture.box_current = None;
+            sel.gesture.box_crossing_locked = false;
+            sel.input.zoom_dir_out = false;
             drop(sel);
             self.arm_hover_after_navigation(i);
             return Task::none();
@@ -3797,19 +3797,19 @@ impl OpenCADStudio {
             self.tabs[i].snap_result = None;
             self.snapper.from_point = None;
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            sel.left_down = false;
-            sel.left_press_pos = None;
-            sel.left_dragging = false;
+            sel.input.left_down = false;
+            sel.input.left_press_pos = None;
+            sel.input.left_dragging = false;
             return Task::none();
         }
 
         let (p, is_click, is_down) = {
             let sel = self.tabs[i].scene.selection.borrow();
-            let p = match sel.last_move_pos {
+            let p = match sel.input.last_move_pos {
                 Some(p) => p,
                 None => return Task::none(),
             };
-            (p, !sel.left_dragging, sel.left_down)
+            (p, !sel.input.left_dragging, sel.input.left_down)
         };
 
         // Grip editing: click-move-click (plus legacy press-drag).
@@ -3850,7 +3850,7 @@ impl OpenCADStudio {
         // Inside a floating viewport the pane is the viewport's own rect
         // and camera (see the MoveCursor path); pick / snap then run in
         // model space exactly where the GPU draws the content.
-        let canvas_sz = self.tabs[i].scene.selection.borrow().vp_size;
+        let canvas_sz = self.tabs[i].scene.selection.borrow().view.vp_size;
         let edit_frame = self.tabs[i].scene.viewport_edit_frame(canvas_sz);
         let (tile_vw, tile_vh, tile_off) = match &edit_frame {
             Some((_, full)) => (full.width, full.height, iced::Point::new(full.x, full.y)),
@@ -3872,7 +3872,7 @@ impl OpenCADStudio {
             .as_ref()
             .map(|c| c.is_selection_gathering())
             .unwrap_or(false);
-        let selection_box_active = self.tabs[i].scene.selection.borrow().box_anchor.is_some();
+        let selection_box_active = self.tabs[i].scene.selection.borrow().gesture.box_anchor.is_some();
         let selection_pick_add = self.pick_add
             || self.tabs[i]
                 .active_cmd
@@ -4523,11 +4523,11 @@ impl OpenCADStudio {
                 {
                     let anchor_world = self.cursor_model_point(i, &edit_cam, p, bounds);
                     let mut selection = self.tabs[i].scene.selection.borrow_mut();
-                    selection.box_anchor = Some(p_full);
-                    selection.box_current = Some(p_full);
-                    selection.box_anchor_world = Some(anchor_world);
-                    if !selection.box_crossing_locked {
-                        selection.box_crossing = false;
+                    selection.gesture.box_anchor = Some(p_full);
+                    selection.gesture.box_current = Some(p_full);
+                    selection.gesture.box_anchor_world = Some(anchor_world);
+                    if !selection.gesture.box_crossing_locked {
+                        selection.gesture.box_crossing = false;
                     }
                     None
                 } else {
@@ -4632,29 +4632,29 @@ impl OpenCADStudio {
             if let Some(r) = result {
                 let task = self.apply_cmd_result(r);
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                sel.left_down = false;
-                sel.left_press_pos = None;
-                sel.left_press_time = None;
-                sel.left_dragging = false;
+                sel.input.left_down = false;
+                sel.input.left_press_pos = None;
+                sel.input.left_press_time = None;
+                sel.input.left_dragging = false;
                 return task;
             }
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            sel.left_down = false;
-            sel.left_press_pos = None;
-            sel.left_press_time = None;
-            sel.left_dragging = false;
+            sel.input.left_down = false;
+            sel.input.left_press_pos = None;
+            sel.input.left_press_time = None;
+            sel.input.left_dragging = false;
             return Task::none();
         }
 
         let (is_down2, is_dragging, box_anchor, box_crossing, _vp_size, poly_drag) = {
             let sel = self.tabs[i].scene.selection.borrow();
             (
-                sel.left_down,
-                sel.left_dragging,
-                sel.box_anchor,
-                sel.box_crossing,
-                sel.vp_size,
-                sel.poly_active,
+                sel.input.left_down,
+                sel.input.left_dragging,
+                sel.gesture.box_anchor,
+                sel.gesture.box_crossing,
+                sel.view.vp_size,
+                sel.gesture.poly_active,
             )
         };
 
@@ -4683,7 +4683,7 @@ impl OpenCADStudio {
                         .scene
                         .selection
                         .borrow()
-                        .poly_points
+                        .gesture.poly_points
                         .iter()
                         .map(|point| iced::Point {
                             x: point.x - tile_off.x,
@@ -4749,18 +4749,18 @@ impl OpenCADStudio {
                     });
                     if let Some(result) = result {
                         let mut selection = self.tabs[i].scene.selection.borrow_mut();
-                        selection.left_down = false;
-                        selection.left_press_pos = None;
-                        selection.left_press_time = None;
-                        selection.left_dragging = false;
-                        selection.poly_active = false;
-                        selection.poly_points.clear();
-                        selection.poly_crossing = false;
-                        selection.box_anchor = None;
-                        selection.box_anchor_world = None;
-                        selection.box_current = None;
-                        selection.box_crossing = false;
-                        selection.box_crossing_locked = false;
+                        selection.input.left_down = false;
+                        selection.input.left_press_pos = None;
+                        selection.input.left_press_time = None;
+                        selection.input.left_dragging = false;
+                        selection.gesture.poly_active = false;
+                        selection.gesture.poly_points.clear();
+                        selection.gesture.poly_crossing = false;
+                        selection.gesture.box_anchor = None;
+                        selection.gesture.box_anchor_world = None;
+                        selection.gesture.box_current = None;
+                        selection.gesture.box_crossing = false;
+                        selection.gesture.box_crossing_locked = false;
                         drop(selection);
                         return self.apply_cmd_result(result);
                     }
@@ -4896,16 +4896,15 @@ properties={:.1}ms picked={}",
                         let sel = self.tabs[i].scene.selection.borrow();
                         // Map lasso points into the active tile.
                         let pts: Vec<iced::Point> = sel
-                            .poly_points
+                            .gesture.poly_points
                             .iter()
                             .map(|pp| iced::Point {
                                 x: pp.x - tile_off.x,
                                 y: pp.y - tile_off.y,
                             })
                             .collect();
-                        (pts, sel.poly_crossing)
+                        (pts, sel.gesture.poly_crossing)
                     };
-                    self.tabs[i].scene.selection.borrow_mut().poly_last_crossing = crossing;
                     let (view_rot, eye, all_wires) = self.pick_view(i, &edit_cam, bounds);
                     let handles = self.tabs[i].scene.path_hit_handles(
                         &poly_pts,
@@ -4937,12 +4936,12 @@ properties={:.1}ms picked={}",
                     selection_just_completed = true;
                 }
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                sel.poly_active = false;
-                sel.poly_points.clear();
-                sel.poly_crossing = false;
-                sel.box_anchor = None;
-                sel.box_anchor_world = None;
-                sel.box_current = None;
+                sel.gesture.poly_active = false;
+                sel.gesture.poly_points.clear();
+                sel.gesture.poly_crossing = false;
+                sel.gesture.box_anchor = None;
+                sel.gesture.box_anchor_world = None;
+                sel.gesture.box_current = None;
             } else {
                 if box_anchor.is_none() {
                     // A parametric-constraint glyph draws above its geometry
@@ -5121,11 +5120,11 @@ was_selected={}",
                                 // Full-canvas space: ViewportMove updates
                                 // box_current in canvas coords and the overlay
                                 // draws there; release maps back into the tile.
-                                sel.box_anchor = Some(p_full);
-                                sel.box_current = Some(p_full);
-                                sel.box_anchor_world = Some(anchor_world);
-                                if !sel.box_crossing_locked {
-                                    sel.box_crossing = false;
+                                sel.gesture.box_anchor = Some(p_full);
+                                sel.gesture.box_current = Some(p_full);
+                                sel.gesture.box_anchor_world = Some(anchor_world);
+                                if !sel.gesture.box_crossing_locked {
+                                    sel.gesture.box_crossing = false;
                                 }
                             }
                         }
@@ -5165,15 +5164,15 @@ was_selected={}",
                     });
                     if let Some(result) = command_result {
                         let mut selection = self.tabs[i].scene.selection.borrow_mut();
-                        selection.left_down = false;
-                        selection.left_press_pos = None;
-                        selection.left_press_time = None;
-                        selection.left_dragging = false;
-                        selection.box_anchor = None;
-                        selection.box_anchor_world = None;
-                        selection.box_current = None;
-                        selection.box_crossing = false;
-                        selection.box_crossing_locked = false;
+                        selection.input.left_down = false;
+                        selection.input.left_press_pos = None;
+                        selection.input.left_press_time = None;
+                        selection.input.left_dragging = false;
+                        selection.gesture.box_anchor = None;
+                        selection.gesture.box_anchor_world = None;
+                        selection.gesture.box_current = None;
+                        selection.gesture.box_crossing = false;
+                        selection.gesture.box_crossing_locked = false;
                         drop(selection);
                         return self.apply_cmd_result(result);
                     }
@@ -5311,22 +5310,20 @@ properties={:.1}ms picked={}",
                         );
                     }
                     let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                    sel.box_last = Some((a, p));
-                    sel.box_last_crossing = crossing;
-                    sel.box_anchor = None;
-                    sel.box_anchor_world = None;
-                    sel.box_current = None;
-                    sel.box_crossing = false;
-                    sel.box_crossing_locked = false;
+                    sel.gesture.box_anchor = None;
+                    sel.gesture.box_anchor_world = None;
+                    sel.gesture.box_current = None;
+                    sel.gesture.box_crossing = false;
+                    sel.gesture.box_crossing_locked = false;
                     selection_just_completed = true;
                 }
             }
 
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            sel.left_down = false;
-            sel.left_press_pos = None;
-            sel.left_press_time = None;
-            sel.left_dragging = false;
+            sel.input.left_down = false;
+            sel.input.left_press_pos = None;
+            sel.input.left_press_time = None;
+            sel.input.left_dragging = false;
         }
 
         if selection_just_completed {
@@ -5364,7 +5361,7 @@ properties={:.1}ms picked={}",
             self.last_vp_click_pos = Some(p);
 
             if is_double_model {
-                let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+                let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
                 let bounds = iced::Rectangle {
                     x: 0.0,
                     y: 0.0,
@@ -5513,7 +5510,7 @@ properties={:.1}ms picked={}",
             self.last_vp_click_pos = Some(p);
 
             if is_double {
-                let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+                let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
                 let bounds = iced::Rectangle {
                     x: 0.0,
                     y: 0.0,
@@ -5660,7 +5657,7 @@ properties={:.1}ms picked={}",
         }
         let (cursor, canvas_size) = {
             let selection = self.tabs[i].scene.selection.borrow();
-            (selection.last_move_pos, selection.vp_size)
+            (selection.input.last_move_pos, selection.view.vp_size)
         };
         let Some(cursor) = cursor else {
             return;
@@ -5690,18 +5687,18 @@ properties={:.1}ms picked={}",
         let now = Instant::now();
         let is_double = {
             let sel = self.tabs[i].scene.selection.borrow();
-            sel.middle_last_press_time
+            sel.input.middle_last_press_time
                 .map(|t| now.duration_since(t).as_millis() < 300)
                 .unwrap_or(false)
         };
         {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
-            let Some(p) = sel.last_move_pos else {
+            let Some(p) = sel.input.last_move_pos else {
                 return Task::none();
             };
-            sel.middle_down = true;
-            sel.middle_last_pos = Some(p);
-            sel.middle_last_press_time = Some(now);
+            sel.input.middle_down = true;
+            sel.input.middle_last_pos = Some(p);
+            sel.input.middle_last_press_time = Some(now);
         }
         if is_double {
             self.tabs[i].scene.fit_all();
@@ -5752,7 +5749,7 @@ properties={:.1}ms picked={}",
     fn pan_active_view(&mut self, i: usize, dx: f32, dy: f32, started: Instant) {
         // Pan scale uses the active tile's size (ortho size is relative to
         // viewport height), so a tiled pane pans at the correct rate.
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         let bounds = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
         if self.tabs[i].scene.active_viewport.is_some() {
             self.tabs[i].scene.pan_active_viewport(dx, dy, bounds);
@@ -5786,8 +5783,8 @@ properties={:.1}ms picked={}",
         let i = self.active_tab;
         self.tabs[i].scene.remember_current_view();
         self.clear_navigation_hover(i);
-        let cursor = self.tabs[i].scene.selection.borrow().last_move_pos;
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let cursor = self.tabs[i].scene.selection.borrow().input.last_move_pos;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         let bounds = iced::Rectangle {
             x: 0.0,
             y: 0.0,
@@ -5847,7 +5844,7 @@ properties={:.1}ms picked={}",
     /// drawing instead of staying frozen at its original pixel. No-op when no
     /// box is in progress. (#234)
     pub(in crate::app) fn reproject_box_anchor(&mut self, i: usize, vw: f32, vh: f32) {
-        let world = self.tabs[i].scene.selection.borrow().box_anchor_world;
+        let world = self.tabs[i].scene.selection.borrow().gesture.box_anchor_world;
         let Some(world) = world else { return };
         let tile_b = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
         let tile_local = iced::Rectangle {
@@ -5862,7 +5859,7 @@ properties={:.1}ms picked={}",
             .borrow()
             .project(world, tile_local)
         {
-            self.tabs[i].scene.selection.borrow_mut().box_anchor =
+            self.tabs[i].scene.selection.borrow_mut().gesture.box_anchor =
                 Some(iced::Point::new(sp.x + tile_b.x, sp.y + tile_b.y));
         }
     }
@@ -5878,7 +5875,7 @@ properties={:.1}ms picked={}",
             return Task::none();
         }
         let rot = self.tabs[i].scene.active_view_rotation_mat();
-        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         // The ViewCube draws in the top-right of whichever area
         // owns it: the full canvas in model space, or the active
         // viewport's screen rectangle in a paper layout. Map the
@@ -6018,12 +6015,12 @@ properties={:.1}ms picked={}",
         let deferred_command = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
             command.needs_entity_pick() && command.entity_pick_deferred_hover()
         });
-        let navigating = self.tabs[i].scene.selection.borrow().middle_down;
+        let navigating = self.tabs[i].scene.selection.borrow().input.middle_down;
         if (self.tabs[i].active_cmd.is_some() && !deferred_command) || navigating {
             self.clear_navigation_hover(i);
             return Task::none();
         }
-        let cursor = self.tabs[i].scene.selection.borrow().last_move_pos;
+        let cursor = self.tabs[i].scene.selection.borrow().input.last_move_pos;
         self.constraint_glyph_tooltip = cursor.and_then(|point| {
             self.constraint_glyph_under(i, point).map(|(kind, _)| kind)
         });
@@ -6037,7 +6034,7 @@ properties={:.1}ms picked={}",
         // Inside a viewport, hover-pick through the viewport camera +
         // model wires so the rollover highlights the entity under the
         // cursor (dwell.point / dwell.tile_size are already pane-local).
-        let canvas_sz = self.tabs[i].scene.selection.borrow().vp_size;
+        let canvas_sz = self.tabs[i].scene.selection.borrow().view.vp_size;
         let edit_cam = self.tabs[i]
             .scene
             .viewport_edit_frame(canvas_sz)
@@ -6818,7 +6815,7 @@ mod zoom_dynamic_cursor_tests {
     fn zoom_armed_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        app.tabs[0].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let _ = app.dispatch_command("ZOOM DYNAMIC");
         app
     }
@@ -6828,7 +6825,7 @@ mod zoom_dynamic_cursor_tests {
     }
 
     fn zoom_dir_out(app: &OpenCADStudio) -> bool {
-        app.tabs[0].scene.selection.borrow().zoom_dir_out
+        app.tabs[0].scene.selection.borrow().input.zoom_dir_out
     }
 
     /// The magnifier has to carry the sign of the zoom actually under way:
@@ -6946,7 +6943,7 @@ mod selection_preview_tests {
         app.ortho_mode = false;
         app.polar_mode = false;
         app.constraint_solve_mode = true;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let scene = &mut app.tabs[i].scene;
         let [outer, inner, upper, lower] = [
             ([0.0, 0.0], [0.0, 5.0]),
@@ -6987,7 +6984,7 @@ mod selection_preview_tests {
         let handles = if let Ok(path) = std::env::var("OCS_GRIP_TEST_DRAWING") {
             let result = app.automation_op(&serde_json::json!({"op":"open","path":path}).to_string());
             assert_eq!(result["ok"], true, "{result}");
-            app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+            app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             [0x57F, 0x57D, 0x57C, 0x57A, 0x57E, 0x57B].map(Handle::new)
         } else {
             [outer, inner, upper, lower, top, right]
@@ -7067,7 +7064,7 @@ mod selection_preview_tests {
         app.snapper.otrack_enabled = false;
         app.ortho_mode = false;
         app.polar_mode = false;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let a = app.tabs[i]
             .scene
             .add_entity(EntityType::Line(Line::from_points(
@@ -7148,7 +7145,7 @@ mod selection_preview_tests {
         app.ortho_mode = false;
         app.polar_mode = false;
         app.constraint_solve_mode = true;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let mut rectangle = LwPolyline::from_points(vec![
             Vector2::new(0.0, 0.0),
             Vector2::new(4.0, 0.0),
@@ -7165,7 +7162,7 @@ mod selection_preview_tests {
         let handle = if let Ok(path) = std::env::var("OCS_GRIP_TEST_DRAWING") {
             let result = app.automation_op(&serde_json::json!({"op":"open","path":path}).to_string());
             assert_eq!(result["ok"], true, "{result}");
-            app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+            app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             Handle::new(0x556)
         } else {
             handle
@@ -7236,7 +7233,7 @@ mod selection_preview_tests {
             app.ortho_mode = false;
             app.polar_mode = false;
             app.constraint_solve_mode = true;
-            app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+            app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             let end = if vertical { Vector3::new(0.0, 4.0, 0.0) } else { Vector3::new(4.0, 0.0, 0.0) };
             let handle = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(Vector3::ZERO, end)));
             app.tabs[i].scene.parametric_constraint_set_mut(ParametricScope::ModelSpace).add(
@@ -7263,7 +7260,7 @@ mod selection_preview_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
         let cursor = |app: &OpenCADStudio, x: f64, y: f64| {
             let at = app.tabs[i].scene.camera.borrow().project(glam::DVec3::new(x, y, 0.0), bounds);
@@ -7301,7 +7298,7 @@ mod selection_preview_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         // Base away from the model origin so the UCS icon cannot swallow
         // the press (it sits at the origin in a fresh drawing).
         let handle = app.tabs[i].scene.add_entity(EntityType::XLine(
@@ -7317,7 +7314,7 @@ mod selection_preview_tests {
         let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
         let g1world = app.tabs[i].selected_grips[1].world;
         let g1cursor = app.tabs[i].scene.camera.borrow().project(g1world, bounds).unwrap();
-        app.tabs[i].scene.selection.borrow_mut().last_move_pos =
+        app.tabs[i].scene.selection.borrow_mut().input.last_move_pos =
             Some(iced::Point::new(g1cursor.x, g1cursor.y));
         let _ = app.on_viewport_left_press();
         assert_eq!(
@@ -7345,7 +7342,7 @@ mod selection_preview_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let handle = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
             Vector3::new(-1.0, 0.0, 0.0),
             Vector3::new(1.0, 0.0, 0.0),
@@ -7403,9 +7400,9 @@ mod selection_preview_tests {
             record.add_value(XDataValue::String("https://example.com/linked".into()));
             line.common.extended_data.add_record(record);
             let handle = app.tabs[i].scene.add_entity(EntityType::Line(line));
-            app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+            app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             let _ = app.run_command_line("ZOOM EXTENTS");
-            app.tabs[i].scene.selection.borrow_mut().last_move_pos = Some(Point::new(400.0, 300.0));
+            app.tabs[i].scene.selection.borrow_mut().input.last_move_pos = Some(Point::new(400.0, 300.0));
             app.ctrl_down = mode != "plain";
             match mode {
                 "pan" => app.tabs[i].pan_mode = true,
@@ -7429,9 +7426,9 @@ mod selection_preview_tests {
             if mode == "link" {
                 assert!(task.units() > 0);
                 let selection = app.tabs[i].scene.selection.borrow();
-                assert!(!selection.left_down && selection.box_anchor.is_none());
+                assert!(!selection.input.left_down && selection.gesture.box_anchor.is_none());
             } else if matches!(mode, "pan" | "orbit" | "zoom") {
-                assert!(app.tabs[i].scene.selection.borrow().middle_down, "{mode}");
+                assert!(app.tabs[i].scene.selection.borrow().input.middle_down, "{mode}");
             }
         }
     }
@@ -7444,7 +7441,7 @@ mod selection_preview_tests {
         let i = app.active_tab;
         app.model_space.selection_preview = preview;
         let _ = app.run_command_line("LINE 0,0 10,10");
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let _ = app.run_command_line("ZOOM EXTENTS");
 
         // The pick only runs once the cursor has been still for the dwell
@@ -7495,7 +7492,7 @@ mod selection_preview_tests {
         app.snapper.otrack_enabled = false;
         app.ortho_mode = false;
         app.polar_mode = false;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 25.0),
@@ -7550,7 +7547,7 @@ mod selection_preview_tests {
         app.snapper.otrack_enabled = false;
         app.ortho_mode = false;
         app.polar_mode = false;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         // In-app BOX equivalent: kernel box committed as a SAT solid.
         let base =
@@ -7644,7 +7641,7 @@ mod selection_preview_tests {
         app.snapper.otrack_enabled = false;
         app.ortho_mode = false;
         app.polar_mode = false;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         let base =
             crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
@@ -7712,7 +7709,7 @@ mod selection_preview_tests {
         app.snapper.otrack_enabled = false;
         app.ortho_mode = false;
         app.polar_mode = false;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         let base =
             crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
@@ -7779,7 +7776,7 @@ mod selection_preview_tests {
         app.snapper.otrack_enabled = false;
         app.ortho_mode = false;
         app.polar_mode = false;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         let base =
             crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
@@ -7840,7 +7837,7 @@ mod selection_preview_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         let base =
             crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
@@ -7925,7 +7922,7 @@ mod selection_preview_tests {
         app.snapper.otrack_enabled = false;
         app.ortho_mode = false;
         app.polar_mode = false;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         let base =
             crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)

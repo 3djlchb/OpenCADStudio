@@ -430,7 +430,7 @@ impl Scene {
     /// wrong whenever a tiled viewport is active.
     pub(super) fn active_camera_aspect(&self) -> f32 {
         if self.current_layout == "Model" {
-            let (canvas_w, canvas_h) = self.selection.borrow().vp_size;
+            let (canvas_w, canvas_h) = self.selection.borrow().view.vp_size;
             let tiles = self.model_tiles.borrow();
             let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
             if let Some(tile) = tiles.get(active) {
@@ -803,7 +803,7 @@ impl Scene {
             z: view_dir.z as f64,
         };
         entry.view_height = view_height as f64;
-        let (canvas_width, canvas_height) = self.selection.borrow().vp_size;
+        let (canvas_width, canvas_height) = self.selection.borrow().view.vp_size;
         let viewport_width = (upper_right.x - lower_left.x).abs() * canvas_width as f64;
         let viewport_height = (upper_right.y - lower_left.y).abs() * canvas_height as f64;
         if viewport_width > 1e-9 && viewport_height > 1e-9 {
@@ -1556,7 +1556,7 @@ impl Scene {
             return;
         };
 
-        let (canvas_w, canvas_h) = self.selection.borrow().vp_size;
+        let (canvas_w, canvas_h) = self.selection.borrow().view.vp_size;
         let fallback = self.last_render_aspect.get().max(0.01);
         let aspects: Vec<f32> = self
             .model_tiles

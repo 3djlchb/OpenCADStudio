@@ -640,7 +640,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                 // produced a one-time jump plus a stuck drag. Column moves
                 // arrive via Message::XrefColMove only.
                 if self.dock_dragging.is_some() {
-                    let avail = self.tabs[self.active_tab].scene.selection.borrow().vp_size.1;
+                    let avail = self.tabs[self.active_tab].scene.selection.borrow().view.vp_size.1;
                     let side = if point.x < self.win_size.0 * 0.5 {
                         DockSide::Left
                     } else {
@@ -1671,7 +1671,7 @@ mod tests {
         app.show_block_palette = false;
         app.show_properties = true;
         let i = app.active_tab;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (1600.0, 900.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 900.0);
         app.win_size = (1600.0, 900.0).into();
         let id = crate::ui::dock::PanelId::Properties;
         let _ = app.on_dock(crate::ui::dock::DockMsg::DockGrab(id));
@@ -1698,7 +1698,7 @@ mod tests {
         app.show_block_palette = true;
         app.show_properties = true;
         let i = app.active_tab;
-        app.tabs[i].scene.selection.borrow_mut().vp_size = (1600.0, 900.0);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 900.0);
         app.win_size = (1600.0, 900.0).into();
         let id = crate::ui::dock::PanelId::Properties;
         let _ = app.on_dock(crate::ui::dock::DockMsg::DockGrab(id));

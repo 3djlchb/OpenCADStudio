@@ -963,7 +963,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow_mut()
-                    .context_menu = None;
+                    .menu.open_at = None;
                 // Same guard as typed MTP/M2P: point step, not entity pick.
                 let i = self.active_tab;
                 let allowed = self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
@@ -2535,7 +2535,7 @@ impl OpenCADStudio {
             Message::Command(cmd) => {
                 // Close viewport context menu if open.
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
                 // Any command also dismisses the Isolate action menu.
                 self.isolate_popup_open = false;
                 // "Pick window" (PLOTWINDOW) from Page Setup needs the backdrop
@@ -3762,7 +3762,7 @@ impl OpenCADStudio {
                         .scene
                         .selection
                         .borrow_mut()
-                        .last_move_pos = Some(p);
+                        .input.last_move_pos = Some(p);
                     return Task::none();
                 }
                 self.focus_model_pane(idx);
@@ -3828,45 +3828,45 @@ impl OpenCADStudio {
                 // Shift+RMB: the one-shot snap override menu at the cursor —
                 // pick a snap for just the next point, then it expires (#337).
                 if self.shift_down {
-                    let pos = self.tabs[i].scene.selection.borrow().last_move_pos;
+                    let pos = self.tabs[i].scene.selection.borrow().input.last_move_pos;
                     if let Some(p) = pos {
                         self.snap_override_popup = Some(p);
                     }
                     return Task::none();
                 }
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                let Some(p) = sel.last_move_pos else {
+                let Some(p) = sel.input.last_move_pos else {
                     return Task::none();
                 };
-                sel.context_menu = None;
-                sel.right_down = true;
-                sel.right_press_pos = Some(p);
-                sel.right_press_time = Some(iced::time::Instant::now());
-                sel.right_last_pos = Some(p);
-                sel.right_dragging = false;
+                sel.menu.open_at = None;
+                sel.input.right_down = true;
+                sel.input.right_press_pos = Some(p);
+                sel.input.right_press_time = Some(iced::time::Instant::now());
+                sel.input.right_last_pos = Some(p);
+                sel.input.right_dragging = false;
                 Task::none()
             }
 
             Message::ViewportRightRelease => {
                 let i = self.active_tab;
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                let Some(click_pos) = sel.last_move_pos else {
+                let Some(click_pos) = sel.input.last_move_pos else {
                     return Task::none();
                 };
-                if !sel.right_down {
+                if !sel.input.right_down {
                     return Task::none();
                 }
-                let was_click = !sel.right_dragging;
+                let was_click = !sel.input.right_dragging;
                 // How long the button was held, for the time-sensitive mode.
                 let held_ms = sel
-                    .right_press_time
+                    .input.right_press_time
                     .map_or(0, |t| t.elapsed().as_millis() as i32);
-                sel.right_down = false;
-                sel.right_press_pos = None;
-                sel.right_press_time = None;
-                sel.right_last_pos = None;
-                sel.right_dragging = false;
-                sel.orbit_pivot = None;
+                sel.input.right_down = false;
+                sel.input.right_press_pos = None;
+                sel.input.right_press_time = None;
+                sel.input.right_last_pos = None;
+                sel.input.right_dragging = false;
+                sel.orbit.pivot = None;
                 if !was_click {
                     return Task::none();
                 }
@@ -3881,7 +3881,7 @@ impl OpenCADStudio {
                 // line is empty. Pending text always runs and resets the Enter
                 // cycle so the next right-click acts as Enter again.
                 if !self.command_line.input.trim().is_empty() {
-                    sel.right_click_entered = false;
+                    sel.input.right_click_entered = false;
                     drop(sel);
                     return self.update(Message::CommandFinalize);
                 }
@@ -3904,19 +3904,19 @@ impl OpenCADStudio {
                         held_ms >= self.right_click_hold_ms
                     }
                     super::settings::RightClickMode::EnterFirst => {
-                        !(has_cmd && !sel.right_click_entered)
+                        !(has_cmd && !sel.input.right_click_entered)
                     }
                 };
                 if !open_menu {
-                    sel.right_click_entered = true;
+                    sel.input.right_click_entered = true;
                     drop(sel);
                     // CommandFinalize is Enter during a command and "repeat
                     // the last command" when idle — exactly the quick
                     // right-click.
                     return self.update(Message::CommandFinalize);
                 }
-                sel.right_click_entered = false;
-                sel.open_context_menu(click_pos);
+                sel.input.right_click_entered = false;
+                sel.menu.open(click_pos);
                 drop(sel);
                 // Take the keyboard away from the command-line field so keys
                 // reach the menu through the global subscription; the field
@@ -3929,11 +3929,11 @@ impl OpenCADStudio {
             Message::ViewportMiddleRelease => {
                 let i = self.active_tab;
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                sel.middle_down = false;
-                sel.middle_last_pos = None;
+                sel.input.middle_down = false;
+                sel.input.middle_last_pos = None;
                 // End of a Shift+MMB orbit — drop the captured pivot so the next
                 // gesture recomputes it against the current selection. (#229)
-                sel.orbit_pivot = None;
+                sel.orbit.pivot = None;
                 drop(sel);
                 self.arm_hover_after_navigation(i);
                 Task::none()
@@ -4051,7 +4051,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow()
-                    .last_move_pos
+                    .input.last_move_pos
                     .unwrap_or(self.cursor_pos);
                 self.update_grip_hover(i, p);
                 Task::none()
@@ -4101,7 +4101,7 @@ impl OpenCADStudio {
                     let (wires, screen_height) = if stale {
                         (
                             self.tabs[i].scene.hit_test_wires(),
-                            self.tabs[i].scene.selection.borrow().vp_size.1,
+                            self.tabs[i].scene.selection.borrow().view.vp_size.1,
                         )
                     } else {
                         (queued_wires, screen_height)
@@ -4114,7 +4114,7 @@ impl OpenCADStudio {
                 if self.active_interaction_index.is_none() && !self.tabs.is_empty() {
                     let i = self.active_tab.min(self.tabs.len() - 1);
                     let wires = self.tabs[i].scene.hit_test_wires();
-                    let screen_height = self.tabs[i].scene.selection.borrow().vp_size.1;
+                    let screen_height = self.tabs[i].scene.selection.borrow().view.vp_size.1;
                     self.prepare_interaction_index_task(i, wires, screen_height)
                         .unwrap_or_else(Task::none)
                 } else {
@@ -5874,7 +5874,7 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
                 // A selected constraint-glyph pill takes Delete before entity
                 // erase — the two selections are mutually exclusive (see
                 // `Scene::selected_constraint`).
@@ -6321,7 +6321,7 @@ impl OpenCADStudio {
 
             Message::DrawOrderPickRef(above) => {
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
                 let to_move: Vec<_> = self.tabs[i].scene.selected.iter().cloned().collect();
                 if to_move.is_empty() {
                     self.command_line
@@ -6337,7 +6337,7 @@ impl OpenCADStudio {
 
             Message::SelectSimilar => {
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
                 let added = self.tabs[i].scene.select_similar();
                 self.command_line
                     .push_output(crate::tf!("Select Similar: {} added.", added).as_ref());
@@ -6347,7 +6347,7 @@ impl OpenCADStudio {
 
             Message::InvertSelection => {
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
                 let count = self.tabs[i].scene.invert_selection();
                 self.command_line.push_output(
                     crate::tf!("Invert Selection: {} object(s) selected.", count).as_ref(),

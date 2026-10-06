@@ -2014,7 +2014,7 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         let interaction_task = {
             let wires = self.tabs[i].scene.hit_test_wires();
-            let screen_height = self.tabs[i].scene.selection.borrow().vp_size.1;
+            let screen_height = self.tabs[i].scene.selection.borrow().view.vp_size.1;
             self.prepare_interaction_index_task(i, wires, screen_height)
                 .unwrap_or_else(Task::none)
         };
@@ -5574,7 +5574,7 @@ impl OpenCADStudio {
     /// canvas outside the sheet, matching Model-space plotting.
     fn display_plot_window(&self) -> Option<(f64, f64, f64, f64)> {
         let scene = &self.tabs[self.active_tab].scene;
-        let (canvas_w, canvas_h) = scene.selection.borrow().vp_size;
+        let (canvas_w, canvas_h) = scene.selection.borrow().view.vp_size;
         let viewport = if scene.current_layout == "Model" {
             scene.active_model_tile_bounds(canvas_w, canvas_h)
         } else {

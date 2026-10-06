@@ -34,7 +34,7 @@ pub const MENU_WIDTH_WITH_HINTS: f32 = 236.0;
 pub const RECENT_LIMIT: usize = 10;
 
 /// Identifies an inline-expanding (accordion) submenu. Only one is open at a
-/// time; the open one is tracked in `SelectionState::context_menu_ui`.
+/// time; the open one is tracked in `SelectionMenu::ui`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubmenuId {
     RecentInput,

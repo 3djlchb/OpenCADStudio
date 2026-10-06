@@ -281,7 +281,7 @@ impl Scene {
         self.interim_wire = None;
         // Drop any point-picked window marquee (STRETCH) so it doesn't linger
         // after the command ends before the next mouse move. (#291)
-        self.selection.borrow_mut().preview_box = None;
+        self.selection.borrow_mut().gesture.preview_box = None;
     }
 
     pub fn wire_models_for(&self, handles: &[codec::Handle]) -> Vec<WireModel> {

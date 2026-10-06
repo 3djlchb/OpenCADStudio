@@ -4213,7 +4213,7 @@ impl Scene {
         // `CursorMoved` handler — the cube overlay sits above the shader
         // and would otherwise mask the move event from `Program::update`.
         let hover_region = show_interaction.then(|| self.viewcube_hover.get()).flatten();
-        self.selection.borrow_mut().vp_size = (bounds.width, bounds.height);
+        self.selection.borrow_mut().view.vp_size = (bounds.width, bounds.height);
         if bounds.height > 0.0 {
             self.set_render_aspect(bounds.width / bounds.height);
             self.set_render_pixel_scale(bounds.width, bounds.height);

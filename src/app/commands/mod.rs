@@ -80,7 +80,7 @@ impl OpenCADStudio {
             .scene
             .selection
             .borrow_mut()
-            .right_click_entered = false;
+            .input.right_click_entered = false;
         // A fresh command starts at the polar/cartesian default — clear
         // any `,`-driven reshape and locked dynamic-input values from a
         // previous command. Otherwise a bare Enter on the first point prompt
@@ -184,18 +184,7 @@ impl OpenCADStudio {
         {
             let mut selection = self.tabs[i].scene.selection.borrow_mut();
             // Cancel the active selection gesture before the new command starts.
-            selection.left_down = false;
-            selection.left_press_pos = None;
-            selection.left_press_time = None;
-            selection.left_dragging = false;
-            selection.box_anchor = None;
-            selection.box_anchor_world = None;
-            selection.box_current = None;
-            selection.box_crossing = false;
-            selection.box_crossing_locked = false;
-            selection.poly_active = false;
-            selection.poly_points.clear();
-            selection.poly_crossing = false;
+            selection.clear_left_selection_gesture();
         }
         // Cancel any running command before starting a new one.
         if self.tabs[i].active_cmd.is_some() {
@@ -961,31 +950,31 @@ mod marquee_cancel_tests {
     fn arm_marquee(app: &mut OpenCADStudio) {
         let i = app.active_tab;
         let mut sel = app.tabs[i].scene.selection.borrow_mut();
-        sel.left_down = true;
-        sel.left_press_pos = Some(iced::Point::new(10.0, 10.0));
-        sel.left_press_time = Some(Instant::now());
-        sel.left_dragging = true;
-        sel.box_anchor = Some(iced::Point::new(10.0, 10.0));
-        sel.box_anchor_world = Some(glam::DVec3::new(1.0, 2.0, 0.0));
-        sel.box_current = Some(iced::Point::new(40.0, 40.0));
-        sel.box_crossing = true;
-        sel.box_crossing_locked = true;
+        sel.input.left_down = true;
+        sel.input.left_press_pos = Some(iced::Point::new(10.0, 10.0));
+        sel.input.left_press_time = Some(Instant::now());
+        sel.input.left_dragging = true;
+        sel.gesture.box_anchor = Some(iced::Point::new(10.0, 10.0));
+        sel.gesture.box_anchor_world = Some(glam::DVec3::new(1.0, 2.0, 0.0));
+        sel.gesture.box_current = Some(iced::Point::new(40.0, 40.0));
+        sel.gesture.box_crossing = true;
+        sel.gesture.box_crossing_locked = true;
     }
 
     /// Arm a held lasso drag.
     fn arm_lasso(app: &mut OpenCADStudio) {
         let i = app.active_tab;
         let mut sel = app.tabs[i].scene.selection.borrow_mut();
-        sel.left_down = true;
-        sel.left_press_pos = Some(iced::Point::new(10.0, 10.0));
-        sel.left_press_time = Some(Instant::now());
-        sel.left_dragging = true;
-        sel.poly_active = true;
-        sel.poly_points = vec![
+        sel.input.left_down = true;
+        sel.input.left_press_pos = Some(iced::Point::new(10.0, 10.0));
+        sel.input.left_press_time = Some(Instant::now());
+        sel.input.left_dragging = true;
+        sel.gesture.poly_active = true;
+        sel.gesture.poly_points = vec![
             iced::Point::new(10.0, 10.0),
             iced::Point::new(20.0, 30.0),
         ];
-        sel.poly_crossing = true;
+        sel.gesture.poly_crossing = true;
     }
 
     #[test]
@@ -997,15 +986,15 @@ mod marquee_cancel_tests {
         let _ = app.dispatch_command("LINE");
 
         let sel = app.tabs[i].scene.selection.borrow();
-        assert!(!sel.left_down);
-        assert!(sel.left_press_pos.is_none());
-        assert!(sel.left_press_time.is_none());
-        assert!(!sel.left_dragging);
-        assert!(sel.box_anchor.is_none());
-        assert!(sel.box_anchor_world.is_none());
-        assert!(sel.box_current.is_none());
-        assert!(!sel.box_crossing);
-        assert!(!sel.box_crossing_locked);
+        assert!(!sel.input.left_down);
+        assert!(sel.input.left_press_pos.is_none());
+        assert!(sel.input.left_press_time.is_none());
+        assert!(!sel.input.left_dragging);
+        assert!(sel.gesture.box_anchor.is_none());
+        assert!(sel.gesture.box_anchor_world.is_none());
+        assert!(sel.gesture.box_current.is_none());
+        assert!(!sel.gesture.box_crossing);
+        assert!(!sel.gesture.box_crossing_locked);
     }
 
     #[test]
@@ -1017,13 +1006,13 @@ mod marquee_cancel_tests {
         let _ = app.dispatch_command("LINE");
 
         let sel = app.tabs[i].scene.selection.borrow();
-        assert!(!sel.left_down);
-        assert!(sel.left_press_pos.is_none());
-        assert!(sel.left_press_time.is_none());
-        assert!(!sel.left_dragging);
-        assert!(!sel.poly_active);
-        assert!(sel.poly_points.is_empty());
-        assert!(!sel.poly_crossing);
+        assert!(!sel.input.left_down);
+        assert!(sel.input.left_press_pos.is_none());
+        assert!(sel.input.left_press_time.is_none());
+        assert!(!sel.input.left_dragging);
+        assert!(!sel.gesture.poly_active);
+        assert!(sel.gesture.poly_points.is_empty());
+        assert!(!sel.gesture.poly_crossing);
     }
 
     #[test]
@@ -1039,8 +1028,8 @@ mod marquee_cancel_tests {
             Some("LINE")
         );
         let sel = app.tabs[i].scene.selection.borrow();
-        assert!(sel.box_anchor.is_none());
-        assert!(sel.box_anchor_world.is_none());
+        assert!(sel.gesture.box_anchor.is_none());
+        assert!(sel.gesture.box_anchor_world.is_none());
     }
 
     #[test]
@@ -1052,15 +1041,15 @@ mod marquee_cancel_tests {
         let _ = app.dispatch_command("ORTHO");
 
         let sel = app.tabs[i].scene.selection.borrow();
-        assert!(sel.left_down);
-        assert!(sel.left_press_pos.is_some());
-        assert!(sel.left_press_time.is_some());
-        assert!(sel.left_dragging);
-        assert!(sel.box_anchor.is_some());
-        assert!(sel.box_anchor_world.is_some());
-        assert!(sel.box_current.is_some());
-        assert!(sel.box_crossing);
-        assert!(sel.box_crossing_locked);
+        assert!(sel.input.left_down);
+        assert!(sel.input.left_press_pos.is_some());
+        assert!(sel.input.left_press_time.is_some());
+        assert!(sel.input.left_dragging);
+        assert!(sel.gesture.box_anchor.is_some());
+        assert!(sel.gesture.box_anchor_world.is_some());
+        assert!(sel.gesture.box_current.is_some());
+        assert!(sel.gesture.box_crossing);
+        assert!(sel.gesture.box_crossing_locked);
     }
 
     #[test]

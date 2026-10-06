@@ -263,13 +263,13 @@ impl OpenCADStudio {
             tab.scene
                 .active_viewport
                 .and_then(|h| {
-                    let (cw, ch) = tab.scene.selection.borrow().vp_size;
+                    let (cw, ch) = tab.scene.selection.borrow().view.vp_size;
                     tab.scene.viewport_screen_rect(h, (cw, ch))
                 })
                 .map(|r| r.width)
                 .unwrap_or(f32::INFINITY)
         } else {
-            let (vw, vh) = tab.scene.selection.borrow().vp_size;
+            let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
             tab.scene.active_model_tile_bounds(vw, vh).width
         };
         let viewcube_visible = self.show_viewcube
@@ -351,7 +351,7 @@ impl OpenCADStudio {
             let size_probe: Element<'_, Message> = responsive(move |size| {
                 {
                     let mut sel = scene.selection.borrow_mut();
-                    sel.vp_size = (size.width, size.height);
+                    sel.view.vp_size = (size.width, size.height);
                 }
                 scene.sync_tiles_from_panes(size.width, size.height);
                 Space::new().width(Fill).height(Fill)
@@ -406,7 +406,7 @@ impl OpenCADStudio {
         let grid_overlay = if self.layout_settling || tab.is_start {
             Space::new().into()
         } else {
-            let (vw, vh) = tab.scene.selection.borrow().vp_size;
+            let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
             let model_basis = {
                 let (o, ux, uy, uz) = tab.ucs_xform().axes();
                 let (ux, uy, uz) = super::helpers::drafting_axes(
@@ -527,7 +527,7 @@ bg={bg_ms:.1}ms n={view_count}"
             let grips: Vec<crate::ui::overlay::GripMarker> = if show_grips
                 && !tab.selected_grips.is_empty()
             {
-                let (vw, vh) = sel_ref.vp_size;
+                let (vw, vh) = sel_ref.view.vp_size;
                 // Overlays project through the active tile's camera, so
                 // they must use the active tile's screen rectangle (with
                 // its canvas offset) — not the whole canvas — or they
@@ -645,7 +645,7 @@ bg={bg_ms:.1}ms n={view_count}"
             let grip_clip = if grips.is_empty() {
                 None
             } else {
-                let (vw, vh) = sel_ref.vp_size;
+                let (vw, vh) = sel_ref.view.vp_size;
                 Some(
                     tab.scene
                         .viewport_edit_frame((vw, vh))
@@ -654,7 +654,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 )
             };
 
-            let (vw, vh) = sel_ref.vp_size;
+            let (vw, vh) = sel_ref.view.vp_size;
             // Active tile rectangle (canvas-offset included) so grid / UCS
             // icon / crosshair project through the active pane's camera at
             // the correct place and scale.
@@ -814,7 +814,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
             // Model-space pane dividers (none in paper / single-pane layouts).
             let dividers = if !is_paper {
-                let (vw, vh) = sel_ref.vp_size;
+                let (vw, vh) = sel_ref.view.vp_size;
                 tab.scene.model_pane_dividers(vw, vh)
             } else {
                 vec![]
@@ -824,8 +824,8 @@ bg={bg_ms:.1}ms n={view_count}"
             // target pane under the cursor.
             let (pane_move_rect, pane_drop_rect) = match self.pane_move_from {
                 Some(from) if !is_paper => {
-                    let (vw, vh) = sel_ref.vp_size;
-                    let cursor = sel_ref.last_move_pos;
+                    let (vw, vh) = sel_ref.view.vp_size;
+                    let cursor = sel_ref.input.last_move_pos;
                     let tiles = tab.scene.model_tiles.borrow();
                     let px = |t: &crate::scene::ModelTile| iced::Rectangle {
                         x: t.rect.x * vw,
@@ -882,7 +882,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 let scope = tab.current_parametric_scope();
                 tab.scene.cached_glyph_placements(
                     scope,
-                    sel_ref.vp_size,
+                    sel_ref.view.vp_size,
                     self.show_constraint_values,
                     self.constraint_bar_display,
                     self.constraint_bar_mode,
@@ -1009,7 +1009,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 .as_ref()
                 .and_then(|command| command.dyn_label_point(w))
                 .and_then(|world| {
-                    let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                    let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                     let (camera, bounds) =
                         tab.scene.viewport_edit_frame((vw, vh)).unwrap_or_else(|| {
                             (
@@ -1085,7 +1085,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         opposite + width_axis * width + height_axis * (height * 0.5);
                     let rectangle_center =
                         opposite + width_axis * (width * 0.5) + height_axis * (height * 0.5);
-                    let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                    let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                     let (camera, bounds) =
                         tab.scene.viewport_edit_frame((vw, vh)).unwrap_or_else(|| {
                             (
@@ -1282,7 +1282,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // viewport drawing / selection is unaffected. In a paper layout
             // the active viewport gets its own picker (below) instead.
             if !is_paper && !tab.is_start {
-                let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                 let rect = tab.scene.active_model_tile_bounds(vw, vh);
                 // Unified control chip: split buttons + render-mode picker +
                 // grid / grid-snap toggles, for the active Model tile.
@@ -1328,7 +1328,7 @@ bg={bg_ms:.1}ms n={view_count}"
             let active_vp_rect: Option<(codec::Handle, iced::Rectangle)> =
                 if is_paper && !tab.is_start {
                     tab.scene.active_viewport.and_then(|h| {
-                        let (cw, ch) = tab.scene.selection.borrow().vp_size;
+                        let (cw, ch) = tab.scene.selection.borrow().view.vp_size;
                         tab.scene
                             .viewport_screen_rect(h, (cw, ch))
                             .map(|rect| (h, rect))
@@ -1342,7 +1342,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 // outline inward when the viewport ran off the top/left edge, so
                 // its drawn border no longer matched the real viewport — clicks
                 // that looked outside landed in (and activated) another viewport.
-                let (cw, ch) = tab.scene.selection.borrow().vp_size;
+                let (cw, ch) = tab.scene.selection.borrow().view.vp_size;
                 let x = rect.x.max(0.0);
                 let y = rect.y.max(0.0);
                 let vw = ((rect.x + rect.width).min(cw) - x).max(1.0);
@@ -1435,7 +1435,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 // Place the ViewCube hit area in the active model tile's top-right
                 // corner so it tracks the active panel in a tiled layout. The hit
                 // test in update.rs already maps clicks through the active tile.
-                let (vw, vh) = tab.scene.selection.borrow().vp_size;
+                let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                 let rect = tab.scene.active_model_tile_bounds(vw, vh);
                 let cube_x = (rect.x + rect.width - VIEWCUBE_HIT_SIZE - VIEWCUBE_PAD).max(0.0);
                 let cube_y = (rect.y + VIEWCUBE_PAD).max(0.0);
@@ -1832,7 +1832,7 @@ bg={bg_ms:.1}ms n={view_count}"
             if !tab.is_start {
                 let (ctx_pos, highlighted) = {
                     let sel = tab.scene.selection.borrow();
-                    (sel.context_menu, sel.context_menu_ui.highlighted)
+                    (sel.menu.open_at, sel.menu.ui.highlighted)
                 };
                 if let Some(p) = ctx_pos {
                     let menu = self.current_context_menu();
@@ -1848,7 +1848,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // In-place MText editor (toolbar + text area), anchored at the
             // insertion-point click.
             if !tab.is_start {
-                let canvas = tab.scene.selection.borrow().vp_size;
+                let canvas = tab.scene.selection.borrow().view.vp_size;
                 if let Some(ed) = &self.mtext_editor {
                     let styles: Vec<String> = tab
                         .scene
@@ -2010,7 +2010,7 @@ bg={bg_ms:.1}ms n={view_count}"
             } else {
                 visible + 1
             };
-            let edge_h = tab.scene.selection.borrow().vp_size.1;
+            let edge_h = tab.scene.selection.borrow().view.vp_size.1;
             let slot_h = edge_h / final_count as f32;
             let index = self.dock_drag_target.map(|(_, i)| i).unwrap_or(0);
             let slot = index.min(final_count.saturating_sub(1));

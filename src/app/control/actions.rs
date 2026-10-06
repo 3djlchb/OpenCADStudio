@@ -1496,7 +1496,7 @@ impl OpenCADStudio {
                     .filter(|v| v.is_finite())
                     .ok_or_else(|| failure("invalid_point", "Missing finite y"))?
                     as f32;
-                let size = self.tabs[self.active_tab].scene.selection.borrow().vp_size;
+                let size = self.tabs[self.active_tab].scene.selection.borrow().view.vp_size;
                 if x < 0. || y < 0. || x > size.0 || y > size.1 {
                     return Err(failure(
                         "outside_viewport",

@@ -1177,13 +1177,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.tabs[i].zoom_dynamic_mode = false;
                     {
                         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                        sel.middle_down = false;
-                        sel.middle_last_pos = None;
-                        sel.orbit_pivot = None;
-                        sel.box_anchor = None;
-                        sel.box_anchor_world = None;
-                        sel.box_current = None;
-                        sel.box_crossing_locked = false;
+                        sel.input.middle_down = false;
+                        sel.input.middle_last_pos = None;
+                        sel.orbit.pivot = None;
+                        sel.gesture.box_anchor = None;
+                        sel.gesture.box_anchor_world = None;
+                        sel.gesture.box_current = None;
+                        sel.gesture.box_crossing_locked = false;
                     }
                     if was_pan {
                         self.command_line.push_output(crate::t!("PAN ended.").as_ref());
@@ -1230,8 +1230,8 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 }
                 {
                     let mut sel = self.tabs[i_e].scene.selection.borrow_mut();
-                    if sel.context_menu.is_some() {
-                        sel.context_menu = None;
+                    if sel.menu.open_at.is_some() {
+                        sel.menu.open_at = None;
                         return Task::none();
                     }
                 }
@@ -1261,13 +1261,13 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                     self.tabs[i].scene.deselect_all();
                     self.refresh_properties();
                     let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                    sel.box_anchor = None;
+                    sel.gesture.box_anchor = None;
                     // Also drop the world-space anchor, or the next pan/zoom
                     // re-projects it back into `box_anchor` and the cancelled
                     // marquee springs back to life (reproject_box_anchor).
-                    sel.box_anchor_world = None;
-                    sel.box_current = None;
-                    sel.box_crossing = false;
+                    sel.gesture.box_anchor_world = None;
+                    sel.gesture.box_current = None;
+                    sel.gesture.box_crossing = false;
                 }
                 Task::none()
     }
@@ -2086,7 +2086,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
 
     pub(super) fn on_qselect_open(&mut self) -> Task<Message> {
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
                 let remembered = self.qselect_settings.clone();
                 let scope = remembered.as_ref().map_or(
                     crate::app::QSelectScope::CurrentSpace,

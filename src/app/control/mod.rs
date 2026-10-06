@@ -439,7 +439,7 @@ impl OpenCADStudio {
             "layout":tab.scene.current_layout,
             "ucs":tab.active_ucs.as_ref().map(|u|json!({"name":u.name,"origin":[u.origin.x,u.origin.y,u.origin.z],"x_axis":[u.x_axis.x,u.x_axis.y,u.x_axis.z],"y_axis":[u.y_axis.x,u.y_axis.y,u.y_axis.z],"elevation":u.elevation})),
             "cursor":{"world":tab.last_cursor_world.to_array(),"screen":[tab.last_cursor_screen.x,tab.last_cursor_screen.y]},
-            "viewport_size":({let s=tab.scene.selection.borrow();[s.vp_size.0,s.vp_size.1]}),
+            "viewport_size":({let s=tab.scene.selection.borrow();[s.view.vp_size.0,s.view.vp_size.1]}),
             "camera":({let c=tab.scene.camera.borrow();json!({"target":c.target.to_array(),"rotation":[c.rotation.x,c.rotation.y,c.rotation.z,c.rotation.w],"distance":c.distance,"fov_y":c.fov_y,"projection":format!("{:?}",c.projection),"yaw":c.yaw,"pitch":c.pitch})}),
             "mtext_editor":self.mtext_editor.as_ref().map(|e|json!({"text":e.content.text(),"height":e.height,"style":e.style})),
             "text_editor":self.text_inline.is_some(),"event_cursor":self.control.serial,
@@ -1358,7 +1358,7 @@ impl OpenCADStudio {
                     .ok_or("Renderer returned malformed image data")?;
             let mut actual_scope = "window";
 
-            let (vp_w, vp_h) = self.tabs[self.active_tab].scene.selection.borrow().vp_size;
+            let (vp_w, vp_h) = self.tabs[self.active_tab].scene.selection.borrow().view.vp_size;
             let mut vp_logical_width = if vp_w > 0.0 { vp_w } else { image.width() as f32 / s.scale_factor };
             let mut vp_logical_height = if vp_h > 0.0 { vp_h } else { image.height() as f32 / s.scale_factor };
 
@@ -2138,7 +2138,7 @@ mod tests {
         let i = app.active_tab;
         {
             let tab = &mut app.tabs[i];
-            tab.scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+            tab.scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
             tab.scene.sync_tiles_from_panes(1920.0, 1080.0);
             tab.scene.fit_all();   // bring the line into the pane so snaps can hit
         }
@@ -2200,7 +2200,7 @@ mod tests {
         let i = app.active_tab;
         {
             let tab = &mut app.tabs[i];
-            tab.scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+            tab.scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
             tab.scene.sync_tiles_from_panes(1920.0, 1080.0);
             tab.scene.fit_all();
         }

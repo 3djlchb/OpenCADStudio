@@ -1222,7 +1222,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         // under way. Hovering before the drag starts shows the neutral "+"
         // magnifier rather than guessing a direction.
         if self.nav != NavCursor::None && cursor.is_over(bounds) {
-            let dragging = self.selection.borrow().middle_down;
+            let dragging = self.selection.borrow().input.middle_down;
             return match self.nav {
                 NavCursor::Pan => {
                     if dragging {
@@ -1233,7 +1233,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                 }
                 NavCursor::Orbit => mouse::Interaction::AllScroll,
                 NavCursor::Zoom => {
-                    if dragging && self.selection.borrow().zoom_dir_out {
+                    if dragging && self.selection.borrow().input.zoom_dir_out {
                         mouse::Interaction::ZoomOut
                     } else {
                         mouse::Interaction::ZoomIn
@@ -1338,7 +1338,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             }
             // Ghost card dragged under the cursor — a 0.32× preview of the
             // source pane, centred on the cursor.
-            if let Some(c) = self.selection.borrow().last_move_pos {
+            if let Some(c) = self.selection.borrow().input.last_move_pos {
                 let gw = (src.width * 0.32).clamp(60.0, 280.0);
                 let gh = (src.height * 0.32).clamp(40.0, 200.0);
                 let g = canvas::Path::rectangle(
@@ -1408,27 +1408,27 @@ impl canvas::Program<Message> for SelectionCanvas {
         // the view zooms. Suppress the drawing, not the state — the anchor is
         // still re-projected as the camera moves.
         if self.nav != NavCursor::Zoom {
-            if let (Some(a), Some(b)) = (self.selection.borrow().box_anchor, self.selection.borrow().box_current) {
-                draw_marquee(&mut frame, a, b, self.selection.borrow().box_crossing, theme, &self.selection_visual, self.crosshair_bg);
+            if let (Some(a), Some(b)) = (self.selection.borrow().gesture.box_anchor, self.selection.borrow().gesture.box_current) {
+                draw_marquee(&mut frame, a, b, self.selection.borrow().gesture.box_crossing, theme, &self.selection_visual, self.crosshair_bg);
             }
         }
         // Preview marquee for point-picked windows (STRETCH) — same look, no pick.
-        if let Some((a, b, crossing)) = self.selection.borrow().preview_box {
+        if let Some((a, b, crossing)) = self.selection.borrow().gesture.preview_box {
             draw_marquee(&mut frame, a, b, crossing, theme, &self.selection_visual, self.crosshair_bg);
         }
 
-        if self.selection.borrow().poly_active && self.selection.borrow().poly_points.len() > 1 {
-            let crossing = self.selection.borrow().poly_crossing;
+        if self.selection.borrow().gesture.poly_active && self.selection.borrow().gesture.poly_points.len() > 1 {
+            let crossing = self.selection.borrow().gesture.poly_crossing;
             let base = resolve_selection_base_color(crossing, theme, &self.selection_visual, self.crosshair_bg);
             let canvas_light = crate::ui::style::common::canvas_is_light(self.crosshair_bg);
             if self.selection_visual.area && self.selection_visual.opacity > 0 {
                 let alpha = selection_fill_alpha(self.selection_visual.opacity as f32, canvas_light);
                 let fill = base.scale_alpha(alpha);
-                if let Some(cur) = self.selection.borrow().last_move_pos {
-                    let start = self.selection.borrow().poly_points[0];
+                if let Some(cur) = self.selection.borrow().input.last_move_pos {
+                    let start = self.selection.borrow().gesture.poly_points[0];
                     let fill_path = canvas::Path::new(|p| {
                         p.move_to(start);
-                        for pt in &self.selection.borrow().poly_points[1..] {
+                        for pt in &self.selection.borrow().gesture.poly_points[1..] {
                             p.line_to(*pt);
                         }
                         p.line_to(cur);
@@ -1440,8 +1440,8 @@ impl canvas::Program<Message> for SelectionCanvas {
             let stroke_alpha = if canvas_light { 0.95 } else { 0.90 };
             let stroke = base.scale_alpha(stroke_alpha);
             let path = canvas::Path::new(|p| {
-                p.move_to(self.selection.borrow().poly_points[0]);
-                for pt in &self.selection.borrow().poly_points[1..] {
+                p.move_to(self.selection.borrow().gesture.poly_points[0]);
+                for pt in &self.selection.borrow().gesture.poly_points[1..] {
                     p.line_to(*pt);
                 }
             });
@@ -1459,9 +1459,9 @@ impl canvas::Program<Message> for SelectionCanvas {
                 ..Default::default()
             };
             frame.stroke(&path, stroke_style.clone());
-            if let Some(cur) = self.selection.borrow().last_move_pos {
-                let start = self.selection.borrow().poly_points[0];
-                let last = *self.selection.borrow().poly_points.last().unwrap();
+            if let Some(cur) = self.selection.borrow().input.last_move_pos {
+                let start = self.selection.borrow().gesture.poly_points[0];
+                let last = *self.selection.borrow().gesture.poly_points.last().unwrap();
                 let preview = canvas::Path::new(|p| {
                     p.move_to(last);
                     p.line_to(cur);
@@ -1898,7 +1898,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             && !self.suppressed
             && self.crosshair.cursor_type == CursorType::Crosshair
         {
-            if let Some(cp) = self.selection.borrow().last_move_pos {
+            if let Some(cp) = self.selection.borrow().input.last_move_pos {
                 let [r, g, b, a] = self.crosshair.color.map_or_else(
                     || {
                         crate::scene::view::render::adapt_to_bg(

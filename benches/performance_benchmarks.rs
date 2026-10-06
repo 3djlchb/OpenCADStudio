@@ -50,7 +50,9 @@ use OpenCADStudio::scene::parametric_constraints::{
 };
 use OpenCADStudio::scene::pick::hit_test::{box_hit, click_hit};
 use OpenCADStudio::scene::pick::interaction_index::InteractionIndex;
-use OpenCADStudio::scene::pick::selection_state::SelectionState;
+use OpenCADStudio::scene::pick::selection_state::{
+    SelectionGesture, SelectionState, SelectionView,
+};
 use OpenCADStudio::scene::pipeline::wire_arena::partition_wires;
 use OpenCADStudio::scene::view::camera::Camera;
 use OpenCADStudio::scene::{ChangeKind, Scene};
@@ -713,12 +715,17 @@ fn bench_selection_cloning(runner: &mut BenchmarkRunner) {
     }
 
     let mut state = SelectionState {
-        vp_size: (1920.0, 1080.0),
-        poly_points: vec![Point::new(10.0, 10.0); 64],
+        view: SelectionView {
+            vp_size: (1920.0, 1080.0),
+        },
+        gesture: SelectionGesture {
+            box_anchor: Some(Point::new(0.0, 0.0)),
+            box_current: Some(Point::new(100.0, 100.0)),
+            poly_points: vec![Point::new(10.0, 10.0); 64],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    state.box_anchor = Some(Point::new(0.0, 0.0));
-    state.box_current = Some(Point::new(100.0, 100.0));
 
     let n = if runner.quick_mode { 1_000 } else { 5_000 };
     let runs = 5;
@@ -793,6 +800,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "DRAWING".to_string(),
@@ -800,6 +808,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "DIMENSIONS".to_string(),
@@ -807,6 +816,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
             LayerInfo {
                 name: "ANNOTATIONS".to_string(),
@@ -814,6 +824,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
                 visible: true,
                 frozen: false,
                 locked: false,
+                vp_frozen: None,
             },
         ],
         "0",
@@ -1371,7 +1382,7 @@ fn bench_ui_constraint_glyphs(runner: &mut BenchmarkRunner) {
             );
         scene.note_parametric_constraint_applied(ParametricScope::ModelSpace, id, 3);
     }
-    scene.selection.borrow_mut().vp_size = (1920.0, 1080.0);
+    scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
     let vp = (1920.0_f32, 1080.0_f32);
 
     // Prime the cache so every timed call below is a hit (same key, same Arc).
@@ -1526,6 +1537,8 @@ fn build_selection_overlay_element(
             snap_angle_deg: 0.0,
             point_mode: false,
             pick_pending: false,
+            hide_arms: false,
+            snap_color: None,
         },
         SelectionVisualOptions::default(),
         empty_glyphs,

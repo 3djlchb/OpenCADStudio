@@ -604,7 +604,7 @@ mod tests {
         app.automation_op(r#"{"op":"run","cmd":"LINE -10,-10 10,10"}"#);
 
         // Set test canvas viewport size
-        app.tabs[0].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         app.tabs[0].scene.fit_all();
 
         let grounding = compute_grounding(&app, 800.0, 600.0, 800, 600);

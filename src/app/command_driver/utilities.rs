@@ -364,7 +364,7 @@ impl OpenCADStudio {
             .is_some_and(|command| command.wants_point_pick_context())
         {
             let scene = &self.tabs[i].scene;
-            let size = scene.selection.borrow().vp_size;
+            let size = scene.selection.borrow().view.vp_size;
             let edit = scene.viewport_edit_frame(size);
             let tile = edit
                 .as_ref()
@@ -919,8 +919,8 @@ impl OpenCADStudio {
             let crossing = matches!(kw.as_str(), "C" | "CROSSING");
             {
                 let mut selection = self.tabs[i].scene.selection.borrow_mut();
-                selection.box_crossing = crossing;
-                selection.box_crossing_locked = true;
+                selection.gesture.box_crossing = crossing;
+                selection.gesture.box_crossing_locked = true;
             }
             let hint = if crossing {
                 crate::t!("Crossing: specify first corner.")

@@ -1148,7 +1148,7 @@ impl OpenCADStudio {
         // The command picked the path; the hit test lives here, where
         // the camera and the drawing's geometry are. Everything after
         // matches what a lasso does, Remove included.
-        let canvas = self.tabs[i].scene.selection.borrow().vp_size;
+        let canvas = self.tabs[i].scene.selection.borrow().view.vp_size;
         let bounds = iced::Rectangle {
             x: 0.0,
             y: 0.0,

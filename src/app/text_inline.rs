@@ -214,7 +214,7 @@ impl super::OpenCADStudio {
             creation,
             screen_anchor: iced::Point::new(60.0, 90.0),
         };
-        if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().last_move_pos {
+        if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().input.last_move_pos {
             state.screen_anchor = p;
         }
         self.text_inline = Some(state);

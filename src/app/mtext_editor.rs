@@ -721,7 +721,7 @@ impl super::OpenCADStudio {
             return;
         }
         let mut state = MTextEditorState::new(pos, initial, height, handle);
-        if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().last_move_pos {
+        if let Some(p) = self.tabs[self.active_tab].scene.selection.borrow().input.last_move_pos {
             state.screen_anchor = p;
         }
         // Seed attachment / line-spacing / box width from the entity being edited.
