@@ -4206,7 +4206,7 @@ dependencies = [
 [[package]]
 name = "opencadcodec"
 version = "0.5.5"
-source = "git+https://github.com/ramox81/cadcodec.git?rev=22b3d1a#22b3d1a1afe9c799185eb6acac41b80db35a7989"
+source = "git+https://github.com/ramox81/cadcodec.git?rev=34f0740#34f074029808865e2d72779b9a34ddcf187fae21"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
