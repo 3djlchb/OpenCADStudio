@@ -87,6 +87,22 @@ const ALIASES: &[(&str, &str)] = &[
     ("EXTFONT", "unicode"),
 ];
 
+/// The space advance of the reference's stroke fonts, in glyph units (cap
+/// height 9), measured from their text extents: the SHX names these LFF
+/// fonts stand in for keep the reference's word gaps.
+const SHX_SPACE: &[(&str, f32)] = &[
+    ("TXT", 9.0),
+    ("MONOTXT", 9.0),
+    ("SIMPLEX", 9.0 * 19.0 / 21.0),
+    ("ROMANS", 9.0),
+    ("ROMAND", 9.0),
+    ("ROMANC", 9.0),
+    ("COMPLEX", 9.0),
+    ("ITALIC", 9.0),
+    ("GDT", 9.0),
+    ("ISOCP", 3.6),
+];
+
 // ── Public types ──────────────────────────────────────────────────────────
 
 /// One glyph: a list of open 2-D polyline strokes in glyph units.
@@ -161,6 +177,12 @@ fn fonts_map() -> &'static HashMap<String, Font> {
         for (alias, stem) in ALIASES {
             if let Some(f) = map.get(&stem.to_ascii_uppercase()).cloned() {
                 map.insert(alias.to_ascii_uppercase(), f);
+            }
+        }
+        // Those names keep the reference font's space width.
+        for (name, word) in SHX_SPACE {
+            if let Some(f) = map.get_mut(*name) {
+                f.word_spacing = *word;
             }
         }
         map
