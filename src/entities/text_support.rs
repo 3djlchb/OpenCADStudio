@@ -488,18 +488,29 @@ fn font_stem(name: &str) -> String {
         .to_string()
 }
 
-/// How many inked glyphs (non-blank characters, stacked parts included) an
-/// MTEXT string draws, in drawing order: the index of the first glyph of
-/// what follows `s` in a longer string.
-pub fn mtext_glyph_count(s: &str) -> usize {
-    let ink = |t: &str| t.chars().filter(|c| !c.is_whitespace()).count();
+/// The visible-character offset that follows the MTEXT string `s` — the
+/// `vis` index [`layout_mtext`]'s glyph boxes give the first character of
+/// whatever comes after `s` in a longer string: every laid-out character,
+/// a tab or stack slot, and one per paragraph break.
+pub fn mtext_visible_count(s: &str) -> usize {
     adapt_mtext_paragraphs(s, 1.0, false)
         .iter()
-        .flat_map(|line| &line.runs)
-        .map(|run| match &run.kind {
-            MTextRunKind::Glyphs(text) => ink(text),
-            MTextRunKind::Tab => 0,
-            MTextRunKind::Stack { numerator, denominator, .. } => ink(numerator) + ink(denominator),
+        .enumerate()
+        .map(|(i, para)| {
+            usize::from(i > 0)
+                + para
+                    .runs
+                    .iter()
+                    .map(|run| match &run.kind {
+                        MTextRunKind::Glyphs(text) => text.chars().count(),
+                        MTextRunKind::Tab => 1,
+                        MTextRunKind::Stack { numerator, denominator, .. } => {
+                            numerator.chars().count()
+                                + denominator.chars().count()
+                                + usize::from(!denominator.is_empty())
+                        }
+                    })
+                    .sum::<usize>()
         })
         .sum()
 }

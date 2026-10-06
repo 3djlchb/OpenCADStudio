@@ -3443,6 +3443,12 @@ impl Scene {
                     targets.render_handles.extend(users.iter().copied());
                 }
             }
+            // A table draws its cells from its own block of cell texts.
+            let record_handle = record.handle;
+            targets.render_handles.extend(self.document.entities().filter_map(|e| match e {
+                EntityType::Table(t) if t.block_record_handle == Some(record_handle) => Some(t.common.handle),
+                _ => None,
+            }));
             targets.touches_block_definition = true;
         }
         self.invalidate_dependency_targets(targets);

@@ -29,11 +29,23 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                     return Some(Task::none());
                 }
+                // A block reference brings its attributes and the fields of its
+                // block definition; a table, the texts of its cells.
                 let document = &self.tabs[i].scene.document;
                 let mut hosts = selected.clone();
                 for handle in &selected {
-                    if let Some(codec::EntityType::Insert(insert)) = document.get_entity(*handle) {
-                        hosts.extend(insert.attributes.iter().map(|a| a.common.handle));
+                    let record = match document.get_entity(*handle) {
+                        Some(codec::EntityType::Insert(insert)) => {
+                            hosts.extend(insert.attributes.iter().map(|a| a.common.handle));
+                            document.block_records.iter().find(|r| r.name.eq_ignore_ascii_case(&insert.block_name))
+                        }
+                        Some(codec::EntityType::Table(table)) => table
+                            .block_record_handle
+                            .and_then(|h| document.block_records.iter().find(|r| r.handle == h)),
+                        _ => None,
+                    };
+                    if let Some(record) = record {
+                        hosts.extend(record.entity_handles.iter().copied());
                     }
                 }
                 self.push_undo_snapshot(i, "UPDATEFIELD");

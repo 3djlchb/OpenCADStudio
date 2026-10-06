@@ -646,7 +646,7 @@ fn content_display_value(
 ) -> String {
     if let Some(handle) = content.field_handle {
         if let Some(value) =
-            crate::entities::field::resolve_handle(document, handle, table.common.handle)
+            crate::entities::field::cell_text(document, handle, table.common.handle)
         {
             return value;
         }

@@ -110,12 +110,10 @@ pub fn update_fields(
     document.update_fields(&OcsFieldContext(Some(&snapshot)), event, hosts)
 }
 
-pub fn resolve_handle(
-    document: &CadDocument,
-    field: Handle,
-    host: Handle,
-) -> Option<String> {
-    codec::fields::resolve_handle(document, field, host, &OcsFieldContext(Some(document)))
+/// The text a table cell shows for its field: a formula is evaluated live
+/// (it reads other cells), any other field shows its stored value.
+pub fn cell_text(document: &CadDocument, field: Handle, table: Handle) -> Option<String> {
+    codec::fields::cell_field_text(document, field, table, &OcsFieldContext(Some(document)))
 }
 
 /// Evaluate one field code (`\AcVar Date \f "yyyy-MM-dd"`, or the `%<…>%`
