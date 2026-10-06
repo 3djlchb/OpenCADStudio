@@ -654,6 +654,9 @@ impl OpenCADStudio {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn sync_drawing_locks(&mut self) {}
+
     /// Reload every open set whose `.dst` was changed by someone else.
     fn poll_sheet_sets(&mut self) {
         let mut changed = false;
@@ -1333,6 +1336,7 @@ impl OpenCADStudio {
     /// Before a native save: a drawing that is a sheet of an open set records
     /// its link (`AcSheetSetData`), as the reference does when it saves a
     /// sheet while its set is open.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn stamp_sheet_set_data(&mut self, i: usize) {
         let Some(path) = self.tabs[i].current_path.as_ref().map(|p| p.to_string_lossy().to_string()) else {
             return;
