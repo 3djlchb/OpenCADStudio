@@ -2144,6 +2144,14 @@ impl OpenCADStudio {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn prepare_native_save(&mut self, i: usize) {
+        // A save is a field evaluation event (FIELDEVAL bit 2).
+        self.tabs[i].scene.update_fields(2, None);
+        self.prepare_snapshot_save(i);
+    }
+
+    /// Bring the drawing state the file stores up to date, without the save
+    /// event an autosave does not raise.
+    pub(in crate::app) fn prepare_snapshot_save(&mut self, i: usize) {
         self.sync_view_state_for_save(i);
         sync_annotation_scale_header(&mut self.tabs[i].scene);
         self.stamp_header_sysvars(i);
@@ -3275,7 +3283,7 @@ impl OpenCADStudio {
             if !self.tabs[i].dirty || self.active_save_jobs.contains_key(&self.tabs[i].id) {
                 continue;
             }
-            self.prepare_native_save(i);
+            self.prepare_snapshot_save(i);
             let version = self.tabs[i].scene.document.version;
             let target = self.autosave_target(i);
             tasks.push(self.queue_native_save(

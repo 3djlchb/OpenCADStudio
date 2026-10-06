@@ -17,6 +17,68 @@ impl OpenCADStudio {
                 self.open_field_dialog(FieldTarget::NewText);
                 Some(Task::none())
             }
+            // UPDATEFIELD — re-evaluate the fields of the selected objects
+            // (a block reference's attributes included), whatever FIELDEVAL.
+            "UPDATEFIELD" => {
+                let selected: Vec<codec::Handle> =
+                    self.tabs[i].scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+                if selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("UPDATEFIELD");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    return Some(Task::none());
+                }
+                let document = &self.tabs[i].scene.document;
+                let mut hosts = selected.clone();
+                for handle in &selected {
+                    if let Some(codec::EntityType::Insert(insert)) = document.get_entity(*handle) {
+                        hosts.extend(insert.attributes.iter().map(|a| a.common.handle));
+                    }
+                }
+                self.push_undo_snapshot(i, "UPDATEFIELD");
+                let found = self.tabs[i].scene.update_fields(32, Some(&hosts));
+                self.tabs[i].scene.deselect_all();
+                self.refresh_properties();
+                if found > 0 {
+                    self.tabs[i].dirty = true;
+                }
+                self.command_line.push_output(crate::tf!("{} field(s) found.", found).as_ref());
+                self.command_line.push_output(crate::tf!("{} field(s) updated.", found).as_ref());
+                Some(Task::none())
+            }
+            // FIELDEVAL — the events that update fields, kept in the drawing.
+            cmd if cmd == "FIELDEVAL" || cmd.starts_with("FIELDEVAL ") || cmd.starts_with("SETVAR FIELDEVAL") => {
+                let value = cmd
+                    .trim_start_matches("SETVAR ")
+                    .trim_start_matches("FIELDEVAL")
+                    .trim();
+                let current = crate::entities::field::fieldeval(&self.tabs[i].scene.document);
+                let ask = |app: &mut Self| {
+                    app.command_line
+                        .push_output(&format!("Enter new value for FIELDEVAL <{current}>:"));
+                    app.pending_setvar = Some("FIELDEVAL".into());
+                };
+                match value.parse::<i32>() {
+                    _ if value.is_empty() => ask(self),
+                    Ok(n) if (0..=31).contains(&n) => {
+                        if n != current {
+                            self.push_undo_snapshot(i, "FIELDEVAL");
+                            crate::io::set_drawing_variable(
+                                &mut self.tabs[i].scene.document,
+                                "FIELDEVAL",
+                                &n.to_string(),
+                            );
+                            self.tabs[i].dirty = true;
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_error("Requires an integer between 0 and 31.");
+                        ask(self);
+                    }
+                }
+                Some(Task::none())
+            }
             cmd if cmd == "_FIELD_OBJECT" || cmd.starts_with("_FIELD_OBJECT ") => {
                 let handle = cmd
                     .split_whitespace()

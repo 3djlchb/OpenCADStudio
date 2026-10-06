@@ -3396,6 +3396,17 @@ impl Scene {
         self.bump_entities_with_parametric_policy(changes, &[], false);
     }
 
+    /// Update the fields an evaluation event re-evaluates (see
+    /// [`crate::entities::field::update_fields`]) and redraw the hosts whose
+    /// text changed. Returns the number of fields the hosts hold.
+    pub fn update_fields(&mut self, event: i32, hosts: Option<&[Handle]>) -> usize {
+        let (changed, found) = crate::entities::field::update_fields(&mut self.document, event, hosts);
+        if !changed.is_empty() {
+            self.bump_text_hosts(&changed);
+        }
+        found
+    }
+
     /// Redraw text hosts whose stored text changed (re-evaluated fields). An
     /// attribute is drawn by its INSERT, and a host inside a block definition
     /// by every reference to that block, so those redraw instead of the host;

@@ -78,6 +78,74 @@ fn oriented_text_corners(
     ]
 }
 
+/// FIELDDISPLAY boxes: the glyph bounds of each field's shown text, one box
+/// per line the field spans, in the text's own frame (`origin`, `rotation`).
+/// Glyph quads come six vertices each in drawing order, one per inked
+/// character, so a field's characters select its quads. `None` when the
+/// host's fields cannot be located in its text (the whole text is boxed).
+fn field_run_corner_groups(
+    verts: &[crate::scene::pipeline::text_gpu::TextVertex],
+    document: &codec::CadDocument,
+    entity: &EntityType,
+    origin: [f64; 2],
+    rotation: f64,
+) -> Option<Vec<[[f64; 2]; 4]>> {
+    use crate::entities::text_support::{mtext_glyph_count, resolve_dxf_special_chars};
+    fn plain_glyph_count(s: &str) -> usize {
+        resolve_dxf_special_chars(s).chars().filter(|c| !c.is_whitespace()).count()
+    }
+    let (text, count): (&str, fn(&str) -> usize) = match entity {
+        EntityType::MText(m) => (&m.value, mtext_glyph_count),
+        EntityType::Text(t) => (&t.value, plain_glyph_count),
+        EntityType::AttributeEntity(a) => (&a.value, plain_glyph_count),
+        _ => return None,
+    };
+    let spans = codec::fields::field_spans(document, entity.common().handle, text)?;
+    let (sin_r, cos_r) = rotation.sin_cos();
+    // Each quad's local bounds [left, bottom, right, top].
+    let quads: Vec<[f64; 4]> = verts
+        .chunks_exact(6)
+        .map(|quad| {
+            let mut b = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+            for v in quad {
+                let x = v.pos[0] as f64 + v.pos_low[0] as f64 - origin[0];
+                let y = v.pos[1] as f64 + v.pos_low[1] as f64 - origin[1];
+                let (lx, ly) = (x * cos_r + y * sin_r, -x * sin_r + y * cos_r);
+                b = [b[0].min(lx), b[1].min(ly), b[2].max(lx), b[3].max(ly)];
+            }
+            b
+        })
+        .collect();
+    let to_world = |x: f64, y: f64| [origin[0] + x * cos_r - y * sin_r, origin[1] + x * sin_r + y * cos_r];
+    let mut groups = Vec::new();
+    for span in spans {
+        let first = count(text.get(..span.start)?);
+        let last = count(text.get(..span.end)?).min(quads.len());
+        // A wrapped field starts a new box where the next glyph moves back
+        // left or off the current line.
+        let mut line: Option<[f64; 4]> = None;
+        for q in quads.get(first..last).unwrap_or_default() {
+            line = Some(match line {
+                Some(b) if q[0] >= b[0] && (q[1] + q[3]) * 0.5 > b[1] && (q[1] + q[3]) * 0.5 < b[3] => {
+                    [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[2]), b[3].max(q[3])]
+                }
+                Some(b) => {
+                    groups.push(b);
+                    *q
+                }
+                None => *q,
+            });
+        }
+        groups.extend(line);
+    }
+    Some(
+        groups
+            .into_iter()
+            .map(|[l, b, r, t]| [to_world(l, b), to_world(r, b), to_world(r, t), to_world(l, t)])
+            .collect(),
+    )
+}
+
 fn oriented_mtext_corner_groups(
     verts: &[crate::scene::pipeline::text_gpu::TextVertex],
     text: &codec::MText,
@@ -1421,12 +1489,29 @@ pub fn tessellate(
                         && crate::entities::field::display()
                         && crate::entities::field::hosts_field(document, entity)
                     {
-                        let corner_groups = match entity {
-                            EntityType::MText(m) => {
-                                let rotation = stroke_groups
+                        let frame = match entity {
+                            EntityType::MText(m) => Some((
+                                [m.insertion_point.x, m.insertion_point.y],
+                                stroke_groups
                                     .iter()
                                     .find_map(|group| group.run.as_ref().map(|run| run.rotation as f64))
-                                    .unwrap_or(m.rotation);
+                                    .unwrap_or(m.rotation),
+                            )),
+                            EntityType::Text(t) => {
+                                Some(([t.insertion_point.x, t.insertion_point.y], t.rotation))
+                            }
+                            EntityType::AttributeEntity(a) => {
+                                Some(([a.insertion_point.x, a.insertion_point.y], a.rotation))
+                            }
+                            _ => None,
+                        };
+                        let runs = frame.and_then(|(origin, rotation)| {
+                            field_run_corner_groups(&sdf_verts, document, entity, origin, rotation)
+                        });
+                        let corner_groups = match entity {
+                            _ if runs.is_some() => runs.unwrap_or_default(),
+                            EntityType::MText(m) => {
+                                let rotation = frame.map_or(m.rotation, |(_, rotation)| rotation);
                                 oriented_mtext_corner_groups(&sdf_verts, m, rotation, 0.0, anno)
                             }
                             EntityType::Text(t) => vec![oriented_text_corners(

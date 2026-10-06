@@ -82,11 +82,6 @@ fn drawing_dir_str(d: &DrawingDirection) -> &'static str {
 /// Per-visible-character world-space boxes for the MText editor's
 /// click-to-select preview. Uses the exact same layout opts as `to_render`
 /// so the boxes line up with the rendered glyphs.
-/// The MTEXT string to render: the live re-evaluated value when the entity
-/// hosts a dynamic field, otherwise its stored (cached) value.
-fn display_value(t: &MText, document: &codec::CadDocument) -> String {
-    crate::entities::field::resolve(document, t.common.handle).unwrap_or_else(|| t.value.clone())
-}
 
 pub fn glyph_boxes(t: &MText, document: &codec::CadDocument) -> Vec<GlyphBox> {
     let resolved_style = resolve_text_style(&t.style, document);
@@ -115,7 +110,9 @@ pub fn glyph_boxes(t: &MText, document: &codec::CadDocument) -> Vec<GlyphBox> {
     } else {
         t.rotation as f32
     };
-    let display = display_value(t, document);
+    // A field shows its stored value: fields update on their evaluation
+    // events (open, save, plot, regen, UPDATEFIELD), never on a redraw.
+    let display = t.value.clone();
     let layout = layout_mtext(&MTextRenderOpts {
         value: &display,
         insertion: [
@@ -171,7 +168,9 @@ fn to_render(t: &MText, document: &codec::CadDocument) -> RenderEntity {
     } else {
         t.rotation as f32
     };
-    let display = display_value(t, document);
+    // A field shows its stored value: fields update on their evaluation
+    // events (open, save, plot, regen, UPDATEFIELD), never on a redraw.
+    let display = t.value.clone();
     let layout = layout_mtext(&MTextRenderOpts {
         value: &display,
         insertion: [

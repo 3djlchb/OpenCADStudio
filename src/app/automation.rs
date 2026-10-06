@@ -848,6 +848,7 @@ impl OpenCADStudio {
                         ".{}.tmp.dwg",
                         path.file_name().unwrap().to_string_lossy()
                     ));
+                    self.tabs[i].scene.update_fields(2, None);
                     let document = self.tabs[i].scene.document_for_save();
                     if let Err(e) = crate::io::save(&document, &scratch) {
                         return err(format!("save: {e}"));
