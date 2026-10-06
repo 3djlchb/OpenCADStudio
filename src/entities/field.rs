@@ -110,6 +110,16 @@ pub fn update_fields(
     document.update_fields(&OcsFieldContext(Some(&snapshot)), event, hosts)
 }
 
+/// Recompute a table's cell formulas into its block after the table changed;
+/// returns the cell texts that changed.
+pub fn refresh_table_formulas(document: &mut CadDocument, table: Handle) -> Vec<Handle> {
+    if document.fields.is_empty() {
+        return Vec::new();
+    }
+    let snapshot = document.clone();
+    document.refresh_table_formulas(&OcsFieldContext(Some(&snapshot)), table)
+}
+
 /// The text a table cell shows for its field: a formula is evaluated live
 /// (it reads other cells), any other field shows its stored value.
 pub fn cell_text(document: &CadDocument, field: Handle, table: Handle) -> Option<String> {

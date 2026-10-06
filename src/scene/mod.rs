@@ -3632,6 +3632,7 @@ impl Scene {
                 && matches!(self.document.get_entity(*handle), Some(EntityType::Table(t)) if t.block_record_handle.is_none())
             {
                 rebuilt_table_block |= self.document.refresh_table_block(*handle);
+                rebuilt_table_block |= !crate::entities::field::refresh_table_formulas(&mut self.document, *handle).is_empty();
             }
         }
         if rebuilt_table_block {
