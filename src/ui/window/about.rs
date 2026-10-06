@@ -152,6 +152,10 @@ pub(crate) fn report() -> String {
             prefs.legacy_gl,
         ));
     }
+    #[cfg(target_arch = "wasm32")]
+    {
+        out.push_str("\n[Graphics]\nBackend: WebGPU / WebGL\n");
+    }
     out
 }
 

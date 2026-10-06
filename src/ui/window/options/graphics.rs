@@ -35,7 +35,7 @@ pub(crate) fn view(prefs: GraphicsPrefs, active: ActiveGpu) -> Element<'static, 
     .on_select(Message::GraphicsBackendChanged)
     .width(260);
 
-    column![
+    let mut col = column![
         text(crate::t!("Graphics")).size(15),
         Space::new().height(6),
         text(crate::t!(
@@ -55,7 +55,20 @@ pub(crate) fn view(prefs: GraphicsPrefs, active: ActiveGpu) -> Element<'static, 
         Space::new().height(4),
         current_row(
             crate::t!("Backend"),
-            unknown(active.backend.as_deref().unwrap_or(""))
+            match active.backend.as_deref() {
+                Some("dx12") => "DirectX 12".to_string(),
+                Some("vulkan") => "Vulkan".to_string(),
+                Some("gl") => "OpenGL".to_string(),
+                Some("metal") => "Metal".to_string(),
+                Some(other) => other.to_string(),
+                None => {
+                    if cfg!(target_os = "macos") {
+                        "Metal".to_string()
+                    } else {
+                        unknown("")
+                    }
+                }
+            },
         ),
         Space::new().height(4),
         current_row(crate::t!("Selected by"), unknown(&active.origin)),
@@ -77,26 +90,33 @@ pub(crate) fn view(prefs: GraphicsPrefs, active: ActiveGpu) -> Element<'static, 
         ]
         .spacing(8)
         .align_y(iced::Center),
-        Space::new().height(10),
-        row![
-            checkbox(prefs.legacy_gl)
-                .on_toggle(Message::GraphicsLegacyGlToggled)
-                .size(15),
+    ];
+
+    if cfg!(target_os = "windows") {
+        col = col.push(Space::new().height(10)).push(
+            row![
+                checkbox(prefs.legacy_gl)
+                    .on_toggle(Message::GraphicsLegacyGlToggled)
+                    .size(15),
+                text(crate::t!(
+                    "Prefer OpenGL on older GPUs (automatic backend only)"
+                ))
+                .size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        );
+    }
+
+    col.push(Space::new().height(16))
+        .push(
             text(crate::t!(
-                "Prefer OpenGL on older GPUs (Windows, automatic backend only)"
+                "If a pinned backend fails to start, the next launch falls back to automatic selection. \
+                 The --backend option and the WGPU_BACKEND variable override this page."
             ))
-            .size(12),
-        ]
-        .spacing(8)
-        .align_y(iced::Center),
-        Space::new().height(16),
-        text(crate::t!(
-            "If a pinned backend fails to start, the next launch falls back to automatic selection. \
-             The --backend option and the WGPU_BACKEND variable override this page."
-        ))
-        .size(11)
-        .width(Fill),
-    ]
-    .spacing(0)
-    .into()
+            .size(11)
+            .width(Fill),
+        )
+        .spacing(0)
+        .into()
 }

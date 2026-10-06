@@ -96,9 +96,12 @@ impl BackendChoice {
         let mut v = vec![BackendChoice::Auto];
         if cfg!(target_os = "windows") {
             v.push(BackendChoice::Dx12);
+            v.push(BackendChoice::Vulkan);
+            v.push(BackendChoice::Gl);
+        } else if cfg!(target_os = "linux") {
+            v.push(BackendChoice::Vulkan);
+            v.push(BackendChoice::Gl);
         }
-        v.push(BackendChoice::Vulkan);
-        v.push(BackendChoice::Gl);
         v
     }
 
@@ -123,7 +126,13 @@ impl BackendChoice {
 
     pub fn label(self) -> &'static str {
         match self {
-            BackendChoice::Auto => "Automatic (recommended)",
+            BackendChoice::Auto => {
+                if cfg!(target_os = "macos") {
+                    "Automatic (Metal)"
+                } else {
+                    "Automatic (recommended)"
+                }
+            }
             BackendChoice::Dx12 => "DirectX 12",
             BackendChoice::Vulkan => "Vulkan",
             BackendChoice::Gl => "OpenGL",
@@ -236,7 +245,13 @@ pub fn active_gpu_summary() -> String {
         Some("gl") => "OpenGL",
         Some("metal") => "Metal",
         Some(other) => other,
-        None => "default",
+        None => {
+            if cfg!(target_os = "macos") {
+                "Metal"
+            } else {
+                "default"
+            }
+        }
     };
     match a.adapter {
         Some(name) => format!("{name} ({backend})"),
@@ -1534,6 +1549,34 @@ mod tests {
             assert_eq!(BackendChoice::parse(c.as_str().unwrap_or("auto")), c);
         }
         assert_eq!(BackendChoice::parse("garbage"), BackendChoice::Auto);
+    }
+
+    #[test]
+    fn backend_choices_match_target_os() {
+        let choices = BackendChoice::available();
+        assert!(choices.contains(&BackendChoice::Auto));
+        if cfg!(target_os = "windows") {
+            assert_eq!(
+                choices,
+                vec![
+                    BackendChoice::Auto,
+                    BackendChoice::Dx12,
+                    BackendChoice::Vulkan,
+                    BackendChoice::Gl,
+                ]
+            );
+        } else if cfg!(target_os = "linux") {
+            assert_eq!(
+                choices,
+                vec![
+                    BackendChoice::Auto,
+                    BackendChoice::Vulkan,
+                    BackendChoice::Gl,
+                ]
+            );
+        } else if cfg!(target_os = "macos") {
+            assert_eq!(choices, vec![BackendChoice::Auto]);
+        }
     }
 
     #[test]
