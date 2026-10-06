@@ -79,10 +79,6 @@ fn drawing_dir_str(d: &DrawingDirection) -> &'static str {
     }
 }
 
-/// Per-visible-character world-space boxes for the MText editor's
-/// click-to-select preview. Uses the exact same layout opts as `to_render`
-/// so the boxes line up with the rendered glyphs.
-
 /// The text MTEXT lays out: its stored value, except that the spaces between
 /// a field's value and a right-to-left word right after it read with that
 /// word — the reference draws `שלום 0 עולם` with no gap after the field
@@ -111,6 +107,9 @@ fn display_text(t: &MText, document: &codec::CadDocument) -> String {
     out
 }
 
+/// Per-visible-character world-space boxes for the MText editor's
+/// click-to-select preview. Uses the exact same layout opts as `to_render`
+/// so the boxes line up with the rendered glyphs.
 pub fn glyph_boxes(t: &MText, document: &codec::CadDocument) -> Vec<GlyphBox> {
     let resolved_style = resolve_text_style(&t.style, document);
     let attach_h_anchor: f32 = match t.attachment_point {

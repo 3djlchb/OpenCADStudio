@@ -705,9 +705,13 @@ mod tests {
         let doc = codec::CadDocument::default();
         let placement = text_run_placement_at_scale(&t, &doc, 1.0);
 
-        // For Arabic text with default HA::Left, origin should be shifted left
-        // so the right edge of the text sits at the insertion point (X = 10.0).
-        assert!(placement.origin[0] < 10.0, "Arabic text origin must be to the left of insertion point: origin_x={}", placement.origin[0]);
+        // Left alignment does not depend on the script: Arabic text starts
+        // at the insertion point like any other.
+        assert!(
+            (placement.origin[0] - 10.0).abs() < 1e-9,
+            "Left-aligned Arabic text starts at the insertion point: origin_x={}",
+            placement.origin[0]
+        );
     }
 }
 

@@ -864,12 +864,9 @@ pub fn is_rtl_char(c: char) -> bool {
     )
 }
 
-/// Reorder a line's atoms into visual order (left to right) using the Unicode
-/// Bidirectional Algorithm (UBA) Rule L2. If the line contains no RTL characters
-/// and is not an RTL paragraph, returns the atoms unchanged.
 /// Left-to-right mark: keeps the shaper's paragraph direction left to right
 /// and closes a right-to-left run inside a word.
-pub(crate) const LRM: char = '‎';
+pub(crate) use crate::scene::text::ttf_glyph::LRM;
 
 /// Whether a word is written right to left as a whole: right-to-left
 /// letters (and their marks) only.
@@ -932,113 +929,6 @@ pub fn reorder_rtl_runs(atoms: Vec<LayoutAtom>) -> Vec<LayoutAtom> {
         i = end;
     }
     atoms
-}
-
-pub fn reorder_line_atoms(atoms: Vec<LayoutAtom>, is_rtl: bool) -> Vec<LayoutAtom> {
-    if atoms.len() <= 1 && !is_rtl {
-        return atoms;
-    }
-    let has_rtl = atoms.iter().any(|atom| match &atom.kind {
-        AtomKind::Word(w) => w.chars().any(is_rtl_char),
-        _ => false,
-    });
-    if !has_rtl && !is_rtl {
-        return atoms;
-    }
-
-    let mut line_text = String::new();
-    let mut ranges = Vec::with_capacity(atoms.len());
-    for atom in &atoms {
-        let start = line_text.len();
-        match &atom.kind {
-            AtomKind::Word(w) => line_text.push_str(w),
-            AtomKind::Space => line_text.push(' '),
-            AtomKind::Tab => line_text.push('\t'),
-            AtomKind::Stack { numerator, denominator, .. } => {
-                line_text.push_str(numerator);
-                line_text.push('/');
-                line_text.push_str(denominator);
-            }
-        }
-        let end = line_text.len();
-        ranges.push(start..end);
-    }
-
-    let base_level = if is_rtl {
-        Some(unicode_bidi::Level::rtl())
-    } else {
-        Some(unicode_bidi::Level::ltr())
-    };
-    let bidi = unicode_bidi::BidiInfo::new(&line_text, base_level);
-    if bidi.paragraphs.is_empty() {
-        return atoms;
-    }
-
-    let atom_levels: Vec<u8> = ranges
-        .iter()
-        .map(|r| {
-            let mut lvl = None;
-            // `bidi.levels` is indexed by byte, so walk characters rather than
-            // bytes to avoid slicing inside a multi-byte character.
-            for (offset, c) in line_text[r.clone()].char_indices() {
-                let i = r.start + offset;
-                if i < bidi.levels.len() {
-                    match unicode_bidi::bidi_class(c) {
-                        unicode_bidi::BidiClass::L
-                        | unicode_bidi::BidiClass::R
-                        | unicode_bidi::BidiClass::AL => {
-                            lvl = Some(bidi.levels[i].number());
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            lvl.unwrap_or_else(|| {
-                if r.start < bidi.levels.len() {
-                    bidi.levels[r.start].number()
-                } else if is_rtl {
-                    1
-                } else {
-                    0
-                }
-            })
-        })
-        .collect();
-
-    let max_level = atom_levels.iter().copied().max().unwrap_or(0);
-    let min_odd_level = atom_levels
-        .iter()
-        .copied()
-        .filter(|&l| l % 2 != 0)
-        .min()
-        .unwrap_or(1);
-
-    let mut order: Vec<usize> = (0..atoms.len()).collect();
-    for level in (min_odd_level..=max_level).rev() {
-        let mut start = 0;
-        while start < order.len() {
-            if atom_levels[order[start]] >= level {
-                let mut end = start + 1;
-                while end < order.len() && atom_levels[order[end]] >= level {
-                    end += 1;
-                }
-                order[start..end].reverse();
-                start = end;
-            } else {
-                start += 1;
-            }
-        }
-    }
-
-    let mut opt_atoms: Vec<Option<LayoutAtom>> = atoms.into_iter().map(Some).collect();
-    let mut reordered = Vec::with_capacity(opt_atoms.len());
-    for idx in order {
-        if let Some(atom) = opt_atoms[idx].take() {
-            reordered.push(atom);
-        }
-    }
-    reordered
 }
 
 pub fn run_scale(state: &RunState, entity_h: f32, base_wf: f32) -> f32 {
@@ -1117,7 +1007,9 @@ fn run_family(face: &Face) -> &str {
 
 /// Advance of a stroke-font run (glyph units × `scale`).
 fn stroke_run_width(face: &Face, text: &str, tracking: f32, scale: f32) -> f32 {
+    // The direction mark takes no room.
     text.chars()
+        .filter(|ch| *ch != LRM)
         .map(|ch| match face.glyph(ch) {
             Some(g) => (g.advance + face.spacing_after(ch) * tracking) * scale,
             None => (6.0 + face.letter_spacing() * tracking) * scale,
@@ -1620,6 +1512,14 @@ pub struct MTextLayout {
 /// (text frame, background fill, low-detail LOD substitutes) around the
 /// text block.
 pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
+    // Vertical text stacks characters one per cell and has no runs to turn.
+    let display_word = |word: String| {
+        if opts.vertical_text {
+            word
+        } else {
+            rtl_display_word(word)
+        }
+    };
     let base_font_name = opts.style.font_name.clone();
     let base_font = Face::resolve(&base_font_name);
     let base_wf_abs = opts.style.width_factor.max(0.01);
@@ -1637,7 +1537,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     struct SubLine {
         atoms: Vec<LayoutAtom>,
         align: Option<ParagraphAlign>,
-        is_rtl: bool,
         indent_first: f32,
         indent_left: f32,
         indent_right: f32,
@@ -1686,7 +1585,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         } else if ch == ' ' || ch == '\t' {
                             if !word.is_empty() {
                                 atoms.push(LayoutAtom {
-                                    kind: AtomKind::Word(rtl_display_word(std::mem::take(&mut word))),
+                                    kind: AtomKind::Word(display_word(std::mem::take(&mut word))),
                                     state: run.state.clone(),
                                     char_offset: word_start,
                                 });
@@ -1714,7 +1613,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             if let Some(prev) = word.chars().last() {
                                 if cjk_break_between(prev, ch) {
                                     atoms.push(LayoutAtom {
-                                        kind: AtomKind::Word(rtl_display_word(std::mem::take(&mut word))),
+                                        kind: AtomKind::Word(display_word(std::mem::take(&mut word))),
                                         state: run.state.clone(),
                                         char_offset: word_start,
                                     });
@@ -1727,7 +1626,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     }
                     if !word.is_empty() {
                         atoms.push(LayoutAtom {
-                            kind: AtomKind::Word(rtl_display_word(word)),
+                            kind: AtomKind::Word(display_word(word)),
                             state: run.state.clone(),
                             char_offset: word_start,
                         });
@@ -1780,7 +1679,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         // one that starts with Hebrew or Arabic: alignment follows the
         // attachment, and only right-to-left runs read backwards in place
         // (`reorder_rtl_runs`).
-        let is_rtl_para = false;
 
         // Wrap to the column the text actually flows down, not to the block:
         // measuring against the full width would let a line run across the
@@ -1815,7 +1713,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             sub_lines.push(SubLine {
                 atoms,
                 align: para.align,
-                is_rtl: is_rtl_para,
                 indent_first: para.indent_first,
                 indent_left: para.indent_left,
                 indent_right: para.indent_right,
@@ -1839,7 +1736,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         sub_lines.push(SubLine {
             atoms: Vec::new(),
             align: None,
-            is_rtl: false,
             indent_first: 0.0,
             indent_left: 0.0,
             indent_right: 0.0,
@@ -2215,9 +2111,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
 
         let content_left = if rect_w > 0.0 {
             box_left
-                + if sub.is_rtl {
-                    sub.indent_right
-                } else if sub.is_first_in_paragraph {
+                + if sub.is_first_in_paragraph {
                     sub.indent_first
                 } else {
                     sub.indent_left
@@ -2226,16 +2120,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             0.0
         };
         let content_right = if rect_w > 0.0 {
-            box_left + rect_w
-                - if sub.is_rtl {
-                    if sub.is_first_in_paragraph {
-                        sub.indent_first
-                    } else {
-                        sub.indent_left
-                    }
-                } else {
-                    sub.indent_right
-                }
+            box_left + rect_w - sub.indent_right
         } else {
             0.0
         };
@@ -2246,13 +2131,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             | Some(ParagraphAlign::Distribute) => 0.0,
             Some(ParagraphAlign::Center) => 0.5,
             Some(ParagraphAlign::Right) => 1.0,
-            None => {
-                if sub.is_rtl {
-                    1.0
-                } else {
-                    attach_h_anchor
-                }
-            }
+            None => attach_h_anchor,
         };
 
         let visible_atoms = sub
@@ -2308,7 +2187,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 xmax: ax,
                 ymin: ay.min(by),
                 ymax: ay.max(by),
-                is_rtl: sub.is_rtl,
+                is_rtl: false,
                 local: [line_lx + cursor_start, line_ly, line_lx + cursor_start, line_ly + caret_h],
             });
             vis += 1;
@@ -2328,17 +2207,17 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             let distribute = matches!(sub.align, Some(ParagraphAlign::Distribute));
             let slack = (content_right - content_left).max(0.0) - line_w;
             if rect_w > 0.0 && (justify || distribute) && slack > 1e-6 {
-                let spaces = sub
-                    .atoms
+                // The gaps the measured width holds: none after the last
+                // visible atom, and no direction marks.
+                let spaces = sub.atoms[..visible_atoms]
                     .iter()
                     .filter(|a| matches!(a.kind, AtomKind::Space))
                     .count();
                 if distribute {
-                    let chars: usize = sub
-                        .atoms
+                    let chars: usize = sub.atoms[..visible_atoms]
                         .iter()
                         .filter_map(|a| match &a.kind {
-                            AtomKind::Word(t) => Some(t.chars().count()),
+                            AtomKind::Word(t) => Some(t.chars().filter(|c| *c != LRM).count()),
                             _ => None,
                         })
                         .sum();
@@ -2501,47 +2380,40 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                 bold: atom.state.bold,
                             }),
                         });
-                        run_x += run_width(&face, run_text, shaped, tracking, run_scale_x);
-                    }
-                    // Underline / overline / strike are lines, not glyphs; a
-                    // run-group's strokes are suppressed by the SDF path, so
-                    // emit the decorations in their own RUN-LESS group. Reuse
-                    // lff's exact positions by tessellating the decorated word
-                    // and taking the strokes it appends after the glyphs.
-                    if atom.state.underline || atom.state.overline || atom.state.strike {
-                        let glyph_n = lff::tessellate_text_run(
-                            [0.0, 0.0],
-                            run_h,
-                            rot,
-                            signed_wf,
-                            oblique,
-                            tracking,
-                            &font_name,
-                            text,
-                        )
-                        .0
-                        .len();
-                        let body = decorated(text, &atom.state);
-                        let (deco, _) = lff::tessellate_text_run(
-                            [0.0, 0.0],
-                            run_h,
-                            rot,
-                            signed_wf,
-                            oblique,
-                            tracking,
-                            &font_name,
-                            &body,
-                        );
-                        if deco.len() > glyph_n {
-                            all_strokes.push(TextStroke {
-                                strokes: deco[glyph_n..].to_vec(),
-                                origin,
-                                color,
-                                fill_tris: vec![],
-                                plane: None,
-                                run: None,
-                            });
+                        // Underline / overline / strike are lines, not glyphs;
+                        // a run-group's strokes are suppressed by the SDF path,
+                        // so emit the decorations in their own RUN-LESS group,
+                        // run by run so they span what is drawn. Reuse lff's
+                        // exact positions by tessellating the decorated run and
+                        // taking the strokes it appends after the glyphs.
+                        if atom.state.underline || atom.state.overline || atom.state.strike {
+                            let tessellate = |body: &str| {
+                                lff::tessellate_text_run(
+                                    [0.0, 0.0],
+                                    run_h,
+                                    rot,
+                                    signed_wf,
+                                    oblique,
+                                    tracking,
+                                    &font_name,
+                                    body,
+                                )
+                                .0
+                            };
+                            let glyph_n = tessellate(run_text).len();
+                            let deco = tessellate(&decorated(run_text, &atom.state));
+                            if deco.len() > glyph_n {
+                                all_strokes.push(TextStroke {
+                                    strokes: deco[glyph_n..].to_vec(),
+                                    origin: [origin[0] + dx as f64, origin[1] + dy as f64],
+                                    color,
+                                    fill_tris: vec![],
+                                    plane: None,
+                                    run: None,
+                                });
+                            }
                         }
+                        run_x += run_width(&face, run_text, shaped, tracking, run_scale_x);
                     }
                     if opts.want_glyph_boxes {
                         let run_h = atom.state.height_mul * entity_h;
@@ -3279,8 +3151,8 @@ mod v_anchor_tests {
     }
 
     #[test]
-    fn test_bidi_atoms() {
-        fn reorder_atoms(words: &[&str], is_rtl: bool) -> Vec<String> {
+    fn right_to_left_runs_read_backwards_in_place() {
+        fn reorder(words: &[&str]) -> Vec<String> {
             let atoms: Vec<super::LayoutAtom> = words
                 .iter()
                 .map(|w| super::LayoutAtom {
@@ -3293,8 +3165,7 @@ mod v_anchor_tests {
                     char_offset: 0,
                 })
                 .collect();
-            let reordered = super::reorder_line_atoms(atoms, is_rtl);
-            reordered
+            super::reorder_rtl_runs(atoms)
                 .into_iter()
                 .map(|a| match a.kind {
                     super::AtomKind::Word(w) => w,
@@ -3304,42 +3175,16 @@ mod v_anchor_tests {
                 .collect()
         }
 
-        // Case 1: Pure Arabic
-        let words1 = ["بسم", " ", "الله", " ", "الرحمن", " ", "الرحيم"];
-        let reordered1 = reorder_atoms(&words1, true);
-        assert_eq!(reordered1, vec!["الرحيم", " ", "الرحمن", " ", "الله", " ", "بسم"]);
-
-        // Case 2: Arabic with numbers
-        let words2 = ["بسم", " ", "الله", " ", "123", " ", "الرحمن"];
-        let reordered2 = reorder_atoms(&words2, true);
-        assert_eq!(reordered2, vec!["الرحمن", " ", "123", " ", "الله", " ", "بسم"]);
-
-        // Case 3: English with Arabic
-        let words3 = ["Hello", " ", "بسم", " ", "الله", " ", "world"];
-        let reordered3 = reorder_atoms(&words3, false);
-        assert_eq!(reordered3, vec!["Hello", " ", "الله", " ", "بسم", " ", "world"]);
-
-        // Case 4: Pure English
-        let words4 = ["Hello", " ", "world"];
-        let reordered4 = reorder_atoms(&words4, false);
-        assert_eq!(reordered4, vec!["Hello", " ", "world"]);
-
-        // Case 5: Mixed Urdu + Arabic + Hebrew + English
-        let text_b = "یہ اردو ہے۔ مرحبا! שלום שנה 2026 is here!";
-        let words_b: Vec<&str> = text_b.split_inclusive(' ').collect();
-        let reordered_b = reorder_atoms(&words_b, true);
+        // A run of right-to-left words turns round with the spaces after it;
+        // everything else keeps its order.
         assert_eq!(
-            reordered_b,
-            vec!["2026 ", "is ", "here!", "שנה ", "שלום ", "مرحبا! ", "ہے۔ ", "اردو ", "یہ "]
+            reorder(&["אבג", " ", "דה", " ", "abc"]),
+            vec![" ", "דה", " ", "אבג", "abc"]
         );
-
-        // Case 6: a word starting with multi-byte neutral punctuation must
-        // not be sliced inside that character.
-        let words6 = ["שלום", " ", "«x"];
-        let reordered6 = reorder_atoms(&words6, false);
-        assert_eq!(reordered6, vec!["שלום", " ", "«x"]);
+        assert_eq!(reorder(&["Hello", " ", "world"]), vec!["Hello", " ", "world"]);
+        // A word starting with multi-byte punctuation ends the run whole.
+        assert_eq!(reorder(&["שלום", " ", "«x"]), vec![" ", "שלום", "«x"]);
     }
-
 
     #[test]
     fn cjk_paragraph_wraps_between_ideographs() {
@@ -3460,10 +3305,11 @@ mod v_anchor_tests {
         };
         let layout_mixed = layout_mtext(&opts_mixed);
         assert!(!layout_mixed.strokes.is_empty());
-        // In a wrapped box of width 200.0, RTL paragraph right-aligns:
-        // the rightmost stroke group should end near 200.0
-        let max_origin = layout_mixed.strokes.iter().map(|s| s.origin[0]).fold(f64::NEG_INFINITY, f64::max);
-        assert!(max_origin > 100.0, "RTL text in 200-width box should be right-aligned near the right margin (got max_origin={})", max_origin);
+        // A paragraph starting with right-to-left text still follows the
+        // attachment: left-anchored in a 200-wide box, it starts at the left.
+        let min_origin = layout_mixed.strokes.iter().map(|s| s.origin[0]).fold(f64::INFINITY, f64::min);
+        // (The space after the turned run leads, as the reference shows it.)
+        assert!(min_origin < 5.0, "a left-anchored paragraph starts at the left margin (got min_origin={min_origin})");
 
         // Test single Arabic word "ميل"
         let opts_mayl = MTextRenderOpts {

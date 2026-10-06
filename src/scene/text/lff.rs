@@ -338,6 +338,10 @@ pub(crate) fn tokenize_run(text: &str) -> Vec<Tok> {
     let mut toks = Vec::new();
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
+        // A direction mark only steers shaping; it draws nothing.
+        if ch == crate::scene::text::ttf_glyph::LRM {
+            continue;
+        }
         if ch == '\\' {
             match chars.peek().copied() {
                 Some('L') => {
