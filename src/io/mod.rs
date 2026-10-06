@@ -531,7 +531,8 @@ pub async fn pick_and_load_web(
 ) -> WebOpenOutcome {
     let Some(handle) = crate::sys::file_dialog()
         .set_title(crate::t!("Open CAD file").as_ref())
-        .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
+        .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "dwt", "DWG", "DXF", "DWT"])
+        .add_filter(crate::t!("Drawing Template (*.dwt)").as_ref(), &["dwt", "DWT"])
         .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .pick_file()
         .await
