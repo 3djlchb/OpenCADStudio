@@ -3738,6 +3738,12 @@ impl OpenCADStudio {
             }
         }
 
+        // A command step that takes a point or a pick commits on the press,
+        // so the cursor moving before the button comes up cannot move it.
+        // Selection steps and drag-fence picks still wait for the release.
+        let picks_on_press = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
+            !command.is_selection_gathering() && !command.accepts_drag_selection()
+        }) && self.tabs[i].scene.selection.borrow().box_anchor.is_none();
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.left_down = true;
         // Stored in full-canvas space (like ViewportMove's cursor and
@@ -3746,6 +3752,12 @@ impl OpenCADStudio {
         sel.left_press_pos = Some(p_full);
         sel.left_press_time = Some(Instant::now());
         sel.left_dragging = false;
+        drop(sel);
+        if picks_on_press {
+            // The command path clears `left_down`, so the real release
+            // that follows finds nothing pressed and does nothing.
+            return self.on_viewport_left_release();
+        }
         Task::none()
     }
 
@@ -7243,6 +7255,44 @@ mod selection_preview_tests {
                 assert!((line.end - opposite).length() < 1e-5, "{line:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_point_step_takes_the_point_where_the_button_went_down() {
+        use codec::EntityType;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().vp_size = (800.0, 600.0);
+        let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
+        let cursor = |app: &OpenCADStudio, x: f64, y: f64| {
+            let at = app.tabs[i].scene.camera.borrow().project(glam::DVec3::new(x, y, 0.0), bounds);
+            let at = at.unwrap();
+            iced::Point::new(at.x, at.y)
+        };
+        let _ = app.run_command_line("LINE");
+        // Away from the origin, where the UCS icon takes presses.
+        for (down, up) in [((40.0, 30.0), (45.0, 34.0)), ((80.0, 30.0), (86.0, 25.0))] {
+            let _ = app.on_viewport_move(cursor(&app, down.0, down.1));
+            let _ = app.on_viewport_left_press();
+            // The hand moves before the button comes up.
+            let _ = app.on_viewport_move(cursor(&app, up.0, up.1));
+            let _ = app.on_viewport_left_release();
+        }
+        let _ = app.feed_command(crate::command::StepInput::Enter);
+        let lines: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::Line(line) => Some(line.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 1, "one point per click, not one per press and release");
+        let line = &lines[0];
+        assert!((line.start.x - 40.0).abs() < 0.5 && (line.start.y - 30.0).abs() < 0.5, "{line:?}");
+        assert!((line.end.x - 80.0).abs() < 0.5 && (line.end.y - 30.0).abs() < 0.5, "{line:?}");
     }
 
     #[test]
