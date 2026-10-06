@@ -3771,8 +3771,7 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let hosts = crate::entities::field::stamp_plot_fields(&mut self.tabs[i].scene.document);
         if !hosts.is_empty() {
-            let changes: Vec<_> = hosts.into_iter().map(|h| (h, crate::scene::ChangeKind::Modified)).collect();
-            self.tabs[i].scene.bump_entities(&changes);
+            self.tabs[i].scene.bump_text_hosts(&hosts);
             self.tabs[i].dirty = true;
         }
     }
