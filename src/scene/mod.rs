@@ -4458,6 +4458,22 @@ impl Scene {
         self.current_layout_block_handle()
     }
 
+    /// A unique id for a new viewport on the current layout: one past the
+    /// largest id there, at least 2 (1 is the layout's own paper viewport).
+    pub fn next_viewport_id(&self) -> i16 {
+        let layout_block = self.current_layout_block_handle();
+        let max_id = self
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                codec::EntityType::Viewport(v) if v.common.owner_handle == layout_block => Some(v.id),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(1);
+        (max_id + 1).max(2)
+    }
+
     /// True when an entity belongs to the active layout, including imported
     /// DXF entities whose owner handle is NULL but whose BlockRecord still
     /// lists the entity. Keep command validation aligned with the same

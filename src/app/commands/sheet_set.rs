@@ -1496,21 +1496,33 @@ impl OpenCADStudio {
         if layout_changed {
             match open_tab {
                 Some(k) => {
-                    self.tabs[k].scene.rename_layout(&old.name, &new_layout);
-                    if let Some(mut link) = self.tabs[k].scene.document.sheet_set_data() {
-                        link.layout_name = new_layout.clone();
-                        self.tabs[k].scene.document.set_sheet_set_data(&link);
+                    self.push_undo_snapshot(k, "LAYOUT RENAME");
+                    let scene = &mut self.tabs[k].scene;
+                    scene.rename_layout(&old.name, &new_layout);
+                    if scene.current_layout == old.name {
+                        scene.set_current_layout(new_layout.clone());
                     }
+                    if let Some(mut link) = scene.document.sheet_set_data() {
+                        link.layout_name = new_layout.clone();
+                        scene.document.set_sheet_set_data(&link);
+                    }
+                    self.tabs[k].dirty = true;
                 }
                 None => {
+                    // The closed drawing is read and written back whole: its
+                    // previous file is kept as `.bak`, as a save over it does.
+                    let path = Path::new(&old.file_name);
                     let mut scene = crate::scene::Scene::new();
-                    scene.document = crate::io::load_file(Path::new(&old.file_name)).map_err(|e| e.to_string())?;
+                    scene.document = crate::io::load_file(path).map_err(|e| e.to_string())?;
                     scene.rename_layout(&old.name, &new_layout);
                     if let Some(mut link) = scene.document.sheet_set_data() {
                         link.layout_name = new_layout.clone();
                         scene.document.set_sheet_set_data(&link);
                     }
-                    crate::io::save(&scene.document, Path::new(&old.file_name)).map_err(|e| e.to_string())?;
+                    if self.backup_on_save {
+                        crate::io::write_backup(path);
+                    }
+                    crate::io::save(&scene.document, path).map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -1552,10 +1564,13 @@ impl OpenCADStudio {
             let ids: Vec<String> = db.sheets().into_iter().flat_map(|s| db.sheet_views(s)).map(|v| v.id().to_string()).collect();
             let k = ids.iter().position(|i| *i == f.component).unwrap_or(0);
             let next = if forward { (k + 1).min(ids.len().saturating_sub(1)) } else { k.saturating_sub(1) };
-            let form = view_form(db, f.set, &ids[next]);
+            let form = ids.get(next).map(|id| view_form(db, f.set, id));
             self.sheet_set.current = Some(f.set);
             self.save_current_sheet_set();
-            self.sheet_set.dialog = Some(SsDialog::Form(form));
+            match form {
+                Some(form) => self.sheet_set.dialog = Some(SsDialog::Form(form)),
+                None => self.close_active_modal(),
+            }
             return;
         }
         if let Err(e) = self.apply_rename(&f) {
@@ -1568,10 +1583,14 @@ impl OpenCADStudio {
         let ids: Vec<String> = db.sheets().iter().map(|s| s.id().to_string()).collect();
         let k = ids.iter().position(|i| *i == f.component).unwrap_or(0);
         let next = if forward { (k + 1).min(ids.len().saturating_sub(1)) } else { k.saturating_sub(1) };
-        let mut form = rename_form(db, f.set, &ids[next]);
+        let Some(id) = ids.get(next) else {
+            self.close_active_modal();
+            return;
+        };
+        let mut form = rename_form(db, f.set, id);
         form.rename = f.rename;
         follow_rename(&mut form);
-        self.sheet_set.selected = Some(ids[next].clone());
+        self.sheet_set.selected = Some(id.clone());
         self.sheet_set.dialog = Some(SsDialog::Form(form));
     }
 
@@ -1901,9 +1920,11 @@ impl OpenCADStudio {
                 vp.center = Vector3::new(x + w / 2.0, y + h / 2.0, 0.0);
                 vp.width = w;
                 vp.height = h;
-                vp.id = 2;
+                vp.id = scene.next_viewport_id();
                 vp.view_target = mv.target.clone();
                 vp.view_direction = mv.direction.clone();
+                // ponytail: plan views only (the DCS offset is the world XY
+                // offset); a twisted or 3D view needs the view basis here.
                 vp.view_center = Vector3::new(mv.center.x - mv.target.x, mv.center.y - mv.target.y, 0.0);
                 vp.view_height = mv.height;
                 vp.custom_scale = scale;
@@ -2123,8 +2144,7 @@ impl OpenCADStudio {
                     let stem = Path::new(&file).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
                     list.blocks.push((format!("new:{file}|{stem}|"), format!("{stem} ({file})")));
                 } else {
-                    for (name, handle, on) in b.names.into_iter().filter(|n| n.2) {
-                        let _ = on;
+                    for (name, handle, _) in b.names.into_iter().filter(|n| n.2) {
                         list.blocks.push((format!("new:{file}|{name}|{handle}"), format!("{name} ({file})")));
                     }
                 }
@@ -2346,35 +2366,39 @@ impl OpenCADStudio {
             .map(|(_, h)| h)
             .unwrap_or_default();
         f.number = f.number.trim().to_string();
+        let Some(db) = self.sheet_set.sets.get(f.set) else {
+            return Task::none();
+        };
+        // The drawing is saved first: a failed save leaves no sheet in the set.
+        // It records the revision the set's next write counts up to.
+        let dst = db.path.clone().unwrap_or_default();
+        let file = ss::native_path(&path.to_string_lossy());
+        scene.document.set_sheet_set_data(&SheetSetData {
+            layout_handle: handle.to_lowercase(),
+            layout_name: layout_name.clone(),
+            sheet_dwg_name: file.clone(),
+            sheet_set_file_name: ss::native_path(&dst),
+            sheet_set_version: db.file_revision() + 1,
+            update_count: 1,
+            update_time: utc_stamp(),
+        });
+        crate::entities::field::stamp_save_dates(&mut scene.document);
+        if let Err(e) = crate::io::save(&scene.document, &path) {
+            return fail(self, f, format!("{file}: {e}"));
+        }
         let Some(db) = self.sheet_set.sets.get_mut(f.set) else {
             return Task::none();
         };
         let Some(sheet) = db.add_sheet(&f.component, &f.number, &title, "") else {
             return Task::none();
         };
-        let file = ss::native_path(&path.to_string_lossy());
         db.set_layout_reference(
             &sheet,
             "Layout",
-            &LayoutReference { file_name: file.clone(), name: layout_name.clone(), handle: handle.clone() },
+            &LayoutReference { file_name: file, name: layout_name, handle },
         );
-        let dst = db.path.clone().unwrap_or_default();
-        if let Err(e) = db.write(&dst) {
+        if let Err(e) = write_set(db, &dst) {
             self.command_line.push_error(&format!("{dst}: {e}"));
-        }
-        let revision = db.file_revision();
-        scene.document.set_sheet_set_data(&SheetSetData {
-            layout_handle: handle.to_lowercase(),
-            layout_name,
-            sheet_dwg_name: file.clone(),
-            sheet_set_file_name: ss::native_path(&dst),
-            sheet_set_version: revision,
-            update_count: 1,
-            update_time: utc_stamp(),
-        });
-        crate::entities::field::stamp_save_dates(&mut scene.document);
-        if let Err(e) = crate::io::save(&scene.document, &path) {
-            self.command_line.push_error(&format!("{file}: {e}"));
         }
         // "Open in drawing editor" (off by default) opens the new sheet.
         self.close_active_modal();
@@ -2388,19 +2412,15 @@ impl OpenCADStudio {
     }
 }
 
-/// The reference's default folder for new sheet set data: My Documents.
+/// The default folder for new sheet set data: the user's Documents folder,
+/// else the home folder.
 fn dirs_next_documents() -> String {
-    #[cfg(target_os = "windows")]
-    if let Ok(profile) = std::env::var("USERPROFILE") {
-        for sub in ["Documents", "OneDrive\\Belgeler", "OneDrive\\Documents"] {
-            let p = Path::new(&profile).join(sub);
-            if p.is_dir() {
-                return p.to_string_lossy().to_string();
-            }
-        }
-        return profile;
+    let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
+    let documents = Path::new(&home).join("Documents");
+    if documents.is_dir() {
+        return documents.to_string_lossy().to_string();
     }
-    std::env::var("HOME").unwrap_or_default()
+    home
 }
 
 /// Copy the wizard's name and description into its draft set.
