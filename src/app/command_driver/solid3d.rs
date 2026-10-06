@@ -486,6 +486,8 @@ impl OpenCADStudio {
             .iter()
             .map(|(_, entity)| entity.clone())
             .collect::<Vec<_>>();
+        // Group 294: a base point the user picked.
+        let picked_base = options.base_point.is_some();
         let options = sweep_model::sweep_selection_options(&selection, options);
         let pending = if profiles.is_empty() {
             None
@@ -496,7 +498,8 @@ impl OpenCADStudio {
         let mut consumed = Vec::new();
         for (handle, profile) in profiles {
             let result = path.as_ref().zip(options).and_then(|(path, options)| {
-                let record = sweep_model::sweep_record(&profile, path, options)?;
+                let mut record = sweep_model::sweep_record(&profile, path, options)?;
+                record.flags_294_296[0] |= picked_base;
                 let (_, _, closed) = kernel::acis::sweep_profile_geometry(
                     record.sweep_entity.as_ref()?,
                     record.sweep_entity_transform,

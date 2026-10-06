@@ -651,7 +651,7 @@ pub fn extrusion_surface_data(
             path_entity_transform: value.path_entity_transform,
             is_solid: false,
             sweep_alignment_flags: value.align_option as i16,
-            align_start: value.has_align_start,
+            align_start: value.align_start,
             bank: value.bank,
             base_point_set: true,
             reference_vector: value.reference_point,

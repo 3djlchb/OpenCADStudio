@@ -4205,7 +4205,7 @@ dependencies = [
 [[package]]
 name = "opencadcodec"
 version = "0.6.0"
-source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=1ca7d33#1ca7d3360a34384b59297ffe8aa18b157d2701d9"
+source = "git+https://github.com/ramox81/cadcodec.git?rev=08b2296#08b229649d5afc5ed948726088df15d72f404c29"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -4237,7 +4237,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7fb0abb#7fb0abb4ee8e4266a770eb673ac7757c71321513"
+source = "git+https://github.com/ramox81/cadkernel.git?rev=a259e57#a259e570fc727fca273ac0b266616045744ad408"
 dependencies = [
  "cavalier_contours",
  "opencadcodec",

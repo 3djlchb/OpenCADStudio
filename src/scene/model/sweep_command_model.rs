@@ -17,6 +17,24 @@ fn embedded_sweep_profile(entity: &EntityType) -> Option<(codec::entities::Embed
     }
 }
 
+/// The sweep path as the reference records it: a 3D polyline as a wire
+/// body, anything else as its embedded entity.
+fn embedded_sweep_path(path: &EntityType) -> Option<codec::entities::EmbeddedEntity> {
+    let EntityType::Polyline3D(value) = path else {
+        return embedded_path(path);
+    };
+    let points = value.vertices.iter()
+        .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
+        .collect::<Vec<_>>();
+    let mut document = codec::entities::acis::SatDocument::new();
+    kernel::acis::append_polyline_wire(&points, value.is_closed(), &mut document).ok()?;
+    Some(codec::entities::EmbeddedEntity::Body {
+        // The 3D polyline object type.
+        type_code: 16,
+        acis_data: codec::entities::AcisData::from_sat(&document.to_sat_string()),
+    })
+}
+
 pub fn is_sweep_profile(entity: &EntityType) -> bool {
     embedded_sweep_profile(entity).is_some_and(|(profile, transform)| {
         kernel::acis::sweep_profile_geometry(&profile, transform).is_ok()
@@ -64,10 +82,11 @@ pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptio
         base,
         operation_major: 1,
         sweep_entity: Some(sweep_entity),
-        path_entity: Some(embedded_path(path)?),
+        path_entity: Some(embedded_sweep_path(path)?),
         scale_factor: options.scale,
         twist_angle: options.twist_angle,
-        align_option: u8::from(options.align),
+        // 1 aligns the profile to the path; 2 only moves it to the path start.
+        align_option: if options.align { 1 } else { 2 },
         has_align_start: true,
         bank: options.bank,
         sweep_entity_transform,
@@ -100,12 +119,32 @@ fn placed_sweep_record(profile: &EntityType, mut record: SolidHistorySweep) -> O
             [0.0, 0.0, 0.0, 1.0],
         ],
     });
+    // The record's matrices are the source profile frame (at the base point,
+    // in the profile plane) and the frame it is placed in at the path start;
+    // the reference re-places the profile from them when it re-evaluates.
+    let (plane, _, _) = kernel::acis::sweep_profile_geometry(
+        record.sweep_entity.as_ref()?,
+        record.sweep_entity_transform,
+    ).ok()?;
+    let x_axis = glam::DVec3::from_array(plane.x_axis).try_normalize()?;
+    let normal = glam::DVec3::from_array(plane.normal()?);
+    let base = glam::DVec3::new(record.reference_point.x, record.reference_point.y, record.reference_point.z);
+    let source_frame = glam::DMat4::from_cols(
+        x_axis.extend(0.0),
+        normal.cross(x_axis).extend(0.0),
+        normal.extend(0.0),
+        base.extend(1.0),
+    );
     let mut moved = profile.clone();
     crate::scene::view::dispatch::apply_transform(&mut moved, &crate::command::EntityTransform::Affine(transform));
-    let (sweep_entity, sweep_entity_transform) = embedded_sweep_profile(&moved)?;
+    let (sweep_entity, _) = embedded_sweep_profile(&moved)?;
     record.sweep_entity = Some(sweep_entity);
-    record.sweep_entity_transform = sweep_entity_transform;
-    record.flags_294_296 = [false, true, true];
+    record.sweep_entity_transform = source_frame.to_cols_array();
+    record.path_entity_transform = (map * source_frame).to_cols_array();
+    // Group 294 marks a profile only moved to the path, not turned onto it.
+    record.flags_294_296 = [record.align_option != 1, true, true];
+    // The reference records its default mitred joint.
+    record.miter_option = 2;
     record.reference_point = Vector3::new(0.0, 0.0, 0.0);
     Some(record)
 }
@@ -135,7 +174,7 @@ pub fn swept_surface_entity(record: &SolidHistorySweep) -> EntityType {
             sweep_entity_transform: record.sweep_entity_transform,
             path_entity_transform: record.path_entity_transform,
             sweep_alignment_flags: record.align_option as i16,
-            align_start: record.has_align_start,
+            align_start: record.align_start,
             bank: record.bank,
             base_point_set: true,
             reference_vector: record.reference_point,
