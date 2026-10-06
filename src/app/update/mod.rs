@@ -96,6 +96,7 @@ mod blocks_palette;
 mod dialog;
 mod dynamic;
 mod file;
+pub(in crate::app) use file::background_task;
 mod page_setup_import;
 mod style;
 pub(in crate::app) mod util;
@@ -1822,6 +1823,7 @@ impl OpenCADStudio {
             Message::FieldDialog(message) => self.on_field_dialog(message),
             Message::PcManager(message) => self.update_pc_manager(message),
             Message::Count(message) => self.on_count(message),
+            Message::SheetSet(message) => self.on_sheet_set(message),
             Message::RibbonSelectTab(idx) => {
                 self.ribbon.select(idx);
                 Task::none()
@@ -8554,6 +8556,10 @@ impl OpenCADStudio {
                 // The Invalid Area dialog's ✕ undoes the boundary change, as its Cancel does.
                 if self.active_modal == Some(super::ModalKind::CountInvalidArea) {
                     return self.update(Message::Count(crate::ui::window::count_palette::CountMsg::InvalidUndo));
+                }
+                if self.active_modal == Some(super::ModalKind::SheetSet) {
+                    self.close_sheet_set_dialog();
+                    return Task::none();
                 }
                 if self.active_modal == Some(super::ModalKind::Field) {
                     self.close_field_dialog();

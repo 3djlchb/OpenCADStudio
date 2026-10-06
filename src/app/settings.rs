@@ -625,6 +625,9 @@ pub struct UserSettings {
     /// Count - Invalid Area: 0 ask, 1 undo, 2 count all of model space.
     #[serde(default)]
     pub count_invalid_area: u8,
+    /// SSMAUTOOPEN, SSLOCATE, SSMPOLLTIME, SSMSHEETSTATUS.
+    #[serde(default)]
+    pub sheet_set: crate::ui::window::sheet_set::SheetSetSettings,
 }
 
 /// A block the Blocks palette lists from outside the current drawing (a
@@ -877,6 +880,7 @@ impl Default for UserSettings {
             count_error_color: 1,
             count_service: true,
             count_invalid_area: 0,
+            sheet_set: Default::default(),
         }
     }
 }

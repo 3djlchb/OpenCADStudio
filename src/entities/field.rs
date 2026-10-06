@@ -71,6 +71,14 @@ impl FieldContext for OcsFieldContext<'_> {
         os_date_locale()
     }
 
+    fn sheet_sets(
+        &self,
+        f: &mut dyn FnMut(&codec::sheet_set::SheetSetDatabase) -> Option<String>,
+    ) -> Option<String> {
+        let sets = SHEET_SETS.read().ok()?;
+        sets.iter().find_map(|db| f(db))
+    }
+
     fn getenv(&self, name: &str) -> Option<String> {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -81,6 +89,16 @@ impl FieldContext for OcsFieldContext<'_> {
             let _ = name;
             None
         }
+    }
+}
+
+/// The sheet sets open in the Sheet Set Manager, for `\AcSm` fields. The
+/// manager replaces the list whenever a set opens, closes or changes.
+static SHEET_SETS: std::sync::RwLock<Vec<codec::sheet_set::SheetSetDatabase>> = std::sync::RwLock::new(Vec::new());
+
+pub fn set_sheet_sets(sets: Vec<codec::sheet_set::SheetSetDatabase>) {
+    if let Ok(mut guard) = SHEET_SETS.write() {
+        *guard = sets;
     }
 }
 
@@ -367,6 +385,77 @@ fn display_name() -> Option<String> {
 pub fn attach_attribute_fields(document: &mut CadDocument, insert: Handle) -> Vec<Handle> {
     let context = OcsFieldContext(None);
     document.attach_attribute_fields(insert, &context)
+}
+
+/// Store fresh values for the sheet set fields (after a sheet set changed)
+/// and return the hosts whose text changed. A field no open sheet set
+/// resolves (`####`: its set was closed or not found) keeps its stored value.
+pub fn refresh_sheet_set_fields(document: &mut CadDocument) -> Vec<Handle> {
+    let context = OcsFieldContext(None);
+    let unresolved: Vec<(Handle, String)> = document
+        .fields
+        .values()
+        .filter(|f| f.evaluator.starts_with("AcSm"))
+        .filter(|f| {
+            let host = field_host(document, f.handle).unwrap_or(Handle::NULL);
+            codec::fields::resolve_handle(document, f.handle, host, &context).is_none_or(|v| v == "####")
+        })
+        .map(|f| (f.handle, f.evaluator.clone()))
+        .collect();
+    // ponytail: the engine refreshes every sheet set field, so the unresolved
+    // ones are hidden from it (evaluator cleared) for this one call; a
+    // "skip unresolved" switch in the engine would replace this.
+    for (h, _) in &unresolved {
+        if let Some(f) = document.fields.get_mut(h) {
+            f.evaluator.clear();
+        }
+    }
+    let changed = document.refresh_sheet_set_fields(&context);
+    for (h, evaluator) in unresolved {
+        if let Some(f) = document.fields.get_mut(&h) {
+            f.evaluator = evaluator;
+        }
+    }
+    changed
+}
+
+/// The entity hosting field `field`: up its owner chain (fields, then the
+/// field dictionary and extension dictionary) to the first non-object.
+fn field_host(document: &CadDocument, field: Handle) -> Option<Handle> {
+    let owner = |h: Handle| -> Option<Handle> {
+        if let Some(f) = document.fields.get(&h) {
+            return Some(f.owner);
+        }
+        match document.objects.get(&h)? {
+            codec::objects::ObjectType::Dictionary(d) => Some(d.owner),
+            codec::objects::ObjectType::Unknown { owner, .. } => Some(*owner),
+            _ => None,
+        }
+    };
+    let mut h = field;
+    for _ in 0..12 {
+        let o = owner(h)?;
+        if owner(o).is_none() {
+            return Some(o);
+        }
+        h = o;
+    }
+    None
+}
+
+/// Now as the OS long date, two spaces and the 24-hour time
+/// (`Monday, October 5, 2026  09:26:39`).
+pub fn long_date_time_now() -> String {
+    let locale = os_date_locale();
+    let picture = format!("{}  HH:mm:ss", locale.long_date);
+    let now = now_utc_julian() + utc_offset_days();
+    codec::fields::format_dt_in(codec::fields::julian_parts(now), &picture, &locale)
+}
+
+/// [`attach_attribute_fields`] with every field code passed through `map`.
+pub fn attach_attribute_fields_mapped(document: &mut CadDocument, insert: Handle, map: &dyn Fn(&str) -> String) -> Vec<Handle> {
+    let context = OcsFieldContext(None);
+    document.attach_attribute_fields_mapped(insert, &context, map)
 }
 
 /// Whether any attribute definition of `block` hosts a field.

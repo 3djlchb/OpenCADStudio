@@ -594,6 +594,10 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
                         self.count_palette.show = false;
                         self.ribbon.set_count_palette(false);
                     }
+                    PanelId::SheetSetManager => {
+                        self.sheet_set.show = false;
+                        self.ribbon.set_sheet_set(false);
+                    }
                     PanelId::Properties => {
                         self.show_properties = false;
                         self.ribbon.set_properties(false);
@@ -700,6 +704,7 @@ pub(super) fn on_ribbon_tool_click(&mut self, tool_id: String, event: ModuleEven
             PanelId::NodeGraph => self.show_node_graph,
             PanelId::PointCloudManager => self.pc_manager.show,
             PanelId::Count => self.count_palette.show,
+            PanelId::SheetSetManager => self.sheet_set.show,
         }
     }
 

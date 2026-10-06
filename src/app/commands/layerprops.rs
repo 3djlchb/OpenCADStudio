@@ -803,6 +803,29 @@ impl OpenCADStudio {
                                 .push_output(crate::tf!("View '{}' saved.", name).as_ref());
                         }
                     }
+                    "WINDOW" | "W" => {
+                        // A plan view of the window between two corners.
+                        let args: Vec<&str> = parts.get(2).map(|s| s.split_whitespace().collect()).unwrap_or_default();
+                        let corner = |s: &str| {
+                            let mut c = s.split(',');
+                            Some((c.next()?.trim().parse::<f64>().ok()?, c.next()?.trim().parse::<f64>().ok()?))
+                        };
+                        match (args.first(), args.get(1).and_then(|s| corner(s)), args.get(2).and_then(|s| corner(s))) {
+                            (Some(name), Some(a), Some(b)) if a.0 != b.0 && a.1 != b.1 => {
+                                use codec::types::Vector3;
+                                let mut view = self.tabs[i].scene.current_as_named_view(name);
+                                view.target = Vector3 { x: (a.0 + b.0) / 2.0, y: (a.1 + b.1) / 2.0, z: 0.0 };
+                                view.direction = Vector3 { x: 0.0, y: 0.0, z: 1.0 };
+                                view.width = (b.0 - a.0).abs();
+                                view.height = (b.1 - a.1).abs();
+                                self.tabs[i].scene.document.views.add_or_replace(view);
+                                self.command_line.push_output(crate::tf!("View '{}' saved.", name).as_ref());
+                            }
+                            _ => self
+                                .command_line
+                                .push_error(crate::t!("Usage: VIEW WINDOW <name> <x1,y1> <x2,y2>").as_ref()),
+                        }
+                    }
                     "DELETE" | "DEL" | "D" => {
                         let name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
                         if name.is_empty() {

@@ -60,6 +60,8 @@ pub struct Ribbon {
     pub show_properties: bool,
     /// The Count palette is open (View › Palettes › Count).
     pub show_count_palette: bool,
+    /// Sheet Set Manager palette shown (SSMSTATE).
+    pub show_sheet_set: bool,
     /// File tabs (FILETAB) visibility — drives the File Tabs button highlight.
     pub show_file_tabs: bool,
     /// Layout tabs (LAYOUTTAB) visibility — drives the Layout Tabs button highlight.
@@ -177,6 +179,7 @@ impl Ribbon {
             show_ucs_icon: true,
             show_properties: true,
             show_count_palette: false,
+            show_sheet_set: false,
             show_file_tabs: true,
             show_layout_tabs: true,
             open_dropdown: None,
@@ -341,6 +344,9 @@ impl Ribbon {
     pub fn set_count_palette(&mut self, on: bool) {
         self.show_count_palette = on;
     }
+    pub fn set_sheet_set(&mut self, on: bool) {
+        self.show_sheet_set = on;
+    }
     pub fn set_file_tabs(&mut self, on: bool) {
         self.show_file_tabs = on;
     }
@@ -360,6 +366,7 @@ impl Ribbon {
             show_properties: self.show_properties,
             show_count_palette: self.show_count_palette,
             show_block_palette,
+            show_sheet_set: self.show_sheet_set,
             show_file_tabs: self.show_file_tabs,
             show_layout_tabs: self.show_layout_tabs,
         }

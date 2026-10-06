@@ -37,6 +37,7 @@ pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_mar
 mod dwg_native_constraints;
 mod entity;
 pub use entity::CreateBlockOptions;
+pub use camera_ops::named_view_center;
 #[cfg(test)]
 mod hatch_boundary;
 mod group_layer;
@@ -4559,6 +4560,22 @@ impl Scene {
     /// without going through private API.
     pub fn current_layout_block_handle_pub(&self) -> Handle {
         self.current_layout_block_handle()
+    }
+
+    /// A unique id for a new viewport on the current layout: one past the
+    /// largest id there, at least 2 (1 is the layout's own paper viewport).
+    pub fn next_viewport_id(&self) -> i16 {
+        let layout_block = self.current_layout_block_handle();
+        let max_id = self
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                codec::EntityType::Viewport(v) if v.common.owner_handle == layout_block => Some(v.id),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(1);
+        (max_id + 1).max(2)
     }
 
     /// True when an entity belongs to the active layout, including imported

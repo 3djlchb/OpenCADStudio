@@ -40,7 +40,7 @@ fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 /// reaches the UI thread: it is caught on the worker and re-surfaced as
 /// [`Message::BackgroundTaskFailed`] so a crashing export or import reports
 /// on the command line instead of killing the application.
-pub(super) fn background_task<T, F, M>(context: impl Into<String>, work: F, map: M) -> Task<Message>
+pub(in crate::app) fn background_task<T, F, M>(context: impl Into<String>, work: F, map: M) -> Task<Message>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
@@ -748,6 +748,7 @@ impl OpenCADStudio {
             count_error_color: self.count_palette.error_color,
             count_service: self.count_palette.service,
             count_invalid_area: self.count_palette.invalid_choice,
+            sheet_set: self.sheet_set.settings,
         }
     }
 
@@ -883,6 +884,7 @@ impl OpenCADStudio {
         self.count_palette.error_color = s.count_error_color;
         self.count_palette.service = s.count_service;
         self.count_palette.invalid_choice = s.count_invalid_area.min(2);
+        self.sheet_set.settings = s.sheet_set;
         self.block_palette.recent = s.block_recent.clone();
         self.block_palette.favorites = s.block_favorites.clone();
         self.block_palette.libraries = s.block_libraries.clone();
@@ -2053,7 +2055,8 @@ impl OpenCADStudio {
         } else {
             Task::none()
         };
-        Task::batch([thumbs_task, pending_open_task, interaction_task, startup_script_task])
+        let sheet_set_task = self.sheet_set_after_open(i);
+        Task::batch([thumbs_task, pending_open_task, interaction_task, startup_script_task, sheet_set_task])
     }
 
     pub(super) fn on_wblock_save_result_some(
@@ -2158,6 +2161,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.document.header.user_real1 = self.tabs[i].scene.annotation_scale as f64;
         self.sync_solid_models_for_save(i);
         self.tabs[i].scene.sync_native_parametric_graph();
+        self.stamp_sheet_set_data(i);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -3310,6 +3314,10 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         for i in 0..self.tabs.len() {
             let _ = std::fs::remove_file(self.autosave_target(i));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        for path in &self.sheet_set.locks {
+            crate::app::commands::sheet_set::release_lock(path);
         }
     }
 
@@ -5519,12 +5527,9 @@ impl OpenCADStudio {
         let half_w = view.width.abs() * 0.5;
         let half_h = view.height.abs() * 0.5;
         (half_w > 1e-9 && half_h > 1e-9).then_some(())?;
-        self.area_plot_job((
-            view.center.x - half_w,
-            view.center.y - half_h,
-            view.center.x + half_w,
-            view.center.y + half_h,
-        ))
+        let center = crate::scene::named_view_center(view);
+        let (cx, cy) = (center.x, center.y);
+        self.area_plot_job((cx - half_w, cy - half_h, cx + half_w, cy + half_h))
     }
 
     pub(in crate::app) fn extents_plot_job(&self) -> Option<PdfPageInput> {

@@ -50,6 +50,8 @@ pub enum PanelId {
     PointCloudManager,
     /// Block counts (COUNTLIST).
     Count,
+    /// The open sheet sets: subsets and sheets.
+    SheetSetManager,
 }
 
 impl PanelId {
@@ -63,6 +65,7 @@ impl PanelId {
             PanelId::NodeGraph => "Node Graph",
             PanelId::PointCloudManager => "Point Cloud Manager",
             PanelId::Count => "Count",
+            PanelId::SheetSetManager => "Sheet Set Manager",
         }
     }
 
@@ -76,6 +79,7 @@ impl PanelId {
             PanelId::NodeGraph => 220.0,
             PanelId::PointCloudManager => 280.0,
             PanelId::Count => 280.0,
+            PanelId::SheetSetManager => 280.0,
         }
     }
 
@@ -167,6 +171,7 @@ impl DockState {
             PanelId::NodeGraph,
             PanelId::PointCloudManager,
             PanelId::Count,
+            PanelId::SheetSetManager,
         ] {
             self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
         }

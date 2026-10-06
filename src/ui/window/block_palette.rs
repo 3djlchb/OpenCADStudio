@@ -378,6 +378,11 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
     }
 }
 
+/// A block preview (the palette's canvas) for other dialogs.
+pub(crate) fn preview_canvas<'a>(wires: &'a [WireModel], height: f32) -> Element<'a, Message> {
+    canvas(BlockPreviewCanvas { wires }).width(Fill).height(Length::Fixed(height)).into()
+}
+
 fn pm(m: BlockPaletteMsg) -> Message {
     Message::BlockPalette(m)
 }

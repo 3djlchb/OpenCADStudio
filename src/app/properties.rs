@@ -3417,25 +3417,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         {
             // Assign a unique viewport ID (max existing id + 1, min 2).
             if let codec::EntityType::Viewport(ref mut vp) = entity {
-                let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
-                let max_id = self.tabs[i]
-                    .scene
-                    .document
-                    .entities()
-                    .filter_map(|e| {
-                        if let codec::EntityType::Viewport(v) = e {
-                            if v.common.owner_handle == layout_block {
-                                Some(v.id)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .max()
-                    .unwrap_or(1);
-                vp.id = (max_id + 1).max(2);
+                vp.id = self.tabs[i].scene.next_viewport_id();
             }
 
             let layout = self.tabs[i].scene.current_layout.clone();
