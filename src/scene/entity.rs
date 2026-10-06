@@ -1452,6 +1452,9 @@ impl Scene {
                     }
                 }
                 m.color = self.count_color(handle, m.color, self.current_bg());
+                if let Some(b) = &mut backdrop {
+                    b.color = self.count_color(handle, b.color, self.current_bg());
+                }
                 if tint_selected && self.selected.contains(&handle) {
                     m.color = [0.15, 0.55, 1.00, m.color[3]];
                 }
