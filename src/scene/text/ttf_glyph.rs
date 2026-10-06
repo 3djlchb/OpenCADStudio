@@ -603,6 +603,9 @@ pub fn char_cells(run: &ShapedRun, text: &str) -> Vec<(f32, f32)> {
         .collect()
 }
 
+/// Left-to-right mark shaped ahead of every run.
+const BASE_MARK: char = '‎';
+
 type ShapeCache = HashMap<(String, String), Option<Arc<ShapedRun>>>;
 
 fn shape_cache() -> &'static Mutex<ShapeCache> {
@@ -901,7 +904,11 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
     let attrs = Attrs::new().family(Family::SansSerif);
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(SHAPE_FS, SHAPE_FS));
     buffer.set_size(&mut font_system, None, None);
-    buffer.set_text(&mut font_system, text, &attrs, Shaping::Advanced, None);
+    // A leading left-to-right mark keeps the paragraph direction left to
+    // right, as the reference lays text out (right-to-left runs still read
+    // backwards); `cells` stay relative to `text`.
+    let marked = format!("{BASE_MARK}{text}");
+    buffer.set_text(&mut font_system, &marked, &attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(&mut font_system, false);
 
     let mut glyphs = Vec::new();
@@ -910,7 +917,10 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
     for run in buffer.layout_runs() {
         advance = advance.max(run.line_w * px_to_9);
         for glyph in run.glyphs.iter() {
-            cells.push((glyph.start, glyph.end, glyph.x * px_to_9, (glyph.x + glyph.w) * px_to_9));
+            if glyph.start >= BASE_MARK.len_utf8() {
+                let m = BASE_MARK.len_utf8();
+                cells.push((glyph.start - m, glyph.end - m, glyph.x * px_to_9, (glyph.x + glyph.w) * px_to_9));
+            }
             let face_index = font_system
                 .db_mut()
                 .face(glyph.font_id)
@@ -978,7 +988,11 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     let mut buf = Buffer::new(&mut fs, Metrics::new(SHAPE_FS, SHAPE_FS));
     // No wrapping: a run is a single line.
     buf.set_size(&mut fs, None, None);
-    buf.set_text(&mut fs, text, &attrs, Shaping::Advanced, None);
+    // A leading left-to-right mark keeps the paragraph direction left to
+    // right, as the reference lays text out (right-to-left runs still read
+    // backwards); `cells` stay relative to `text`.
+    let marked = format!("{BASE_MARK}{text}");
+    buf.set_text(&mut fs, &marked, &attrs, Shaping::Advanced, None);
     buf.shape_until_scroll(&mut fs, false);
 
     if primary_metrics.is_none() {
@@ -1017,7 +1031,10 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     for run in buf.layout_runs() {
         advance = advance.max(run.line_w * px_to_9);
         for g in run.glyphs.iter() {
-            cells.push((g.start, g.end, g.x * px_to_9, (g.x + g.w) * px_to_9));
+            if g.start >= BASE_MARK.len_utf8() {
+                let m = BASE_MARK.len_utf8();
+                cells.push((g.start - m, g.end - m, g.x * px_to_9, (g.x + g.w) * px_to_9));
+            }
             let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
             let Some(font) = fs.get_font(g.font_id, g.font_weight) else {
                 continue;

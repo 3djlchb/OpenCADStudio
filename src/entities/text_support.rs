@@ -867,6 +867,73 @@ pub fn is_rtl_char(c: char) -> bool {
 /// Reorder a line's atoms into visual order (left to right) using the Unicode
 /// Bidirectional Algorithm (UBA) Rule L2. If the line contains no RTL characters
 /// and is not an RTL paragraph, returns the atoms unchanged.
+/// Left-to-right mark: keeps the shaper's paragraph direction left to right
+/// and closes a right-to-left run inside a word.
+pub(crate) const LRM: char = '‎';
+
+/// Whether a word is written right to left as a whole: right-to-left
+/// letters (and their marks) only.
+fn is_rtl_word(w: &str) -> bool {
+    w.chars().any(is_rtl_char)
+        && w.chars().all(|c| {
+            matches!(
+                unicode_bidi::bidi_class(c),
+                unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL | unicode_bidi::BidiClass::NSM
+            )
+        })
+}
+
+/// A word as the reference draws it inside MTEXT: each run of right-to-left
+/// letters reads backwards in place, everything else (digits, punctuation,
+/// Latin) keeps its order — `אב_123_גד` shows `בא_123_דג`. A mark after
+/// each right-to-left run keeps the shaper from carrying neutrals and
+/// numbers into it.
+pub(crate) fn rtl_display_word(word: String) -> String {
+    if !word.chars().any(is_rtl_char) || is_rtl_word(&word) {
+        return word;
+    }
+    let mut out = String::with_capacity(word.len() + 6);
+    let mut in_rtl = false;
+    for c in word.chars() {
+        let rtl = matches!(
+            unicode_bidi::bidi_class(c),
+            unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL
+        ) || (in_rtl && unicode_bidi::bidi_class(c) == unicode_bidi::BidiClass::NSM);
+        if in_rtl && !rtl {
+            out.push(LRM);
+        }
+        out.push(c);
+        in_rtl = rtl;
+    }
+    out
+}
+
+/// The reference's MTEXT line order: words keep their order left to right,
+/// except that a run of right-to-left words — with the spaces between and
+/// after them — reads backwards as a whole (`אבג דה abc` shows
+/// ` הד גבאabc`). Each right-to-left word is itself shaped backwards.
+pub fn reorder_rtl_runs(atoms: Vec<LayoutAtom>) -> Vec<LayoutAtom> {
+    let rtl = |a: &LayoutAtom| matches!(&a.kind, AtomKind::Word(w) if is_rtl_word(w));
+    if !atoms.iter().any(rtl) {
+        return atoms;
+    }
+    let mut atoms = atoms;
+    let mut i = 0;
+    while i < atoms.len() {
+        if !rtl(&atoms[i]) {
+            i += 1;
+            continue;
+        }
+        let mut end = i + 1;
+        while end < atoms.len() && (rtl(&atoms[end]) || matches!(atoms[end].kind, AtomKind::Space)) {
+            end += 1;
+        }
+        atoms[i..end].reverse();
+        i = end;
+    }
+    atoms
+}
+
 pub fn reorder_line_atoms(atoms: Vec<LayoutAtom>, is_rtl: bool) -> Vec<LayoutAtom> {
     if atoms.len() <= 1 && !is_rtl {
         return atoms;
@@ -1057,7 +1124,9 @@ pub fn word_cells(
     Some(
         crate::scene::text::ttf_glyph::char_cells(&run, text)
             .into_iter()
-            .map(|(x0, x1)| (x0 * scale, x1 * scale))
+            .zip(text.chars())
+            .filter(|(_, c)| *c != LRM)
+            .map(|((x0, x1), _)| (x0 * scale, x1 * scale))
             .collect(),
     )
 }
@@ -1141,7 +1210,8 @@ pub fn wrap_paragraph(
             AtomKind::Word(_) | AtomKind::Stack { .. } => {
                 let w = atom_width(&atom, entity_h, base_wf, base_font);
                 let max_w = line_max_w(subline_idx);
-                if !cur.is_empty() && cur_w + w > max_w && !after_align_tab {
+                let has_content = cur.iter().any(|a| !matches!(a.kind, AtomKind::Space));
+                if has_content && cur_w + w > max_w && !after_align_tab {
                     while matches!(cur.last().map(|a| &a.kind), Some(AtomKind::Space)) {
                         cur.pop();
                     }
@@ -1155,7 +1225,9 @@ pub fn wrap_paragraph(
             }
             AtomKind::Space => {
                 after_align_tab = false;
-                if cur.is_empty() {
+                // A wrapped line does not start with the spaces it broke at;
+                // the paragraph's own leading spaces keep their width.
+                if cur.is_empty() && subline_idx > 0 {
                     continue;
                 }
                 cur_w += atom_width(&atom, entity_h, base_wf, base_font);
@@ -1526,7 +1598,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         } else if ch == ' ' || ch == '\t' {
                             if !word.is_empty() {
                                 atoms.push(LayoutAtom {
-                                    kind: AtomKind::Word(std::mem::take(&mut word)),
+                                    kind: AtomKind::Word(rtl_display_word(std::mem::take(&mut word))),
                                     state: run.state.clone(),
                                     char_offset: word_start,
                                 });
@@ -1554,7 +1626,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             if let Some(prev) = word.chars().last() {
                                 if cjk_break_between(prev, ch) {
                                     atoms.push(LayoutAtom {
-                                        kind: AtomKind::Word(std::mem::take(&mut word)),
+                                        kind: AtomKind::Word(rtl_display_word(std::mem::take(&mut word))),
                                         state: run.state.clone(),
                                         char_offset: word_start,
                                     });
@@ -1567,7 +1639,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     }
                     if !word.is_empty() {
                         atoms.push(LayoutAtom {
-                            kind: AtomKind::Word(word),
+                            kind: AtomKind::Word(rtl_display_word(word)),
                             state: run.state.clone(),
                             char_offset: word_start,
                         });
@@ -1603,52 +1675,24 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             }
         }
 
-        // Trim leading + trailing Space atoms so line_w / cursor_start agree
-        // on the paragraph's visible content. Without this a stray trailing
-        // space measures wider than it draws and centring / right-alignment
-        // is off by half a space-width.
+        // Trailing Space atoms draw nothing; the line width that centring /
+        // right-alignment use leaves them out (see `line_w` below), while
+        // leading spaces keep their width, as in the reference application.
         //
-        // Skipped when emitting glyph boxes (the MText editor) so a space the
+        // Kept when emitting glyph boxes (the MText editor) so a space the
         // user just typed at the end keeps a selectable box and the caret can
         // sit after it.
         if !opts.want_glyph_boxes {
-            let first_word = atoms
-                .iter()
-                .position(|a| !matches!(a.kind, AtomKind::Space))
-                .unwrap_or(atoms.len());
-            atoms.drain(..first_word);
             while matches!(atoms.last().map(|a| &a.kind), Some(AtomKind::Space)) {
                 atoms.pop();
             }
         }
 
-        let is_rtl_para = {
-            let mut strong_rtl = None;
-            for atom in &atoms {
-                match &atom.kind {
-                    AtomKind::Word(w) => {
-                        for ch in w.chars() {
-                            match unicode_bidi::bidi_class(ch) {
-                                unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL => {
-                                    strong_rtl = Some(true);
-                                    break;
-                                }
-                                unicode_bidi::BidiClass::L => {
-                                    strong_rtl = Some(false);
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        }
-                        if strong_rtl.is_some() {
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            strong_rtl.unwrap_or(false)
-        };
+        // The reference lays every MTEXT paragraph out left to right, also
+        // one that starts with Hebrew or Arabic: alignment follows the
+        // attachment, and only right-to-left runs read backwards in place
+        // (`reorder_rtl_runs`).
+        let is_rtl_para = false;
 
         // Wrap to the column the text actually flows down, not to the block:
         // measuring against the full width would let a line run across the
@@ -1678,7 +1722,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             let atoms = if opts.vertical_text {
                 atoms
             } else {
-                reorder_line_atoms(atoms, is_rtl_para)
+                reorder_rtl_runs(atoms)
             };
             sub_lines.push(SubLine {
                 atoms,
@@ -2123,8 +2167,13 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             }
         };
 
+        let visible_atoms = sub
+            .atoms
+            .iter()
+            .rposition(|a| !matches!(a.kind, AtomKind::Space))
+            .map_or(0, |i| i + 1);
         let line_w = line_total_width(
-            &sub.atoms,
+            &sub.atoms[..visible_atoms],
             entity_h,
             base_wf,
             &base_font_name,
@@ -2383,7 +2432,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     }
                     if opts.want_glyph_boxes {
                         let run_h = atom.state.height_mul * entity_h;
-                        let count = text.chars().count();
+                        let count = text.chars().filter(|c| *c != LRM).count();
                         let is_rtl = text.chars().any(is_rtl_char);
                         if is_rtl && count > 0 {
                             let word_w = if tracking != atom.state.tracking {
@@ -2429,7 +2478,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             let face = Face::resolve(&font_name);
                             let shaped = word_cells(text, &atom.state, entity_h, base_wf, &base_font_name);
                             let mut cx = cursor_x;
-                            for (ci, ch) in text.chars().enumerate() {
+                            for (ci, ch) in text.chars().filter(|c| *c != LRM).enumerate() {
                                 let adv = match face.glyph(ch) {
                                     Some(g) => {
                                         (g.advance + face.spacing_after(ch) * tracking) * scale

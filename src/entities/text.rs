@@ -281,38 +281,13 @@ pub fn text_run_placement_at_scale(
         // box one way while the strokes run the other (the bounds advance is
         // always positive — it uses |width_factor|). Left keeps its 0 reference.
         let sign = width_factor.signum();
-        let is_rtl = {
-            let mut strong_rtl = false;
-            for ch in value_for_bounds.chars() {
-                match unicode_bidi::bidi_class(ch) {
-                    unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL => {
-                        strong_rtl = true;
-                        break;
-                    }
-                    unicode_bidi::BidiClass::L => {
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            strong_rtl
-        };
+        // Left / right alignment do not depend on the text's script: the
+        // reference lays a line that starts with Hebrew or Arabic out from its
+        // left end like any other.
         let ax = match t.horizontal_alignment {
-            HA::Left => {
-                if is_rtl {
-                    b.advance * sign
-                } else {
-                    0.0
-                }
-            }
+            HA::Left => 0.0,
             HA::Center | HA::Middle => b.advance * 0.5 * sign,
-            HA::Right => {
-                if is_rtl {
-                    0.0
-                } else {
-                    b.advance * sign
-                }
-            }
+            HA::Right => b.advance * sign,
             HA::Aligned | HA::Fit => 0.0,
         };
         // Vertical anchor uses the inked extent (cap / baseline geometry).
