@@ -121,6 +121,48 @@ pub(crate) fn style_for_property<'a>(
     None
 }
 
+/// A cell's text height: the content's own format when it overrides it,
+/// else the cell, row, column or table style that sets it, else the
+/// content's value.
+fn cell_text_height(
+    table: &Table,
+    row: &codec::entities::table::TableRow,
+    column: usize,
+    cell: &codec::entities::table::TableCell,
+    content: &codec::entities::table::CellContent,
+) -> Option<f64> {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    let own = content.format_property_flags & P::TEXT_HEIGHT.bits() as i32 != 0;
+    own.then_some(content.text_height)
+        .or_else(|| style_for_property(table, row, column, cell, P::TEXT_HEIGHT).map(|s| s.text_height))
+        .or(Some(content.text_height))
+        .filter(|h| *h > 1e-6)
+}
+
+/// A cell's text style: the content's own, else the cell, row, column or
+/// table style that sets it (by handle, or by name for a cell override).
+fn cell_text_style(
+    document: &codec::CadDocument,
+    table: &Table,
+    row: &codec::entities::table::TableRow,
+    column: usize,
+    cell: &codec::entities::table::TableCell,
+    content: Option<&codec::entities::table::CellContent>,
+) -> Option<codec::Handle> {
+    use codec::entities::table::CellStylePropertyFlags as P;
+    content.and_then(|c| c.text_style_handle).or_else(|| {
+        let style = style_for_property(table, row, column, cell, P::TEXT_STYLE)?;
+        style.text_style_handle.or_else(|| {
+            let name = style.text_style_name.trim();
+            document
+                .text_styles
+                .iter()
+                .find(|s| !name.is_empty() && s.name.eq_ignore_ascii_case(name))
+                .map(|s| s.handle)
+        })
+    })
+}
+
 fn style_for_border<'a>(
     table: &'a Table,
     row: &'a codec::entities::table::TableRow,
@@ -1250,8 +1292,7 @@ impl RenderConvertible for Table {
                 // Resolve text height: content → cell-style → row-style → 0.18.
                 let content = cell.contents.first();
                 let cell_h = content
-                    .map(|c| c.text_height)
-                    .filter(|h| *h > 1e-6)
+                    .and_then(|c| cell_text_height(self, row, ci, cell, c))
                     .or_else(|| {
                         cell.style
                             .as_ref()
@@ -1264,8 +1305,7 @@ impl RenderConvertible for Table {
                 let margin = cell_h * 0.5_f32;
 
                 // Resolve text-style handle: content → cell-style → row-style.
-                let style_handle = content
-                    .and_then(|c| c.text_style_handle)
+                let style_handle = cell_text_style(document, self, row, ci, cell, content)
                     .or_else(|| cell.style.as_ref().and_then(|s| s.text_style_handle))
                     .or_else(|| row_style.and_then(|s| s.text_style_handle));
                 let font_owned = font_for_handle(style_handle).unwrap_or_else(|| "txt".to_string());
@@ -1761,11 +1801,8 @@ pub fn tessellate_table(
             let fallback_sizes: Vec<_> = value_contents
                 .iter()
                 .map(|(_, content, text)| {
-                    let height = if content.text_height > 1e-6 {
-                        content.text_height as f32 * anno_scale
-                    } else {
-                        fallback_text_height
-                    };
+                    let height = cell_text_height(tab, row, ci, cell, content)
+                        .map_or(fallback_text_height, |h| h as f32 * anno_scale);
                     let mut max_chars = 0usize;
                     let mut line_count = 0usize;
                     for line in text.split("\\P") {
@@ -1794,20 +1831,7 @@ pub fn tessellate_table(
             for (slot_index, (content_index, content, text)) in
                 value_contents.iter().enumerate()
             {
-                let text_height_style = style_for_property(
-                    tab,
-                    row,
-                    ci,
-                    cell,
-                    codec::entities::table::CellStylePropertyFlags::TEXT_HEIGHT,
-                );
-                let cell_h = (content.text_height > 1e-6)
-                    .then_some(content.text_height)
-                    .or_else(|| {
-                        text_height_style
-                            .map(|style| style.text_height)
-                            .filter(|height| *height > 1e-6)
-                    })
+                let cell_h = cell_text_height(tab, row, ci, cell, content)
                     .or_else(|| {
                         row_style
                             .map(|style| style.text_height)
@@ -1856,16 +1880,7 @@ pub fn tessellate_table(
                     .map(|style| style.margin_bottom as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
                     .unwrap_or_else(|| v_margin.max(cell_h * 0.5));
-                let style_handle = content.text_style_handle.or_else(|| {
-                    style_for_property(
-                        tab,
-                        row,
-                        ci,
-                        cell,
-                        codec::entities::table::CellStylePropertyFlags::TEXT_STYLE,
-                    )
-                    .and_then(|style| style.text_style_handle)
-                })
+                let style_handle = cell_text_style(document, tab, row, ci, cell, Some(content))
                     .or_else(|| row_style.and_then(|style| style.text_style_handle));
                 let font_owned =
                     font_for_handle(style_handle).unwrap_or_else(|| "txt".to_string());
