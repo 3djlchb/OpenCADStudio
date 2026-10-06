@@ -347,6 +347,7 @@ where
         "modeling" => OptionsTab::Modeling,
         "selection" => OptionsTab::Selection,
         "user-preferences" => OptionsTab::UserPreferences,
+        "graphics" => OptionsTab::Graphics,
         _ => OptionsTab::General,
     })
 }

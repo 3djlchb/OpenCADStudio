@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod graphics;
 pub(crate) mod spacemouse;
 use crate::app::config::UiThemeConfig;
 use crate::app::settings;
@@ -35,6 +37,7 @@ pub enum OptionsTab {
     Modeling,
     Selection,
     UserPreferences,
+    Graphics,
 }
 
 /// Application preferences the dialog reads that are plain scalars on the app.
@@ -201,6 +204,7 @@ pub fn view_window<'a>(
     selection: SelectionPrefs,
     prefs: AppPrefs,
     spacemouse: Element<'a, Message>,
+    graphics: Element<'a, Message>,
     snap_angle_input: &'a str,
     zoom_factor_input: &'a str,
     drawing_prefs: DrawingPrefs,
@@ -1675,6 +1679,7 @@ pub fn view_window<'a>(
         OptionsTab::Drafting => drafting.into(),
         OptionsTab::Modeling => modeling.into(),
         OptionsTab::UserPreferences => user_prefs.into(),
+        OptionsTab::Graphics => graphics,
     };
 
     // A vertical rail rather than a horizontal strip: the tab names are
@@ -1697,7 +1702,11 @@ pub fn view_window<'a>(
         tab_button(crate::t!("3D Modeling"), OptionsTab::Modeling),
         tab_button(crate::t!("Selection"), OptionsTab::Selection),
         tab_button(crate::t!("User Preferences"), OptionsTab::UserPreferences),
-    ]
+    ];
+    // The web build has no backend to choose, so it has no Graphics page.
+    #[cfg(not(target_arch = "wasm32"))]
+    let tabs = tabs.push(tab_button(crate::t!("Graphics"), OptionsTab::Graphics));
+    let tabs = tabs
     .spacing(2)
     .width(iced::Length::Fixed(TAB_RAIL_WIDTH));
 

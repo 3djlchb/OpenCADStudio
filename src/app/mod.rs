@@ -619,6 +619,10 @@ pub(super) struct OpenCADStudio {
     dyn_mode: i16,
     /// Currently visible page in the application Options dialog.
     options_tab: crate::ui::window::options::OptionsTab,
+    /// Saved graphics options (backend, compat renderer); read at launch, so
+    /// edits here only take effect after a restart.
+    #[cfg(not(target_arch = "wasm32"))]
+    graphics_prefs: crate::gpu_backend::GraphicsPrefs,
     /// The Options window's commit point (see `options_session`).
     options_saved: Option<options_session::OptionsSnapshot>,
     /// Close was pressed with unapplied changes; the discard guard is up.
@@ -2262,6 +2266,15 @@ pub enum Message {
     OptionsOpen,
     /// Switch the visible page in Options.
     OptionsTabChanged(crate::ui::window::options::OptionsTab),
+    /// Options > Graphics: pin a backend (applies at next launch).
+    #[cfg(not(target_arch = "wasm32"))]
+    GraphicsBackendChanged(crate::gpu_backend::BackendChoice),
+    /// Options > Graphics: force the packed compatibility renderer.
+    #[cfg(not(target_arch = "wasm32"))]
+    GraphicsCompatToggled(bool),
+    /// Options > Graphics: prefer OpenGL on older GPUs.
+    #[cfg(not(target_arch = "wasm32"))]
+    GraphicsLegacyGlToggled(bool),
     /// Set CURSORSIZE from the Display-page slider.
     CursorSizeChanged(i32),
     /// Set PICKBOX from the Selection-page slider.
@@ -4153,6 +4166,8 @@ impl OpenCADStudio {
             dyn_input: true,
             dyn_mode: 3,
             options_tab: crate::ui::window::options::OptionsTab::General,
+            #[cfg(not(target_arch = "wasm32"))]
+            graphics_prefs: crate::gpu_backend::load_prefs(),
             options_saved: None,
             options_close_confirm: false,
             spacemouse: {

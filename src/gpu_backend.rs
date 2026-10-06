@@ -76,6 +76,174 @@ pub fn gpu_guard_active() -> bool {
     !candidate_backends().is_empty()
 }
 
+/// Test hook: make the synthetic probe report a legacy (below-baseline) GPU.
+pub const FORCE_LEGACY_ENV: &str = "OCS_GPU_PROBE_FORCE_LEGACY";
+
+/// The backend the user pinned in Options > Graphics.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BackendChoice {
+    /// Probe and pick the best backend (the default).
+    #[default]
+    Auto,
+    Dx12,
+    Vulkan,
+    Gl,
+}
+
+impl BackendChoice {
+    /// Choices offered on this OS.
+    pub fn available() -> Vec<BackendChoice> {
+        let mut v = vec![BackendChoice::Auto];
+        if cfg!(target_os = "windows") {
+            v.push(BackendChoice::Dx12);
+        }
+        v.push(BackendChoice::Vulkan);
+        v.push(BackendChoice::Gl);
+        v
+    }
+
+    /// The `WGPU_BACKEND` value, or `None` for automatic.
+    pub fn as_str(self) -> Option<&'static str> {
+        match self {
+            BackendChoice::Auto => None,
+            BackendChoice::Dx12 => Some("dx12"),
+            BackendChoice::Vulkan => Some("vulkan"),
+            BackendChoice::Gl => Some("gl"),
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "dx12" => BackendChoice::Dx12,
+            "vulkan" => BackendChoice::Vulkan,
+            "gl" => BackendChoice::Gl,
+            _ => BackendChoice::Auto,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BackendChoice::Auto => "Automatic (recommended)",
+            BackendChoice::Dx12 => "DirectX 12",
+            BackendChoice::Vulkan => "Vulkan",
+            BackendChoice::Gl => "OpenGL",
+        }
+    }
+}
+
+/// Graphics settings that apply at the next launch. They live in their own
+/// file because the backend is chosen before the application (and its
+/// settings) exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GraphicsPrefs {
+    pub backend: BackendChoice,
+    /// Force the packed renderer that avoids shader storage buffers.
+    pub compat_renderer: bool,
+    /// On Windows, prefer OpenGL when the GPU is below the WebGPU baseline.
+    pub legacy_gl: bool,
+}
+
+impl Default for GraphicsPrefs {
+    fn default() -> Self {
+        Self {
+            backend: BackendChoice::Auto,
+            compat_renderer: false,
+            legacy_gl: true,
+        }
+    }
+}
+
+fn prefs_path() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var(SENTINEL_DIR_ENV) {
+        return Some(PathBuf::from(dir).join("graphics.json"));
+    }
+    crate::config::config_dir().map(|d| d.join("graphics.json"))
+}
+
+/// Saved graphics preferences; defaults when absent or unreadable.
+pub fn load_prefs() -> GraphicsPrefs {
+    let Some(text) = prefs_path().and_then(|p| std::fs::read_to_string(p).ok()) else {
+        return GraphicsPrefs::default();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return GraphicsPrefs::default();
+    };
+    let d = GraphicsPrefs::default();
+    GraphicsPrefs {
+        backend: v
+            .get("backend")
+            .and_then(|x| x.as_str())
+            .map_or(d.backend, BackendChoice::parse),
+        compat_renderer: v
+            .get("compat_renderer")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(d.compat_renderer),
+        legacy_gl: v
+            .get("legacy_gl")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(d.legacy_gl),
+    }
+}
+
+/// Persist graphics preferences (best effort).
+pub fn save_prefs(prefs: GraphicsPrefs) {
+    let Some(p) = prefs_path() else {
+        return;
+    };
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let json = serde_json::json!({
+        "backend": prefs.backend.as_str().unwrap_or("auto"),
+        "compat_renderer": prefs.compat_renderer,
+        "legacy_gl": prefs.legacy_gl,
+    });
+    let _ = std::fs::write(p, serde_json::to_string_pretty(&json).unwrap_or_default());
+}
+
+/// What this run ended up using, and why.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ActiveGpu {
+    /// `WGPU_BACKEND` value in effect (`None` = left to iced's default).
+    pub backend: Option<String>,
+    /// Adapter name when a probe identified it.
+    pub adapter: Option<String>,
+    /// Driver name / version when a probe reported it.
+    pub driver: String,
+    /// How the backend was chosen (`automatic`, `--backend`, ...).
+    pub origin: String,
+    /// The adapter is below the WebGPU baseline.
+    pub legacy: bool,
+}
+
+static ACTIVE: std::sync::OnceLock<ActiveGpu> = std::sync::OnceLock::new();
+
+fn record_active(active: ActiveGpu) {
+    let _ = ACTIVE.set(active);
+}
+
+/// The backend decision for this run (default-empty before `resolve_gpu`).
+pub fn active_gpu() -> ActiveGpu {
+    ACTIVE.get().cloned().unwrap_or_default()
+}
+
+/// Short `Adapter (backend)` text for the About dialog.
+pub fn active_gpu_summary() -> String {
+    let a = active_gpu();
+    let backend = match a.backend.as_deref() {
+        Some("dx12") => "DirectX 12",
+        Some("vulkan") => "Vulkan",
+        Some("gl") => "OpenGL",
+        Some("metal") => "Metal",
+        Some(other) => other,
+        None => "default",
+    };
+    match a.adapter {
+        Some(name) => format!("{name} ({backend})"),
+        None => backend.to_string(),
+    }
+}
+
 /// Capabilities reported by a passing probe child (one JSON line on stdout).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeCaps {
@@ -87,6 +255,12 @@ pub struct ProbeCaps {
     pub max_storage: u32,
     /// True when this is a software rasterizer (WARP / llvmpipe / SwiftShader).
     pub software: bool,
+    /// True when the adapter falls below the WebGPU baseline (missing
+    /// downlevel flags or shader model < 5): an older GPU that DX12/Vulkan
+    /// accept but run poorly or unreliably.
+    pub legacy: bool,
+    /// Driver name and version as the adapter reports them (may be empty).
+    pub driver: String,
 }
 
 impl ProbeCaps {
@@ -100,6 +274,8 @@ impl ProbeCaps {
             adapter: "synthetic-test-adapter".to_string(),
             max_storage,
             software: false,
+            legacy: std::env::var_os(FORCE_LEGACY_ENV).is_some_and(|_| backend != "gl"),
+            driver: String::new(),
         }
     }
 
@@ -111,6 +287,12 @@ impl ProbeCaps {
             adapter: v.get("adapter")?.as_str().unwrap_or("unknown").to_string(),
             max_storage: v.get("max_storage")?.as_u64()? as u32,
             software: v.get("software")?.as_bool()?,
+            legacy: v.get("legacy").and_then(|x| x.as_bool()).unwrap_or(false),
+            driver: v
+                .get("driver")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
         })
     }
 
@@ -120,6 +302,8 @@ impl ProbeCaps {
             "adapter": self.adapter,
             "max_storage": self.max_storage,
             "software": self.software,
+            "legacy": self.legacy,
+            "driver": self.driver,
         })
         .to_string()
     }
@@ -463,11 +647,41 @@ fn run_probe_for(arg: &str) -> Option<ProbeCaps> {
 
 /// Resolve and apply `WGPU_BACKEND` for this launch.
 ///
-/// Precedence: `--backend` > existing `WGPU_BACKEND` > `--safe-mode` >
+/// Precedence: `--backend` > existing `WGPU_BACKEND` > `--safe-mode` > saved
+/// Graphics option (skipped when that backend died with the previous run) >
 /// per-backend probes (minus crash-implicated backends) > software adapter >
 /// last-resort `gl`. Inactive on macOS/wasm (env untouched).
 pub fn resolve_gpu(cli_backend: Option<&str>, safe_mode: bool) -> GpuResolution {
+    let prefs = load_prefs();
     let env_backend = std::env::var("WGPU_BACKEND").ok();
+    let excluded = if previous_run_crashed() {
+        crashed_backends()
+    } else {
+        Vec::new()
+    };
+    // A saved backend choice acts like `--backend`, except when it is the
+    // backend that took down the previous run: the user must never be locked
+    // into a setting that cannot start.
+    let saved = prefs
+        .backend
+        .as_str()
+        .filter(|b| !excluded.iter().any(|e| e == b));
+    let origin = if cli_backend.is_some() {
+        "--backend"
+    } else if env_backend.is_some() {
+        "WGPU_BACKEND"
+    } else if safe_mode {
+        "safe mode"
+    } else if saved.is_some() {
+        "Graphics options"
+    } else {
+        "automatic"
+    };
+    let cli_backend = cli_backend.or(if env_backend.is_none() && !safe_mode {
+        saved
+    } else {
+        None
+    });
     if cli_backend.is_some() || env_backend.is_some() || safe_mode || !gpu_guard_active() {
         let d = decide_backend(
             cli_backend,
@@ -482,18 +696,21 @@ pub fn resolve_gpu(cli_backend: Option<&str>, safe_mode: bool) -> GpuResolution 
         if let Some(v) = &d.backend_value {
             std::env::set_var("WGPU_BACKEND", v);
         }
+        record_active(ActiveGpu {
+            backend: d.backend_value.clone(),
+            adapter: None,
+            driver: String::new(),
+            origin: origin.to_string(),
+            legacy: false,
+        });
         return GpuResolution {
             backend_value: d.backend_value,
             reason: d.reason,
             compat_renderer: false,
         };
     }
-    let candidates = candidate_backends();
-    let excluded = if previous_run_crashed() {
-        crashed_backends()
-    } else {
-        Vec::new()
-    };
+    let mut candidates = candidate_backends();
+    let mut origin = origin.to_string();
     let mut results: Vec<(String, Option<ProbeCaps>)> = Vec::new();
     for backend in &candidates {
         if excluded.iter().any(|e| e == backend) {
@@ -510,6 +727,29 @@ pub fn resolve_gpu(cli_backend: Option<&str>, safe_mode: bool) -> GpuResolution 
         if results.iter().any(|(_, c)| c.is_some()) {
             break;
         }
+    }
+    // Older GPUs that DX12/Vulkan accept but run poorly: when the winning
+    // probe says the adapter is below the WebGPU baseline, try GL first. GL
+    // only wins if its own probe passes, so this never trades a working
+    // backend for a broken one.
+    if cfg!(target_os = "windows")
+        && prefs.legacy_gl
+        && !excluded.iter().any(|e| e == "gl")
+        && results
+            .iter()
+            .find_map(|(_, c)| c.as_ref())
+            .is_some_and(|c| c.legacy && !c.software && c.backend != "gl")
+    {
+        let gl = run_probe_for("gl");
+        eprintln!(
+            "[gpu] older GPU detected; probe gl: {}",
+            gl.as_ref().map(|c| c.adapter.as_str()).unwrap_or("FAILED")
+        );
+        if gl.is_some() {
+            candidates = prefer_gl(&candidates);
+            origin = "automatic (older GPU, OpenGL preferred)".to_string();
+        }
+        results.push(("gl".to_string(), gl));
     }
     let sw = if results.iter().all(|(_, c)| c.is_none()) {
         run_probe_for("sw")
@@ -538,11 +778,33 @@ pub fn resolve_gpu(cli_backend: Option<&str>, safe_mode: bool) -> GpuResolution 
             eprintln!("[gpu] {}", compat_notice());
         }
     }
+    let chosen = results
+        .iter()
+        .filter(|(b, _)| Some(b) == d.backend_value.as_ref())
+        .find_map(|(_, c)| c.clone());
+    record_active(ActiveGpu {
+        backend: d.backend_value.clone(),
+        adapter: d.adapter_name.clone(),
+        driver: chosen.as_ref().map(|c| c.driver.clone()).unwrap_or_default(),
+        origin: if d.reason.is_some() && origin == "automatic" {
+            "automatic (fallback)".to_string()
+        } else {
+            origin
+        },
+        legacy: chosen.is_some_and(|c| c.legacy),
+    });
     GpuResolution {
         backend_value: d.backend_value,
         reason: d.reason,
         compat_renderer: d.compat_renderer,
     }
+}
+
+/// `candidates` with `gl` moved to the front.
+pub fn prefer_gl(candidates: &[String]) -> Vec<String> {
+    let mut out = vec!["gl".to_string()];
+    out.extend(candidates.iter().filter(|b| *b != "gl").cloned());
+    out
 }
 
 /// Child-process entry point for `--gpu-probe <backend|sw>`: exercise one
@@ -718,6 +980,8 @@ fn exercise_adapter(adapter: &iced::wgpu::Adapter) -> Option<ProbeCaps> {
             adapter: info.name.clone(),
             max_storage: adapter.limits().max_storage_buffers_per_shader_stage,
             software: is_software_adapter(&info),
+            legacy: !adapter.get_downlevel_capabilities().is_webgpu_compliant(),
+            driver: format!("{} {}", info.driver, info.driver_info).trim().to_string(),
         });
     }
     None
@@ -902,6 +1166,8 @@ mod tests {
             adapter: format!("test {backend}"),
             max_storage: storage,
             software: false,
+            legacy: false,
+            driver: String::new(),
         }
     }
 
@@ -1013,6 +1279,8 @@ mod tests {
             adapter: "llvmpipe".to_string(),
             max_storage: 8,
             software: true,
+            legacy: false,
+            driver: String::new(),
         };
         let d = decide_backend(
             None,
@@ -1060,6 +1328,8 @@ mod tests {
             adapter: "Intel HD 405 (Braswell)".to_string(),
             max_storage: 8,
             software: false,
+            legacy: false,
+            driver: String::new(),
         };
         let line = caps.to_json_line();
         assert_eq!(ProbeCaps::from_json_line(&line), Some(caps));
@@ -1213,5 +1483,75 @@ mod tests {
         assert!(needs_compat_renderer(&bare));
         unsafe { std::env::remove_var(FORCE_OK_ENV) };
         unsafe { std::env::remove_var(FORCE_CAPS_ENV) };
+    }
+
+    #[test]
+    fn legacy_gpu_routes_to_gl_first_but_gl_must_still_pass() {
+        let order = prefer_gl(&cands(&["dx12", "vulkan", "gl"]));
+        assert_eq!(order, cands(&["gl", "dx12", "vulkan"]));
+        // GL probe passed: it wins silently.
+        let results = vec![
+            ("dx12".to_string(), Some(ProbeCaps { legacy: true, ..ok_caps("dx12", 8) })),
+            ("gl".to_string(), Some(ok_caps("gl", 8))),
+        ];
+        let d = decide_backend(None, None, false, &order, &[], &results, None, true);
+        assert_eq!(d.backend_value.as_deref(), Some("gl"));
+        assert!(d.reason.is_none());
+        // GL probe failed: the working DX12 stays.
+        let results = vec![
+            ("dx12".to_string(), Some(ProbeCaps { legacy: true, ..ok_caps("dx12", 8) })),
+            ("gl".to_string(), None),
+        ];
+        let d = decide_backend(
+            None,
+            None,
+            false,
+            &cands(&["dx12", "vulkan", "gl"]),
+            &[],
+            &results,
+            None,
+            true,
+        );
+        assert_eq!(d.backend_value.as_deref(), Some("dx12"));
+    }
+
+    #[test]
+    fn probe_json_without_new_fields_still_parses() {
+        let line = r#"{"backend":"dx12","adapter":"x","max_storage":8,"software":false}"#;
+        let caps = ProbeCaps::from_json_line(line).expect("old probe output parses");
+        assert!(!caps.legacy);
+        assert!(caps.driver.is_empty());
+    }
+
+    #[test]
+    fn backend_choice_round_trips() {
+        for c in [
+            BackendChoice::Auto,
+            BackendChoice::Dx12,
+            BackendChoice::Vulkan,
+            BackendChoice::Gl,
+        ] {
+            assert_eq!(BackendChoice::parse(c.as_str().unwrap_or("auto")), c);
+        }
+        assert_eq!(BackendChoice::parse("garbage"), BackendChoice::Auto);
+    }
+
+    #[test]
+    fn graphics_prefs_persist_and_default_when_missing() {
+        let _guard = SENTINEL_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("ocs-gpu-prefs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // SAFETY: serialized by SENTINEL_TESTS; process-local test hook.
+        unsafe { std::env::set_var(SENTINEL_DIR_ENV, &dir) };
+        assert_eq!(load_prefs(), GraphicsPrefs::default());
+        let p = GraphicsPrefs {
+            backend: BackendChoice::Vulkan,
+            compat_renderer: true,
+            legacy_gl: false,
+        };
+        save_prefs(p);
+        assert_eq!(load_prefs(), p);
+        unsafe { std::env::remove_var(SENTINEL_DIR_ENV) };
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

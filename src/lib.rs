@@ -29,5 +29,6 @@ pub mod rest;
 pub mod scene;
 pub mod snap;
 pub mod sys;
+pub mod sysinfo;
 pub mod ui;
 pub mod videos;

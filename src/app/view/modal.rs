@@ -332,6 +332,16 @@ impl OpenCADStudio {
                             self.spacemouse_preferences, self.spacemouse.status(),
                             self.spacemouse_paused, self.spacemouse_details,
                         ),
+                        {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let page = crate::ui::window::options::graphics::view(
+                                self.graphics_prefs,
+                                crate::gpu_backend::active_gpu(),
+                            );
+                            #[cfg(target_arch = "wasm32")]
+                            let page = iced::widget::Space::new().into();
+                            page
+                        },
                         &self.snap_angle_input,
                         &self.zoom_factor_input,
                         {

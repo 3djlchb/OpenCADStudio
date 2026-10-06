@@ -7932,6 +7932,27 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::GraphicsBackendChanged(choice) => {
+                self.graphics_prefs.backend = choice;
+                crate::gpu_backend::save_prefs(self.graphics_prefs);
+                Task::none()
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::GraphicsCompatToggled(on) => {
+                self.graphics_prefs.compat_renderer = on;
+                crate::gpu_backend::save_prefs(self.graphics_prefs);
+                Task::none()
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::GraphicsLegacyGlToggled(on) => {
+                self.graphics_prefs.legacy_gl = on;
+                crate::gpu_backend::save_prefs(self.graphics_prefs);
+                Task::none()
+            }
+
             Message::CursorSizeChanged(value) => {
                 self.cursor_size = value.clamp(1, 100);
                 self.persist_settings_if_changed();
@@ -8976,16 +8997,7 @@ impl OpenCADStudio {
             }
 
             Message::AboutCopyInfo => {
-                let info = format!(
-                    "Open CAD Studio v{}\nRevision: {}\nCommit date: {}\nProfile: {}\nFeatures: {}\nOS: {}\nArch: {}",
-                    env!("OCS_FULL_VERSION"),
-                    env!("OCS_GIT_REV"),
-                    env!("OCS_COMMIT_DATE"),
-                    env!("OCS_BUILD_PROFILE"),
-                    env!("OCS_BUILD_FEATURES"),
-                    crate::ui::window::about::platform_name(),
-                    crate::ui::window::about::architecture_name(),
-                );
+                let info = crate::ui::window::about::report();
                 #[cfg(target_arch = "wasm32")]
                 {
                     crate::sys::write_clipboard_text(&info);

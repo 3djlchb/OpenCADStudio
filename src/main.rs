@@ -194,8 +194,9 @@ fn main() -> iced::Result {
         // The probe enables the packed renderer automatically on GPUs without
         // shader storage buffers; an explicit `--compat-renderer` does the
         // same without the notice.
-        let compat_renderer = args.compat_renderer || gpu.compat_renderer;
-        let gpu_compat_auto = !args.compat_renderer && gpu.compat_renderer;
+        let saved_compat = OpenCADStudio::gpu_backend::load_prefs().compat_renderer;
+        let compat_renderer = args.compat_renderer || saved_compat || gpu.compat_renderer;
+        let gpu_compat_auto = !args.compat_renderer && !saved_compat && gpu.compat_renderer;
         let _ = cli::GUI_CONFIG.set(cli::GuiConfig {
             files: if args.new { Vec::new() } else { args.files },
             new: args.new,
