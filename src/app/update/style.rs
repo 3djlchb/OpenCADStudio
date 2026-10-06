@@ -1210,10 +1210,7 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                 if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {
                     match field {
                         "dimblk" => ds.dimblk = handle,
-                        "dimblk1" => {
-                            ds.dimblk1 = handle;
-                            ds.dimblk2 = handle;
-                        }
+                        "dimblk1" => ds.dimblk1 = handle,
                         "dimblk2" => ds.dimblk2 = handle,
                         "dimldrblk" => ds.dimldrblk = handle,
                         "dimltex_handle" => ds.dimltex_handle = handle,
@@ -1223,5 +1220,74 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                     }
                 }
                 Task::none()
+    }
+}
+
+#[cfg(test)]
+mod ds_set_handle_tests {
+    // #41: picking the first arrowhead must not touch the second.
+    use crate::app::OpenCADStudio;
+
+    fn app_with_arrow_blocks() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        for name in ["ARROW_A", "ARROW_B"] {
+            let mut br = codec::tables::BlockRecord::new(name);
+            br.handle = app.tabs[i].scene.document.allocate_handle();
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .add(br)
+                .unwrap();
+        }
+        let first = app.tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .iter()
+            .next()
+            .map(|s| s.name.clone())
+            .expect("fresh doc ships a dimstyle");
+        app.dimstyle_selected = first;
+        app
+    }
+
+    #[test]
+    fn dimblk1_pick_leaves_dimblk2_alone() {
+        let mut app = app_with_arrow_blocks();
+        let i = app.active_tab;
+        let name = app.dimstyle_selected.clone();
+        let hb = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|b| b.name == "ARROW_B")
+            .map(|b| b.handle)
+            .unwrap();
+        app.tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .get_mut(&name)
+            .unwrap()
+            .dimblk2 = hb;
+        let _ = app.on_ds_set_handle("dimblk1", "ARROW_A".to_string());
+        let ds = app.tabs[i].scene.document.dim_styles.get(&name).unwrap();
+        let ha = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|b| b.name == "ARROW_A")
+            .map(|b| b.handle)
+            .unwrap();
+        assert_eq!(ds.dimblk1, ha, "first arrowhead takes the pick");
+        assert_eq!(
+            ds.dimblk2, hb,
+            "picking the first arrowhead must not touch the second"
+        );
     }
 }
