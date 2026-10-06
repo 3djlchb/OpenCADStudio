@@ -1131,6 +1131,23 @@ pub fn word_cells(
     )
 }
 
+/// The letter spacing a stroke-font word leaves after its last glyph (0 for
+/// shaped words, whose advance carries no extra spacing).
+fn trailing_letter_gap(atom: &LayoutAtom, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
+    let AtomKind::Word(text) = &atom.kind else {
+        return 0.0;
+    };
+    let font_name = resolve_font(&atom.state, base_font);
+    let face = Face::resolve(&font_name);
+    if face.ttf_family().is_some() || crate::scene::text::web_font::requires_shaping(text) {
+        return 0.0;
+    }
+    text.chars()
+        .rev()
+        .find(|c| *c != LRM)
+        .map_or(0.0, |c| face.spacing_after(c) * atom.state.tracking * run_scale(&atom.state, entity_h, base_wf))
+}
+
 pub fn measure_space(state: &RunState, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
@@ -2180,7 +2197,13 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             0.0,
             sub.indent_left,
             &sub.tab_stops,
-        );
+        )
+        // Aligned on the last glyph's ink: the letter spacing after it is not
+        // part of the width centring / right alignment use (the reference
+        // puts a right-aligned line's last stroke on the edge).
+        - sub.atoms[..visible_atoms]
+            .last()
+            .map_or(0.0, |atom| trailing_letter_gap(atom, entity_h, base_wf, &base_font_name));
         line_widths.push(line_w);
 
         let cursor_start = if rect_w > 0.0 {
