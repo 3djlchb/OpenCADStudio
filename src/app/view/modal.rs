@@ -383,11 +383,14 @@ impl OpenCADStudio {
                                 crate::ui::window::options::Folders::default()
                             }
                         },
+                        &self.qnew_template,
                         self.double_click_block_refedit,
                         self.double_click_block_attedit,
                         self.cursor_type,
                         self.crosshair_color,
                         &self.crosshair_color_input,
+                        self.snap_marker_color,
+                        &self.snap_marker_color_input,
                         self.lineweight_display_scale,
                         &self.model_space,
                         &self.model_bg_input,

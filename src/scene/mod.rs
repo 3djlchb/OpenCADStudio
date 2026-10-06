@@ -6300,6 +6300,39 @@ impl Scene {
         Some(scale_handle)
     }
 
+    /// Scale the active viewport to `factor` paper units per model unit
+    /// (ZOOM nXP). A named scale of that factor is linked as its annotation
+    /// scale; otherwise the viewport keeps a custom scale.
+    pub fn set_viewport_scale_factor(&mut self, factor: f64) -> bool {
+        let Some(viewport) = self.explicit_viewport_handle() else {
+            return false;
+        };
+        let unit_factor = self.annotation_scale_unit_factor();
+        let named = self.document.objects.values().find_map(|object| match object {
+            ObjectType::Scale(scale)
+                if !scale.is_temporary
+                    && (scale.factor() * unit_factor - factor).abs() <= 1.0e-9 * factor.max(1.0) =>
+            {
+                Some(scale.name.clone())
+            }
+            _ => None,
+        });
+        if let Some(name) = named {
+            return self.set_viewport_scale_named_for(viewport, &name).is_some();
+        }
+        match self.document.get_entity_mut(viewport) {
+            Some(EntityType::Viewport(vp)) if !vp.status.locked && factor > 1.0e-9 => {
+                vp.custom_scale = factor;
+                vp.view_height = vp.height / factor;
+            }
+            _ => return false,
+        }
+        self.notify_viewport_changed(viewport);
+        self.resident_wire_sets.borrow_mut().clear();
+        self.bump_geometry();
+        true
+    }
+
     pub fn viewport_annotation_scale_synced(&self) -> Option<bool> {
         let viewport = self.explicit_viewport_handle()?;
         let EntityType::Viewport(vp) = self.document.get_entity(viewport)? else {

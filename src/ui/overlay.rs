@@ -239,6 +239,12 @@ pub struct CrosshairOptions {
     /// the crosshair arms disappear and a blue pickbox remains — the
     /// screen-level "the client wants YOU to pick" signal.
     pub pick_pending: bool,
+    /// Draw only the pickbox: the active command previews a line that the
+    /// full-length arms would cover.
+    pub hide_arms: bool,
+    /// Explicit object-snap marker colour; `None` picks one that reads on
+    /// the canvas.
+    pub snap_color: Option<[u8; 3]>,
 }
 
 /// Rendering style for the viewport grid.
@@ -1517,6 +1523,10 @@ impl canvas::Program<Message> for SelectionCanvas {
         if let Some((sp, snap_type)) = self.snap {
             let (r, g, b) = if snap_type == SnapType::ObjectPick {
                 (0.95_f32, 0.50, 0.08) // orange object-snap marker
+            } else if let Some([r, g, b]) = self.crosshair.snap_color {
+                (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+            } else if crate::ui::style::common::canvas_is_light(self.crosshair_bg) {
+                (0.80, 0.45, 0.0) // dark amber: yellow vanishes on a light canvas
             } else {
                 (1.0, 0.9, 0.1) // classic yellow OSNAP
             };
@@ -1568,6 +1578,25 @@ impl canvas::Program<Message> for SelectionCanvas {
                     let r = 5.5_f32;
                     let path = canvas::Path::circle(sp, r);
                     frame.stroke(&path, stroke);
+                }
+                SnapType::GeometricCenter => {
+                    // Pentagon around a centre dot: the area centroid.
+                    let r = 6.5_f32;
+                    let path = canvas::Path::new(|b| {
+                        for k in 0..5 {
+                            let a = -std::f32::consts::FRAC_PI_2
+                                + k as f32 * std::f32::consts::TAU / 5.0;
+                            let p = Point::new(sp.x + r * a.cos(), sp.y + r * a.sin());
+                            if k == 0 {
+                                b.move_to(p);
+                            } else {
+                                b.line_to(p);
+                            }
+                        }
+                        b.close();
+                    });
+                    frame.stroke(&path, stroke.clone());
+                    frame.fill(&canvas::Path::circle(sp, 1.6), marker);
                 }
                 SnapType::Node => {
                     // Circle with an inscribed X.
@@ -1915,7 +1944,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                 // The arms stay only for the normal (non-pending) cursor: a
                 // waiting pick shows the box alone, regardless of the UCS
                 // rotation, so the square is unmistakable.
-                if !pick_pending {
+                if !pick_pending && !self.crosshair.hide_arms {
                     for angle in base_angles {
                         let rad = (angle + self.crosshair.snap_angle_deg as f64).to_radians();
                         let dir = Point::new(rad.cos() as f32, -rad.sin() as f32);
@@ -3363,6 +3392,37 @@ impl DynInputCanvas {
         (Self::box_content(b).len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0
     }
 
+    /// Slide a box centred at `center` straight away from the crosshair until
+    /// it neither covers the aim point nor a box already placed (#1546).
+    fn clear_of(center: Point, w: f32, cursor: Point, placed: &[iced::Rectangle]) -> Point {
+        const KEEP: f32 = 18.0;
+        let hits = |c: Point| {
+            let r = iced::Rectangle {
+                x: c.x - w * 0.5,
+                y: c.y - DYN_BOX_H * 0.5,
+                width: w,
+                height: DYN_BOX_H,
+            };
+            r.expand(KEEP).contains(cursor) || placed.iter().any(|p| p.intersects(&r))
+        };
+        let (mut dx, mut dy) = (center.x - cursor.x, center.y - cursor.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1.0 {
+            (dx, dy) = (0.0, 1.0);
+        } else {
+            (dx, dy) = (dx / len, dy / len);
+        }
+        let mut c = center;
+        for _ in 0..60 {
+            if !hits(c) {
+                break;
+            }
+            c.x += dx * 4.0;
+            c.y += dy * 4.0;
+        }
+        c
+    }
+
     /// Draw a value box centred at `center`, clamped inside `bounds`.
     fn draw_box(
         frame: &mut canvas::Frame,
@@ -3647,6 +3707,7 @@ impl DynInputCanvas {
         }
 
         // ── Box placement by role ──
+        let mut placed: Vec<iced::Rectangle> = Vec::with_capacity(self.boxes.len());
         for b in &self.boxes {
             let center = b.center.unwrap_or_else(|| match b.role {
                 DynRole::Angle => self.label_screen.unwrap_or_else(|| {
@@ -3689,6 +3750,14 @@ impl DynInputCanvas {
                     x: base.x + dx * len * 0.5 + nx * 16.0,
                     y: base.y + dy * len * 0.5 + ny * 16.0,
                 },
+            });
+            let w = Self::box_width(b);
+            let center = Self::clear_of(center, w, cursor, &placed);
+            placed.push(iced::Rectangle {
+                x: center.x - w * 0.5,
+                y: center.y - DYN_BOX_H * 0.5,
+                width: w,
+                height: DYN_BOX_H,
             });
             Self::draw_box(frame, b, center, bounds, theme);
         }

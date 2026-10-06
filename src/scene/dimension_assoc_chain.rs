@@ -54,7 +54,7 @@ pub(crate) fn osnap_type_for(snap: crate::snap::SnapType) -> u8 {
         S::Nearest | S::Extension => osnap::NEAR,
         S::ApparentIntersection => osnap::APPARENT_INT,
         S::Parallel => osnap::PARA,
-        S::Grid | S::ObjectPick | S::Vertex | S::EdgeMidpoint | S::FaceCenter | S::Knot | S::FacePerpendicular | S::NearestFace => {
+        S::GeometricCenter | S::Grid | S::ObjectPick | S::Vertex | S::EdgeMidpoint | S::FaceCenter | S::Knot | S::FacePerpendicular | S::NearestFace => {
             osnap::NONE
         }
     }

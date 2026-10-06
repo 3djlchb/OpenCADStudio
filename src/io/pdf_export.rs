@@ -771,7 +771,9 @@ fn append_pdf_page(
         }
         // Near-white and near-yellow (viewport active border) → dark grey for print
         // (only when no CTB override was applied).
-        if !color_overridden {
+        // `aci == 0` is an explicit true colour and plots as drawn, like the
+        // hatch pass (#1621); only a pure white there is an unresolved colour 7.
+        if !color_overridden && (wire.aci != 0 || [r, g, b] == [1.0; 3]) {
             // An authored white (not colour 7) plots as drawn, like on screen.
             let is_light = r > 0.80
                 && g > 0.80

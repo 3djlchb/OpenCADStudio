@@ -3,6 +3,65 @@ use super::*;
 impl OpenCADStudio {
     pub(super) fn dispatch_styleprops(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
+            // View / grid variables held by the app rather than the header,
+            // typed bare or through SETVAR (#1524, #1618).
+            cmd if matches!(
+                cmd.strip_prefix("SETVAR ").unwrap_or(cmd).split_whitespace().next(),
+                Some("PERSPECTIVE" | "GRIDMODE" | "GRIDUNIT")
+            ) =>
+            {
+                let mut words = cmd.strip_prefix("SETVAR ").unwrap_or(cmd).splitn(2, ' ');
+                let name = words.next().unwrap_or_default().to_string();
+                let value = words.next().map(str::trim).filter(|v| !v.is_empty());
+                let current = match name.as_str() {
+                    "PERSPECTIVE" => {
+                        let persp = self.tabs[i].scene.camera.borrow().projection
+                            == crate::scene::Projection::Perspective;
+                        (persp as i32).to_string()
+                    }
+                    "GRIDMODE" => (self.show_grid as i32).to_string(),
+                    _ => format!("{},{}", self.grid_spacing_x, self.grid_spacing_y),
+                };
+                let Some(value) = value else {
+                    self.command_line
+                        .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+                    self.pending_setvar = Some(name);
+                    return Some(Task::none());
+                };
+                match (name.as_str(), value) {
+                    ("PERSPECTIVE", "0" | "1") => {
+                        return Some(Task::done(Message::SetProjection(value == "0")));
+                    }
+                    ("GRIDMODE", "0" | "1") => {
+                        if (value == "1") != self.show_grid {
+                            return Some(Task::done(Message::ToggleGrid));
+                        }
+                    }
+                    ("GRIDUNIT", _) => {
+                        let mut parts = value.split(',').map(|p| p.trim().parse::<f32>());
+                        let x = parts.next().and_then(Result::ok).filter(|v| *v > 0.0);
+                        let y = match parts.next() {
+                            Some(p) => p.ok().filter(|v| *v > 0.0),
+                            None => x,
+                        };
+                        let (Some(x), Some(y)) = (x, y) else {
+                            self.command_line.push_error(
+                                crate::t!("Requires two positive values (x,y) or one for both.")
+                                    .as_ref(),
+                            );
+                            return Some(Task::none());
+                        };
+                        self.grid_spacing_x = x;
+                        self.grid_spacing_y = y;
+                        self.sync_vport_display(i);
+                        self.persist_settings_if_changed();
+                    }
+                    _ => self
+                        .command_line
+                        .push_error(crate::t!("Requires 0 or 1").as_ref()),
+                }
+                return Some(Task::none());
+            }
             "CETRANSPARENCY" => return self.dispatch_styleprops("SETVAR CETRANSPARENCY", i),
             cmd if cmd.starts_with("CETRANSPARENCY ") => {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
@@ -84,9 +143,10 @@ impl OpenCADStudio {
                 use crate::command::KeywordCommand;
                 let c = KeywordCommand::new(
                     "LINETYPE",
-                    "LINETYPE  [List / Set]:",
+                    "LINETYPE  [List / Set / Load]:",
                     vec![
                         ("List", "LIST", None),
+                        ("Load", "LOAD", None),
                         ("Set", "SET", Some("LINETYPE SET  linetype name (ByLayer / ByBlock / …):")),
                     ],
                 );
@@ -98,6 +158,13 @@ impl OpenCADStudio {
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
+                    // Load the definitions of a `.lin` file (#1588).
+                    "LOAD" | "L" => {
+                        return Some(Task::perform(
+                            crate::io::pick_linetype_file(),
+                            Message::LinetypeLoaded,
+                        ));
+                    }
                     "" | "LIST" | "?" => {
                         let ltypes: Vec<String> = self.tabs[i]
                             .scene
@@ -3247,7 +3314,7 @@ impl OpenCADStudio {
                     );
                 }
             }
-            cmd if cmd == "DDPTYPE" => {
+            cmd if cmd == "DDPTYPE" || cmd == "PTYPE" => {
                 // The dialog shows the magnitude; the sign (relative/absolute)
                 // is driven by the radio buttons. A positive PDSIZE is absolute;
                 // zero or negative is relative.

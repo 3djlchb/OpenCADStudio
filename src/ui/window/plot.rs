@@ -1553,7 +1553,7 @@ pub fn view_window(
                 paper_space_option(s.paperspace_last, t!("Paper space last"), PlotFlag::PaperspaceLast),
                 check(t!("Merge overlapping lines"), s.merge_lines, PlotFlag::MergeLines),
                 check(t!("Plot stamp"), s.stamp, PlotFlag::Stamp),
-                paper_space_option(s.save_to_layout, t!("Save changes to layout"), PlotFlag::SaveToLayout),
+                check(t!("Save changes to layout"), s.save_to_layout, PlotFlag::SaveToLayout),
             ]
             .spacing(6)
             .width(width),

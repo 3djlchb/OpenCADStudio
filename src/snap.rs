@@ -30,6 +30,8 @@ pub enum SnapType {
     Endpoint,
     Midpoint,
     Center,
+    /// Area centroid of a closed polyline (#1369).
+    GeometricCenter,
     Node,
     Quadrant,
     Intersection,
@@ -83,6 +85,7 @@ pub const ALL_SNAP_MODES: &[(SnapType, &str, &str)] = &[
     (SnapType::Endpoint, "◻", "Endpoint"),
     (SnapType::Midpoint, "△", "Midpoint"),
     (SnapType::Center, "◯", "Center"),
+    (SnapType::GeometricCenter, "⊙", "Geometric Center"),
     (SnapType::Node, "◆", "Node"),
     (SnapType::Quadrant, "◇", "Quadrant"),
     (SnapType::Intersection, "✕", "Intersection"),
@@ -1440,6 +1443,10 @@ impl Snapper {
             // else stays on the 2D master + mode set.
             let (snap_type, on) = match hint {
                 SnapHint::Center => (SnapType::Center, self.is_on(SnapType::Center)),
+                SnapHint::GeometricCenter => (
+                    SnapType::GeometricCenter,
+                    self.is_on(SnapType::GeometricCenter),
+                ),
                 SnapHint::Node => (SnapType::Node, self.is_on(SnapType::Node)),
                 SnapHint::Quadrant => (SnapType::Quadrant, self.is_on(SnapType::Quadrant)),
                 SnapHint::Insertion => (SnapType::Insertion, self.is_on(SnapType::Insertion)),
@@ -2602,6 +2609,7 @@ pub(crate) fn snap_tier(t: SnapType) -> u8 {
         | SnapType::ApparentIntersection
         | SnapType::Midpoint
         | SnapType::Center
+        | SnapType::GeometricCenter
         | SnapType::Node
         | SnapType::Quadrant
         | SnapType::Insertion
@@ -2663,7 +2671,7 @@ pub(crate) fn snap_priority(t: SnapType) -> u8 {
         SnapType::Intersection => 1,
         SnapType::ApparentIntersection => 2,
         SnapType::Midpoint => 3,
-        SnapType::Center => 4,
+        SnapType::Center | SnapType::GeometricCenter => 4,
         SnapType::Node => 5,
         SnapType::Quadrant => 6,
         SnapType::Insertion => 7,

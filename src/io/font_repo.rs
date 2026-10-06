@@ -82,7 +82,10 @@ pub fn missing_shx_fonts(doc: &CadDocument) -> Vec<String> {
         // The primary font and the big font (Asian double-byte glyphs) are
         // both plain .shx files the style depends on.
         for file in [style.font_file.trim(), style.big_font_file.trim()] {
-            if file.is_empty() || !file.to_ascii_lowercase().ends_with(".shx") {
+            if file.is_empty()
+                || !file.to_ascii_lowercase().ends_with(".shx")
+                || crate::io::linetypes::is_bundled_shape_file(file)
+            {
                 continue;
             }
             let resolved = crate::io::resolve_image_file(file, base).is_some()

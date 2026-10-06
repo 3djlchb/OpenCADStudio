@@ -37,8 +37,11 @@ pub fn color_to_aci_string(c: AcadColor) -> String {
 /// Convert an Iced colour chosen by `iced_aw::ColorPicker` into a DWG true
 /// colour. ACI-only destinations map it to their closest indexed colour later.
 pub fn iced_to_acad_color(color: Color) -> AcadColor {
-    let [r, g, b, _] = color.into_rgba8();
-    AcadColor::Rgb { r, g, b }
+    // Truncate the way the picker labels its channels, so the stored colour
+    // is the one the dialog showed; rounding drifted dragged values by one
+    // (#1621).
+    let byte = |c: f32| (c * 255.0) as u8;
+    AcadColor::Rgb { r: byte(color.r), g: byte(color.g), b: byte(color.b) }
 }
 
 /// Return the closest CAD Color Index for an RGB colour.

@@ -548,6 +548,102 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::PspaceCommand));
             }
 
+            // ── CHSPACE — move objects between model and paper space through
+            //    a viewport, keeping their apparent size and place (#1428).
+            //    Inside a viewport the selection goes to the sheet; on the
+            //    sheet it goes into the model through the viewport under it.
+            "CHSPACE" => {
+                let handles: Vec<codec::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                if self.tabs[i].scene.current_layout == "Model" {
+                    self.command_line
+                        .push_error(crate::t!("CHSPACE: Command not allowed in the Model tab.").as_ref());
+                    return Some(Task::none());
+                }
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("CHSPACE");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    return Some(Task::none());
+                }
+                let scene = &self.tabs[i].scene;
+                let to_paper = scene.active_viewport.is_some();
+                let frame = match scene.active_viewport {
+                    Some(vp) => scene.viewport_frame(vp),
+                    None => {
+                        // The viewport under the middle of the selection.
+                        let (mut lo, mut hi) = (glam::DVec2::MAX, glam::DVec2::MIN);
+                        for wire in scene.wire_models_for(&handles) {
+                            let [x0, y0, x1, y1] = wire.aabb.map(f64::from);
+                            if [x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+                                lo = lo.min(glam::DVec2::new(x0, y0));
+                                hi = hi.max(glam::DVec2::new(x1, y1));
+                            }
+                        }
+                        let mid = (lo + hi) * 0.5;
+                        mid.is_finite()
+                            .then(|| scene.viewport_frames_at_paper_point(mid.extend(0.0)))
+                            .and_then(|frames| frames.into_iter().next())
+                    }
+                };
+                let Some(frame) = frame else {
+                    self.command_line.push_error(
+                        crate::t!("CHSPACE: No plan-view viewport to change space through.").as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+                use crate::command::EntityTransform as T;
+                let z = glam::DVec3::Z;
+                let steps = if to_paper {
+                    [
+                        T::Translate((-frame.model_target).extend(0.0)),
+                        T::Rotate { center: glam::DVec3::ZERO, axis: z, angle_rad: frame.twist },
+                        T::Scale { center: glam::DVec3::ZERO, factor: frame.scale },
+                        T::Translate(frame.paper_center.extend(0.0)),
+                    ]
+                } else {
+                    [
+                        T::Translate((-frame.paper_center).extend(0.0)),
+                        T::Scale { center: glam::DVec3::ZERO, factor: 1.0 / frame.scale },
+                        T::Rotate { center: glam::DVec3::ZERO, axis: z, angle_rad: -frame.twist },
+                        T::Translate(frame.model_target.extend(0.0)),
+                    ]
+                };
+                self.push_undo_snapshot(i, "CHSPACE");
+                let scene = &mut self.tabs[i].scene;
+                let entities: Vec<codec::EntityType> = handles
+                    .iter()
+                    .filter_map(|h| scene.document.get_entity(*h).cloned())
+                    .collect();
+                scene.deselect_all();
+                scene.erase_entities(&handles);
+                // The clones land in the other space: the sheet with no active
+                // viewport, the model with one.
+                let active = scene.active_viewport;
+                scene.active_viewport = if to_paper { None } else { Some(frame.viewport) };
+                let moved: Vec<codec::Handle> =
+                    entities.into_iter().map(|e| scene.add_entity_clone(e)).collect();
+                scene.active_viewport = active;
+                for step in &steps {
+                    scene.transform_entities(&moved, step);
+                }
+                self.tabs[i].dirty = true;
+                let count = moved.len();
+                self.command_line.push_output(
+                    if to_paper {
+                        crate::tf!("CHSPACE: {count} object(s) changed to paper space.")
+                    } else {
+                        crate::tf!("CHSPACE: {count} object(s) changed to model space.")
+                    }
+                    .as_ref(),
+                );
+            }
+
             // ── Viewport arrangement shortcuts ────────────────────────────
             // Tile the model viewports into preset splits. Each delegates to the
             // matching VPORTS configuration so the Model/paper handling stays in

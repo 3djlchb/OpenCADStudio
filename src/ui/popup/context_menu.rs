@@ -521,6 +521,7 @@ fn snap_override_items() -> Vec<MenuItem> {
         snap("Apparent Intersection", SnapType::ApparentIntersection),
         snap("Extension", SnapType::Extension),
         snap("Center", SnapType::Center),
+        snap("Geometric Center", SnapType::GeometricCenter),
         snap("Quadrant", SnapType::Quadrant),
         snap("Tangent", SnapType::Tangent),
         snap("Perpendicular", SnapType::Perpendicular),

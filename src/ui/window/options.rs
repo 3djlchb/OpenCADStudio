@@ -209,11 +209,14 @@ pub fn view_window<'a>(
     zoom_factor_input: &'a str,
     drawing_prefs: DrawingPrefs,
     folders: Folders,
+    qnew_template: &'a str,
     double_click_block_refedit: bool,
     double_click_block_attedit: bool,
     cursor_type: CursorType,
     crosshair_color: Option<[u8; 3]>,
     crosshair_color_input: &'a str,
+    snap_marker_color: Option<[u8; 3]>,
+    snap_marker_color_input: &'a str,
     lineweight_display_scale: i32,
     model_space: &'a crate::app::config::ModelSpaceThemeConfig,
     model_bg_input: &'a str,
@@ -522,6 +525,24 @@ pub fn view_window<'a>(
             ..Default::default()
         });
 
+    let snap_rgb = snap_marker_color.unwrap_or([255, 230, 26]);
+    let snap_swatch = container(Space::new())
+        .width(28)
+        .height(22)
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(iced::Color::from_rgb8(
+                snap_rgb[0],
+                snap_rgb[1],
+                snap_rgb[2],
+            ))),
+            border: Border {
+                color: theme.palette().background.strong.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+
     let model_bg_rgb = model_space.custom_bg.unwrap_or(crate::app::config::CLASSIC_CAD_DARK_BG);
 
     let paper_bg_rgb = model_space.custom_paper_bg.unwrap_or(crate::app::config::DEFAULT_PAPER_BG);
@@ -764,6 +785,18 @@ pub fn view_window<'a>(
                 crosshair_swatch,
                 text_input(crate::t!("#RRGGBB or blank").as_ref(), crosshair_color_input)
                     .on_input(Message::CrosshairColorChanged)
+                    .width(150),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(10))
+        .push(
+            row![
+                text(crate::t!("Snap marker color")).size(12).width(140),
+                snap_swatch,
+                text_input(crate::t!("#RRGGBB or blank").as_ref(), snap_marker_color_input)
+                    .on_input(Message::SnapMarkerColorChanged)
                     .width(150),
             ]
             .spacing(10)
@@ -1666,6 +1699,21 @@ pub fn view_window<'a>(
         folder_row(crate::t!("Plugins"), folders.plugins.clone()),
         Space::new().height(12),
         folder_row(crate::t!("Autosave files"), folders.autosave.clone()),
+        Space::new().height(16),
+        text(crate::t!("Default template for new drawings")).size(12),
+        Space::new().height(4),
+        row![
+            text_input(crate::t!("Blank drawing").as_ref(), qnew_template)
+                .on_input(Message::QnewTemplateChanged)
+                .size(11)
+                .width(Fill),
+            button(text(crate::t!("Browse...")).size(11))
+                .padding([4, 10])
+                .style(button::secondary)
+                .on_press(Message::QnewTemplateBrowse),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
     ]
     .spacing(0)
     .width(sizing.width);

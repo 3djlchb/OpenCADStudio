@@ -97,6 +97,13 @@ impl CadCommand for ZoomWindowCommand {
                 self.scale_prompt = true;
                 return Some(CmdResult::NeedPoint);
             }
+            // A scale factor straight at the first prompt: n, nX or nXP.
+            upper if upper.ends_with('X')
+                || upper.ends_with("XP")
+                || crate::app::expr_eval::eval_number(&upper).is_some() =>
+            {
+                return Some(CmdResult::Dispatch(format!("ZOOM SCALE {text}")));
+            }
             _ => return None,
         };
         Some(CmdResult::Dispatch(command.to_string()))

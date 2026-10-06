@@ -590,6 +590,10 @@ pub(super) struct OpenCADStudio {
     crosshair_color: Option<[u8; 3]>,
     /// Editable Options buffer for the crosshair colour.
     crosshair_color_input: String,
+    /// Explicit object-snap marker colour; `None` keeps the automatic one.
+    snap_marker_color: Option<[u8; 3]>,
+    /// Editable Options buffer for the snap marker colour.
+    snap_marker_color_input: String,
     /// Defer the ISOLINES mesh rebuild until the slider is released.
     isolines_awaiting_regen: bool,
     /// Edit buffer for the SNAPANG field on the Options Drafting page. Kept
@@ -1024,6 +1028,8 @@ pub(super) struct OpenCADStudio {
     check_missing_fonts: bool,
     /// Custom font source base URL; empty selects the community repository.
     font_source_url: String,
+    /// Template a new drawing starts from (QNEW); empty = blank.
+    qnew_template: String,
     /// Editable copy of `font_source_url` shown in the missing-fonts prompt.
     font_source_input: String,
     donation_prompt_version: String,
@@ -2289,6 +2295,10 @@ pub enum Message {
     LineweightDisplayScaleChanged(i32),
     /// Edit the optional crosshair RGB value; blank restores automatic contrast.
     CrosshairColorChanged(String),
+    SnapMarkerColorChanged(String),
+    /// Options → Files: the default template for new drawings.
+    QnewTemplateChanged(String),
+    QnewTemplateBrowse,
     /// Set the default type/version used when first saving a new drawing.
     DefaultSaveFormatChanged(String),
     /// Select one of Iced's built-in themes or the editable Custom theme.
@@ -3678,6 +3688,8 @@ pub enum Message {
     // ── Plot Style Table ─────────────────────────────────────────────────
     /// Open file dialog to load a CTB/STB plot style table.
     PlotStyleLoad,
+    /// LINETYPE Load: the picked `.lin` file's text, `None` when cancelled.
+    LinetypeLoaded(Option<String>),
     /// Callback when the user picks (or cancels) a CTB/STB file.
     /// The Load… picker finished: a table, nothing (cancelled), or why the
     /// file could not be read.
@@ -4151,6 +4163,8 @@ impl OpenCADStudio {
             cursor_type: settings::CursorType::Crosshair,
             crosshair_color: None,
             crosshair_color_input: String::new(),
+            snap_marker_color: None,
+            snap_marker_color_input: String::new(),
             isolines_awaiting_regen: false,
             snap_angle_input: "0".to_string(),
             lineweight_display_scale: 100,
@@ -4338,6 +4352,7 @@ impl OpenCADStudio {
             default_assoc_prompted: false,
             check_missing_fonts: true,
             font_source_url: String::new(),
+            qnew_template: String::new(),
             font_source_input: String::new(),
             donation_prompt_version: String::new(),
             read_only: false,

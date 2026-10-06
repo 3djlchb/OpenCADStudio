@@ -4,6 +4,8 @@
 pub enum SnapHint {
     /// Geometric center of a circle, arc, or ellipse.
     Center,
+    /// Area centroid of a closed polyline.
+    GeometricCenter,
     /// Point entity location.
     Node,
     /// 0 / 90 / 180 / 270 ° point on a circle/arc (within arc span).

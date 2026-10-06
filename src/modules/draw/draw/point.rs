@@ -81,5 +81,5 @@ impl CadCommand for PointCommand {
 inventory::submit!(crate::command::CommandRegistration { names: &["POINT", "MULTIPOINT"] });  // PointCommand
 // Point display style system variables + dialog.
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PDMODE", "PDSIZE", "DDPTYPE"]
+    names: &["PDMODE", "PDSIZE", "DDPTYPE", "PTYPE"]
 });

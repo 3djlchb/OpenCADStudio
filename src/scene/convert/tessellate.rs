@@ -180,6 +180,21 @@ pub(crate) fn text_contrast_background(
 /// Split each absolute f64 source point into double-single (high, low) f32
 /// buffers in one pass — the relative-to-eye residual the GPU/CPU reconstruct
 /// to f64 precision at UTM-scale coordinates.
+/// Area centroid of a closed polyline, for the Geometric Center snap.
+fn geometric_center(entity: &EntityType) -> Option<glam::DVec3> {
+    let closed = match entity {
+        EntityType::LwPolyline(p) => p.is_closed && p.vertices.len() >= 3,
+        EntityType::Polyline2D(p) => p.is_closed() && p.vertices.len() >= 3,
+        _ => false,
+    };
+    if !closed {
+        return None;
+    }
+    let planar = crate::entities::curve::entity_curve(entity)?;
+    let center = planar.curve.enclosed_centroid()?;
+    Some(glam::DVec3::from_array(planar.plane.point_at(center)))
+}
+
 pub(crate) fn points_to_ds(
     src: impl IntoIterator<Item = [f64; 3]>,
 ) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
@@ -1102,7 +1117,10 @@ pub fn tessellate(
             )),
             _ => convert(entity, document),
         });
-    if let Some(te) = te {
+    if let Some(mut te) = te {
+        if let Some(center) = geometric_center(entity) {
+            te.snap_pts.push((center, SnapHint::GeometricCenter));
+        }
         match te.object {
             // ── Text / MText: pre-tessellated glyph strokes ───────────────
             //

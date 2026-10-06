@@ -951,25 +951,34 @@ pub(crate) fn tapered_band_points(
     let seg_count = if is_closed { n } else { n.saturating_sub(1) };
     let mut pts: Vec<[f64; 3]> = Vec::with_capacity(seg_count + 1);
     let mut widths: Vec<f32> = Vec::with_capacity(seg_count + 1);
-    let mut push = |x: f64, y: f64, w: f32| {
-        let (wx, wy, wz) = to_wcs(x, y);
-        pts.push([wx, wy, wz]);
+    let mut push = |xy: Option<(f64, f64)>, w: f32| {
+        // `None` is the NaN separator that breaks the band.
+        pts.push(xy.map_or([f64::NAN; 3], |(x, y)| to_wcs(x, y).into()));
         widths.push(w);
     };
+    let mut prev_end_width: Option<f64> = None;
     for i in 0..seg_count {
         let (p0, bulge, sw0, ew0) = verts[i];
         let (p1, _, _, _) = verts[(i + 1) % n];
-        if i == 0 {
-            push(p0[0], p0[1], sw0 as f32);
+        match prev_end_width {
+            None => push(Some((p0[0], p0[1])), sw0 as f32),
+            // A segment starting at another width than the last one ended
+            // steps there: break the band and restart it (#1628).
+            Some(prev) if (prev - sw0).abs() > 1e-9 => {
+                push(None, 0.0);
+                push(Some((p0[0], p0[1])), sw0 as f32);
+            }
+            Some(_) => {}
         }
+        prev_end_width = Some(ew0);
         if bulge.abs() < 1e-9 {
-            push(p1[0], p1[1], ew0 as f32);
+            push(Some((p1[0], p1[1])), ew0 as f32);
         } else if let Some(arc) = BulgeArc::from_bulge(p0, p1, bulge) {
             let samples = arc.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
             let segments = samples.len().saturating_sub(1).max(1);
             for (index, s) in samples.into_iter().enumerate().skip(1) {
                 let t = index as f64 / segments as f64;
-                push(s[0], s[1], (sw0 + (ew0 - sw0) * t) as f32);
+                push(Some((s[0], s[1])), (sw0 + (ew0 - sw0) * t) as f32);
             }
         }
     }

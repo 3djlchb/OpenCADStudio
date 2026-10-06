@@ -518,12 +518,20 @@ impl Graph {
             _ => None,
         };
         let zoom = self.zoom();
+        // Lay the nodes out relative to the visible area's top-left rather
+        // than the graph origin: a `pin` clips to its own bounds, so nodes
+        // left of / above the origin vanished once panned or zoomed out (#1592).
+        let shift = Vector::new(self.pan.x / zoom, self.pan.y / zoom);
         let mut nodes = stack![];
         for (node, node_sections) in self.engine.nodes.iter().zip(sections) {
             let Some(ui) = self.ui.get(&node.id) else {
                 continue;
             };
-            nodes = nodes.push(pin(self.node_view(node, node_sections)).x(ui.pos.x).y(ui.pos.y));
+            nodes = nodes.push(
+                pin(self.node_view(node, node_sections))
+                    .x(ui.pos.x + shift.x)
+                    .y(ui.pos.y + shift.y),
+            );
         }
         let mut layers = stack![
             canvas(Wires { wires, pending, width: 2.0 * zoom.max(0.5) })
@@ -531,7 +539,6 @@ impl Graph {
                 .height(Length::Fill),
             Zoomed {
                 content: nodes.width(Length::Fill).height(Length::Fill).into(),
-                pan: self.pan,
                 zoom,
             },
         ];
@@ -955,17 +962,16 @@ impl canvas::Program<Message> for Wires {
 }
 
 /// Lays its content out in graph space and draws and hit-tests it through
-/// `pan` and `zoom`, so every widget inside scales as one picture.
+/// `zoom`, so every widget inside scales as one picture.
 struct Zoomed<'a> {
     content: Element<'a, Message>,
-    pan: Vector,
     zoom: f32,
 }
 
 impl Zoomed<'_> {
     /// Content coordinates → screen, for a layer whose top-left is `origin`.
     fn transformation(&self, origin: Point) -> Transformation {
-        Transformation::translate(origin.x + self.pan.x, origin.y + self.pan.y)
+        Transformation::translate(origin.x, origin.y)
             * Transformation::scale(self.zoom)
             * Transformation::translate(-origin.x, -origin.y)
     }

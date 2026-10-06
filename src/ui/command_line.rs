@@ -985,8 +985,13 @@ impl CommandLine {
             .on_press(Message::CommandHistoryClear)
             .style(header_btn_style)
             .padding([2, 6]);
+            // Collapses the console back to the single input line (#1094).
+            let collapse_btn = button(crate::ui::icons::themed_arrow_down(11.0))
+                .on_press(Message::CommandHistoryToggle)
+                .style(header_btn_style)
+                .padding([2, 6]);
             let header = container(
-                row![Space::new().width(Length::Fill), copy_btn, clear_btn]
+                row![Space::new().width(Length::Fill), copy_btn, clear_btn, collapse_btn]
                     .spacing(6)
                     .align_y(iced::Center),
             )

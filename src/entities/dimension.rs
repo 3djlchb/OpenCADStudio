@@ -842,12 +842,22 @@ fn large_radial_rotation(d: &DimensionLargeRadial) -> f64 {
 }
 
 fn apply_transform(dim: &mut Dimension, t: &EntityTransform) {
+    // A zero text point is the "placed automatically" sentinel, not a
+    // location: moving it to wherever the origin lands left the text there.
+    let auto_text = {
+        let base = dim.base();
+        let p = base.text_middle_point;
+        !base.text_user_positioned && p.x == 0.0 && p.y == 0.0 && p.z == 0.0
+    };
     crate::scene::view::transform::apply_standard_entity_transform(dim, t, |entity, p1, p2| {
         codec::Entity::apply_transform(
             entity,
             &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
         );
     });
+    if auto_text {
+        reset_automatic_text_position(dim.base_mut());
+    }
 }
 
 impl PropertyEditable for Dimension {

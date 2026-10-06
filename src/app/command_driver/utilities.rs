@@ -677,6 +677,7 @@ impl OpenCADStudio {
             None
         };
         let is_escape = matches!(&input, StepInput::Escape);
+        let keyed = matches!(&input, StepInput::Text(_) | StepInput::Enter);
         let result: Option<CmdResult> = {
             let Some(cmd) = self.tabs[i].active_cmd.as_mut() else {
                 return (Task::none(), false);
@@ -703,7 +704,15 @@ impl OpenCADStudio {
             self.tabs[i].pending_pause_tokens = None;
         }
         match result {
-            Some(r) => (self.apply_cmd_result(r), true),
+            Some(r) => {
+                let task = self.apply_cmd_result(r);
+                // A keyword can move the step without the cursor moving
+                // (PEDIT Next vertex): redraw its preview now (#1628).
+                if keyed && self.active_tab == i {
+                    self.refresh_active_cmd_preview(i);
+                }
+                (task, true)
+            }
             None => (Task::none(), false),
         }
     }

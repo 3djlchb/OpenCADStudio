@@ -128,6 +128,8 @@ pub struct LayerInfo {
     pub visible: bool,
     pub frozen: bool,
     pub locked: bool,
+    /// Layout with an active viewport: (its Layer Manager column, frozen there).
+    pub vp_frozen: Option<(usize, bool)>,
 }
 
 /// Full-screen backdrop for an open ribbon dropdown: closes the dropdown when
@@ -1042,6 +1044,13 @@ impl Ribbon {
                     crate::ui::icons::layer_lock(ll),
                     Message::LayerToggleLock(info.name.clone()),
                 );
+                // Freeze in the current viewport only (#1466).
+                let vp_freeze = info.vp_frozen.map(|(column, frozen)| {
+                    icon_btn(
+                        crate::ui::icons::layer_vp_freeze(frozen),
+                        Message::LayerToggleVpFreeze(info.name.clone(), column),
+                    )
+                });
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_active);
                 let label =
@@ -1067,7 +1076,10 @@ impl Ribbon {
                     .padding([4, 4]);
 
                 container(
-                    row![checkmark, vis, freeze, lock, select]
+                    row![checkmark, vis, freeze]
+                        .push(vp_freeze)
+                        .push(lock)
+                        .push(select)
                         .spacing(5)
                         .align_y(iced::Center),
                 )

@@ -32,6 +32,8 @@ static REDO: &[u8] = include_bytes!("../../assets/icons/ui/redo.svg");
 static OSNAP_ENDPOINT: &[u8] = include_bytes!("../../assets/icons/osnap/endpoint.svg");
 static OSNAP_MIDPOINT: &[u8] = include_bytes!("../../assets/icons/osnap/midpoint.svg");
 static OSNAP_CENTER: &[u8] = include_bytes!("../../assets/icons/osnap/center.svg");
+static OSNAP_GEOMETRIC_CENTER: &[u8] =
+    include_bytes!("../../assets/icons/osnap/geometric_center.svg");
 static OSNAP_NODE: &[u8] = include_bytes!("../../assets/icons/osnap/node.svg");
 static OSNAP_QUADRANT: &[u8] = include_bytes!("../../assets/icons/osnap/quadrant.svg");
 static OSNAP_INTERSECTION: &[u8] = include_bytes!("../../assets/icons/osnap/intersection.svg");
@@ -51,6 +53,8 @@ static LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/layon.svg");
 static LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/layoff.svg");
 static LAY_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layfrz.svg");
 static LAY_THW: &[u8] = include_bytes!("../../assets/icons/layers/laythw.svg");
+static LAY_VP_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layvpfrz.svg");
+static LAY_VP_THW: &[u8] = include_bytes!("../../assets/icons/layers/layvpthw.svg");
 static LAY_LCK: &[u8] = include_bytes!("../../assets/icons/layers/laylck.svg");
 static LAY_ULK: &[u8] = include_bytes!("../../assets/icons/layers/layulk.svg");
 
@@ -630,6 +634,7 @@ pub fn osnap(snap: crate::snap::SnapType) -> &'static [u8] {
         S::Endpoint => OSNAP_ENDPOINT,
         S::Midpoint => OSNAP_MIDPOINT,
         S::Center => OSNAP_CENTER,
+        S::GeometricCenter => OSNAP_GEOMETRIC_CENTER,
         S::Node => OSNAP_NODE,
         S::Quadrant => OSNAP_QUADRANT,
         S::Intersection => OSNAP_INTERSECTION,
@@ -691,6 +696,15 @@ pub fn layer_freeze(frozen: bool) -> &'static [u8] {
         LAY_FRZ
     } else {
         LAY_THW
+    }
+}
+
+/// Freeze-in-current-viewport icon bytes (frozen / thawed).
+pub fn layer_vp_freeze(frozen: bool) -> &'static [u8] {
+    if frozen {
+        LAY_VP_FRZ
+    } else {
+        LAY_VP_THW
     }
 }
 

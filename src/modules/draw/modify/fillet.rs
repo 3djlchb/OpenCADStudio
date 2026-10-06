@@ -9,7 +9,7 @@
 //   Pick two lines (line-only; arcs are not chamferable).
 //   Finds intersection, backs off dist1 along line 1 and dist2 along line 2.
 
-use codec::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
+use codec::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline, LwVertex};
 
 // Shared plane geometry, from opencadkernel via the local adapters.
 use super::geom;
@@ -1354,6 +1354,9 @@ enum FilletStep {
     // Radius may be typed directly or measured by picking two points.
     WaitingForRadius,
 
+    /// Trim / No trim: whether the picked objects are cut back to the arc.
+    TrimMode,
+
     RadiusSecondPoint {
         first: DVec3,
     },
@@ -1398,12 +1401,16 @@ impl FilletCommand {
     /// Switch to the radius sub-step, remembering the first pick (if any) so
     /// it can be restored afterwards.
     fn enter_radius_substep(&mut self) {
+        self.enter_substep(FilletStep::WaitingForRadius);
+    }
+
+    fn enter_substep(&mut self, step: FilletStep) {
         self.resume_second = if let FilletStep::Second { h1, e1, click1 } = &self.step {
             Some((*h1, e1.clone(), *click1))
         } else {
             None
         };
-        self.step = FilletStep::WaitingForRadius;
+        self.step = step;
     }
 
     /// Leave the radius sub-step, resuming the second pick when a first object
@@ -1415,7 +1422,12 @@ impl FilletCommand {
         };
     }
 
-    fn continue_after_fillet(&mut self, replacements: Vec<(Handle, Vec<EntityType>)>) -> CmdResult {
+    fn continue_after_fillet(&mut self, mut replacements: Vec<(Handle, Vec<EntityType>)>) -> CmdResult {
+        for entity in replacements.iter_mut().flat_map(|(_, entities)| entities.iter_mut()) {
+            if let EntityType::LwPolyline(poly) = entity {
+                drop_zero_length_segments(poly);
+            }
+        }
         self.all_entities.retain(|entity| {
             !replacements
                 .iter()
@@ -1488,6 +1500,12 @@ impl CadCommand for FilletCommand {
             FilletStep::RadiusSecondPoint { .. } => {
                 crate::t!("FILLET  Specify second point for radius:").into_owned()
             }
+            FilletStep::TrimMode => if defaults::get_fillet_trim() {
+                crate::t!("FILLET  Enter Trim mode option [Trim/No trim] <Trim>:")
+            } else {
+                crate::t!("FILLET  Enter Trim mode option [Trim/No trim] <No trim>:")
+            }
+            .into_owned(),
             FilletStep::Second { .. } => {
                 crate::tf!(
                     "FILLET  Select second object (Line/Arc/LwPolyline)  [R={:.4}]:",
@@ -1509,10 +1527,14 @@ impl CadCommand for FilletCommand {
                 }
                 opts.push(CmdOption::new("Polyline", "P"));
                 opts.push(CmdOption::new("Radius", "R"));
+                opts.push(CmdOption::new("Trim", "T"));
                 opts
             }
             FilletStep::Second { .. } => {
-                vec![CmdOption::new("Radius", "R")]
+                vec![CmdOption::new("Radius", "R"), CmdOption::new("Trim", "T")]
+            }
+            FilletStep::TrimMode => {
+                vec![CmdOption::new("Trim", "T"), CmdOption::new("No trim", "N")]
             }
             FilletStep::Polyline
             | FilletStep::WaitingForRadius
@@ -1521,7 +1543,7 @@ impl CadCommand for FilletCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step, FilletStep::WaitingForRadius)
+        matches!(self.step, FilletStep::WaitingForRadius | FilletStep::TrimMode)
     }
 
     fn dyn_field(&self) -> crate::command::DynField {
@@ -1552,6 +1574,16 @@ impl CadCommand for FilletCommand {
                 // Invalid — stay and re-prompt
                 Some(CmdResult::NeedPoint)
             }
+            FilletStep::TrimMode => {
+                match text.trim().to_uppercase().as_str() {
+                    "" => {}
+                    "T" | "TRIM" => defaults::set_fillet_trim(true),
+                    "N" | "NO TRIM" | "NOTRIM" => defaults::set_fillet_trim(false),
+                    _ => return Some(CmdResult::NeedPoint),
+                }
+                self.resume_after_radius();
+                Some(CmdResult::NeedPoint)
+            }
             FilletStep::First | FilletStep::Second { .. } => {
                 let t = text.trim();
                 let upper = t.to_uppercase();
@@ -1561,6 +1593,10 @@ impl CadCommand for FilletCommand {
                 }
                 if upper == "U" || upper == "UNDO" {
                     return self.undo_last();
+                }
+                if upper == "T" || upper == "TRIM" {
+                    self.enter_substep(FilletStep::TrimMode);
+                    return Some(CmdResult::NeedPoint);
                 }
                 // "R" alone → enter sub-step to collect radius
                 if upper == "R" {
@@ -1594,6 +1630,7 @@ impl CadCommand for FilletCommand {
             self.step,
             FilletStep::WaitingForRadius
                 | FilletStep::RadiusSecondPoint { .. }
+                | FilletStep::TrimMode
         )
     }
 
@@ -1619,7 +1656,8 @@ impl CadCommand for FilletCommand {
 
         match &self.step {
             FilletStep::WaitingForRadius
-            | FilletStep::RadiusSecondPoint { .. } => {
+            | FilletStep::RadiusSecondPoint { .. }
+            | FilletStep::TrimMode => {
                 return CmdResult::NeedPoint;
             }
 
@@ -1689,6 +1727,17 @@ impl CadCommand for FilletCommand {
 
                 if let Some(e2) = e2 {
                     match compute_fillet_entities(&e1, click1, &e2, click, self.radius) {
+                        // No trim: the objects stay as they are; only the arc
+                        // is added (#1558).
+                        Some((_, _, maybe_arc)) if !defaults::get_fillet_trim() => {
+                            let Some(arc) = maybe_arc else {
+                                return CmdResult::NeedPoint;
+                            };
+                            self.step = FilletStep::First;
+                            self.resume_second = None;
+                            self.made += 1;
+                            CmdResult::CommitEntity(arc)
+                        }
                         Some((new_e1, new_e2, maybe_arc)) => {
                             let mut first_replacements = vec![new_e1];
                             if let Some(arc) = maybe_arc {
@@ -1719,7 +1768,8 @@ impl CadCommand for FilletCommand {
 
         match &self.step {
             FilletStep::WaitingForRadius
-            | FilletStep::RadiusSecondPoint { .. } => vec![],
+            | FilletStep::RadiusSecondPoint { .. }
+            | FilletStep::TrimMode => vec![],
             FilletStep::Polyline => {
                 let preview = self
                     .entity_index
@@ -1780,20 +1830,21 @@ impl CadCommand for FilletCommand {
                     if let Some((new_e1, new_e2, maybe_arc)) =
                         compute_fillet_entities(&e1, click1, &e2, click, self.radius)
                     {
-                        let mut out = vec![
-                            WireModel::solid(
+                        let mut out = Vec::new();
+                        if defaults::get_fillet_trim() {
+                            out.push(WireModel::solid(
                                 "fillet_e1".into(),
                                 entity_pts(&new_e1),
                                 WireModel::CYAN,
                                 false,
-                            ),
-                            WireModel::solid(
+                            ));
+                            out.push(WireModel::solid(
                                 "fillet_e2".into(),
                                 entity_pts(&new_e2),
                                 WireModel::CYAN,
                                 false,
-                            ),
-                        ];
+                            ));
+                        }
                         if let Some(arc) = maybe_arc {
                             out.push(WireModel::solid(
                                 "fillet_arc".into(),
@@ -1853,6 +1904,29 @@ impl CadCommand for FilletCommand {
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+}
+
+/// A radius-0 fillet over an existing arc leaves its two ends on one point;
+/// the zero-length segment between them blocked every later fillet of that
+/// corner (#1422). The later vertex carries the next segment, so it survives.
+fn drop_zero_length_segments(poly: &mut LwPolyline) {
+    let same = |a: &LwVertex, b: &LwVertex| {
+        (a.location.x - b.location.x).abs() < 1e-9 && (a.location.y - b.location.y).abs() < 1e-9
+    };
+    let mut i = 0;
+    while i + 1 < poly.vertices.len() && poly.vertices.len() > 2 {
+        if same(&poly.vertices[i], &poly.vertices[i + 1]) {
+            poly.vertices.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    if poly.is_closed && poly.vertices.len() > 2 {
+        let n = poly.vertices.len();
+        if same(&poly.vertices[n - 1], &poly.vertices[0]) {
+            poly.vertices.pop();
+        }
     }
 }
 
@@ -2448,16 +2522,16 @@ mod tests {
             1.0,
             vec![line(0.0, 0.0, 10.0, 0.0, 1), line(0.0, 0.0, 0.0, 10.0, 2)],
         );
-        assert_eq!(keywords(&command), ["P", "R"]);
+        assert_eq!(keywords(&command), ["P", "R", "T"]);
         assert!(command.on_text_input("U").is_none(), "nothing to undo yet");
         command.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
         assert!(matches!(
             command.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)),
             CmdResult::ReplaceManyContinue(_)
         ));
-        assert_eq!(keywords(&command), ["U", "P", "R"]);
+        assert_eq!(keywords(&command), ["U", "P", "R", "T"]);
         assert!(matches!(command.on_text_input("U"), Some(CmdResult::UndoDocument)));
-        assert_eq!(keywords(&command), ["P", "R"]);
+        assert_eq!(keywords(&command), ["P", "R", "T"]);
         // The host hands the restored document back; the cache follows it.
         let mut doc = codec::CadDocument::new();
         let _ = doc.add_entity(line(0.0, 0.0, 20.0, 0.0, 7));

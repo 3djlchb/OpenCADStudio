@@ -1311,6 +1311,7 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.tabs[i]
                             .layers
                             .sync_with_viewports(&doc_layers, vp_info);
+                        self.sync_ribbon_layers();
                         // Per-viewport layer visibility changes the resident
                         // assembly, not any entity's tessellated geometry.
                         self.tabs[i].scene.bump_geometry_no_blocks();

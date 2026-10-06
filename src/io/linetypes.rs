@@ -345,6 +345,13 @@ fn bundled_shape_name(file: &str, number: i16) -> Option<&'static str> {
         .map(|(_, name, _)| *name)
 }
 
+/// Whether `file` is a shape file the bundled LFF substitutes stand in for,
+/// so its absence on disk never needs reporting.
+pub fn is_bundled_shape_file(file: &str) -> bool {
+    let stem = shape_file_stem(file);
+    BUNDLED_SHAPES.iter().any(|(f, _, _)| *f == stem)
+}
+
 /// The drawing's shape-file STYLE for `file`, added when missing (an empty
 /// name, as shape files are stored).
 fn shape_file_style(doc: &mut CadDocument, file: &str) -> codec::Handle {

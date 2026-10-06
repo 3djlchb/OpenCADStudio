@@ -170,9 +170,10 @@ impl From<&str> for OpenLoadError {
 pub async fn pick_open_path() -> Option<(PathBuf, u64)> {
     let handle = crate::sys::file_dialog()
         .set_title(crate::t!("Open CAD file").as_ref())
-        .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "bak", "sv$", "DWG", "DXF", "BAK"])
+        .add_filter(crate::t!("CAD Files").as_ref(), &["dwg", "dxf", "dwt", "bak", "sv$", "DWG", "DXF", "DWT", "BAK"])
         .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
         .add_filter(crate::t!("DXF Files").as_ref(), &["dxf", "DXF"])
+        .add_filter(crate::t!("Drawing Template (*.dwt)").as_ref(), &["dwt", "DWT"])
         .add_filter(crate::t!("Backup / Autosave").as_ref(), &["bak", "sv$", "BAK"])
         .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .pick_file()
@@ -1761,6 +1762,16 @@ mod save_failure_tests {
 /// picked from outside the plot styles folder is copied into it (unless a
 /// file of that name is already there), so the dialog lists it from now on
 /// and page setups naming it resolve after a restart.
+/// Pick a `.lin` linetype definition file and return its text (#1588).
+pub async fn pick_linetype_file() -> Option<String> {
+    let handle = crate::sys::file_dialog()
+        .set_title(crate::t!("Load Linetypes").as_ref())
+        .add_filter(crate::t!("Linetype Files").as_ref(), &["lin", "LIN"])
+        .pick_file()
+        .await?;
+    Some(String::from_utf8_lossy(&handle.read().await).into_owned())
+}
+
 pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, String> {
     let dialog = crate::sys::file_dialog()
         .set_title(crate::t!("Load Plot Style Table").as_ref())

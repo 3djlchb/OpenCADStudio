@@ -634,6 +634,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "FITSPLINE",
         // System variables (typeable directly).
         "MIRRTEXT",
+        "PERSPECTIVE",
+        "GRIDMODE",
+        "GRIDUNIT",
         "ZOOMWHEEL",
         "ZOOMFACTOR",
         "SHORTCUTMENU",
@@ -844,6 +847,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "MLSTYLE",
         "MS",
         "MSPACE",
+        "CHSPACE",
         "NAVVCUBE",
         "NEW",
         "OBJIMPORT",

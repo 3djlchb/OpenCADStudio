@@ -9,6 +9,7 @@ use glam::DVec3;
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::scene::model::wire_model::WireModel;
 use crate::t;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -188,6 +189,24 @@ impl PeditCommand {
         }
     }
 
+    /// WCS location of a vertex of the polyline being edited.
+    fn vertex_world(&self, index: usize) -> Option<DVec3> {
+        let entity = self.target.and_then(|handle| self.entities.get(&handle.value()))?;
+        let (ocs, n) = match entity {
+            EntityType::LwPolyline(p) => {
+                let v = p.vertices.get(index)?;
+                ((v.location.x, v.location.y, p.elevation), &p.normal)
+            }
+            EntityType::Polyline2D(p) => {
+                let v = p.vertices.get(index)?;
+                ((v.location.x, v.location.y, p.elevation), &p.normal)
+            }
+            _ => return None,
+        };
+        let (x, y, z) = crate::scene::view::transform::ocs_point_to_wcs(ocs, (n.x, n.y, n.z));
+        Some(DVec3::new(x, y, z))
+    }
+
     fn vertex_count(&self) -> usize {
         self.target.and_then(|handle| self.entities.get(&handle.value())).map_or(0, |entity| match entity {
             EntityType::LwPolyline(polyline) => polyline.vertices.len(),
@@ -235,6 +254,40 @@ impl PeditCommand {
 impl CadCommand for PeditCommand {
     fn name(&self) -> &'static str {
         "PEDIT"
+    }
+
+    /// Edit-vertex steps mark the current vertex with a screen-sized X (#1628).
+    fn on_mouse_move(&mut self, _pt: DVec3) -> Option<WireModel> {
+        let index = match self.mode {
+            Mode::PolyVertex(i)
+            | Mode::PolyTangent(i)
+            | Mode::PolyMove(i)
+            | Mode::PolyInsert(i)
+            | Mode::PolyWidthStart(i, _)
+            | Mode::PolyWidthEnd(i, _) => i,
+            Mode::PolyRange { end, .. } => end,
+            _ => return None,
+        };
+        let origin = self.vertex_world(index)?;
+        let at = |dx: f64, dy: f64| {
+            let p = origin + DVec3::new(dx, dy, 0.0);
+            [p.x, p.y, p.z]
+        };
+        let h = 0.5;
+        let mut wire = WireModel::solid_f64(
+            "pedit_vertex_marker".into(),
+            vec![at(-h, -h), at(h, h), [f64::NAN; 3], at(-h, h), at(h, -h)],
+            WireModel::CYAN,
+            false,
+        );
+        wire.point_marker = Some(crate::scene::model::wire_model::PointMarker {
+            origin,
+            normal: DVec3::Z,
+            axis_x: DVec3::X,
+            axis_y: DVec3::Y,
+            viewport_percent: 3.0,
+        });
+        Some(wire)
     }
 
     fn prompt(&self) -> String {

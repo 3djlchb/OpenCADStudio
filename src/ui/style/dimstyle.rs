@@ -384,6 +384,29 @@ pub fn view_window<'a>(
     };
 
     // Linear unit formats shared by DIMLUNIT / DIMALTU.
+    // Precision reads as the number pattern it produces (#1426).
+    const OPT_PREC: &[(&str, &str)] = &[
+        ("0", "0"),
+        ("1", "0.0"),
+        ("2", "0.00"),
+        ("3", "0.000"),
+        ("4", "0.0000"),
+        ("5", "0.00000"),
+        ("6", "0.000000"),
+        ("7", "0.0000000"),
+        ("8", "0.00000000"),
+    ];
+    // A precision dropdown, or the read-only value while the option is off.
+    let prec_field = move |label: Cow<'static, str>, fld: DsField, val: &'a str, enabled: bool| -> Element<'a, Message> {
+        if enabled {
+            enum_field(label, fld, val, OPT_PREC)
+        } else {
+            row![lbl(label), mk_field_enabled(fld, val, false)]
+                .spacing(8)
+                .align_y(iced::Center)
+                .into()
+        }
+    };
     const OPT_LUNIT: &[(&str, &str)] = &[
         ("1", "Scientific"),
         ("2", "Decimal"),
@@ -900,8 +923,7 @@ pub fn view_window<'a>(
         4 => column![
             text(t!("Linear dimensions")).size(11).style(primary_style),
             enum_field(t!("Unit format"), DsField::Dimlunit, vals.dimlunit, OPT_LUNIT),
-            row![lbl(t!("Precision")), mk_field(DsField::Dimdec, vals.dimdec)]
-                .spacing(8).align_y(iced::Center),
+            prec_field(t!("Precision"), DsField::Dimdec, vals.dimdec, true),
             if matches!(vals.dimlunit.trim(), "4" | "5") {
                 enum_field(
                     t!("Fraction format"),
@@ -946,8 +968,7 @@ pub fn view_window<'a>(
                 vals.dimaunit,
                 &[("0", "Decimal degrees"), ("1", "Degrees, minutes, seconds"), ("2", "Gradians"), ("3", "Radians"), ("4", "Surveyor's units")],
             ),
-            row![lbl(t!("Precision")), mk_field(DsField::Dimadec, vals.dimadec)]
-                .spacing(8).align_y(iced::Center),
+            prec_field(t!("Precision"), DsField::Dimadec, vals.dimadec, true),
             enum_field(
                 t!("Zero suppression"),
                 DsField::Dimazin,
@@ -970,24 +991,14 @@ pub fn view_window<'a>(
             ]
             .spacing(8)
             .align_y(iced::Center),
-            row![
-                lbl(t!("Precision")),
-                mk_field_enabled(DsField::Dimaltd, vals.dimaltd, vals.dimalt)
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+            prec_field(t!("Precision"), DsField::Dimaltd, vals.dimaltd, vals.dimalt),
             if vals.dimalt {
                 enum_field(t!("Unit format"), DsField::Dimaltu, vals.dimaltu, OPT_LUNIT)
             } else {
                 row![lbl(t!("Unit format")), container(text(alternate_unit_name).size(11).style(muted_style)).padding([4, 7]).width(150)]
                     .spacing(8).align_y(iced::Center).into()
             },
-            row![
-                lbl(t!("Tolerance precision")),
-                mk_field_enabled(DsField::Dimalttd, vals.dimalttd, vals.dimalt)
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+            prec_field(t!("Tolerance precision"), DsField::Dimalttd, vals.dimalttd, vals.dimalt),
             row![
                 lbl(t!("Round off")),
                 mk_field_enabled(DsField::Dimaltrnd, vals.dimaltrnd, vals.dimalt)
@@ -1042,12 +1053,7 @@ pub fn view_window<'a>(
             ]
             .spacing(8)
             .align_y(iced::Center),
-            row![
-                lbl(t!("Precision")),
-                mk_field_enabled(DsField::Dimtdec, vals.dimtdec, vals.dimtol || vals.dimlim)
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+            prec_field(t!("Precision"), DsField::Dimtdec, vals.dimtdec, vals.dimtol || vals.dimlim),
             row![
                 lbl(t!("Height scale")),
                 mk_field_enabled(DsField::Dimtfac, vals.dimtfac, vals.dimtol || vals.dimlim)

@@ -681,6 +681,7 @@ impl OpenCADStudio {
             ncopy_bind: self.ncopy_bind,
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
+            snap_marker_color: self.snap_marker_color,
             lineweight_display_scale: self.lineweight_display_scale,
             isometric_drafting: self.isometric_drafting,
             iso_plane: self.iso_plane,
@@ -689,6 +690,7 @@ impl OpenCADStudio {
             default_assoc_prompted: self.default_assoc_prompted,
             check_missing_fonts: self.check_missing_fonts,
             font_source_url: self.font_source_url.clone(),
+            qnew_template: self.qnew_template.clone(),
             donation_prompt_version: self.donation_prompt_version.clone(),
             gpu_warning_silenced: self.gpu_warning_silenced.clone(),
             disabled_plugins: {
@@ -791,6 +793,11 @@ impl OpenCADStudio {
             .crosshair_color
             .map(crate::app::config::rgb_to_hex)
             .unwrap_or_default();
+        self.snap_marker_color = s.snap_marker_color;
+        self.snap_marker_color_input = s
+            .snap_marker_color
+            .map(crate::app::config::rgb_to_hex)
+            .unwrap_or_default();
         self.lineweight_display_scale = s.lineweight_display_scale.clamp(25, 200);
         self.isometric_drafting = s.isometric_drafting;
         self.iso_plane = s.iso_plane;
@@ -808,6 +815,7 @@ impl OpenCADStudio {
         self.default_assoc_prompted = s.default_assoc_prompted;
         self.check_missing_fonts = s.check_missing_fonts;
         self.font_source_url = s.font_source_url.clone();
+        self.qnew_template = s.qnew_template.clone();
         self.font_source_input = s.font_source_url.clone();
         self.donation_prompt_version = s.donation_prompt_version.clone();
         self.gpu_warning_silenced = s.gpu_warning_silenced.clone();
@@ -3603,10 +3611,13 @@ impl OpenCADStudio {
     pub(super) fn apply_plot_page_settings(&mut self) {
         let i = self.active_tab;
         let layout_name = self.tabs[i].scene.current_layout.clone();
+        let ps = self.plot_settings_from_dialog(self.dialog_base_settings());
         if layout_name == "Model" {
+            // Model keeps its page setup too (#1620); it has no sheet limits.
+            self.tabs[i].scene.set_layout_plot_settings(&layout_name, &ps);
+            self.tabs[i].dirty = true;
             return;
         }
-        let ps = self.plot_settings_from_dialog(self.dialog_base_settings());
         let (w, h) = plot_dialog_sheet_mm(&self.plot_dialog);
         let plot_area = self.plot_dialog.area.clone();
         let center = ps.flags.plot_centered;
@@ -5360,7 +5371,7 @@ impl OpenCADStudio {
         // into it when "Save changes to layout" is on, so the page setup
         // remembers the last plot the way other applications expect. The
         // runtime paper/scale choices drive this one plot operation either way.
-        if !preview && d.save_to_layout && d.paper_space {
+        if !preview && d.save_to_layout {
             self.apply_dialog_to_layout();
         } else {
             self.sync_dialog_plot_runtime();

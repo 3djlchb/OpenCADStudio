@@ -911,13 +911,29 @@ impl OpenCADStudio {
                     .or_else(|| cmd.strip_prefix("ZOOM S "))
                     .or_else(|| cmd.strip_prefix("ZS "))
                     .unwrap_or("1");
-                if let Ok(factor) = rest.trim().parse::<f32>() {
-                    if factor > 0.0 {
-                        self.tabs[i].scene.remember_current_view();
-                        self.tabs[i].scene.zoom_camera(1.0 / factor);
+                // nXP scales the active viewport against paper space, nX (or
+                // a bare n) the current view (#1465). n may be an expression
+                // such as 1/50.
+                let rest = rest.trim().to_ascii_uppercase();
+                let (number, xp) = match rest.strip_suffix("XP") {
+                    Some(n) => (n, true),
+                    None => (rest.strip_suffix('X').unwrap_or(&rest), false),
+                };
+                let factor = crate::app::expr_eval::eval_number(number.trim())
+                    .filter(|f| f.is_finite() && *f > 0.0);
+                match factor {
+                    Some(factor) if xp && self.tabs[i].scene.set_viewport_scale_factor(factor) => {
+                        self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::tf!("Zoom Scale ×{factor:.3}").as_ref());
                     }
+                    Some(factor) => {
+                        self.tabs[i].scene.remember_current_view();
+                        self.tabs[i].scene.zoom_camera(1.0 / factor as f32);
+                        self.command_line
+                            .push_output(crate::tf!("Zoom Scale ×{factor:.3}").as_ref());
+                    }
+                    None => {}
                 }
             }
 

@@ -251,6 +251,7 @@ const SNAP_ORDER: &[SnapType] = &[
     SnapType::Endpoint,
     SnapType::Midpoint,
     SnapType::Center,
+    SnapType::GeometricCenter,
     SnapType::Node,
     SnapType::Quadrant,
     SnapType::Intersection,
@@ -276,6 +277,7 @@ fn snap_bit(s: SnapType) -> Option<i32> {
         SnapType::Midpoint => 2,
         SnapType::Center => 4,
         SnapType::Node => 8,
+        SnapType::GeometricCenter => 1024,
         SnapType::Quadrant => 16,
         SnapType::Intersection => 32,
         SnapType::Insertion => 64,
@@ -430,6 +432,8 @@ pub struct UserSettings {
     pub cursor_type: CursorType,
     /// Explicit crosshair RGB. `None` keeps automatic background contrast.
     pub crosshair_color: Option<[u8; 3]>,
+    /// Explicit object-snap marker RGB. `None` keeps the automatic colour.
+    pub snap_marker_color: Option<[u8; 3]>,
     /// Model-space lineweight preview scale as a percentage.
     pub lineweight_display_scale: i32,
     /// Isometric drafting changes the grid and crosshair to the active axis
@@ -459,6 +463,9 @@ pub struct UserSettings {
     /// so an intranet folder or a private GitHub raw folder both work.
     #[serde(default)]
     pub font_source_url: String,
+    /// Drawing new tabs start from (QNEW template); empty = a blank drawing.
+    #[serde(default)]
+    pub qnew_template: String,
     /// App version whose donation prompt has been displayed.
     pub donation_prompt_version: String,
     /// The graphics verdict (`GpuStatus::identity()`) whose warning popup the
@@ -819,6 +826,7 @@ impl Default for UserSettings {
             ncopy_bind: false,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,
+            snap_marker_color: None,
             lineweight_display_scale: 100,
             isometric_drafting: false,
             iso_plane: IsoPlane::Left,
@@ -827,6 +835,7 @@ impl Default for UserSettings {
             default_assoc_prompted: false,
             check_missing_fonts: true,
             font_source_url: String::new(),
+            qnew_template: String::new(),
             donation_prompt_version: String::new(),
             gpu_warning_silenced: String::new(),
             disabled_plugins: Vec::new(),

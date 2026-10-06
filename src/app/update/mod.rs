@@ -1877,6 +1877,20 @@ impl OpenCADStudio {
                 self.sync_ribbon_from_selection();
                 // A fresh drawing starts with grid/snap off (its tile defaults).
                 self.adopt_view_display(self.active_tab);
+                // QNEW: start from the default template when one is set (#1113).
+                let template = self.qnew_template.trim().to_string();
+                if !template.is_empty() {
+                    match self.apply_template(&template) {
+                        Ok(_) => {
+                            self.tabs[idx].dirty = false;
+                            self.refresh_layer_panel();
+                            self.sync_ribbon_styles();
+                        }
+                        Err(error) => self.command_line.push_error(
+                            error["error"].as_str().unwrap_or("template"),
+                        ),
+                    }
+                }
                 Task::none()
             }
 
@@ -5809,6 +5823,10 @@ impl OpenCADStudio {
                     if id == crate::modules::insert::insert_block::GALLERY_ID {
                         self.refresh_block_palette();
                     }
+                    // The per-viewport freeze column follows the active viewport.
+                    if id == crate::ui::ribbon::widgets::LAYER_COMBO_ID {
+                        self.refresh_layer_panel();
+                    }
                     self.ribbon.toggle_dropdown(&id);
                 }
                 Task::none()
@@ -8005,6 +8023,39 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::QnewTemplateChanged(path) => {
+                self.qnew_template = path;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::QnewTemplateBrowse => Task::perform(
+                async {
+                    crate::sys::file_dialog()
+                        .add_filter(
+                            crate::t!("Drawing Template (*.dwt)").as_ref(),
+                            &["dwt", "DWT", "dwg", "DWG", "dxf", "DXF"],
+                        )
+                        .pick_file()
+                        .await
+                        .map(|handle| crate::sys::handle_path(&handle).display().to_string())
+                },
+                |path| match path {
+                    Some(path) => Message::QnewTemplateChanged(path),
+                    None => Message::Noop,
+                },
+            ),
+            Message::SnapMarkerColorChanged(value) => {
+                self.snap_marker_color_input = value.clone();
+                if value.trim().is_empty() {
+                    self.snap_marker_color = None;
+                    self.persist_settings_if_changed();
+                } else if let Some(rgb) = crate::app::config::parse_hex(&value) {
+                    self.snap_marker_color = Some(rgb);
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+
             Message::DefaultSaveFormatChanged(format) => {
                 self.default_save_format = crate::io::canonical_save_format(&format).to_string();
                 self.persist_settings_if_changed();
@@ -9835,6 +9886,22 @@ impl OpenCADStudio {
             }
 
             // ── Plot Style Table ──────────────────────────────────────────────
+            Message::LinetypeLoaded(Some(source)) => {
+                let i = self.active_tab;
+                self.push_undo_snapshot(i, "LINETYPE");
+                let added = crate::io::linetypes::populate_document_from_source(
+                    &mut self.tabs[i].scene.document,
+                    &source,
+                );
+                if added > 0 {
+                    self.tabs[i].dirty = true;
+                    self.tabs[i].scene.bump_geometry();
+                }
+                self.command_line
+                    .push_output(crate::tf!("{added} linetype(s) loaded.").as_ref());
+                Task::none()
+            }
+            Message::LinetypeLoaded(None) => Task::none(),
             Message::PlotStyleLoad => {
                 Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
             }

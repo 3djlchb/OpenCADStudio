@@ -88,6 +88,11 @@ impl OpenCADStudio {
             return;
         }
         let active = self.tabs[i].active_layer.clone();
+        let vp_column = self.tabs[i].scene.active_viewport.and_then(|vp| {
+            (self.tabs[i].scene.current_layout != "Model")
+                .then(|| self.tabs[i].layers.vp_cols.iter().position(|c| c.handle == vp))
+                .flatten()
+        });
         let infos: Vec<crate::ui::ribbon::LayerInfo> = self.tabs[i]
             .layers
             .layers
@@ -100,6 +105,8 @@ impl OpenCADStudio {
                 visible: l.visible,
                 frozen: l.frozen,
                 locked: l.locked,
+                vp_frozen: vp_column
+                    .map(|column| (column, l.vp_frozen.get(column).copied().unwrap_or(false))),
             })
             .collect();
         let names: Vec<String> = infos.iter().map(|l| l.name.clone()).collect();
