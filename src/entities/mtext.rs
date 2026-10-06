@@ -83,6 +83,34 @@ fn drawing_dir_str(d: &DrawingDirection) -> &'static str {
 /// click-to-select preview. Uses the exact same layout opts as `to_render`
 /// so the boxes line up with the rendered glyphs.
 
+/// The text MTEXT lays out: its stored value, except that the spaces between
+/// a field's value and a right-to-left word right after it read with that
+/// word — the reference draws `שלום 0 עולם` with no gap after the field
+/// (the spaces end up after the word), while plain text keeps the gap.
+fn display_text(t: &MText, document: &codec::CadDocument) -> String {
+    use crate::entities::text_support::is_rtl_char;
+    let value = &t.value;
+    if !value.chars().any(is_rtl_char) {
+        return value.clone();
+    }
+    let Some(spans) = codec::fields::field_spans(document, t.common.handle, value) else {
+        return value.clone();
+    };
+    let mut out = value.clone();
+    for span in spans.iter().rev() {
+        let rest = &out[span.end..];
+        let gap = rest.len() - rest.trim_start_matches(' ').len();
+        let after = &rest[gap..];
+        if gap == 0 || !after.chars().next().is_some_and(is_rtl_char) {
+            continue;
+        }
+        let word = after.find(|c: char| c == ' ' || c == '\\').unwrap_or(after.len());
+        let moved = format!("{}{}{}", &after[..word], &rest[..gap], &after[word..]);
+        out.replace_range(span.end.., &moved);
+    }
+    out
+}
+
 pub fn glyph_boxes(t: &MText, document: &codec::CadDocument) -> Vec<GlyphBox> {
     let resolved_style = resolve_text_style(&t.style, document);
     let attach_h_anchor: f32 = match t.attachment_point {
@@ -112,7 +140,7 @@ pub fn glyph_boxes(t: &MText, document: &codec::CadDocument) -> Vec<GlyphBox> {
     };
     // A field shows its stored value: fields update on their evaluation
     // events (open, save, plot, regen, UPDATEFIELD), never on a redraw.
-    let display = t.value.clone();
+    let display = display_text(t, document);
     let layout = layout_mtext(&MTextRenderOpts {
         value: &display,
         insertion: [
@@ -170,7 +198,7 @@ fn to_render(t: &MText, document: &codec::CadDocument) -> RenderEntity {
     };
     // A field shows its stored value: fields update on their evaluation
     // events (open, save, plot, regen, UPDATEFIELD), never on a redraw.
-    let display = t.value.clone();
+    let display = display_text(t, document);
     let layout = layout_mtext(&MTextRenderOpts {
         value: &display,
         insertion: [
