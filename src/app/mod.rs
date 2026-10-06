@@ -818,6 +818,7 @@ pub(super) struct OpenCADStudio {
     pub(crate) show_browser: bool,
     /// Point Cloud Manager palette (POINTCLOUDMANAGER).
     pub(crate) pc_manager: crate::ui::window::pc_manager::PcManager,
+    pub(crate) count_palette: crate::ui::window::count_palette::CountPalette,
     /// Which viewport background the colour wheel is editing, or `None` when
     /// it is closed. One slot, because only one wheel can be open at a time.
     pub(crate) bg_picker: Option<BgTarget>,
@@ -1942,6 +1943,7 @@ pub enum ModalKind {
     GeometricTolerance,
     AttDef,
     AttDefEdit,
+    CountInvalidArea,
     Field,
     DraftingSettings,
     AutoConstrainSettings,
@@ -3899,6 +3901,7 @@ pub enum Message {
     FieldDialog(crate::ui::window::field_dialog::FieldDialogMsg),
     /// A click or search in the Point Cloud Manager.
     PcManager(crate::ui::window::pc_manager::PcManagerMsg),
+    Count(crate::ui::window::count_palette::CountMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -4225,6 +4228,7 @@ impl OpenCADStudio {
             show_external_references: false,
             show_browser: false,
             pc_manager: Default::default(),
+            count_palette: Default::default(),
             bg_picker: None,
             block_palette: Default::default(),
             xref_manager: Default::default(),

@@ -1669,6 +1669,13 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
+            // Count mode: a blue frame round the drawing and the count toolbar.
+            if let (Some(mode), false) = (tab.count.as_ref(), tab.is_start) {
+                viewport_stack = viewport_stack.push(crate::ui::window::count_palette::border());
+                viewport_stack = viewport_stack
+                    .push(crate::ui::window::count_palette::toolbar(mode, &tab.scene.document));
+            }
+
             // Reserve the overlaid command line when placing cursor-anchored panels.
             mark("chrome");
             let command_line_inset = if self.command_line.history_open {
@@ -1888,6 +1895,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 crate::ui::dock::PanelId::Browser => self.show_browser,
                 crate::ui::dock::PanelId::NodeGraph => self.show_node_graph,
                 crate::ui::dock::PanelId::PointCloudManager => self.pc_manager.show,
+                crate::ui::dock::PanelId::Count => self.count_palette.show,
             }
         };
         let edge_stack = |side: crate::app::config::DockSide| -> Option<Element<'_, Message>> {
@@ -3022,6 +3030,14 @@ impl OpenCADStudio {
                 auto_collapse,
             ),
             crate::ui::dock::PanelId::NodeGraph => tab.graph.panel(width, auto_collapse),
+            crate::ui::dock::PanelId::Count => crate::ui::window::count_palette::view(
+                &self.count_palette,
+                tab.count.as_ref(),
+                &tab.scene.document,
+                tab.scene.geometry_epoch,
+                width,
+                auto_collapse,
+            ),
             crate::ui::dock::PanelId::PointCloudManager => crate::ui::window::pc_manager::view(
                 &self.pc_manager,
                 &tab.scene.document,

@@ -222,6 +222,15 @@ impl OpenCADStudio {
                 );
             }
             FieldDialogMsg::PlotScale(k) => state.plot_scale = k,
+            FieldDialogMsg::CountExpression(v) => state.count_expression = v,
+            FieldDialogMsg::ShowCountInstances => {
+                // The dialog closes and count mode shows what the expression counts.
+                let json = state.count_expression.clone();
+                self.field_dialog = None;
+                self.close_active_modal();
+                self.show_count_instances(i, &json);
+                return Task::none();
+            }
             FieldDialogMsg::PlaceholderProperty(k) => {
                 state.placeholder_property = k;
                 state.text_case = 0;

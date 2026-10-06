@@ -1973,6 +1973,15 @@ pub enum ViewportRefreshScope {
 /// Entity membership in document order, keyed by geometry epoch.
 type BlockMembers = (u64, HashMap<Handle, Vec<Handle>>);
 
+/// What count mode colours: see [`Scene::count_display`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CountDisplay {
+    pub counted: HashSet<Handle>,
+    pub errors: HashSet<Handle>,
+    pub color: [f32; 4],
+    pub error_color: [f32; 4],
+}
+
 pub struct Scene {
     pub camera: Rc<RefCell<Camera>>,
     /// View saved immediately before the latest navigation operation. ZOOM
@@ -2061,6 +2070,10 @@ pub struct Scene {
     /// edited geometry stands out while the surrounding drawing stays visible
     /// for context. `None` = not editing. (#136)
     pub refedit_keep: Option<HashSet<Handle>>,
+    /// COUNT mode colours: counted references in COUNTCOLOR, overlapping
+    /// duplicates in COUNTERRORCOLOR, everything else faded. `None` outside
+    /// count mode.
+    pub count_display: Option<CountDisplay>,
     /// Entity drawn with the selection-highlight colour without being part
     /// of the real selection — used to preview a row in the cycling list box.
     pub hover_highlight: Option<Handle>,
@@ -2658,6 +2671,7 @@ impl Scene {
             preview_hidden: HashSet::default(),
             command_preview_hidden: HashSet::default(),
             refedit_keep: None,
+            count_display: None,
             hover_highlight: None,
             constraint_hover_highlights: HashSet::default(),
             constraint_hover_refs: Vec::new(),
@@ -3497,6 +3511,15 @@ impl Scene {
             self.associative_hatch_source_cache.borrow_mut().take();
         }
         let mut changes = changes.to_vec();
+        // A table's drawing (its *T block) follows the table's cells, sizes
+        // and styles; it is left alone while it already matches.
+        for (handle, kind) in &changes {
+            if !matches!(kind, ChangeKind::Removed)
+                && matches!(self.document.get_entity(*handle), Some(EntityType::Table(_)))
+            {
+                self.document.refresh_table_block(*handle);
+            }
+        }
         // A restyle (layer on/off, colour, text or dimension style) moves no
         // geometry, so nothing measured from it is re-resolved: an
         // association that disagrees with its dimension would otherwise
@@ -4036,6 +4059,9 @@ impl Scene {
                             );
                         }
                     }
+                    if self.meshes.contains_key(&h) {
+                        material.diffuse = self.count_color(h, material.diffuse, bg);
+                    }
                     (h, material)
                 })
             })
@@ -4134,10 +4160,50 @@ impl Scene {
         self.bump_geometry_no_blocks();
     }
 
+    /// Enter / leave the COUNT colouring; a no-op when nothing changed.
+    pub fn set_count_display(&mut self, display: Option<CountDisplay>) {
+        if self.count_display == display {
+            return;
+        }
+        self.count_display = display;
+        self.hatch_cache.borrow_mut().clear();
+        self.recolor_meshes();
+        self.bump_geometry_no_blocks();
+    }
+
+    /// The colour count mode gives an object drawn as part of `handle` (a
+    /// top-level entity): the count colours, else faded; unchanged outside
+    /// count mode.
+    pub(crate) fn count_color(&self, handle: Handle, color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
+        let Some(count) = &self.count_display else {
+            return color;
+        };
+        let [r, g, b, _] = if count.errors.contains(&handle) {
+            count.error_color
+        } else if count.counted.contains(&handle) {
+            count.color
+        } else {
+            return crate::scene::cache::block_cache::fade_toward_bg(color, bg);
+        };
+        [r, g, b, color[3]]
+    }
+
     /// Fade the colours of wires that belong to entities outside the REFEDIT
     /// keep set (no-op when not editing). The geometry is untouched, so
-    /// hit-testing still works on faded entities.
+    /// hit-testing still works on faded entities. In count mode the counted
+    /// references and the duplicates take the count colours instead.
     fn apply_refedit_fade(&self, wires: &mut [WireModel], bg: [f32; 4]) {
+        if let Some(count) = &self.count_display {
+            for w in wires.iter_mut() {
+                w.color = match Self::handle_from_wire_name(&w.name) {
+                    Some(h) if count.errors.contains(&h) => count.error_color,
+                    Some(h) if count.counted.contains(&h) => count.color,
+                    _ => crate::scene::cache::block_cache::fade_toward_bg(w.color, bg),
+                };
+                // Shared instance geometry keeps its own colour; draw these wires on their own.
+                w.render_instance = None;
+            }
+        }
         let Some(keep) = &self.refedit_keep else {
             return;
         };
@@ -8776,6 +8842,14 @@ impl Scene {
                         &self.document,
                         self.material_base_dir.as_deref(),
                     );
+                }
+                if self.count_display.is_some() {
+                    let own = transformed.instance_color.or(set.display_color()).unwrap_or([1.0; 4]);
+                    let color = self.count_color(context.root_handle, own, self.current_bg());
+                    transformed.instance_color = Some(color);
+                    if let Some(material) = transformed.material.as_mut() {
+                        material.diffuse = color;
+                    }
                 }
                 transformed.instance_handle = Some(context.root_handle);
                 out.push(transformed);
