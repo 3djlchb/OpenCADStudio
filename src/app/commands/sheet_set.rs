@@ -247,14 +247,13 @@ struct ModelView {
 }
 
 /// Named view `view` of a model drawing, or its extents.
-// ponytail: plan views only (centre = target + view centre); a twisted or 3D
-// view would need the full DCS transform.
 fn model_view(doc: &codec::CadDocument, view: Option<&str>) -> Option<ModelView> {
     use codec::types::Vector3;
     if let Some(name) = view {
         let v = doc.views.iter().find(|v| !v.paper_space && v.name.eq_ignore_ascii_case(name))?;
+        let c = crate::scene::named_view_center(v);
         return Some(ModelView {
-            center: Vector3::new(v.target.x + v.center.x, v.target.y + v.center.y, v.target.z),
+            center: Vector3::new(c.x, c.y, c.z),
             width: v.width.abs().max(1e-6),
             height: v.height.abs().max(1e-6),
             target: v.target.clone(),

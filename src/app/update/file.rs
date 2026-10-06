@@ -5519,8 +5519,8 @@ impl OpenCADStudio {
         let half_w = view.width.abs() * 0.5;
         let half_h = view.height.abs() * 0.5;
         (half_w > 1e-9 && half_h > 1e-9).then_some(())?;
-        // The view centre is relative to its target (plan views).
-        let (cx, cy) = (view.target.x + view.center.x, view.target.y + view.center.y);
+        let center = crate::scene::named_view_center(view);
+        let (cx, cy) = (center.x, center.y);
         self.area_plot_job((cx - half_w, cy - half_h, cx + half_w, cy + half_h))
     }
 

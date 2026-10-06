@@ -166,6 +166,24 @@ fn is_active_vport_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("*Active")
 }
 
+/// The world point a named view is centred on. The VIEW record's centre is
+/// in view (DCS) coordinates, an offset from its target in the view plane.
+/// Views saved by earlier versions of this application stored the target
+/// itself as the centre; that centre (equal to a non-zero target) is taken
+/// as the target, not as an offset from it.
+pub fn named_view_center(view: &codec::tables::View) -> glam::DVec3 {
+    use glam::{DQuat, DVec3};
+    let target = DVec3::new(view.target.x, view.target.y, view.target.z);
+    let (cx, cy) = (view.center.x, view.center.y);
+    let tol = 1e-9 * target.length().max(1.0);
+    let legacy = (target.x != 0.0 || target.y != 0.0) && (cx - target.x).abs() <= tol && (cy - target.y).abs() <= tol;
+    if legacy {
+        return target;
+    }
+    let eye = DVec3::new(view.direction.x, view.direction.y, view.direction.z).try_normalize().unwrap_or(DVec3::Z);
+    target + DQuat::from_rotation_arc(DVec3::Z, eye) * DVec3::new(cx, cy, 0.0)
+}
+
 impl Scene {
     /// A geometry mutation makes every fitted Model camera AABB stale. Clear
     /// both the live camera and inactive tile snapshots immediately so no view
@@ -189,7 +207,6 @@ impl Scene {
         use glam::Vec3;
         let cam = &mut *self.camera.borrow_mut();
         // The stored direction points from the target toward the eye.
-        cam.target = glam::DVec3::new(view.target.x, view.target.y, view.target.z);
         let eye_dir = Vec3::new(
             view.direction.x as f32,
             view.direction.y as f32,
@@ -202,9 +219,7 @@ impl Scene {
         };
         // Build rotation: canonical eye is +Z, rotate to eye_dir.
         cam.rotation = glam::Quat::from_rotation_arc(Vec3::Z, eye_dir);
-        // The view centre is an offset in view coordinates from the target.
-        let offset = cam.rotation * Vec3::new(view.center.x as f32, view.center.y as f32, 0.0);
-        cam.target += glam::DVec3::new(offset.x as f64, offset.y as f64, offset.z as f64);
+        cam.target = named_view_center(view);
         // Sync yaw/pitch from new rotation (for ViewCube).
         let pitch = eye_dir.z.clamp(-1.0, 1.0).asin();
         let yaw = eye_dir.x.atan2(eye_dir.y);

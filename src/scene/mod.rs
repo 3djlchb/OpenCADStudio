@@ -37,6 +37,7 @@ pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_mar
 mod dwg_native_constraints;
 mod entity;
 pub use entity::CreateBlockOptions;
+pub use camera_ops::named_view_center;
 #[cfg(test)]
 mod hatch_boundary;
 mod group_layer;
