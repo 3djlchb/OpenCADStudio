@@ -247,6 +247,7 @@ impl OpenCADStudio {
                                 .document
                                 .ucss
                                 .add_or_replace(ucs.clone());
+                            self.tabs[i].scene.bump_ucs_epoch();
                             self.tabs[i].active_ucs = Some(ucs);
                             active_changed = true;
                             self.tabs[i].dirty = true;
@@ -261,6 +262,7 @@ impl OpenCADStudio {
                         } else if let Some(removed) =
                             self.tabs[i].scene.document.ucss.remove(&name)
                         {
+                            self.tabs[i].scene.bump_ucs_epoch();
                             let removed_handle = removed.handle;
                             for entity in self.tabs[i].scene.document.entities_mut() {
                                 if let codec::EntityType::Viewport(viewport) = entity {

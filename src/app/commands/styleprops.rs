@@ -2997,6 +2997,7 @@ impl OpenCADStudio {
                             self.tabs[i].scene.bump_geometry_no_blocks();
                         }
                         if type_str == "UCS" {
+                            self.tabs[i].scene.bump_ucs_epoch();
                             if let Some(active) = self.tabs[i].active_ucs.as_mut() {
                                 if active.name.eq_ignore_ascii_case(&old_name) {
                                     active.name = new_name.clone();

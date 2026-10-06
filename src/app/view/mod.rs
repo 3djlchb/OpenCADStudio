@@ -1416,14 +1416,9 @@ bg={bg_ms:.1}ms n={view_count}"
                         .as_ref()
                         .map(|u| u.name.clone())
                         .unwrap_or_default();
-                    let ucs_names: Vec<String> = tab
-                        .scene
-                        .document
-                        .ucss
-                        .iter()
-                        .map(|u| u.name.clone())
-                        .filter(|n| !n.is_empty())
-                        .collect();
+                    // Epoch-memoised (#34): Arc clone per frame, rebuilt only
+                    // after a UCS-table bump.
+                    let ucs_names = tab.scene.cached_ucs_names();
                     let picker = iced::widget::pin(iced::widget::opaque(viewcube_ucs_picker(
                         ucs_current,
                         ucs_names,
@@ -1456,14 +1451,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     .as_ref()
                     .map(|u| u.name.clone())
                     .unwrap_or_default();
-                let ucs_names: Vec<String> = tab
-                    .scene
-                    .document
-                    .ucss
-                    .iter()
-                    .map(|u| u.name.clone())
-                    .filter(|n| !n.is_empty())
-                    .collect();
+                // Epoch-memoised (#34): Arc clone per frame, rebuilt only
+                // after a UCS-table bump.
+                let ucs_names = tab.scene.cached_ucs_names();
                 let picker = iced::widget::pin(iced::widget::opaque(viewcube_ucs_picker(
                     ucs_current,
                     ucs_names,

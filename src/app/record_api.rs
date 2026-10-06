@@ -1611,7 +1611,12 @@ impl OpenCADStudio {
                     "app_ids" => patch_table!(app_ids),
                     "views" => patch_table!(views),
                     "vports" => patch_table!(vports),
-                    "ucss" => patch_table!(ucss),
+                    "ucss" => {
+                        patch_table!(ucss);
+                        if changed {
+                            self.tabs[i].scene.bump_ucs_epoch();
+                        }
+                    }
                     "vx_table" => patch_table!(vx_table),
                     _ => unreachable!(),
                 }

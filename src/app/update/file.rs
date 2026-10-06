@@ -1860,6 +1860,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.document = doc;
         self.tabs[i].scene.bump_layout_epoch();
         self.tabs[i].scene.bump_scale_epoch();
+        self.tabs[i].scene.bump_ucs_epoch();
         // Load parameters first so imported dimensional constraints
         // can resolve their named driving values.
         self.tabs[i].scene.load_named_parameters_from_document();

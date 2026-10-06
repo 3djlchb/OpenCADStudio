@@ -855,6 +855,7 @@ impl OpenCADStudio {
                     self.tabs[i].scene.invalidate_dependency_index();
                     self.tabs[i].scene.bump_layout_epoch();
                     self.tabs[i].scene.bump_scale_epoch();
+                    self.tabs[i].scene.bump_ucs_epoch();
                 }
                 StructureSnapshot::Layers(entries) => {
                     let names: Vec<String> =

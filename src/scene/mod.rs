@@ -2365,6 +2365,10 @@ pub struct Scene {
     scale_epoch: u64,
     scale_picker_cache:
         RefCell<Option<(u64, f64, Option<bool>, String, std::sync::Arc<Vec<(String, f32, f64)>>)>>,
+    /// Bump on any named-UCS table mutation (UCS SAVE / DELETE / RENAME,
+    /// record-API patch, file-open, undo Full-swap).
+    ucs_epoch: u64,
+    ucs_names_cache: RefCell<Option<(u64, std::sync::Arc<[String]>)>>,
     /// Reverse dependencies from layer/style/block definitions to the top-level
     /// entities whose resident wire runs actually change. Kept independent from
     /// `geometry_epoch`: a layer colour toggle can reuse the index, invalidate
@@ -2756,6 +2760,8 @@ impl Scene {
             layout_names_cache: RefCell::new(None),
             scale_epoch: 0,
             scale_picker_cache: RefCell::new(None),
+            ucs_epoch: 0,
+            ucs_names_cache: RefCell::new(None),
             dependency_index_cache: RefCell::new(None),
             associative_hatch_source_cache: RefCell::new(None),
             parametric_constraints: Vec::new(),
@@ -6576,6 +6582,32 @@ impl Scene {
             std::sync::Arc::clone(&list),
         ));
         list
+    }
+
+    pub fn bump_ucs_epoch(&mut self) {
+        self.ucs_epoch += 1;
+    }
+
+    /// Named-UCS names for the ViewCube picker, memoised behind `ucs_epoch`
+    /// (#34, mirrors `cached_layout_names`). Same empty-name filter the view
+    /// blocks used when building the list inline every frame.
+    pub fn cached_ucs_names(&self) -> std::sync::Arc<[String]> {
+        if let Some((epoch, names)) = self.ucs_names_cache.borrow().as_ref() {
+            if *epoch == self.ucs_epoch {
+                return std::sync::Arc::clone(names);
+            }
+        }
+        let names: std::sync::Arc<[String]> = self
+            .document
+            .ucss
+            .iter()
+            .map(|u| u.name.clone())
+            .filter(|n| !n.is_empty())
+            .collect::<Vec<_>>()
+            .into();
+        *self.ucs_names_cache.borrow_mut() =
+            Some((self.ucs_epoch, std::sync::Arc::clone(&names)));
+        names
     }
 
     /// Wire set for the Model layout, shared by every tile.
@@ -14252,6 +14284,33 @@ mod layout_cache_tests {
             "after switching to 1:50 the architectural entry must drop out"
         );
         assert!(after.iter().any(|(n, _, _)| n == "1:50"));
+    }
+
+    #[test]
+    fn cached_ucs_names_returns_same_arc_until_bump() {
+        // RED: `Scene::cached_ucs_names` does not exist yet (#34).
+        let scene = Scene::new();
+        let first = scene.cached_ucs_names();
+        let second = scene.cached_ucs_names();
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn cached_ucs_names_invalidated_by_bump() {
+        // RED: `Scene::bump_ucs_epoch` does not exist yet (#34).
+        let mut scene = Scene::new();
+        let before = scene.cached_ucs_names();
+        scene
+            .document
+            .ucss
+            .add_or_replace(codec::tables::Ucs::new("TEST_CACHED_UCS"));
+        scene.bump_ucs_epoch();
+        let after = scene.cached_ucs_names();
+        assert!(
+            !std::sync::Arc::ptr_eq(&before, &after),
+            "ucs mutation + bump must replace the cached Arc"
+        );
+        assert!(after.iter().any(|n| n == "TEST_CACHED_UCS"));
     }
 }
 
