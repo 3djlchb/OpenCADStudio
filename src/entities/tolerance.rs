@@ -1051,12 +1051,16 @@ mod tests {
                 (got - (pen - spacing)).abs() < 1e-3,
                 "{src:?}: content {got} should be pen {pen} less one {spacing} gap"
             );
-            let expected = ink + (cell.len() as f32 - 1.0) * spacing;
-            assert!(
-                (got - expected).abs() < 1e-3,
-                "{src:?}: content {got} should be ink {ink} plus {} inter-run gaps",
-                cell.len() - 1
-            );
+            // Ink and pen agree only where glyphs advance by their own ink;
+            // the text fonts keep the advances of the fonts they stand in for.
+            if cell.iter().all(|run| run.font == SYMBOL_FONT) {
+                let expected = ink + (cell.len() as f32 - 1.0) * spacing;
+                assert!(
+                    (got - expected).abs() < 1e-3,
+                    "{src:?}: content {got} should be ink {ink} plus {} inter-run gaps",
+                    cell.len() - 1
+                );
+            }
         }
     }
 }
