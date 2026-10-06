@@ -202,6 +202,9 @@ impl Scene {
         };
         // Build rotation: canonical eye is +Z, rotate to eye_dir.
         cam.rotation = glam::Quat::from_rotation_arc(Vec3::Z, eye_dir);
+        // The view centre is an offset in view coordinates from the target.
+        let offset = cam.rotation * Vec3::new(view.center.x as f32, view.center.y as f32, 0.0);
+        cam.target += glam::DVec3::new(offset.x as f64, offset.y as f64, offset.z as f64);
         // Sync yaw/pitch from new rotation (for ViewCube).
         let pitch = eye_dir.z.clamp(-1.0, 1.0).asin();
         let yaw = eye_dir.x.atan2(eye_dir.y);
@@ -224,13 +227,11 @@ impl Scene {
         let cam = self.camera.borrow();
         let eye_dir = cam.rotation * glam::Vec3::Z;
         let height = cam.ortho_size() * 2.0;
-        let width = height; // caller can adjust; rough square
+        // The window's shape: the last rendered aspect ratio.
+        let width = height * self.active_camera_aspect();
         let mut view = codec::tables::View::new(name);
-        view.center = Vector3 {
-            x: cam.target.x as f64,
-            y: cam.target.y as f64,
-            z: 0.0,
-        };
+        // The centre is in view (DCS) coordinates, relative to the target.
+        view.center = Vector3 { x: 0.0, y: 0.0, z: 0.0 };
         view.target = Vector3 {
             x: cam.target.x as f64,
             y: cam.target.y as f64,

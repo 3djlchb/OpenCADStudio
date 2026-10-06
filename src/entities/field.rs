@@ -71,6 +71,14 @@ impl FieldContext for OcsFieldContext<'_> {
         os_date_locale()
     }
 
+    fn sheet_sets(
+        &self,
+        f: &mut dyn FnMut(&codec::sheet_set::SheetSetDatabase) -> Option<String>,
+    ) -> Option<String> {
+        let sets = SHEET_SETS.read().ok()?;
+        sets.iter().find_map(|db| f(db))
+    }
+
     fn getenv(&self, name: &str) -> Option<String> {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -81,6 +89,16 @@ impl FieldContext for OcsFieldContext<'_> {
             let _ = name;
             None
         }
+    }
+}
+
+/// The sheet sets open in the Sheet Set Manager, for `\AcSm` fields. The
+/// manager replaces the list whenever a set opens, closes or changes.
+static SHEET_SETS: std::sync::RwLock<Vec<codec::sheet_set::SheetSetDatabase>> = std::sync::RwLock::new(Vec::new());
+
+pub fn set_sheet_sets(sets: Vec<codec::sheet_set::SheetSetDatabase>) {
+    if let Ok(mut guard) = SHEET_SETS.write() {
+        *guard = sets;
     }
 }
 
@@ -367,6 +385,18 @@ fn display_name() -> Option<String> {
 pub fn attach_attribute_fields(document: &mut CadDocument, insert: Handle) -> Vec<Handle> {
     let context = OcsFieldContext(None);
     document.attach_attribute_fields(insert, &context)
+}
+
+/// Store fresh values for the sheet set fields (after a sheet set changed).
+pub fn refresh_sheet_set_fields(document: &mut CadDocument) -> Vec<Handle> {
+    let context = OcsFieldContext(None);
+    document.refresh_sheet_set_fields(&context)
+}
+
+/// [`attach_attribute_fields`] with every field code passed through `map`.
+pub fn attach_attribute_fields_mapped(document: &mut CadDocument, insert: Handle, map: &dyn Fn(&str) -> String) -> Vec<Handle> {
+    let context = OcsFieldContext(None);
+    document.attach_attribute_fields_mapped(insert, &context, map)
 }
 
 /// Whether any attribute definition of `block` hosts a field.

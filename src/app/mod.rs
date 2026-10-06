@@ -818,6 +818,13 @@ pub(super) struct OpenCADStudio {
     pub(crate) show_browser: bool,
     /// Point Cloud Manager palette (POINTCLOUDMANAGER).
     pub(crate) pc_manager: crate::ui::window::pc_manager::PcManager,
+    /// Sheet Set Manager palette, the open sheet sets and their dialogs.
+    pub(crate) sheet_set: crate::ui::window::sheet_set::SheetSetManager,
+    /// A sheet opened from the manager: its drawing (path key) and layout,
+    /// switched to once the drawing has loaded.
+    pub(crate) sheet_set_pending_layout: Option<(String, String)>,
+    /// The subset / set Import Layout as Sheet adds to, while its file picker is open.
+    pub(crate) sheet_set_import_parent: Option<String>,
     /// Which viewport background the colour wheel is editing, or `None` when
     /// it is closed. One slot, because only one wheel can be open at a time.
     pub(crate) bg_picker: Option<BgTarget>,
@@ -1990,6 +1997,8 @@ pub enum ModalKind {
     GpuWarning,
     /// Reference Manager help window (toolbar Help button).
     XrefHelp,
+    /// Sheet set wizard, properties and sheet / subset forms.
+    SheetSet,
 }
 
 /// A property group controlled by a layer state's restore mask.
@@ -3899,6 +3908,7 @@ pub enum Message {
     FieldDialog(crate::ui::window::field_dialog::FieldDialogMsg),
     /// A click or search in the Point Cloud Manager.
     PcManager(crate::ui::window::pc_manager::PcManagerMsg),
+    SheetSet(crate::ui::window::sheet_set::SheetSetMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -4225,6 +4235,9 @@ impl OpenCADStudio {
             show_external_references: false,
             show_browser: false,
             pc_manager: Default::default(),
+            sheet_set: Default::default(),
+            sheet_set_pending_layout: None,
+            sheet_set_import_parent: None,
             bg_picker: None,
             block_palette: Default::default(),
             xref_manager: Default::default(),

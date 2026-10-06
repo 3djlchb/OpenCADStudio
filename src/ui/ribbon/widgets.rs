@@ -38,6 +38,7 @@ pub(super) struct ToggleState {
     pub show_ucs_icon: bool,
     pub show_properties: bool,
     pub show_block_palette: bool,
+    pub show_sheet_set: bool,
     pub show_file_tabs: bool,
     pub show_layout_tabs: bool,
 }
@@ -380,6 +381,7 @@ pub(super) fn is_active_tool(
         "UCSICON" => state.show_ucs_icon,
         "PROPERTIES" => state.show_properties,
         "BLOCKPALETTE" => state.show_block_palette,
+        "SHEETSET" => state.show_sheet_set,
         "FILETAB" => state.show_file_tabs,
         "LAYOUTTAB" => state.show_layout_tabs,
         id => active_tool.as_deref() == Some(id),

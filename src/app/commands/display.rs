@@ -587,12 +587,6 @@ impl OpenCADStudio {
                     .push_info(crate::t!("TOOLPALETTES: Tool Palettes not yet implemented.").as_ref());
             }
 
-            // ── SHEETSET — not yet implemented ───────────────────────────────────
-            "SHEETSET" => {
-                self.command_line
-                    .push_info(crate::t!("SHEETSET: Sheet Set Manager not yet implemented.").as_ref());
-            }
-
             // ── XDATA — read/write extended entity data ──────────────────────────
             // XDATA LIST             — show all xdata records on selected entities
             // XDATA SET <app> <str>  — append a string xdata value for <app>

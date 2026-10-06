@@ -784,6 +784,8 @@ impl OpenCADStudio {
         if tokens[0].eq_ignore_ascii_case("BACKGROUND")
             || tokens[0].eq_ignore_ascii_case("COLORSCHEME")
             || tokens[0].eq_ignore_ascii_case("XREF")
+            // `VIEW WINDOW <name> <x1,y1> <x2,y2>` takes its arguments in one line.
+            || tokens[0].eq_ignore_ascii_case("VIEW")
         {
             return self.dispatch_command(cmd);
         }

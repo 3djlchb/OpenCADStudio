@@ -1888,6 +1888,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 crate::ui::dock::PanelId::Browser => self.show_browser,
                 crate::ui::dock::PanelId::NodeGraph => self.show_node_graph,
                 crate::ui::dock::PanelId::PointCloudManager => self.pc_manager.show,
+                crate::ui::dock::PanelId::SheetSetManager => self.sheet_set.show,
             }
         };
         let edge_stack = |side: crate::app::config::DockSide| -> Option<Element<'_, Message>> {
@@ -2642,6 +2643,14 @@ impl OpenCADStudio {
         };
         #[cfg(target_arch = "wasm32")]
         let plugin_drain = Subscription::none();
+        // Open sheet sets reload when their .dst changes on disk.
+        #[cfg(not(target_arch = "wasm32"))]
+        // Open sheet sets reload when their .dst changes on disk; the
+        // drawings' .dwl lock files follow the open tabs.
+        let sheet_set_poll = iced::time::every(std::time::Duration::from_secs(1))
+            .map(|_| Message::SheetSet(crate::ui::window::sheet_set::SheetSetMsg::Poll));
+        #[cfg(target_arch = "wasm32")]
+        let sheet_set_poll = Subscription::none();
         let hatch_pattern_keys = if self.tabs[self.active_tab]
             .properties
             .hatch_pattern_picker_open
@@ -2843,6 +2852,7 @@ impl OpenCADStudio {
             web_fonts,
             autosave,
             plugin_drain,
+            sheet_set_poll,
             single_instance,
             hatch_pattern_keys,
             keyboard_events,
@@ -3029,6 +3039,9 @@ impl OpenCADStudio {
                 width,
                 auto_collapse,
             ),
+            crate::ui::dock::PanelId::SheetSetManager => {
+                crate::ui::window::sheet_set::view(&self.sheet_set, width, auto_collapse)
+            }
         };
         let divider = dock_divider(id);
         match side {

@@ -613,6 +613,9 @@ pub struct UserSettings {
     /// BLOCKNAVIGATE (default ".").
     #[serde(default = "default_block_navigate")]
     pub block_navigate: String,
+    /// SSMAUTOOPEN, SSLOCATE, SSMPOLLTIME, SSMSHEETSTATUS.
+    #[serde(default)]
+    pub sheet_set: crate::ui::window::sheet_set::SheetSetSettings,
 }
 
 /// A block the Blocks palette lists from outside the current drawing (a
@@ -853,6 +856,7 @@ impl Default for UserSettings {
             block_mru_list: 50,
             block_redefine_mode: 1,
             block_navigate: ".".to_string(),
+            sheet_set: Default::default(),
         }
     }
 }

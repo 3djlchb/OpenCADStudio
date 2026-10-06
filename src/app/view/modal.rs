@@ -75,6 +75,7 @@ impl OpenCADStudio {
             Some(K::RecoveryPrompt) => crate::tr!("modal", "recovery-prompt"),
             Some(K::GpuWarning) => crate::tr!("gpu", "title"),
             Some(K::XrefHelp) => crate::t!("Reference Manager Help").into_owned(),
+            Some(K::SheetSet) => self.sheet_set.dialog.as_ref().map(|d| d.title()).unwrap_or_default(),
             None => String::new(),
         }
     }
@@ -579,6 +580,24 @@ impl OpenCADStudio {
             super::super::ModalKind::AttDef => {
                 let state = self.attdef_dialog.as_ref()?;
                 sized_flow(ex, 720, 520, |flow| crate::ui::window::attdef_dialog::view(state, flow))
+            }
+            super::super::ModalKind::SheetSet => {
+                let (w, h) = match self.sheet_set.dialog.as_ref()? {
+                    crate::ui::window::sheet_set::SsDialog::Wizard(_) => (720, 560),
+                    crate::ui::window::sheet_set::SsDialog::Properties(_) => (640, 700),
+                    crate::ui::window::sheet_set::SsDialog::Form(f) => match f.kind {
+                        crate::ui::window::sheet_set::FormKind::Rename => (560, 470),
+                        crate::ui::window::sheet_set::FormKind::RenameView => (520, 200),
+                        crate::ui::window::sheet_set::FormKind::ImportLayout => (620, 470),
+                        _ => (560, 420),
+                    },
+                    crate::ui::window::sheet_set::SsDialog::Confirm(..) => (460, 190),
+                    crate::ui::window::sheet_set::SsDialog::Template(_) => (480, 400),
+                    crate::ui::window::sheet_set::SsDialog::Category(_) => (480, 440),
+                    crate::ui::window::sheet_set::SsDialog::BlockList(_) => (540, 330),
+                    crate::ui::window::sheet_set::SsDialog::SelectBlock(_) => (580, 390),
+                };
+                sized_flow(ex, w, h, |flow| crate::ui::window::sheet_set::dialog_view(&self.sheet_set, flow))
             }
             super::super::ModalKind::Field => {
                 let state = self.field_dialog.as_ref()?;

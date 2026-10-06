@@ -38,7 +38,233 @@ pub const CATEGORIES: &[(&str, &[&str])] = &[
         "Plot",
         &["DeviceName", "Login", "PageSetupName", "PaperSize", "PlotDate", "PlotOrientation", "PlotScale", "PlotStyleTable"],
     ),
+    ("SheetSet", SHEET_SET_FIELDS),
 ];
+
+/// The SheetSet category, in the reference's order.
+pub const SHEET_SET_FIELDS: &[&str] = &[
+    "CurrentSheetCategory",
+    "CurrentSheetCustom",
+    "CurrentSheetDescription",
+    "CurrentSheetIssuePurpose",
+    "CurrentSheetNumber",
+    "CurrentSheetNumberAndTitle",
+    "CurrentSheetRevisionDate",
+    "CurrentSheetRevisionNumber",
+    "CurrentSheetSet",
+    "CurrentSheetSetCustom",
+    "CurrentSheetSetDescription",
+    "CurrentSheetSetProjectMilestone",
+    "CurrentSheetSetProjectName",
+    "CurrentSheetSetProjectNumber",
+    "CurrentSheetSetProjectPhase",
+    "CurrentSheetSubSet",
+    "CurrentSheetTitle",
+    "SheetSet",
+    "SheetSetPlaceholder",
+    "SheetView",
+];
+
+/// A sheet set field's code without format: `\AcSm[.16.2] Component.Property`.
+fn sheet_set_code(name: &str, custom: &str) -> String {
+    let (version, target) = match name {
+        "CurrentSheetCategory" => (".16.2", "Sheet.Category".to_string()),
+        "CurrentSheetCustom" => ("", format!("Sheet.{custom}")),
+        "CurrentSheetDescription" => ("", "Sheet.Description".into()),
+        "CurrentSheetIssuePurpose" => (".16.2", "Sheet.IssuePurpose".into()),
+        "CurrentSheetNumber" => ("", "Sheet.Number".into()),
+        "CurrentSheetNumberAndTitle" => ("", "Sheet.NumberAndTitle".into()),
+        "CurrentSheetRevisionDate" => (".16.2", "Sheet.RevisionDate".into()),
+        "CurrentSheetRevisionNumber" => (".16.2", "Sheet.RevisionNumber".into()),
+        "CurrentSheetSet" => ("", "SheetSet.Name".into()),
+        "CurrentSheetSetCustom" => ("", format!("SheetSet.{custom}")),
+        "CurrentSheetSetDescription" => ("", "SheetSet.Description".into()),
+        "CurrentSheetSetProjectMilestone" => (".16.2", "SheetSet.ProjectMilestone".into()),
+        "CurrentSheetSetProjectName" => (".16.2", "SheetSet.ProjectName".into()),
+        "CurrentSheetSetProjectNumber" => (".16.2", "SheetSet.ProjectNumber".into()),
+        "CurrentSheetSetProjectPhase" => (".16.2", "SheetSet.ProjectPhase".into()),
+        "CurrentSheetSubSet" => ("", "Subset.Name".into()),
+        "CurrentSheetTitle" => ("", "Sheet.Title".into()),
+        _ => return "\\AcSm".into(),
+    };
+    format!("\\AcSm{version} {target}")
+}
+
+/// The navigation tree of a SheetSet (set, subsets, sheets) or SheetView
+/// (set, view categories) field: depth, component id, label, is a sheet.
+pub fn nav_nodes(db: &codec::sheet_set::SheetSetDatabase, views: bool) -> Vec<(u16, String, String, bool)> {
+    use codec::sheet_set::{number_and_title, ComponentKind, Element as SsElement};
+    let set = db.sheet_set();
+    let mut out = vec![(0, set.id().to_string(), db.name().to_string(), false)];
+    if views {
+        // Views of the unnamed (default) category sit under the set, then each
+        // named category with its views.
+        let all: Vec<&SsElement> = db.sheets().into_iter().flat_map(|s| db.sheet_views(s)).collect();
+        let named: Vec<&SsElement> = db.view_categories();
+        let in_named = |v: &SsElement| {
+            codec::sheet_set::SheetSetDatabase::view_category_of(v).is_some_and(|c| named.iter().any(|n| n.id() == c))
+        };
+        for v in all.iter().filter(|v| !in_named(v)) {
+            out.push((1, v.id().to_string(), number_and_title(v), true));
+        }
+        for c in &named {
+            out.push((1, c.id().to_string(), c.prop("Name").unwrap_or("").to_string(), false));
+            for v in all.iter().filter(|v| codec::sheet_set::SheetSetDatabase::view_category_of(v) == Some(c.id())) {
+                out.push((2, v.id().to_string(), number_and_title(v), true));
+            }
+        }
+        return out;
+    }
+    fn go(el: &SsElement, depth: u16, out: &mut Vec<(u16, String, String, bool)>) {
+        for c in &el.children {
+            match ComponentKind::of(c) {
+                Some(ComponentKind::Subset) => {
+                    out.push((depth, c.id().to_string(), c.prop("Name").unwrap_or("").to_string(), false));
+                    go(c, depth + 1, out);
+                }
+                Some(ComponentKind::Sheet) => out.push((depth, c.id().to_string(), number_and_title(c), true)),
+                _ => {}
+            }
+        }
+    }
+    go(set, 1, &mut out);
+    out
+}
+
+/// The properties a navigation node offers: list label, code property, version.
+pub fn nav_props(db: &codec::sheet_set::SheetSetDatabase, id: &str) -> Vec<(String, String, &'static str)> {
+    use codec::sheet_set::{custom_properties, ComponentKind, CUSTOM_SHEET_PROP, CUSTOM_SHEET_SET_PROP};
+    let Some(el) = db.find(id) else { return Vec::new() };
+    let fixed = |list: &[(&str, &str, &'static str)]| -> Vec<(String, String, &'static str)> {
+        list.iter().map(|(l, p, v)| (l.to_string(), p.to_string(), *v)).collect()
+    };
+    let custom = |flag: i32| -> Vec<(String, String, &'static str)> {
+        custom_properties(db.sheet_set()).into_iter().filter(|(_, _, f)| f & flag != 0).map(|(n, _, _)| (n.clone(), n, "")).collect()
+    };
+    match ComponentKind::of(el) {
+        Some(ComponentKind::SheetSet) => {
+            let mut v = fixed(&[
+                ("SheetSetName", "Name", ""),
+                ("SheetSetDescription", "Description", ""),
+                ("ProjectNumber", "ProjectNumber", ".16.2"),
+                ("ProjectName", "ProjectName", ".16.2"),
+                ("ProjectPhase", "ProjectPhase", ".16.2"),
+                ("ProjectMilestone", "ProjectMilestone", ".16.2"),
+            ]);
+            v.extend(custom(CUSTOM_SHEET_SET_PROP));
+            v
+        }
+        Some(ComponentKind::Subset) => fixed(&[("SheetSubsetName", "Name", "")]),
+        Some(ComponentKind::Sheet) => {
+            let mut v = fixed(&[
+                ("SheetNumberAndTitle", "NumberAndTitle", ""),
+                ("SheetTitle", "Title", ""),
+                ("SheetNumber", "Number", ""),
+                ("SheetDescription", "Description", ""),
+                ("RevisionNumber", "RevisionNumber", ".16.2"),
+                ("RevisionDate", "RevisionDate", ".16.2"),
+                ("IssuePurpose", "IssuePurpose", ".16.2"),
+                ("Category", "Category", ".16.2"),
+            ]);
+            v.extend(custom(CUSTOM_SHEET_PROP));
+            v
+        }
+        None if el.name == "AcSmSheetView" => fixed(&[
+            ("ViewNumberAndTitle", "NumberAndTitle", ""),
+            ("ViewTitle", "Title", ""),
+            ("ViewNumber", "Number", ""),
+            ("ViewportScale", "ViewportScale", ".16.2"),
+        ]),
+        None => fixed(&[("ViewCategoryName", "Name", "")]),
+    }
+}
+
+/// The sheet drawing, named view and layout a sheet or sheet view node links to.
+pub fn nav_link(db: &codec::sheet_set::SheetSetDatabase, id: &str) -> Option<(String, String, String)> {
+    let el = db.find(id)?;
+    let (sheet, view) = if el.name == "AcSmSheetView" {
+        let views = db.parent_of(id)?;
+        let sheet = db.parent_of(views.id())?;
+        (sheet.id().to_string(), el.named("NamedView").and_then(|v| v.prop("Name")).unwrap_or("").to_string())
+    } else if codec::sheet_set::ComponentKind::of(el) == Some(codec::sheet_set::ComponentKind::Sheet) {
+        (id.to_string(), String::new())
+    } else {
+        return None;
+    };
+    let r = db.layout_reference(&sheet, "Layout")?;
+    Some((r.file_name, view, r.name))
+}
+
+impl FieldDialogState {
+    /// `\AcSm Database("…").SheetSet("…")[.Component("…")].Property` of the
+    /// picked node, with the text case and, on a sheet, the hyperlink to it.
+    fn navigation_code(&self) -> String {
+        let Some(db) = self.ss_sets.get(self.ss_set) else { return "\\AcSm".into() };
+        let Some((_, prop, version)) = nav_props(db, &self.ss_node).into_iter().find(|(l, _, _)| *l == self.ss_prop) else {
+            return "\\AcSm".into();
+        };
+        let set = db.sheet_set().id().to_string();
+        let path = codec::sheet_set::native_path(db.path.as_deref().unwrap_or(""));
+        // ViewportScale takes a scale format (and its version), not a text case.
+        let scale = prop == "ViewportScale";
+        let version = if scale {
+            codec::fields::PLOT_SCALE_FORMATS
+                .get(self.ss_scale_format)
+                .map_or("", |(_, c)| if c.starts_with("\\AcVar.16.2") { ".16.2" } else { "" })
+        } else {
+            version
+        };
+        let mut code = format!("\\AcSm{version} Database(\"{path}\").SheetSet(\"{set}\")");
+        if self.ss_node != set {
+            code.push_str(&format!(".Component(\"{}\")", self.ss_node));
+        }
+        code.push('.');
+        code.push_str(&prop);
+        if scale {
+            let f = viewport_scale_picture(self.ss_scale_format);
+            if !f.is_empty() {
+                code.push(' ');
+                code.push_str(&f);
+            }
+            return code;
+        }
+        if self.text_case != 0 {
+            code.push_str(&format!(" \\f \"%tc{}\"", self.text_case));
+        }
+        // A sheet links to its layout, a view to its named view on the sheet.
+        if self.ss_href {
+            if let Some((file, view, layout)) = nav_link(db, &self.ss_node) {
+                code.push_str(&format!(" \\href \"{file}#{view},{layout}##1\""));
+            }
+        }
+        code
+    }
+}
+
+/// SheetSetPlaceholder types: list label, the `?` target, field version.
+pub const PLACEHOLDER_TYPES: &[(&str, &str, &str)] = &[
+    ("SheetNumberAndTitle", "?Sheet.NumberAndTitle", ""),
+    ("SheetTitle", "?Sheet.Title", ""),
+    ("SheetNumber", "?Sheet.Number", ""),
+    ("SheetDescription", "?Sheet.Description", ""),
+    ("RevisionNumber", "?Sheet.RevisionNumber", ".16.2"),
+    ("RevisionDate", "?Sheet.RevisionDate", ".16.2"),
+    ("IssuePurpose", "?Sheet.IssuePurpose", ".16.2"),
+    ("Category", "?Sheet.Category", ".16.2"),
+    ("Custom", "?Sheet.", ""),
+    ("ViewNumberAndTitle", "?View.NumberAndTitle", ""),
+    ("ViewTitle", "?View.Title", ""),
+    ("ViewNumber", "?View.Number", ""),
+    ("ViewportScale", "?View.ViewportScale", ".16.2"),
+];
+
+/// ViewportScale placeholder formats: the PlotScale pictures.
+pub fn viewport_scale_picture(k: usize) -> String {
+    codec::fields::PLOT_SCALE_FORMATS
+        .get(k)
+        .and_then(|(_, code)| code.find("\\f ").map(|p| code[p..].to_string()))
+        .unwrap_or_default()
+}
 
 /// The fields of a category; "All" lists every field once, sorted.
 pub fn fields_of(category: usize) -> Vec<&'static str> {
@@ -77,6 +303,13 @@ pub enum FieldKind {
     Formula,
     Hyperlink,
     PlotScale,
+    /// A CurrentSheet* / CurrentSheetSet* field (text case).
+    SheetSet,
+    /// CurrentSheetCustom / CurrentSheetSetCustom (text case + property).
+    SheetSetCustom,
+    SheetSetPlaceholder,
+    /// SheetSet / SheetView: a component picked in a sheet set.
+    SheetSetNavigation,
     BlockPlaceholder,
 }
 
@@ -96,6 +329,10 @@ pub fn kind_of(name: &str) -> FieldKind {
         "Formula" => FieldKind::Formula,
         "Hyperlink" => FieldKind::Hyperlink,
         "PlotScale" => FieldKind::PlotScale,
+        "CurrentSheetCustom" | "CurrentSheetSetCustom" => FieldKind::SheetSetCustom,
+        "SheetSetPlaceholder" => FieldKind::SheetSetPlaceholder,
+        "SheetSet" | "SheetView" => FieldKind::SheetSetNavigation,
+        n if SHEET_SET_FIELDS.contains(&n) => FieldKind::SheetSet,
         "BlockPlaceholder" => FieldKind::BlockPlaceholder,
         _ => FieldKind::Text,
     }
@@ -136,6 +373,23 @@ pub struct FieldDialogState {
     /// Index into codec BLOCK_PLACEHOLDER_PROPERTIES.
     pub placeholder_property: usize,
     pub preview: String,
+    /// Sheet set fields: the open set's sheet (flags 2) and set (flags 1)
+    /// custom property names, the chosen one, the placeholder type and the
+    /// ViewportScale format.
+    pub ss_sheet_custom: Vec<String>,
+    pub ss_set_custom: Vec<String>,
+    pub ss_custom: String,
+    pub ss_placeholder: usize,
+    pub ss_scale_format: usize,
+    /// The open sheet set's name (SheetSet / SheetView fields).
+    pub ss_set_name: String,
+    /// SheetSet / SheetView: the sets offered (open ones and any picked with
+    /// "..."), the one shown, the node and property picked, associate hyperlink.
+    pub ss_sets: Vec<codec::sheet_set::SheetSetDatabase>,
+    pub ss_set: usize,
+    pub ss_node: String,
+    pub ss_prop: String,
+    pub ss_href: bool,
     /// Today in each of DATE_FORMATS, for the Examples list.
     pub examples: Vec<String>,
 }
@@ -168,6 +422,17 @@ impl FieldDialogState {
             placeholder_block: None,
             placeholder_property: 7,
             preview: String::new(),
+            ss_sheet_custom: Vec::new(),
+            ss_set_custom: Vec::new(),
+            ss_custom: String::new(),
+            ss_placeholder: 0,
+            ss_scale_format: 6,
+            ss_set_name: String::new(),
+            ss_sets: Vec::new(),
+            ss_set: 0,
+            ss_node: String::new(),
+            ss_prop: String::new(),
+            ss_href: true,
             examples: Vec::new(),
         }
     }
@@ -221,6 +486,25 @@ impl FieldDialogState {
                     .map_or_else(|| "\\AcVar PlotScale".to_string(), |f| f.1.to_string()),
                 vec![],
             ),
+            FieldKind::SheetSet | FieldKind::SheetSetCustom => (case(sheet_set_code(self.name, &self.ss_custom)), vec![]),
+            FieldKind::SheetSetNavigation => (self.navigation_code(), vec![]),
+            FieldKind::SheetSetPlaceholder => {
+                let (label, target, version) = PLACEHOLDER_TYPES[self.ss_placeholder.min(PLACEHOLDER_TYPES.len() - 1)];
+                let target = if label == "Custom" { format!("{target}{}", self.ss_custom) } else { target.to_string() };
+                if label == "ViewportScale" {
+                    // The version follows the format, as for PlotScale.
+                    let version = codec::fields::PLOT_SCALE_FORMATS
+                        .get(self.ss_scale_format)
+                        .map_or("", |(_, code)| if code.starts_with("\\AcVar.16.2") { ".16.2" } else { "" });
+                    let base = format!("\\AcSm{version} {target}");
+                    match viewport_scale_picture(self.ss_scale_format) {
+                        f if f.is_empty() => (base, vec![]),
+                        f => (format!("{base} {f}"), vec![]),
+                    }
+                } else {
+                    (case(format!("\\AcSm{version} {target}")), vec![])
+                }
+            }
             FieldKind::BlockPlaceholder => {
                 let (_, property, format) = codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[self.placeholder_property];
                 // Text properties take the chosen case; the others keep their own format.
@@ -330,6 +614,15 @@ pub enum FieldDialogMsg {
     HyperlinkUrl(String),
     BrowseHyperlink,
     PlotScale(usize),
+    SsCustom(String),
+    SsPlaceholder(usize),
+    SsScaleFormat(usize),
+    SsSet(usize),
+    SsNode(String),
+    SsProp(String),
+    SsHref(bool),
+    SsBrowse,
+    SsPicked(Option<std::path::PathBuf>),
     Help,
     Ok,
 }
@@ -632,6 +925,123 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         ]
         .spacing(8)
         .into(),
+        FieldKind::SheetSet => column![text(t!("Format")).size(12), case_list(state)].spacing(8).into(),
+        FieldKind::SheetSetCustom => {
+            let names = if state.name == "CurrentSheetCustom" { &state.ss_sheet_custom } else { &state.ss_set_custom };
+            column![
+                text(t!("Format")).size(12),
+                case_list(state),
+                text(t!("Custom property name")).size(12),
+                pick_list(
+                    (!state.ss_custom.is_empty()).then(|| state.ss_custom.clone()),
+                    names.clone(),
+                    |s: &String| s.clone(),
+                )
+                .on_select(|s| msg(FieldDialogMsg::SsCustom(s)))
+                .text_size(12)
+                .padding([5, 8])
+                .width(Fill),
+            ]
+            .spacing(8)
+            .into()
+        }
+        FieldKind::SheetSetPlaceholder => {
+            let kind = PLACEHOLDER_TYPES[state.ss_placeholder.min(PLACEHOLDER_TYPES.len() - 1)].0;
+            let types = list(
+                PLACEHOLDER_TYPES
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (n, _, _))| (n.to_string(), state.ss_placeholder == i, FieldDialogMsg::SsPlaceholder(i)))
+                    .collect(),
+                200.0,
+            );
+            let format: Element<'a, Message> = if kind == "ViewportScale" {
+                list(
+                    codec::fields::PLOT_SCALE_FORMATS
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (n, _))| (t!(*n).into_owned(), state.ss_scale_format == i, FieldDialogMsg::SsScaleFormat(i)))
+                        .collect(),
+                    170.0,
+                )
+            } else {
+                case_list(state)
+            };
+            let mut col = column![text(t!("Placeholder type")).size(12), types, text(t!("Format")).size(12), format].spacing(8);
+            if kind == "Custom" {
+                col = col.push(text(t!("Custom property name")).size(12)).push(
+                    pick_list(
+                        (!state.ss_custom.is_empty()).then(|| state.ss_custom.clone()),
+                        state.ss_sheet_custom.clone(),
+                        |s: &String| s.clone(),
+                    )
+                    .on_select(|s| msg(FieldDialogMsg::SsCustom(s)))
+                    .text_size(12)
+                    .padding([5, 8])
+                    .width(Fill),
+                );
+            }
+            col.into()
+        }
+        FieldKind::SheetSetNavigation => {
+            let picks: Vec<Pick> = state.ss_sets.iter().enumerate().map(|(i, d)| Pick(i, d.name().to_string())).collect();
+            let current = picks.get(state.ss_set).cloned();
+            let set_row = row![
+                pick_list(current, picks, |p: &Pick| p.1.clone())
+                    .on_select(|p: Pick| msg(FieldDialogMsg::SsSet(p.0)))
+                    .text_size(12)
+                    .padding([5, 8])
+                    .width(Fill),
+                button(text("...").size(12)).on_press(msg(FieldDialogMsg::SsBrowse)).style(button_style(false)).padding([5, 10]),
+            ]
+            .spacing(6);
+            let db = state.ss_sets.get(state.ss_set);
+            let nodes = db.map(|d| nav_nodes(d, state.name == "SheetView")).unwrap_or_default();
+            let tree = list(
+                nodes
+                    .iter()
+                    .map(|(depth, id, label, _)| {
+                        (format!("{}{label}", "    ".repeat(usize::from(*depth))), *id == state.ss_node, FieldDialogMsg::SsNode(id.clone()))
+                    })
+                    .collect(),
+                118.0,
+            );
+            let props = db.map(|d| nav_props(d, &state.ss_node)).unwrap_or_default();
+            let prop_list = list(
+                props.iter().map(|(l, _, _)| (l.clone(), *l == state.ss_prop, FieldDialogMsg::SsProp(l.clone()))).collect(),
+                92.0,
+            );
+            let linkable = db.is_some_and(|d| nav_link(d, &state.ss_node).is_some()) && state.ss_prop != "ViewportScale";
+            let mut href = checkbox(state.ss_href && linkable).label(t!("Associate hyperlink").into_owned()).text_size(12).size(14);
+            if linkable {
+                href = href.on_toggle(|v| msg(FieldDialogMsg::SsHref(v)));
+            }
+            let format: Element<'a, Message> = if state.ss_prop == "ViewportScale" {
+                list(
+                    codec::fields::PLOT_SCALE_FORMATS
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (n, _))| (t!(*n).into_owned(), state.ss_scale_format == i, FieldDialogMsg::SsScaleFormat(i)))
+                        .collect(),
+                    120.0,
+                )
+            } else {
+                case_list(state)
+            };
+            column![
+                text(t!("Sheet set")).size(12),
+                set_row,
+                text(t!("Sheet navigation tree")).size(12),
+                tree,
+                text(t!("Property")).size(12),
+                prop_list,
+                text(t!("Format")).size(12),
+                format,
+                href,
+            ]
+            .spacing(8)
+            .into()
+        }
         FieldKind::Object => column![
             row![
                 text(t!("Object type")).size(12).width(Length::Fixed(96.0)),
@@ -728,6 +1138,7 @@ pub fn view<'a>(
         .spacing(10),
         FieldKind::Hyperlink => column![card(t!("Hyperlink").into_owned(), format_panel(state)), preview].spacing(10),
         FieldKind::BlockPlaceholder => column![card(t!("Block placeholder").into_owned(), format_panel(state)), preview].spacing(10),
+        FieldKind::SheetSetNavigation => column![card(t!("Sheet set").into_owned(), format_panel(state)), preview].spacing(10),
         _ => column![card(t!("Format").into_owned(), format_panel(state)), preview].spacing(10),
     };
     let (code, _) = state.code();
