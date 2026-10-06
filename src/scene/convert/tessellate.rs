@@ -85,12 +85,14 @@ const FIELD_BOX_BELOW: f64 = 0.345;
 const FIELD_BOX_ABOVE: f64 = 1.19;
 
 /// FIELDDISPLAY boxes: each field's shown text, one box per line it spans,
-/// placed from the text layout itself — MTEXT's per-character layout cells
-/// (the editor's glyph boxes) and TEXT / attribute pen advances, the same
-/// layout and shaping the glyphs are drawn with — so formatting codes,
-/// missing glyphs or shaped scripts before a field do not shift it. A box
-/// spans the field's character cells horizontally and FIELD_BOX_BELOW /
-/// FIELD_BOX_ABOVE vertically. `None` when the host's fields cannot be
+/// placed from the text layout itself, in the text's own (rotated) frame —
+/// MTEXT and multi-line attributes from the layout's character cells, TEXT
+/// and single-line attributes from each line's character cells (the
+/// shaper's glyph cells for TrueType fonts and shaped scripts, else the
+/// stroke font's advances) — so formatting codes, missing glyphs, shaped or
+/// right-to-left scripts before a field do not shift it. A box spans the
+/// field's character cells along the line and FIELD_BOX_BELOW /
+/// FIELD_BOX_ABOVE across it. `None` when the host's fields cannot be
 /// located in its text (the whole text is boxed then).
 fn field_run_corner_groups(
     document: &codec::CadDocument,
@@ -98,44 +100,61 @@ fn field_run_corner_groups(
     stroke_groups: &[crate::scene::convert::acad_to_render::TextStroke],
     anno: f64,
 ) -> Option<Vec<[[f64; 2]; 4]>> {
-    use crate::entities::text_support::{mtext_visible_count, resolve_dxf_special_chars, text_local_bounds};
+    use crate::entities::text_support::{
+        mtext_visible_count, resolve_dxf_special_chars, resolve_text_style, text_char_cells, GlyphBox,
+    };
     let handle = entity.common().handle;
-    // Lines of a field in a local frame: [left, baseline, right, height].
-    let mut lines: Vec<[f64; 4]> = Vec::new();
-    let (origin, rotation) = match entity {
+    // Field lines as (origin, rotation, [left, baseline, right, height]) in
+    // the origin's frame.
+    let mut lines: Vec<([f64; 2], f64, [f64; 4])> = Vec::new();
+    // Group a field's layout cells by line (a shared baseline).
+    let from_cells = |lines: &mut Vec<([f64; 2], f64, [f64; 4])>,
+                      cells: &[GlyphBox],
+                      text: &str,
+                      spans: &[std::ops::Range<usize>],
+                      origin: [f64; 2],
+                      rotation: f64|
+     -> Option<()> {
+        for span in spans {
+            let first = mtext_visible_count(text.get(..span.start)?);
+            let last = mtext_visible_count(text.get(..span.end)?);
+            let mut line: Option<[f64; 4]> = None;
+            for b in cells.iter().filter(|b| (first..last).contains(&b.vis)) {
+                let [l, base, r, top] = b.local.map(|v| v as f64 * anno);
+                let h = top - base;
+                line = Some(match line {
+                    Some(c) if (c[1] - base).abs() <= 1e-3 * h.max(c[3]) => {
+                        [c[0].min(l), c[1], c[2].max(r), c[3].max(h)]
+                    }
+                    Some(c) => {
+                        lines.push((origin, rotation, c));
+                        [l, base, r, h]
+                    }
+                    None => [l, base, r, h],
+                });
+            }
+            lines.extend(line.map(|c| (origin, rotation, c)));
+        }
+        Some(())
+    };
+    match entity {
         EntityType::MText(m) => {
             let spans = codec::fields::field_spans(document, handle, &m.value)?;
-            let mut local = m.clone();
-            local.insertion_point = codec::types::Vector3::new(0.0, 0.0, 0.0);
-            local.rotation = 0.0;
-            let boxes = crate::entities::mtext::glyph_boxes(&local, document);
-            for span in spans {
-                let first = mtext_visible_count(m.value.get(..span.start)?);
-                let last = mtext_visible_count(m.value.get(..span.end)?);
-                let mut line: Option<[f64; 4]> = None;
-                for b in boxes.iter().filter(|b| (first..last).contains(&b.vis)) {
-                    let (l, base, r, h) = (b.xmin as f64, b.ymin as f64, b.xmax as f64, (b.ymax - b.ymin) as f64);
-                    line = Some(match line {
-                        Some(c) if (c[1] - base).abs() <= 1e-3 * h.max(c[3]) => {
-                            [c[0].min(l), c[1], c[2].max(r), c[3].max(h)]
-                        }
-                        Some(c) => {
-                            lines.push(c);
-                            [l, base, r, h]
-                        }
-                        None => [l, base, r, h],
-                    });
-                }
-                lines.extend(line);
-            }
-            let rotation = stroke_groups
-                .iter()
-                .find_map(|g| g.run.as_ref().map(|run| run.rotation as f64))
-                .unwrap_or(m.rotation);
-            for line in &mut lines {
-                *line = line.map(|v| v * anno);
-            }
-            ([m.insertion_point.x, m.insertion_point.y], rotation)
+            let cells = crate::entities::mtext::glyph_boxes(m, document);
+            let flip = if resolve_text_style(&m.style, document).is_upside_down { std::f64::consts::PI } else { 0.0 };
+            from_cells(
+                &mut lines,
+                &cells,
+                &m.value,
+                &spans,
+                [m.insertion_point.x, m.insertion_point.y],
+                m.rotation + flip,
+            )?;
+        }
+        EntityType::AttributeEntity(a) if crate::entities::attribute::attribute_cells(a, document).is_some() => {
+            let spans = codec::fields::field_spans(document, handle, &a.value)?;
+            let (cells, origin, rotation) = crate::entities::attribute::attribute_cells(a, document)?;
+            from_cells(&mut lines, &cells, &a.value, &spans, origin, rotation as f64)?;
         }
         EntityType::Text(_) | EntityType::AttributeEntity(_) => {
             let text = match entity {
@@ -144,28 +163,38 @@ fn field_run_corner_groups(
                 _ => return None,
             };
             let spans = codec::fields::field_spans(document, handle, text)?;
-            // One laid-out line: a multi-line attribute keeps the whole box.
-            let [group] = stroke_groups else { return None };
-            let run = group.run.as_ref()?;
-            let advance = |s: &str| {
-                text_local_bounds(&run.font, &resolve_dxf_special_chars(s), run.height, run.width_factor, run.oblique)
-                    .map_or(0.0, |b| b.advance as f64)
-            };
-            for span in spans {
-                let (l, r) = (advance(text.get(..span.start)?), advance(text.get(..span.end)?));
-                lines.push([l * anno, 0.0, r * anno, run.height as f64 * anno]);
+            // One laid-out line per `\P`-separated line, in order.
+            let mut start = 0;
+            for (line_text, group) in text.split("\\P").zip(stroke_groups) {
+                let range = start..start + line_text.len();
+                start = range.end + 2;
+                let run = group.run.as_ref()?;
+                let resolved = resolve_dxf_special_chars(line_text);
+                let cells = text_char_cells(&run.font, &resolved, run.height, run.width_factor);
+                let char_at = |byte: usize| resolve_dxf_special_chars(&line_text[..byte]).chars().count();
+                for span in &spans {
+                    let (a, b) = (span.start.max(range.start), span.end.min(range.end));
+                    if a >= b {
+                        continue;
+                    }
+                    let picked = cells.get(char_at(a - range.start)..char_at(b - range.start)).unwrap_or_default();
+                    let l = picked.iter().map(|c| c.0).fold(f32::INFINITY, f32::min) as f64;
+                    let r = picked.iter().map(|c| c.1).fold(f32::NEG_INFINITY, f32::max) as f64;
+                    if l.is_finite() && r.is_finite() {
+                        lines.push((group.origin, run.rotation as f64, [l * anno, 0.0, r * anno, run.height as f64 * anno]));
+                    }
+                }
             }
-            (group.origin, run.rotation as f64)
         }
         _ => return None,
-    };
-    let (sin_r, cos_r) = rotation.sin_cos();
-    let to_world = |x: f64, y: f64| [origin[0] + x * cos_r - y * sin_r, origin[1] + x * sin_r + y * cos_r];
+    }
     Some(
         lines
             .into_iter()
-            .filter(|[l, _, r, _]| r > l)
-            .map(|[l, base, r, h]| {
+            .filter(|(_, _, [l, _, r, _])| r > l)
+            .map(|(origin, rotation, [l, base, r, h])| {
+                let (sin_r, cos_r) = rotation.sin_cos();
+                let to_world = |x: f64, y: f64| [origin[0] + x * cos_r - y * sin_r, origin[1] + x * sin_r + y * cos_r];
                 let (b, t) = (base - FIELD_BOX_BELOW * h, base + FIELD_BOX_ABOVE * h);
                 [to_world(l, b), to_world(r, b), to_world(r, t), to_world(l, t)]
             })
@@ -1508,17 +1537,16 @@ pub fn tessellate(
                 // entity still has a hit-test target via snap_pts. With SDF on
                 // this is the normal path (strokes suppressed) and the wire
                 // also carries the glyph quads built above.
-                if bins.is_empty() {
-                    let mut wires: Vec<WireModel> = Vec::new();
-                    // FIELDDISPLAY: a field shows on a gray box behind its
-                    // glyphs, on screen only.
-                    if text_aabb != WireModel::UNBOUNDED_AABB
-                        && crate::entities::field::display()
+                // FIELDDISPLAY: a field shows on a gray box behind its glyphs,
+                // on screen only — for SDF glyphs and shaped stroke text alike.
+                let mut field_background: Option<WireModel> = None;
+                    if crate::entities::field::display()
                         && crate::entities::field::hosts_field(document, entity)
                     {
                         let runs = field_run_corner_groups(document, entity, &stroke_groups, anno);
                         let corner_groups = match entity {
                             _ if runs.is_some() => runs.unwrap_or_default(),
+                            _ if text_aabb == WireModel::UNBOUNDED_AABB => Vec::new(),
                             EntityType::MText(m) => {
                                 let rotation = stroke_groups
                                     .iter()
@@ -1550,7 +1578,7 @@ pub fn tessellate(
                             }
                         }
                         if !ft.is_empty() {
-                            wires.push(WireModel {
+                            field_background = Some(WireModel {
                                 display_visible: true,
                                 plot_visible: false,
                                 name: name.clone(),
@@ -1565,6 +1593,9 @@ pub fn tessellate(
                             });
                         }
                     }
+                if bins.is_empty() {
+                    let mut wires: Vec<WireModel> = Vec::new();
+                    wires.extend(field_background.take());
                     // MTEXT background and frame follow the glyph bounds.
                     if text_aabb != WireModel::UNBOUNDED_AABB {
                         if let EntityType::MText(m) = entity {
@@ -1801,6 +1832,7 @@ pub fn tessellate(
                 }
 
                 let mut out: Vec<WireModel> = Vec::new();
+                out.extend(field_background);
                 let mut is_first = true;
                 for bin in bins {
                     let wire_color = match bin.color {

@@ -101,7 +101,21 @@ fn mtext_flag_str(f: MTextFlag) -> &'static str {
 /// Render text strokes for an attribute, honouring alignment, oblique angle,
 /// width factor, generation flags (backward / upside-down), text-style
 /// resolution, and basic multiline splitting on `\n` / `\\P`.
-fn build_attr_render(mut input: AttrTextInputs<'_>, document: &codec::CadDocument) -> RenderEntity {
+/// Laid-out character cells of a multi-line (MTEXT) attribute: the layout's
+/// glyph boxes, the point they are relative to and the layout rotation.
+pub(crate) type AttrCells = (Vec<crate::entities::text_support::GlyphBox>, [f64; 2], f32);
+
+fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::CadDocument) -> RenderEntity {
+    build_attr_layout(input, document, None)
+}
+
+/// [`build_attr_render`], also handing back a multi-line attribute's
+/// character cells in `cells` (left `None` for a single-line one).
+fn build_attr_layout(
+    mut input: AttrTextInputs<'_>,
+    document: &codec::CadDocument,
+    mut cells: Option<&mut Option<AttrCells>>,
+) -> RenderEntity {
     let normal = (input.normal.x, input.normal.y, input.normal.z);
     let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
         (
@@ -248,8 +262,11 @@ fn build_attr_render(mut input: AttrTextInputs<'_>, document: &codec::CadDocumen
             exact_line_spacing: false,
             rectangle_height: 0.0,
             vertical_text: false,
-            want_glyph_boxes: false,
+            want_glyph_boxes: cells.is_some(),
         });
+        if let Some(out) = cells.as_deref_mut() {
+            *out = Some((layout.glyph_boxes.clone(), [anchor_pt.x, anchor_pt.y], rotation));
+        }
         let _ = input.line_count;
         let _ = input.is_multiline;
         return RenderEntity {
@@ -838,6 +855,35 @@ impl Transformable for AttributeDefinition {
 }
 
 // ── AttributeEntity ───────────────────────────────────────────────────────────
+
+/// The laid-out character cells of a multi-line (MTEXT) attribute, the
+/// point they are relative to and the layout rotation; `None` for a
+/// single-line attribute.
+pub(crate) fn attribute_cells(a: &AttributeEntity, document: &codec::CadDocument) -> Option<AttrCells> {
+    let mut out = None;
+    build_attr_layout(attr_inputs(a), document, Some(&mut out));
+    out
+}
+
+fn attr_inputs(a: &AttributeEntity) -> AttrTextInputs<'_> {
+    AttrTextInputs {
+        value: &a.value,
+        insertion_point: a.insertion_point,
+        alignment_point: a.alignment_point,
+        height: a.height,
+        rotation: a.rotation,
+        width_factor: a.width_factor,
+        oblique_angle: a.oblique_angle,
+        text_style: &a.text_style,
+        text_generation_flags: a.text_generation_flags,
+        horizontal_alignment: a.horizontal_alignment,
+        vertical_alignment: a.vertical_alignment,
+        normal: a.normal,
+        mtext_flag: a.mtext_flag,
+        is_multiline: a.is_multiline,
+        line_count: a.line_count,
+    }
+}
 
 impl RenderConvertible for AttributeEntity {
     fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
