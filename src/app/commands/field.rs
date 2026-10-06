@@ -17,48 +17,6 @@ impl OpenCADStudio {
                 self.open_field_dialog(FieldTarget::NewText);
                 Some(Task::none())
             }
-            // UPDATEFIELD — re-evaluate the fields of the selected objects
-            // (a block reference's attributes included), whatever FIELDEVAL.
-            "UPDATEFIELD" => {
-                let selected: Vec<codec::Handle> =
-                    self.tabs[i].scene.selected_entities().into_iter().map(|(h, _)| h).collect();
-                if selected.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let cmd = SelectObjectsCommand::new("UPDATEFIELD");
-                    self.command_line.push_info(&cmd.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(cmd));
-                    return Some(Task::none());
-                }
-                // A block reference brings its attributes and the fields of its
-                // block definition; a table, the texts of its cells.
-                let document = &self.tabs[i].scene.document;
-                let mut hosts = selected.clone();
-                for handle in &selected {
-                    let record = match document.get_entity(*handle) {
-                        Some(codec::EntityType::Insert(insert)) => {
-                            hosts.extend(insert.attributes.iter().map(|a| a.common.handle));
-                            document.block_records.iter().find(|r| r.name.eq_ignore_ascii_case(&insert.block_name))
-                        }
-                        Some(codec::EntityType::Table(table)) => table
-                            .block_record_handle
-                            .and_then(|h| document.block_records.iter().find(|r| r.handle == h)),
-                        _ => None,
-                    };
-                    if let Some(record) = record {
-                        hosts.extend(record.entity_handles.iter().copied());
-                    }
-                }
-                self.push_undo_snapshot(i, "UPDATEFIELD");
-                let found = self.tabs[i].scene.update_fields(32, Some(&hosts));
-                self.tabs[i].scene.deselect_all();
-                self.refresh_properties();
-                if found > 0 {
-                    self.tabs[i].dirty = true;
-                }
-                self.command_line.push_output(crate::tf!("{} field(s) found.", found).as_ref());
-                self.command_line.push_output(crate::tf!("{} field(s) updated.", found).as_ref());
-                Some(Task::none())
-            }
             // FIELDEVAL — the events that update fields, kept in the drawing.
             cmd if cmd == "FIELDEVAL" || cmd.starts_with("FIELDEVAL ") || cmd.starts_with("SETVAR FIELDEVAL") => {
                 let value = cmd
@@ -85,7 +43,9 @@ impl OpenCADStudio {
                         }
                     }
                     _ => {
-                        self.command_line.push_error("Requires an integer between 0 and 31.");
+                        let (min, max) = (0, 31);
+                        self.command_line
+                            .push_error(&crate::tf!("Requires an integer between {min} and {max}."));
                         ask(self);
                     }
                 }

@@ -327,7 +327,13 @@ pub const BACKGROUND: [f32; 4] = [203.0 / 255.0, 203.0 / 255.0, 203.0 / 255.0, 1
 
 /// Whether `entity` hosts a field: its extension dictionary has ACAD_FIELD.
 pub fn hosts_field(document: &CadDocument, entity: &codec::entities::EntityType) -> bool {
-    let Some(xdict) = entity.common().xdictionary_handle else {
+    common_hosts_field(document, entity.common())
+}
+
+/// [`hosts_field`] for an entity known only by its common data, such as an
+/// attribute of a block reference.
+pub fn common_hosts_field(document: &CadDocument, common: &codec::entities::EntityCommon) -> bool {
+    let Some(xdict) = common.xdictionary_handle else {
         return false;
     };
     matches!(

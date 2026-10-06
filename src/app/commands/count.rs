@@ -542,60 +542,54 @@ impl OpenCADStudio {
     }
 
     /// UPDATEFIELD: every field the objects host is evaluated again and its
-    /// text written back. A table's fields are hosted by the cell texts of its
-    /// drawing (its `*T` block); fields a table keeps without such a text are
-    /// evaluated when drawn and are not counted here.
+    /// text written back, whatever FIELDEVAL says. A block reference brings
+    /// its attributes and the texts of its block definition; a table, the
+    /// cell texts of its drawing (its `*T` block).
     fn update_fields(&mut self, i: usize, handles: &[Handle]) {
         let doc = &self.tabs[i].scene.document;
-        let mut found = 0;
-        let mut updates: Vec<(Handle, String)> = Vec::new();
+        let mut hosts = handles.to_vec();
         for h in handles {
-            let Some(entity) = doc.get_entity(*h) else { continue };
-            let hosts: Vec<Handle> = match entity {
-                EntityType::Table(t) => t
+            let record = match doc.get_entity(*h) {
+                Some(EntityType::Insert(insert)) => {
+                    hosts.extend(insert.attributes.iter().map(|a| a.common.handle));
+                    doc.block_records.get(&insert.block_name)
+                }
+                Some(EntityType::Table(t)) => t
                     .block_record_handle
                     .and_then(|r| doc.block_records.iter().find(|b| b.handle == r))
-                    .or_else(|| doc.block_records.get(&t.block_name).filter(|_| !t.block_name.is_empty()))
-                    .map(|record| record.entity_handles.clone())
-                    .unwrap_or_default(),
-                _ => vec![*h],
+                    .or_else(|| doc.block_records.get(&t.block_name).filter(|_| !t.block_name.is_empty())),
+                _ => None,
             };
-            for host in hosts {
-                if !doc.get_entity(host).is_some_and(|e| crate::entities::field::hosts_field(doc, e)) {
-                    continue;
-                }
-                found += 1;
-                if let Some(text) = crate::entities::field::resolve(doc, host) {
-                    updates.push((host, text));
-                }
+            if let Some(record) = record {
+                hosts.extend(record.entity_handles.iter().copied());
             }
         }
+        let attributes: Vec<&codec::entities::EntityCommon> = handles
+            .iter()
+            .filter_map(|h| match doc.get_entity(*h) {
+                Some(EntityType::Insert(insert)) => Some(insert.attributes.iter().map(|a| &a.common)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let found = hosts
+            .iter()
+            .filter(|h| match doc.get_entity(**h) {
+                Some(entity) => crate::entities::field::hosts_field(doc, entity),
+                None => attributes.iter().any(|common| {
+                    common.handle == **h && crate::entities::field::common_hosts_field(doc, common)
+                }),
+            })
+            .count();
         self.command_line.push_output(&crate::tf!("{found} field(s) found."));
         if found == 0 {
             return;
         }
         self.push_undo_snapshot(i, "UPDATEFIELD");
-        let mut changed = Vec::new();
-        for (h, text) in updates {
-            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(h) {
-                match entity {
-                    EntityType::MText(m) => m.value = text,
-                    EntityType::Text(t) => t.value = text,
-                    EntityType::AttributeDefinition(a) => a.default_value = text,
-                    _ => continue,
-                }
-                changed.push((h, crate::scene::ChangeKind::Modified));
-            }
+        let updated = self.tabs[i].scene.update_fields(32, Some(&hosts));
+        if updated > 0 {
+            self.tabs[i].dirty = true;
         }
-        let updated = changed.len();
-        // Table cell texts live in a block definition.
-        let scene = &mut self.tabs[i].scene;
-        if scene.changes_touch_block_definition(&changed) {
-            scene.bump_geometry();
-        } else {
-            scene.bump_entities(&changed);
-        }
-        self.tabs[i].dirty = true;
         self.command_line.push_output(&crate::tf!("{updated} field(s) updated."));
     }
 

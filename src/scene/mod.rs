@@ -3415,11 +3415,11 @@ impl Scene {
     /// [`crate::entities::field::update_fields`]) and redraw the hosts whose
     /// text changed. Returns the number of fields the hosts hold.
     pub fn update_fields(&mut self, event: i32, hosts: Option<&[Handle]>) -> usize {
-        let (changed, found) = crate::entities::field::update_fields(&mut self.document, event, hosts);
+        let changed = crate::entities::field::update_fields(&mut self.document, event, hosts).0;
         if !changed.is_empty() {
             self.bump_text_hosts(&changed);
         }
-        found
+        changed.len()
     }
 
     /// Redraw text hosts whose stored text changed (re-evaluated fields). An
@@ -3427,43 +3427,82 @@ impl Scene {
     /// by every reference to that block, so those redraw instead of the host;
     /// nothing else re-tessellates.
     pub fn bump_text_hosts(&mut self, hosts: &[Handle]) {
+        if hosts.is_empty() {
+            return;
+        }
         if self.dependency_index_cache.borrow().is_none() {
             *self.dependency_index_cache.borrow_mut() = Some(self.rebuild_dependency_index());
         }
+        // One pass over the drawing for all hosts: which block definition
+        // holds an entity, which INSERT draws an attribute, which tables
+        // draw from a block.
+        let layout_blocks: HashSet<Handle> = self
+            .document
+            .objects
+            .values()
+            .filter_map(|object| match object {
+                ObjectType::Layout(layout) if !layout.block_record.is_null() => Some(layout.block_record),
+                _ => None,
+            })
+            .collect();
+        let mut definitions: HashMap<Handle, (Handle, String)> = HashMap::default();
+        let mut members: HashMap<Handle, Handle> = HashMap::default();
+        for record in self.document.block_records.iter() {
+            let name = record.name.to_ascii_uppercase();
+            if layout_blocks.contains(&record.handle)
+                || name.starts_with("*MODEL_SPACE")
+                || name.starts_with("*PAPER_SPACE")
+            {
+                continue;
+            }
+            definitions.insert(record.handle, (record.handle, normalize_name(&record.name)));
+            for member in &record.entity_handles {
+                members.insert(*member, record.handle);
+            }
+        }
+        let mut attribute_owner: HashMap<Handle, Handle> = HashMap::default();
+        let mut tables_of: HashMap<Handle, Vec<Handle>> = HashMap::default();
+        for entity in self.document.entities() {
+            match entity {
+                EntityType::Insert(insert) => {
+                    for attribute in &insert.attributes {
+                        attribute_owner.insert(attribute.common.handle, insert.common.handle);
+                    }
+                }
+                EntityType::Table(table) => {
+                    if let Some(record) = table.block_record_handle {
+                        tables_of.entry(record).or_default().push(table.common.handle);
+                    }
+                }
+                _ => {}
+            }
+        }
         let mut targets = DependencyTargets::default();
         for &host in hosts {
-            let drawn = match self.document.get_entity(host) {
-                Some(entity) => entity,
-                None => match self.document.entities().find(|e| {
-                    matches!(e, EntityType::Insert(i) if i.attributes.iter().any(|a| a.common.handle == host))
-                }) {
-                    Some(insert) => insert,
+            // An attribute is drawn by its INSERT.
+            let handle = match self.document.get_entity(host) {
+                Some(_) => host,
+                None => match attribute_owner.get(&host) {
+                    Some(insert) => *insert,
                     None => continue,
                 },
             };
-            let handle = drawn.common().handle;
-            let owner = drawn.common().owner_handle;
-            if !self.changes_touch_block_definition(&[(handle, ChangeKind::Modified)]) {
+            let owner = self.document.get_entity(handle).map(|e| e.common().owner_handle);
+            let record = owner
+                .and_then(|owner| definitions.get(&owner))
+                .or_else(|| members.get(&handle).and_then(|record| definitions.get(record)));
+            let Some((record_handle, name)) = record else {
                 targets.render_handles.insert(handle);
                 continue;
-            }
-            let Some(record) = self.document.block_records.iter().find(|r| {
-                r.handle == owner || r.entity_handles.contains(&handle)
-            }) else {
-                continue;
             };
-            let name = normalize_name(&record.name);
+            // A host inside a block definition is drawn by every reference
+            // to that block, and a table by its own block of cell texts.
             if let Some(index) = self.dependency_index_cache.borrow().as_ref() {
-                if let Some(users) = index.block_roots.get(&name) {
+                if let Some(users) = index.block_roots.get(name) {
                     targets.render_handles.extend(users.iter().copied());
                 }
             }
-            // A table draws its cells from its own block of cell texts.
-            let record_handle = record.handle;
-            targets.render_handles.extend(self.document.entities().filter_map(|e| match e {
-                EntityType::Table(t) if t.block_record_handle == Some(record_handle) => Some(t.common.handle),
-                _ => None,
-            }));
+            targets.render_handles.extend(tables_of.get(record_handle).into_iter().flatten().copied());
             targets.touches_block_definition = true;
         }
         self.invalidate_dependency_targets(targets);

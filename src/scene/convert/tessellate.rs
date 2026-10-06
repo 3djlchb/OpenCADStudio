@@ -99,6 +99,7 @@ fn field_run_corner_groups(
     entity: &EntityType,
     stroke_groups: &[crate::scene::convert::acad_to_render::TextStroke],
     anno: f64,
+    ref_origin: [f64; 2],
 ) -> Option<Vec<[[f64; 2]; 4]>> {
     use crate::entities::text_support::{
         mtext_visible_count, resolve_dxf_special_chars, resolve_text_style, text_char_cells, GlyphBox,
@@ -137,6 +138,10 @@ fn field_run_corner_groups(
         }
         Some(())
     };
+    let multiline_attribute = match entity {
+        EntityType::AttributeEntity(a) => crate::entities::attribute::attribute_cells(a, document),
+        _ => None,
+    };
     match entity {
         EntityType::MText(m) => {
             let spans = codec::fields::field_spans(document, handle, &m.value)?;
@@ -151,9 +156,10 @@ fn field_run_corner_groups(
                 m.rotation + flip,
             )?;
         }
-        EntityType::AttributeEntity(a) if crate::entities::attribute::attribute_cells(a, document).is_some() => {
+        // A multi-line attribute is laid out like MTEXT.
+        EntityType::AttributeEntity(a) if multiline_attribute.is_some() => {
             let spans = codec::fields::field_spans(document, handle, &a.value)?;
-            let (cells, origin, rotation) = crate::entities::attribute::attribute_cells(a, document)?;
+            let (cells, origin, rotation) = multiline_attribute?;
             from_cells(&mut lines, &cells, &a.value, &spans, origin, rotation as f64)?;
         }
         EntityType::Text(_) | EntityType::AttributeEntity(_) => {
@@ -171,7 +177,9 @@ fn field_run_corner_groups(
                 let run = group.run.as_ref()?;
                 let resolved = resolve_dxf_special_chars(line_text);
                 let cells = text_char_cells(&run.font, &resolved, run.height, run.width_factor);
-                let char_at = |byte: usize| resolve_dxf_special_chars(&line_text[..byte]).chars().count();
+                let char_at = |byte: usize| {
+                    line_text.get(..byte).map_or(0, |head| resolve_dxf_special_chars(head).chars().count())
+                };
                 for span in &spans {
                     let (a, b) = (span.start.max(range.start), span.end.min(range.end));
                     if a >= b {
@@ -181,7 +189,12 @@ fn field_run_corner_groups(
                     let l = picked.iter().map(|c| c.0).fold(f32::INFINITY, f32::min) as f64;
                     let r = picked.iter().map(|c| c.1).fold(f32::NEG_INFINITY, f32::max) as f64;
                     if l.is_finite() && r.is_finite() {
-                        lines.push((group.origin, run.rotation as f64, [l * anno, 0.0, r * anno, run.height as f64 * anno]));
+                        // Glyphs scale about the reference origin.
+                        let origin = [
+                            (group.origin[0] - ref_origin[0]) * anno + ref_origin[0],
+                            (group.origin[1] - ref_origin[1]) * anno + ref_origin[1],
+                        ];
+                        lines.push((origin, run.rotation as f64, [l * anno, 0.0, r * anno, run.height as f64 * anno]));
                     }
                 }
             }
@@ -1551,66 +1564,66 @@ pub fn tessellate(
                     WireModel::UNBOUNDED_AABB
                 };
 
+                // FIELDDISPLAY: a field shows on a gray box behind its glyphs,
+                // on screen only — for SDF glyphs and shaped stroke text alike.
+                let mut field_background: Option<WireModel> = None;
+                if crate::entities::field::display()
+                    && crate::entities::field::hosts_field(document, entity)
+                {
+                    let runs = field_run_corner_groups(document, entity, &stroke_groups, anno, ref_origin);
+                    let corner_groups = match entity {
+                        _ if runs.is_some() => runs.unwrap_or_default(),
+                        _ if text_aabb == WireModel::UNBOUNDED_AABB => Vec::new(),
+                        EntityType::MText(m) => {
+                            let rotation = stroke_groups
+                                .iter()
+                                .find_map(|group| group.run.as_ref().map(|run| run.rotation as f64))
+                                .unwrap_or(m.rotation);
+                            oriented_mtext_corner_groups(&sdf_verts, m, rotation, 0.0, anno)
+                        }
+                        EntityType::Text(t) => vec![oriented_text_corners(
+                            &sdf_verts,
+                            [t.insertion_point.x, t.insertion_point.y],
+                            t.rotation,
+                            0.0,
+                        )],
+                        EntityType::AttributeEntity(a) => vec![oriented_text_corners(
+                            &sdf_verts,
+                            [a.insertion_point.x, a.insertion_point.y],
+                            a.rotation,
+                            0.0,
+                        )],
+                        _ => Vec::new(),
+                    };
+                    let mut ft = Vec::with_capacity(6 * corner_groups.len());
+                    let mut ftl = Vec::with_capacity(6 * corner_groups.len());
+                    for corners in &corner_groups {
+                        for &k in &[0usize, 1, 2, 0, 2, 3] {
+                            let (h, lo) = split_ds_xyz(corners[k][0], corners[k][1], elev_v);
+                            ft.push(h);
+                            ftl.push(lo);
+                        }
+                    }
+                    if !ft.is_empty() {
+                        field_background = Some(WireModel {
+                            display_visible: true,
+                            plot_visible: false,
+                            name: name.clone(),
+                            color: crate::entities::field::BACKGROUND,
+                            selected,
+                            line_weight_px,
+                            aabb: WireModel::UNBOUNDED_AABB,
+                            plinegen: true,
+                            fill_tris: ft,
+                            fill_tris_low: ftl,
+                            ..Default::default()
+                        });
+                    }
+                }
                 // Empty input (no glyphs) → emit a single empty wire so the
                 // entity still has a hit-test target via snap_pts. With SDF on
                 // this is the normal path (strokes suppressed) and the wire
                 // also carries the glyph quads built above.
-                // FIELDDISPLAY: a field shows on a gray box behind its glyphs,
-                // on screen only — for SDF glyphs and shaped stroke text alike.
-                let mut field_background: Option<WireModel> = None;
-                    if crate::entities::field::display()
-                        && crate::entities::field::hosts_field(document, entity)
-                    {
-                        let runs = field_run_corner_groups(document, entity, &stroke_groups, anno);
-                        let corner_groups = match entity {
-                            _ if runs.is_some() => runs.unwrap_or_default(),
-                            _ if text_aabb == WireModel::UNBOUNDED_AABB => Vec::new(),
-                            EntityType::MText(m) => {
-                                let rotation = stroke_groups
-                                    .iter()
-                                    .find_map(|group| group.run.as_ref().map(|run| run.rotation as f64))
-                                    .unwrap_or(m.rotation);
-                                oriented_mtext_corner_groups(&sdf_verts, m, rotation, 0.0, anno)
-                            }
-                            EntityType::Text(t) => vec![oriented_text_corners(
-                                &sdf_verts,
-                                [t.insertion_point.x, t.insertion_point.y],
-                                t.rotation,
-                                0.0,
-                            )],
-                            EntityType::AttributeEntity(a) => vec![oriented_text_corners(
-                                &sdf_verts,
-                                [a.insertion_point.x, a.insertion_point.y],
-                                a.rotation,
-                                0.0,
-                            )],
-                            _ => Vec::new(),
-                        };
-                        let mut ft = Vec::with_capacity(6 * corner_groups.len());
-                        let mut ftl = Vec::with_capacity(6 * corner_groups.len());
-                        for corners in &corner_groups {
-                            for &k in &[0usize, 1, 2, 0, 2, 3] {
-                                let (h, lo) = split_ds_xyz(corners[k][0], corners[k][1], elev_v);
-                                ft.push(h);
-                                ftl.push(lo);
-                            }
-                        }
-                        if !ft.is_empty() {
-                            field_background = Some(WireModel {
-                                display_visible: true,
-                                plot_visible: false,
-                                name: name.clone(),
-                                color: crate::entities::field::BACKGROUND,
-                                selected,
-                                line_weight_px,
-                                aabb: WireModel::UNBOUNDED_AABB,
-                                plinegen: true,
-                                fill_tris: ft,
-                                fill_tris_low: ftl,
-                                ..Default::default()
-                            });
-                        }
-                    }
                 if bins.is_empty() {
                     let mut wires: Vec<WireModel> = Vec::new();
                     wires.extend(field_background.take());
