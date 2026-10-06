@@ -850,6 +850,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "CHSPACE",
         "NAVVCUBE",
         "NEW",
+        "QNEW",
         "OBJIMPORT",
         "OPEN",
         "ORTHO",

@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: brak rzutni w widoku z góry do zmiany obszaru.
     .chspace-to-paper = CHSPACE: przeniesiono obiekty do obszaru papieru: __ocs_fmt_0__.
     .chspace-to-model = CHSPACE: przeniesiono obiekty do obszaru modelu: __ocs_fmt_0__.
+    .select-template-title = Wybierz szablon
 errors =
     .save-warning = Zapisz ostrzeżenie
     .unable-to-save-drawing = Nie można zapisać rysunku

@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: Ei tasokuvan näkymäikkunaa tilan vaihtoon.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ objektia siirretty paperitilaan.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ objektia siirretty mallitilaan.
+    .select-template-title = Valitse malli
 errors =
     .save-warning = Tallenna varoitus
     .unable-to-save-drawing = Piirustusta ei voi tallentaa

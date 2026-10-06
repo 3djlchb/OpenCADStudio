@@ -2323,6 +2323,7 @@ common =
     .chspace-no-viewport = CHSPACE: 没有可用于更改空间的平面视图视口。
     .chspace-to-paper = CHSPACE: 已将 __ocs_fmt_0__ 个对象移到图纸空间。
     .chspace-to-model = CHSPACE: 已将 __ocs_fmt_0__ 个对象移到模型空间。
+    .select-template-title = 选择样板
 errors =
     .save-warning = 保存警告
     .unable-to-save-drawing = 无法保存图形

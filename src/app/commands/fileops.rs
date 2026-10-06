@@ -3,7 +3,25 @@ use super::*;
 impl OpenCADStudio {
     pub(super) fn dispatch_fileops(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
-            "NEW" => return Some(Task::done(Message::TabNew)),
+            // QNEW starts from the default template (Options > Files); NEW
+            // asks which template to start from (#1635).
+            "QNEW" => return Some(Task::done(Message::TabNew)),
+            "NEW" => {
+                return Some(Task::perform(
+                    async {
+                        crate::sys::file_dialog()
+                            .set_title(crate::t!("Select Template").as_ref())
+                            .add_filter(
+                                crate::t!("Drawing Template (*.dwt)").as_ref(),
+                                &["dwt", "DWT", "dwg", "DWG", "dxf", "DXF"],
+                            )
+                            .pick_file()
+                            .await
+                            .map(|handle| crate::sys::handle_path(&handle))
+                    },
+                    Message::NewFromTemplate,
+                ));
+            }
             "OPEN" => return Some(Task::done(Message::OpenFile)),
             "SAVE" | "QSAVE" => return Some(Task::done(Message::SaveFile)),
             // SAVEALL — write every open drawing that already has a file path.

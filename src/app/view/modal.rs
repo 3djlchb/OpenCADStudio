@@ -1152,7 +1152,9 @@ impl OpenCADStudio {
                 let mut lt_opts: Vec<String> = vec!["ByBlock".to_string()];
                 lt_opts.extend(doc.line_types.iter().map(|lt| lt.name.clone()));
                 let mut textstyle_opts: Vec<String> = vec!["None".to_string()];
-                textstyle_opts.extend(doc.text_styles.iter().map(|t| t.name.clone()));
+                textstyle_opts.extend(
+                    doc.text_styles.iter().filter(|t| !t.is_shape_file).map(|t| t.name.clone()),
+                );
                 let opt_block = |h: Option<codec::types::Handle>| -> String {
                     match h {
                         Some(h) => doc
@@ -1416,7 +1418,11 @@ impl OpenCADStudio {
             let mut lt_opts: Vec<String> = vec!["ByBlock".to_string()];
             lt_opts.extend(doc.line_types.iter().map(|lt| lt.name.clone()));
             let text_style_opts: Vec<String> =
-                doc.text_styles.iter().map(|style| style.name.clone()).collect();
+                doc.text_styles
+                    .iter()
+                    .filter(|style| !style.is_shape_file)
+                    .map(|style| style.name.clone())
+                    .collect();
             let text_style_fixed_height = doc
                 .text_styles
                 .get(&self.ds_dimtxsty)

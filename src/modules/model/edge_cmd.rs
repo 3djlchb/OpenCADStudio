@@ -230,7 +230,15 @@ impl SolidEdgeCommand {
             self.preview_for_values(self.default_value, self.other_value)
         {
             self.preview_wires = wires;
-            self.preview_hidden.push(handle);
+            // While edges are still being picked the source stays drawn: a
+            // hidden solid leaves the pick meshes, so the next edge could not
+            // be selected (#1625). The preview overlays it until confirmed.
+            if !matches!(
+                self.step,
+                EdgeStep::Selecting | EdgeStep::PickingLoop | EdgeStep::LoopConfirm
+            ) {
+                self.preview_hidden.push(handle);
+            }
         }
     }
 

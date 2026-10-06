@@ -2336,6 +2336,7 @@ common =
     .chspace-no-viewport = CHSPACE: nenhuma janela de vista em planta para mudar de espaço.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ objeto(s) movido(s) para o espaço do papel.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ objeto(s) movido(s) para o espaço do modelo.
+    .select-template-title = Selecionar modelo
 errors =
     .save-warning = Aviso de salvamento
     .unable-to-save-drawing = Não foi possível salvar o desenho

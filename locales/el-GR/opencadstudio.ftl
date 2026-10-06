@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: Δεν υπάρχει παράθυρο προβολής κάτοψης για αλλαγή χώρου.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ αντικείμενα μεταφέρθηκαν στον χώρο χαρτιού.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ αντικείμενα μεταφέρθηκαν στον χώρο μοντέλου.
+    .select-template-title = Επιλογή προτύπου
 errors =
     .save-warning = Προειδοποίηση αποθήκευσης
     .unable-to-save-drawing = Αδυναμία αποθήκευσης σχεδίου

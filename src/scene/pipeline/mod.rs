@@ -4960,7 +4960,10 @@ analytic={:.1} regular={:.1} blocks={:.1}",
 
         // ── Pass 7: selection overlay pass ───────────────────────────────
         // Redraws selected wires and text with depth_compare=Always so both
-        // appear on top of all other geometry at full brightness.
+        // appear on top of all other geometry at full brightness — unless
+        // faces are drawn: then edges behind a surface stay hidden while
+        // selected, as they are when not (#1031).
+        let occluded = hidden_line || !mesh_wireframe;
         let have_text_highlight =
             (!self.text_highlight_gpu.is_empty())
                 || !self.block_text_highlight_gpu.is_empty();
@@ -4997,7 +5000,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             pass.set_stencil_reference(stencil_ref);
             if !self.gpu_selected_wires.is_empty() {
-                pass.set_pipeline(if hidden_line {
+                pass.set_pipeline(if occluded {
                     &self.wire_pipeline
                 } else {
                     &self.wire_xray_pipeline
@@ -5016,7 +5019,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 }
             }
             if !self.gpu_selected_block_wires.is_empty() {
-                pass.set_pipeline(if hidden_line {
+                pass.set_pipeline(if occluded {
                     &self.block_wire_pipeline
                 } else {
                     &self.block_wire_xray_pipeline
@@ -5029,7 +5032,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 }
             }
             if !self.gpu_selected_circles.is_empty() {
-                pass.set_pipeline(if hidden_line {
+                pass.set_pipeline(if occluded {
                     &self.circle_pipeline
                 } else {
                     &self.circle_xray_pipeline
@@ -5043,7 +5046,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 }
             }
             if !self.gpu_selected_ellipses.is_empty() {
-                pass.set_pipeline(if hidden_line {
+                pass.set_pipeline(if occluded {
                     &self.ellipse_pipeline
                 } else {
                     &self.ellipse_xray_pipeline

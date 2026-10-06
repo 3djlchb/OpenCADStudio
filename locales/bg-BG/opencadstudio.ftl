@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: Няма прозорец в план, през който да се смени пространството.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ обекта преместени в пространството на листа.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ обекта преместени в пространството на модела.
+    .select-template-title = Избор на шаблон
 errors =
     .save-warning = Предупреждение при запазване
     .unable-to-save-drawing = Чертежът не може да бъде запазен

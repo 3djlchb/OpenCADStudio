@@ -2336,6 +2336,7 @@ common =
     .chspace-no-viewport = CHSPACE: Kein Ansichtsfenster in Draufsicht zum Wechseln des Bereichs.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ Objekt(e) in den Papierbereich verschoben.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ Objekt(e) in den Modellbereich verschoben.
+    .select-template-title = Vorlage auswählen
 errors =
     .save-warning = Warnhinweise speichern
     .unable-to-save-drawing = Zeichnung konnte nicht gespeichert werden

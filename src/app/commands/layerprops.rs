@@ -875,8 +875,25 @@ impl OpenCADStudio {
                             crate::scene::CubeRegion::Face(face),
                         )));
                     }
-                    "ISO" | "ISOMETRIC" | "SWISO" => {
-                        return Some(Task::done(Message::ViewCubeHome));
+                    // Isometric presets snap to the matching ViewCube corner;
+                    // ISO alone is the south-west one.
+                    "ISO" | "ISOMETRIC" | "SWISO" | "SEISO" | "NEISO" | "NWISO" => {
+                        let (x, y) = match sub.as_str() {
+                            "SEISO" => (1.0, -1.0),
+                            "NEISO" => (1.0, 1.0),
+                            "NWISO" => (-1.0, 1.0),
+                            _ => (-1.0, -1.0),
+                        };
+                        let want = glam::Vec3::new(x, y, 1.0).normalize();
+                        let corner = (18..26)
+                            .map(crate::scene::CubeRegion::Corner)
+                            .max_by(|a, b| {
+                                a.snap_direction()
+                                    .dot(want)
+                                    .total_cmp(&b.snap_direction().dot(want))
+                            })
+                            .expect("the cube has corners");
+                        return Some(Task::done(Message::ViewCubeSnap(corner)));
                     }
                     // VIEW <name> shortcut for restore
                     _ => {

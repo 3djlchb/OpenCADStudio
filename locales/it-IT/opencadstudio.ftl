@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: nessuna finestra in vista in pianta attraverso cui cambiare spazio.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ oggetto/i spostato/i nello spazio carta.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ oggetto/i spostato/i nello spazio modello.
+    .select-template-title = Seleziona modello
 errors =
     .save-warning = Salva avviso
     .unable-to-save-drawing = Impossibile salvare il disegno

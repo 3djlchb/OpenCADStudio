@@ -234,7 +234,14 @@ impl OpenCADStudio {
             v
         };
         match kind {
-            StyleKind::Text => doc.text_styles.iter().map(|s| s.name.clone()).collect(),
+            // Shape-file entries (complex linetype glyphs) are not text styles to
+            // pick or edit; they have no name (#1634).
+            StyleKind::Text => doc
+                .text_styles
+                .iter()
+                .filter(|s| !s.is_shape_file)
+                .map(|s| s.name.clone())
+                .collect(),
             StyleKind::Dim => doc.dim_styles.iter().map(|s| s.name.clone()).collect(),
             StyleKind::Table => from_objects(|o| match o {
                 ObjectType::TableStyle(s) => Some(s.name.as_str()),

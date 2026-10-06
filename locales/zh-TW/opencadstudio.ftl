@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: 沒有可用於變更空間的平面視圖視埠。
     .chspace-to-paper = CHSPACE: 已將 __ocs_fmt_0__ 個物件移到圖紙空間。
     .chspace-to-model = CHSPACE: 已將 __ocs_fmt_0__ 個物件移到模型空間。
+    .select-template-title = 選取樣板
 errors =
     .save-warning = 儲存警告
     .unable-to-save-drawing = 無法儲存圖形

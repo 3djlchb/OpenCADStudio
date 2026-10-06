@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: Není výřez v půdorysném pohledu, přes který změnit prostor.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ objektů přesunuto do výkresového prostoru.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ objektů přesunuto do modelového prostoru.
+    .select-template-title = Vybrat šablonu
 errors =
     .save-warning = Uložit varování
     .unable-to-save-drawing = Nákres nelze uložit

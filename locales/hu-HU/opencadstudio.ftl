@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: Nincs felülnézeti nézetablak a tér váltásához.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ objektum papírtérbe helyezve.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ objektum modelltérbe helyezve.
+    .select-template-title = Sablon kiválasztása
 errors =
     .save-warning = Figyelmeztetés mentése
     .unable-to-save-drawing = Nem sikerült menteni a rajzot

@@ -2299,6 +2299,8 @@ pub enum Message {
     /// Options → Files: the default template for new drawings.
     QnewTemplateChanged(String),
     QnewTemplateBrowse,
+    /// NEW: the picked template a new drawing starts from (`None` = cancelled).
+    NewFromTemplate(Option<std::path::PathBuf>),
     /// Set the default type/version used when first saving a new drawing.
     DefaultSaveFormatChanged(String),
     /// Select one of Iced's built-in themes or the editable Custom theme.

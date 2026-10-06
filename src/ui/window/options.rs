@@ -425,7 +425,8 @@ pub fn view_window<'a>(
             text(crate::tr!("options", "default-save-format-label")).size(12).width(150),
             iced::widget::pick_list(
                 selected_format,
-                crate::io::SAVE_FORMAT_OPTIONS,
+                // Drawings, not the template entry (the list's last).
+                &crate::io::SAVE_FORMAT_OPTIONS[..crate::io::SAVE_FORMAT_OPTIONS.len() - 1],
                 |value| value.to_string(),
             )
             .on_select(|format: &str| Message::DefaultSaveFormatChanged(format.to_string()))

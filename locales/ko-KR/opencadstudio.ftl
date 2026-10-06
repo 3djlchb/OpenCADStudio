@@ -2335,6 +2335,7 @@ common =
     .chspace-no-viewport = CHSPACE: 공간을 변경할 평면 뷰포트가 없습니다.
     .chspace-to-paper = CHSPACE: 객체 __ocs_fmt_0__개를 도면 공간으로 옮겼습니다.
     .chspace-to-model = CHSPACE: 객체 __ocs_fmt_0__개를 모형 공간으로 옮겼습니다.
+    .select-template-title = 템플릿 선택
 errors =
     .save-warning = 경고 저장
     .unable-to-save-drawing = 도면을 저장할 수 없습니다

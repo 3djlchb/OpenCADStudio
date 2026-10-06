@@ -4878,6 +4878,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Unknown command: {}" => Some(("command", "unknown-command-cmd")),
         "Unsaved changes will be discarded." => Some(("common", "unsaved-changes-will-be-discarded")),
         "Discard & close" => Some(("common", "discard-close")),
+        "Select Template" => Some(("common", "select-template-title")),
         "CHSPACE: Command not allowed in the Model tab." => Some(("common", "chspace-model-tab")),
         "CHSPACE: No plan-view viewport to change space through." => Some(("common", "chspace-no-viewport")),
         "CHSPACE: {count} object(s) changed to paper space." => Some(("common", "chspace-to-paper")),

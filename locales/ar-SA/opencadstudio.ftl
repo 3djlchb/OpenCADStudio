@@ -2348,6 +2348,7 @@ common =
     .chspace-no-viewport = CHSPACE: لا توجد نافذة عرض مسقطية لتغيير الفضاء من خلالها.
     .chspace-to-paper = CHSPACE: تم نقل __ocs_fmt_0__ كائن إلى فضاء الورق.
     .chspace-to-model = CHSPACE: تم نقل __ocs_fmt_0__ كائن إلى فضاء النموذج.
+    .select-template-title = تحديد قالب
 errors =
     .save-warning = تحذير الحفظ
     .unable-to-save-drawing = تعذر حفظ الرسم

@@ -2336,6 +2336,7 @@ common =
     .chspace-no-viewport = CHSPACE : aucune fenêtre en vue en plan pour changer d'espace.
     .chspace-to-paper = CHSPACE : __ocs_fmt_0__ objet(s) déplacé(s) dans l'espace papier.
     .chspace-to-model = CHSPACE : __ocs_fmt_0__ objet(s) déplacé(s) dans l'espace objet.
+    .select-template-title = Sélectionner un gabarit
 errors =
     .save-warning = Enregistrer l' avertissement
     .unable-to-save-drawing = Impossible de sauvegarder le dessin

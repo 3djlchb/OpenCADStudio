@@ -3137,6 +3137,8 @@ impl OpenCADStudio {
             let default_name = filename;
             let (filter_label, filter_ext): (&str, &str) = if ext.eq_ignore_ascii_case("dxf") {
                 ("DXF Files", "dxf")
+            } else if ext.eq_ignore_ascii_case("dwt") {
+                ("Drawing Template (*.dwt)", "dwt")
             } else {
                 ("DWG Files", "dwg")
             };

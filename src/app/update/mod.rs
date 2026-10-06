@@ -8028,6 +8028,22 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+            Message::NewFromTemplate(Some(path)) => {
+                let task = self.update(Message::TabNew);
+                let idx = self.active_tab;
+                match self.apply_template(&path.to_string_lossy()) {
+                    Ok(_) => {
+                        self.tabs[idx].dirty = false;
+                        self.refresh_layer_panel();
+                        self.sync_ribbon_styles();
+                    }
+                    Err(error) => self
+                        .command_line
+                        .push_error(error["error"].as_str().unwrap_or("template")),
+                }
+                task
+            }
+            Message::NewFromTemplate(None) => Task::none(),
             Message::QnewTemplateBrowse => Task::perform(
                 async {
                     crate::sys::file_dialog()

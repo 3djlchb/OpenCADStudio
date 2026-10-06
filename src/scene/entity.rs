@@ -2575,6 +2575,10 @@ impl Scene {
         if !incremental {
             self.meshes.clear();
             self.block_meshes.clear();
+            // The B-rep cache follows the entities too: an undo that rebuilds
+            // everything left the undone fillet's body here, and the next
+            // edge operation brought it back (#1107). Restored on demand.
+            self.solid_models.clear();
         }
         // BLOCK-entity handles of the layout (model + paper) blocks. A solid
         // owned by one of these is top-level; anything else lives in a block

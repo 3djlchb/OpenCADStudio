@@ -2336,6 +2336,7 @@ common =
     .chspace-no-viewport = CHSPACE: No plan-view viewport to change space through.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ object(s) changed to paper space.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ object(s) changed to model space.
+    .select-template-title = Select Template
 errors =
     .save-warning = Save Warning
     .unable-to-save-drawing = Unable to Save Drawing

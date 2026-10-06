@@ -521,7 +521,7 @@ impl Ribbon {
     ) -> Element<'_, Message> {
         // ── Quick-access file commands + undo/redo, one merged flow ────────
         let lead = iced::widget::Row::with_children(vec![
-            quick_access_btn(crate::ui::icons::DOC_NEW, "New", "NEW").into(),
+            quick_access_btn(crate::ui::icons::DOC_NEW, "New", "QNEW").into(),
             quick_access_btn(crate::ui::icons::FOLDER_OPEN, "Open", "OPEN").into(),
             quick_access_btn(crate::ui::icons::SAVE, "Save", "SAVE").into(),
             quick_access_btn(crate::ui::icons::FILE_EXPORT, "Save As", "SAVEAS").into(),

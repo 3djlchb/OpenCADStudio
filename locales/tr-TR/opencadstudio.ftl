@@ -2320,6 +2320,7 @@ common =
     .chspace-no-viewport = CHSPACE: Alan değiştirmek için plan görünümlü görünüm penceresi yok.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ nesne kağıt alanına taşındı.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ nesne model alanına taşındı.
+    .select-template-title = Şablon Seç
 errors =
     .save-warning = Kaydetme Uyarısı
     .unable-to-save-drawing = Çizim Kaydedilemiyor

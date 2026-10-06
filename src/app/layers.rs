@@ -149,7 +149,12 @@ impl OpenCADStudio {
         }
         let doc = &self.tabs[i].scene.document;
 
-        let text_names: Vec<String> = doc.text_styles.iter().map(|s| s.name.clone()).collect();
+        let text_names: Vec<String> = doc
+            .text_styles
+            .iter()
+            .filter(|s| !s.is_shape_file)
+            .map(|s| s.name.clone())
+            .collect();
         let active_text = doc.header.current_text_style_name.clone();
         let active_text = if text_names.contains(&active_text) {
             active_text

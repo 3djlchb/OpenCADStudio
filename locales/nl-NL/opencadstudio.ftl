@@ -2336,6 +2336,7 @@ common =
     .chspace-no-viewport = CHSPACE: geen viewport in bovenaanzicht om de ruimte via te wisselen.
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ object(en) naar de papierruimte verplaatst.
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ object(en) naar de modelruimte verplaatst.
+    .select-template-title = Sjabloon selecteren
 errors =
     .save-warning = Waarschuwing opslaan
     .unable-to-save-drawing = Kan tekening niet opslaan

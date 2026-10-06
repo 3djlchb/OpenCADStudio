@@ -2326,6 +2326,7 @@ common =
     .chspace-no-viewport = CHSPACE: 空間を変更できる平面ビューのビューポートがありません。
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ 個のオブジェクトをペーパー空間に移動しました。
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ 個のオブジェクトをモデル空間に移動しました。
+    .select-template-title = テンプレートを選択
 errors =
     .save-warning = 保存の警告
     .unable-to-save-drawing = 図面を保存できません

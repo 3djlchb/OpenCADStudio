@@ -2339,6 +2339,7 @@ common =
     .chspace-no-viewport = CHSPACE: нет видового экрана в плане для смены пространства.
     .chspace-to-paper = CHSPACE: перенесено в пространство листа объектов: __ocs_fmt_0__.
     .chspace-to-model = CHSPACE: перенесено в пространство модели объектов: __ocs_fmt_0__.
+    .select-template-title = Выбор шаблона
 errors =
     .save-warning = Спасти предостережение
     .unable-to-save-drawing = Не удалось сохранить чертёж

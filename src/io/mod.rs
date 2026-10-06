@@ -1402,7 +1402,7 @@ pub const DEFAULT_SAVE_FORMAT: &str = "DWG 2018";
 
 pub const SAVE_FORMAT_OPTIONS: &[&str] = &[
     "DWG 2018", "DWG 2013", "DWG 2010", "DWG 2007", "DWG 2004", "DWG 2000", "DWG R14", "DXF 2018",
-    "DXF 2013", "DXF 2010", "DXF 2007", "DXF 2004", "DXF 2000", "DXF R14",
+    "DXF 2013", "DXF 2010", "DXF 2007", "DXF 2004", "DXF 2000", "DXF R14", "DWT 2018",
 ];
 
 pub fn canonical_save_format(format: &str) -> &'static str {
@@ -1432,7 +1432,14 @@ pub fn parse_save_format(format: &str) -> (&'static str, codec::DxfVersion) {
     use codec::DxfVersion;
     let f = format.to_ascii_uppercase();
     let is_dxf = f.starts_with("DXF");
-    let ext = if is_dxf { "dxf" } else { "dwg" };
+    // A drawing template (.dwt) is a DWG under another extension (#1635).
+    let ext = if is_dxf {
+        "dxf"
+    } else if f.starts_with("DWT") {
+        "dwt"
+    } else {
+        "dwg"
+    };
     let version = if f.contains("2013") {
         DxfVersion::AC1027
     } else if f.contains("2010") {
@@ -1611,14 +1618,14 @@ impl std::fmt::Display for SaveFailure {
 
 impl std::error::Error for SaveFailure {}
 
-const SUPPORTED_SAVE_FORMATS: &str = ".dwg, .dxf";
+const SUPPORTED_SAVE_FORMATS: &str = ".dwg, .dxf, .dwt";
 
 fn validate_save_extension(path: &Path) -> Result<(), SaveFailure> {
     let extension = path
         .extension()
         .map(|value| value.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if matches!(extension.as_str(), "dwg" | "dxf" | "sv$") {
+    if matches!(extension.as_str(), "dwg" | "dxf" | "dwt" | "sv$") {
         return Ok(());
     }
 
@@ -1684,7 +1691,7 @@ mod save_failure_tests {
 
         assert_eq!(
             error,
-            "unsupported output format .pdf; supported formats: .dwg, .dxf"
+            "unsupported output format .pdf; supported formats: .dwg, .dxf, .dwt"
         );
         assert!(!path.exists(), "unsupported export created an output file");
     }

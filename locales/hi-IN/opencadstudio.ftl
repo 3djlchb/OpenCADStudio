@@ -2324,6 +2324,7 @@ common =
     .chspace-no-viewport = CHSPACE: स्पेस बदलने के लिए कोई प्लान-व्यू व्यूपोर्ट नहीं।
     .chspace-to-paper = CHSPACE: __ocs_fmt_0__ ऑब्जेक्ट पेपर स्पेस में बदले गए।
     .chspace-to-model = CHSPACE: __ocs_fmt_0__ ऑब्जेक्ट मॉडल स्पेस में बदले गए।
+    .select-template-title = टेम्पलेट चुनें
 errors =
     .save-warning = चेतावनी सहेजें
     .unable-to-save-drawing = ड्रॉइंग सहेजी नहीं जा सकी
