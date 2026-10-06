@@ -3617,6 +3617,9 @@ mod tests {
         let _ = app.run_command_line("SETVAR ZOOMFACTOR 2");
         assert_eq!(app.zoom_factor, 500, "and neither is 2");
 
+        // What the Options field reached is still reported here.
+        let _ = app.update(crate::app::Message::ZoomFactorInputChanged("250".into()));
+        assert_eq!(app.zoom_factor, 250);
         let _ = app.run_command_line("SETVAR ZOOMFACTOR 60");
         assert_eq!(app.zoom_factor, 60);
     }

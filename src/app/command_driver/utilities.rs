@@ -1180,8 +1180,9 @@ impl OpenCADStudio {
             if self.tabs[i].active_cmd.is_some() {
                 return self.feed_command(StepInput::Enter);
             }
+            // Same repeat the command line's empty Enter gives.
             if let Some(cmd) = self.tabs[i].last_cmd.clone() {
-                return self.run_command_line(&cmd);
+                return self.dispatch_command(&cmd);
             }
             return Task::none();
         }

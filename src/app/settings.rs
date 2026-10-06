@@ -171,13 +171,11 @@ pub fn clamp_right_click_hold_ms(v: i32) -> i32 {
 
 /// ZOOMFACTOR bounds.
 ///
-/// `ZOOM_FACTOR_SYSVAR_MAX` is the range the system variable has: `SETVAR
-/// ZOOMFACTOR` accepts 3 to 100 and nothing else, so a drawing session set
-/// up on the command line stays within the range the variable has everywhere
-/// else. The Options window is the app's own surface and reaches
-/// `ZOOM_FACTOR_MAX` for anyone who wants a faster wheel than the variable
-/// can express; that value lives only in this application's own
-/// configuration file, so it is nobody else's to read.
+/// `ZOOM_FACTOR_SYSVAR_MAX` is where the Options slider stops: the range the
+/// variable has elsewhere. Both the Options field and `SETVAR ZOOMFACTOR`
+/// reach `ZOOM_FACTOR_MAX` for anyone who wants a faster wheel; the value
+/// lives only in this application's own configuration file, so it is nobody
+/// else's to read.
 pub const ZOOM_FACTOR_MIN: i32 = 3;
 pub const ZOOM_FACTOR_SYSVAR_MAX: i32 = 100;
 pub const ZOOM_FACTOR_MAX: i32 = 500;
