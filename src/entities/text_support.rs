@@ -1228,7 +1228,10 @@ pub fn wrap_paragraph(
                 let w = atom_width(&atom, entity_h, base_wf, base_font);
                 let max_w = line_max_w(subline_idx);
                 let has_content = cur.iter().any(|a| !matches!(a.kind, AtomKind::Space));
-                if has_content && cur_w + w > max_w && !after_align_tab {
+                // A word fits when its ink does: the letter spacing after its
+                // last glyph may run past the edge.
+                let ink_w = w - trailing_letter_gap(&atom, entity_h, base_wf, base_font);
+                if has_content && cur_w + ink_w > max_w && !after_align_tab {
                     while matches!(cur.last().map(|a| &a.kind), Some(AtomKind::Space)) {
                         cur.pop();
                     }
