@@ -29,7 +29,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// changes, so schema drift (new params, renamed tools) is always a conscious,
 /// reviewed edit — and clients can detect a stale bridge by comparing digests.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "bb2640277721f23e08cf17085bd9204753f810ece27abf31402be876e2c4683d";
+const TOOL_SCHEMA_DIGEST: &str = "537fd4e77a61b9333f21dcd294b6c91b338884acc9cd2964cbb74855821cfa12";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

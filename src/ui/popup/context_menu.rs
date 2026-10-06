@@ -1076,8 +1076,8 @@ mod tests {
         assert_eq!(menu.default_row_y(), MENU_PAD_TOP);
         let menu = build_context_menu(&idle_ctx(false), None);
         assert_eq!(menu.default_row_y(), MENU_PAD_TOP);
-        // 10 items + 3 submenu headers + 6 separators, plus panel padding.
-        let expected = MENU_PAD_TOP * 2.0 + 13.0 * MENU_ROW_H + 6.0 * MENU_SEP_H;
+        // 11 items + 3 submenu headers + 6 separators, plus panel padding.
+        let expected = MENU_PAD_TOP * 2.0 + 14.0 * MENU_ROW_H + 6.0 * MENU_SEP_H;
         assert_eq!(menu.height(), expected);
     }
 
