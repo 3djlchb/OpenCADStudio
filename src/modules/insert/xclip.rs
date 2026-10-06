@@ -497,7 +497,7 @@ impl CadCommand for ClipCommand {
             }
             // The layout's own paper-space viewport (id 1) is not clippable.
             Some(EntityType::Viewport(vp)) if vp.id != 1 => {
-                let clipped = !vp.clip_boundary_handle.is_null();
+                let clipped = crate::entities::viewport::is_clipped(&vp);
                 self.inner = Some(Box::new(MviewCommand::vpclip(handle, clipped)));
                 CmdResult::NeedPoint
             }

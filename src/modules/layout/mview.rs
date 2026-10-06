@@ -799,7 +799,7 @@ impl CadCommand for MviewCommand {
         if self.step == Step::ClipSelect {
             return match self.picked.take() {
                 Some(EntityType::Viewport(vp)) if vp.id != 1 => {
-                    self.clip = Some((handle, !vp.clip_boundary_handle.is_null()));
+                    self.clip = Some((handle, crate::entities::viewport::is_clipped(&vp)));
                     self.step = Step::ClipChoice;
                     CmdResult::NeedPoint
                 }

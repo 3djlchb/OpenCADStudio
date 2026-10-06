@@ -147,6 +147,7 @@ fn viewport_dimension_curved_clip_includes_the_exact_boundary() {
         panic!()
     };
     vp.clip_boundary_handle = clip;
+    vp.status.non_rectangular_clipping = true;
     assert!(scene
         .viewport_displays_paper_point(frame.viewport, glam::DVec2::new(boundary.x, boundary.y)));
     assert!(!scene.viewport_displays_paper_point(frame.viewport, glam::DVec2::new(60.01, 50.0)));
@@ -463,6 +464,7 @@ fn viewport_dimension_eligibility_is_shared_and_uses_clipping() {
     let clip = scene.add_entity(EntityType::LwPolyline(clip));
     if let Some(EntityType::Viewport(vp)) = scene.document.get_entity_mut(top) {
         vp.clip_boundary_handle = clip;
+        vp.status.non_rectangular_clipping = true;
     }
     assert_eq!(
         scene

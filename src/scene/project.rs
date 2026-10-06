@@ -507,7 +507,7 @@ impl Scene {
                 [xmin as f64, ymin as f64], [xmax as f64, ymin as f64],
                 [xmax as f64, ymax as f64], [xmin as f64, ymax as f64],
             ]];
-            if !self.images.is_empty() && !viewport.clip_boundary_handle.is_null() {
+            if !self.images.is_empty() && crate::entities::viewport::is_clipped(viewport) {
                 let boundary = self.clip_boundary_polygon(
                     viewport.clip_boundary_handle, viewport.center.z as f32);
                 if boundary.len() >= 3 {
@@ -663,7 +663,7 @@ impl Scene {
         if hw.abs() < 1e-6 || hh.abs() < 1e-6 {
             return vec![];
         }
-        let poly = if vp.clip_boundary_handle.is_null() {
+        let poly = if !crate::entities::viewport::is_clipped(vp) {
             // Rectangular viewport → its own four corners (paper coords). These
             // map to full-rect NDC [-1, 1], a no-op mask over a render target
             // that already clips to the rectangle, but it keeps rect and

@@ -90,6 +90,7 @@ impl OpenCADStudio {
         let mut vp = vp;
         if clip.is_null() {
             vp.clip_boundary_handle = Handle::NULL;
+            vp.status.non_rectangular_clipping = false;
         } else {
             let (lo, hi) = clip_boundary_extents(scene, clip)
                 .map(|(lo, hi)| (glam::DVec2::from(lo), glam::DVec2::from(hi)))
@@ -117,6 +118,7 @@ impl OpenCADStudio {
             vp.height = hi.y - lo.y;
             vp.view_height = vp.height * scale;
             vp.clip_boundary_handle = clip;
+            vp.status.non_rectangular_clipping = true;
             if let Some(entity) = scene.document.get_entity_mut(clip) {
                 let common = entity.common_mut();
                 if !common.reactors.contains(&viewport) {
@@ -228,6 +230,7 @@ impl OpenCADStudio {
         viewport.height = max_y - min_y;
         viewport.id = 2;
         viewport.clip_boundary_handle = clip_handle;
+        viewport.status.non_rectangular_clipping = !clip_handle.is_null();
         let viewport_handle = self.commit_entity_handle(codec::EntityType::Viewport(viewport));
         if let Some(viewport_handle) = viewport_handle {
             if !created_boundary {

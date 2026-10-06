@@ -189,7 +189,7 @@ impl Scene {
         if (paper.x - vp.center.x).abs() > hw || (paper.y - vp.center.y).abs() > hh {
             return false;
         }
-        if vp.clip_boundary_handle.is_null() {
+        if !crate::entities::viewport::is_clipped(vp) {
             return true;
         }
         let Some(boundary) = self.document.get_entity(vp.clip_boundary_handle)
@@ -321,6 +321,7 @@ mod clip_tests {
         viewport.width = 20.0;
         viewport.height = 20.0;
         viewport.clip_boundary_handle = clip;
+        viewport.status.non_rectangular_clipping = true;
         let viewport = scene.add_entity(EntityType::Viewport(viewport));
         for (x, y, inside) in [
             (2.0, 2.0, true), (8.0, 2.0, true), (8.0, 8.0, false),

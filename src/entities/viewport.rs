@@ -119,7 +119,7 @@ fn properties(vp: &Viewport) -> Vec<PropSection> {
                 ro(
                     "Clipped",
                     "vp_clipped",
-                    if vp.clip_boundary_handle.is_null() { "No" } else { "Yes" },
+                    if is_clipped(vp) { "Yes" } else { "No" },
                 ),
                 Property {
                     label: "Display locked".into(),
@@ -342,6 +342,13 @@ fn apply_grip(vp: &mut Viewport, grip_id: usize, apply: GripApply) {
 
 /// Stretch a rectangular paper-space viewport by the corners captured by a
 /// crossing window. Bounds that have no captured corner stay anchored.
+/// A viewport clipped by its boundary object: the boundary is linked and
+/// non-rectangular clipping is on. A stored boundary with clipping off draws
+/// the rectangular viewport.
+pub(crate) fn is_clipped(vp: &Viewport) -> bool {
+    !vp.clip_boundary_handle.is_null() && vp.status.non_rectangular_clipping
+}
+
 pub fn stretch(
     vp: &mut Viewport,
     win_min: glam::DVec3,
@@ -435,7 +442,7 @@ impl crate::entities::traits::FallbackTess for Viewport {
         // A clipped viewport uses its linked boundary entity as its visible
         // frame. Drawing the viewport's rectangular extents as well leaves an
         // incorrect box around polygonal/Object MVIEW results.
-        if !self.clip_boundary_handle.is_null() {
+        if is_clipped(self) {
             return (vec![], vec![], vec![], vec![]);
         }
         let cx = self.center.x;
