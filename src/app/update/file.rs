@@ -40,7 +40,7 @@ fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 /// reaches the UI thread: it is caught on the worker and re-surfaced as
 /// [`Message::BackgroundTaskFailed`] so a crashing export or import reports
 /// on the command line instead of killing the application.
-pub(super) fn background_task<T, F, M>(context: impl Into<String>, work: F, map: M) -> Task<Message>
+pub(in crate::app) fn background_task<T, F, M>(context: impl Into<String>, work: F, map: M) -> Task<Message>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,

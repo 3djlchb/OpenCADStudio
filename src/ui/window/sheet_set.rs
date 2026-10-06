@@ -91,9 +91,11 @@ pub struct SheetSetManager {
 }
 
 /// Drawings read from disk with their modification time; a changed file is
-/// read again.
+/// read again (off the UI thread, see [`read_drawing`]).
 #[derive(Default)]
-pub struct DrawingCache(pub std::collections::HashMap<String, (std::time::SystemTime, std::sync::Arc<codec::CadDocument>)>);
+pub struct DrawingCache(
+    pub std::collections::HashMap<String, (std::time::SystemTime, std::sync::Arc<codec::CadDocument>)>,
+);
 
 impl std::fmt::Debug for DrawingCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -102,20 +104,46 @@ impl std::fmt::Debug for DrawingCache {
 }
 
 impl DrawingCache {
-    /// The drawing at `path`, read again when its modification time changed.
-    pub fn get(&mut self, path: &str) -> Option<std::sync::Arc<codec::CadDocument>> {
+    /// The drawing at `path` when it was read and is unchanged since.
+    pub fn get(&self, path: &str) -> Option<std::sync::Arc<codec::CadDocument>> {
         let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
-        let key = ss::path_key(path);
-        if let Some((t, doc)) = self.0.get(&key) {
-            if *t == modified {
-                return Some(doc.clone());
-            }
-        }
-        let doc = std::sync::Arc::new(crate::io::load_file(std::path::Path::new(path)).ok()?);
-        self.0.insert(key, (modified, doc.clone()));
-        Some(doc)
+        let (t, doc) = self.0.get(&ss::path_key(path))?;
+        (*t == modified).then(|| doc.clone())
+    }
+
+    pub fn insert(&mut self, path: &str, modified: std::time::SystemTime, doc: std::sync::Arc<codec::CadDocument>) {
+        self.0.insert(ss::path_key(path), (modified, doc));
+    }
+
+    /// Take the drawing at `path` out (to lend it to a scene); put it back
+    /// with [`DrawingCache::insert`].
+    pub fn take(&mut self, path: &str) -> Option<(std::time::SystemTime, std::sync::Arc<codec::CadDocument>)> {
+        self.0.remove(&ss::path_key(path))
     }
 }
+
+/// A drawing read for the cache (its modification time and document).
+#[derive(Clone)]
+pub struct ReadDrawing(pub Result<(std::time::SystemTime, std::sync::Arc<codec::CadDocument>), String>);
+
+impl std::fmt::Debug for ReadDrawing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_ok() { "ReadDrawing(Ok)" } else { "ReadDrawing(Err)" })
+    }
+}
+
+/// Read the drawing at `path` (run on a worker thread).
+pub fn read_drawing(path: &str) -> ReadDrawing {
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).map_err(|e| e.to_string());
+    ReadDrawing(modified.and_then(|t| {
+        let doc = crate::io::load_file(std::path::Path::new(path)).map_err(|e| e.to_string())?;
+        Ok((t, std::sync::Arc::new(doc)))
+    }))
+}
+
+/// The paper-space layouts (name, handle) and the sheet link of a drawing
+/// picked for Import Layout as Sheet, or why it could not be read.
+pub type ImportRead = Result<(Vec<(String, String)>, Option<codec::sheet_set::SheetSetData>), String>;
 
 /// A row menu item: an entry, a separator, or a fly-out submenu (label, key, items).
 #[derive(Debug, Clone)]
@@ -193,6 +221,13 @@ pub enum SheetSetMsg {
     /// Import: Browse for Drawings and the drawings picked.
     BrowseDrawings,
     ImportAdd(Vec<std::path::PathBuf>),
+    /// The drawings picked for import, read: into a new Import dialog
+    /// (`true`) or replacing the open dialog's rows.
+    ImportRead(bool, Vec<(std::path::PathBuf, ImportRead)>),
+    /// A drawing read for the cache, then the message that needed it.
+    DrawingRead(String, ReadDrawing, Box<SheetSetMsg>),
+    /// The wizard's folder of existing drawings, scanned for layouts.
+    FolderScanned(std::path::PathBuf, Vec<FoundLayout>),
     /// Rename & Renumber: apply and go to the previous / next sheet.
     Previous,
     Next,

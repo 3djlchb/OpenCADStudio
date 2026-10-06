@@ -4,8 +4,8 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::ui::window::sheet_set::{
-    BlockList, Category, FieldId, Form, FormKind, FoundLayout, ImportRow, MenuAction, Placing, PropRow, Properties,
-    RowKey, SelectBlock, SheetSetMsg, SheetStatus, SsDialog, TemplatePick, ViewAction, Wizard, WizardMsg,
+    BlockList, Category, FieldId, Form, FormKind, FoundLayout, ImportRead, ImportRow, MenuAction, Placing, PropRow,
+    Properties, RowKey, SelectBlock, SheetSetMsg, SheetStatus, SsDialog, TemplatePick, ViewAction, Wizard, WizardMsg,
 };
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use codec::entities::Entity as _;
@@ -300,13 +300,40 @@ fn prompts_for_template(db: &SheetSetDatabase, component: &str) -> bool {
     false
 }
 
+/// A drawing's paper-space layouts and sheet link, for Import (run on a
+/// worker thread).
+fn read_import(path: &Path) -> ImportRead {
+    let doc = crate::io::load_file(path).map_err(|e| e.to_string())?;
+    Ok((paper_layouts(&doc), doc.sheet_set_data()))
+}
+
+/// Read the drawings picked for Import off the UI thread.
+fn read_imports(paths: Vec<PathBuf>, new_form: bool) -> Task<Message> {
+    crate::app::update::background_task(
+        crate::t!("Import Layout as Sheet"),
+        move || {
+            paths
+                .into_iter()
+                .map(|p| {
+                    let read = read_import(&p);
+                    (p, read)
+                })
+                .collect()
+        },
+        move |read| Message::SheetSet(SheetSetMsg::ImportRead(new_form, read)),
+    )
+}
+
 /// The layouts of a drawing that can become sheets, each with the sheet set
 /// it already belongs to: the drawing's sheet link, or this set.
-fn import_rows(path: &Path, db: &SheetSetDatabase) -> Result<Vec<ImportRow>, String> {
-    let doc = crate::io::load_file(path).map_err(|e| e.to_string())?;
+fn import_rows(
+    path: &Path,
+    layouts: Vec<(String, String)>,
+    link: Option<&SheetSetData>,
+    db: &SheetSetDatabase,
+) -> Vec<ImportRow> {
     let drawing = path.to_string_lossy().to_string();
-    let link = doc.sheet_set_data();
-    Ok(paper_layouts(&doc)
+    layouts
         .into_iter()
         .map(|(layout, handle)| {
             let mine = db.sheet_for(&drawing, Some(&layout)).is_some_and(|s| {
@@ -315,14 +342,43 @@ fn import_rows(path: &Path, db: &SheetSetDatabase) -> Result<Vec<ImportRow>, Str
             // A layout of this set is taken; one the drawing's sheet link
             // names for another set is only warned about (still importable).
             let warn = !mine
-                && link.as_ref().is_some_and(|l| {
+                && link.is_some_and(|l| {
                     l.layout_name.eq_ignore_ascii_case(&layout)
                         && !l.sheet_set_file_name.is_empty()
                         && db.path.as_deref().is_none_or(|p| ss::path_key(p) != ss::path_key(&l.sheet_set_file_name))
                 });
             ImportRow { drawing: drawing.clone(), layout, handle, on: !mine, taken: mine, warn }
         })
-        .collect())
+        .collect()
+}
+
+/// The layouts of the drawings in a wizard folder (run on a worker thread).
+fn scan_folder(path: &Path) -> Vec<FoundLayout> {
+    let folder = path.to_string_lossy().to_string();
+    let mut files: Vec<PathBuf> = std::fs::read_dir(path)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dwg")))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    let mut found = Vec::new();
+    for file in files {
+        let Ok(doc) = crate::io::load_file(&file) else {
+            continue;
+        };
+        for (layout, handle) in paper_layouts(&doc) {
+            found.push(FoundLayout {
+                folder: folder.clone(),
+                file: file.to_string_lossy().to_string(),
+                layout,
+                handle,
+                on: true,
+            });
+        }
+    }
+    found
 }
 
 /// Rename & Renumber: layout and file names follow the options.
@@ -752,7 +808,17 @@ impl OpenCADStudio {
                     |p| Message::SheetSet(SheetSetMsg::ImportAdd(p)),
                 )
             }
-            SheetSetMsg::ImportAdd(paths) => self.import_add(paths),
+            SheetSetMsg::ImportAdd(paths) if !paths.is_empty() => return read_imports(paths, false),
+            SheetSetMsg::ImportAdd(_) => {}
+            SheetSetMsg::ImportRead(new_form, read) => self.import_read(new_form, read),
+            SheetSetMsg::FolderScanned(path, found) => self.folder_scanned(path, found),
+            SheetSetMsg::DrawingRead(path, read, then) => match read.0 {
+                Ok((modified, doc)) => {
+                    self.sheet_set.drawings.insert(&path, modified, doc);
+                    return self.on_sheet_set(*then);
+                }
+                Err(e) => self.command_line.push_error(&format!("{path}: {e}")),
+            },
             SheetSetMsg::Previous => self.rename_step(false),
             SheetSetMsg::Next => self.rename_step(true),
             SheetSetMsg::ViewsByCategory(v) => self.sheet_set.by_category = v,
@@ -778,10 +844,14 @@ impl OpenCADStudio {
                     _ => None,
                 };
                 // A whole drawing taken as a block shows its model space.
-                let preview = target.and_then(|(file, name)| {
-                    let whole = self.sheet_set.drawings.get(&file).is_some_and(|d| d.block_records.get(&name).is_none());
-                    self.block_preview(&file, if whole { "" } else { &name })
-                });
+                let mut preview = None;
+                if let Some((file, name)) = target {
+                    let whole = match self.drawing_or_read(&file, SheetSetMsg::BlockListSelect(k)) {
+                        Ok(doc) => doc.block_records.get(&name).is_none(),
+                        Err(task) => return task,
+                    };
+                    preview = self.block_preview(&file, if whole { "" } else { &name });
+                }
                 if let Some(SsDialog::BlockList(b)) = self.sheet_set.dialog.as_mut() {
                     b.selected = Some(k);
                     b.preview = preview;
@@ -820,7 +890,7 @@ impl OpenCADStudio {
                 )
             }
             SheetSetMsg::SelectBlockPicked(None) => {}
-            SheetSetMsg::SelectBlockPicked(Some(path)) => self.select_block_file(path),
+            SheetSetMsg::SelectBlockPicked(Some(path)) => return self.select_block_file(path),
             SheetSetMsg::SelectBlockWhole(v) => {
                 let file = match self.sheet_set.dialog.as_ref() {
                     Some(SsDialog::SelectBlock(b)) => b.file.clone(),
@@ -847,17 +917,17 @@ impl OpenCADStudio {
                 }
             }
             SheetSetMsg::ToggleDrawing(path) => {
-                let key = ss::path_key(&path);
-                if !self.sheet_set.open_drawings.remove(&key) {
-                    self.load_model_views(&path);
-                    self.sheet_set.open_drawings.insert(key);
+                if !self.sheet_set.open_drawings.remove(&ss::path_key(&path)) {
+                    return self.on_sheet_set(SheetSetMsg::SeeViews(path));
                 }
             }
             SheetSetMsg::SeeViews(path) => {
-                self.load_model_views(&path);
+                if let Err(task) = self.load_model_views(&path) {
+                    return task;
+                }
                 self.sheet_set.open_drawings.insert(ss::path_key(&path));
             }
-            SheetSetMsg::PlaceOnSheet(path, view) => self.start_place_view(path, view),
+            SheetSetMsg::PlaceOnSheet(path, view) => return self.start_place_view(path, view),
             SheetSetMsg::ViewMenu(id, action) => {
                 self.sheet_set.submenu = None;
                 return self.view_menu(id, action);
@@ -911,10 +981,10 @@ impl OpenCADStudio {
                 }
             }
             SheetSetMsg::OpenPicked(None) | SheetSetMsg::ImportPicked(None) | SheetSetMsg::TemplatePicked(None) => {}
-            SheetSetMsg::ImportPicked(Some(path)) => self.import_layout_form(path),
-            SheetSetMsg::FolderPicked(field, Some(path)) => self.dialog_folder(field, path),
+            SheetSetMsg::ImportPicked(Some(path)) => return read_imports(vec![path], true),
+            SheetSetMsg::FolderPicked(field, Some(path)) => return self.dialog_folder(field, path),
             SheetSetMsg::FolderPicked(_, None) => {}
-            SheetSetMsg::TemplatePicked(Some(path)) => self.properties_template(path),
+            SheetSetMsg::TemplatePicked(Some(path)) => return self.properties_template(path),
             #[cfg(not(target_arch = "wasm32"))]
             SheetSetMsg::Browse(field) => {
                 return Task::perform(
@@ -1116,7 +1186,14 @@ impl OpenCADStudio {
                 // A subset that prompts for its template asks for it first.
                 if prompts_for_template(db, &id) {
                     let file = template.map(|t| t.file_name).unwrap_or_default();
-                    let layouts = crate::io::load_file(Path::new(&file)).map(|d| paper_layouts(&d).into_iter().map(|(n, _)| n).collect()).unwrap_or_default();
+                    let layouts = if Path::new(&file).is_file() {
+                        match self.drawing_or_read(&file, SheetSetMsg::Menu(id.clone(), MenuAction::NewSheet)) {
+                            Ok(doc) => paper_layouts(&doc).into_iter().map(|(n, _)| n).collect(),
+                            Err(task) => return task,
+                        }
+                    } else {
+                        Vec::new()
+                    };
                     self.sheet_set.dialog = Some(SsDialog::Template(TemplatePick { form, file, layouts, layout: 0 }));
                 } else {
                     self.sheet_set.dialog = Some(SsDialog::Form(form));
@@ -1352,46 +1429,42 @@ impl OpenCADStudio {
         }
     }
 
-    fn dialog_folder(&mut self, field: FieldId, path: PathBuf) {
-        let folder = path.to_string_lossy().to_string();
+    fn dialog_folder(&mut self, field: FieldId, path: PathBuf) -> Task<Message> {
         if field == FieldId::AddFolder {
-            self.wizard_add_folder(path);
-            return;
+            return self.wizard_add_folder(path);
         }
-        self.dialog_input(field, folder);
+        self.dialog_input(field, path.to_string_lossy().to_string());
+        Task::none()
     }
 
-    fn wizard_add_folder(&mut self, path: PathBuf) {
+    /// The wizard's Browse for existing drawings: the folder's drawings are
+    /// read off the UI thread.
+    fn wizard_add_folder(&mut self, path: PathBuf) -> Task<Message> {
+        let Some(SsDialog::Wizard(w)) = self.sheet_set.dialog.as_ref() else {
+            return Task::none();
+        };
+        if w.folders.contains(&path.to_string_lossy().to_string()) {
+            return Task::none();
+        }
+        crate::app::update::background_task(
+            crate::t!("Sheet Set Manager"),
+            move || {
+                let found = scan_folder(&path);
+                (path, found)
+            },
+            |(path, found)| Message::SheetSet(SheetSetMsg::FolderScanned(path, found)),
+        )
+    }
+
+    fn folder_scanned(&mut self, path: PathBuf, found: Vec<FoundLayout>) {
         let Some(SsDialog::Wizard(w)) = self.sheet_set.dialog.as_mut() else {
             return;
         };
         let folder = path.to_string_lossy().to_string();
-        if w.folders.contains(&folder) {
-            return;
+        if !w.folders.contains(&folder) {
+            w.layouts.extend(found);
+            w.folders.push(folder);
         }
-        let mut files: Vec<PathBuf> = std::fs::read_dir(&path)
-            .map(|rd| {
-                rd.filter_map(|e| e.ok().map(|e| e.path()))
-                    .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dwg")))
-                    .collect()
-            })
-            .unwrap_or_default();
-        files.sort();
-        for file in files {
-            let Ok(doc) = crate::io::load_file(&file) else {
-                continue;
-            };
-            for (layout, handle) in paper_layouts(&doc) {
-                w.layouts.push(FoundLayout {
-                    folder: folder.clone(),
-                    file: file.to_string_lossy().to_string(),
-                    layout,
-                    handle,
-                    on: true,
-                });
-            }
-        }
-        w.folders.push(folder);
     }
 
     fn on_wizard(&mut self, m: WizardMsg) {
@@ -1429,18 +1502,42 @@ impl OpenCADStudio {
         }
     }
 
-    fn import_layout_form(&mut self, path: PathBuf) {
-        let (Some(set), Some(parent)) = (self.sheet_set.current, self.sheet_set_import_parent.take()) else {
+    /// The drawings picked for Import, read: a new Import dialog for the
+    /// subset whose menu asked, or the open dialog's rows replaced.
+    fn import_read(&mut self, new_form: bool, read: Vec<(PathBuf, ImportRead)>) {
+        let set = match self.sheet_set.dialog.as_ref() {
+            _ if new_form => self.sheet_set.current,
+            Some(SsDialog::Form(f)) => Some(f.set),
+            _ => None,
+        };
+        let Some(db) = set.and_then(|k| self.sheet_set.sets.get(k)) else { return };
+        let mut rows = Vec::new();
+        let mut errors = Vec::new();
+        for (path, r) in read {
+            match r {
+                Ok((layouts, link)) => rows.extend(import_rows(&path, layouts, link.as_ref(), db)),
+                Err(e) => errors.push(format!("{}: {e}", path.display())),
+            }
+        }
+        let failed = !errors.is_empty();
+        for e in errors {
+            self.command_line.push_error(&e);
+        }
+        if !new_form {
+            // The drawings picked replace the list.
+            if let Some(SsDialog::Form(f)) = self.sheet_set.dialog.as_mut() {
+                if !rows.is_empty() {
+                    f.rows = rows;
+                }
+            }
+            return;
+        }
+        let (Some(set), Some(parent)) = (set, self.sheet_set_import_parent.take()) else {
             return;
         };
-        let Some(db) = self.sheet_set.db() else { return };
-        let rows = match import_rows(&path, db) {
-            Ok(rows) => rows,
-            Err(e) => {
-                self.command_line.push_error(&format!("{}: {e}", path.display()));
-                return;
-            }
-        };
+        if failed {
+            return;
+        }
         self.sheet_set.dialog = Some(SsDialog::Form(Form {
             kind: FormKind::ImportLayout,
             set,
@@ -1450,25 +1547,6 @@ impl OpenCADStudio {
             ..Form::default()
         }));
         self.active_modal = Some(crate::app::ModalKind::SheetSet);
-    }
-
-    /// Browse for Drawings of the open Import dialog: add their layouts.
-    fn import_add(&mut self, paths: Vec<PathBuf>) {
-        let Some(SsDialog::Form(f)) = self.sheet_set.dialog.as_ref() else { return };
-        let Some(db) = self.sheet_set.sets.get(f.set) else { return };
-        let mut added = Vec::new();
-        for p in paths {
-            match import_rows(&p, db) {
-                Ok(rows) => added.extend(rows),
-                Err(e) => self.command_line.push_error(&format!("{}: {e}", p.display())),
-            }
-        }
-        // The drawings picked replace the list.
-        if let Some(SsDialog::Form(f)) = self.sheet_set.dialog.as_mut() {
-            if !added.is_empty() {
-                f.rows = added;
-            }
-        }
     }
 
     /// Rename & Renumber: number and title into the set, and the layout and
@@ -1658,16 +1736,38 @@ impl OpenCADStudio {
         self.save_current_sheet_set();
     }
 
-    /// A block preview (`name` empty: the drawing's model space), cached by
-    /// `file|name`; returns its key.
+    /// A drawing read and cached, or the task that reads it off the UI thread
+    /// and then handles `then` again.
+    fn drawing_or_read(
+        &mut self,
+        path: &str,
+        then: SheetSetMsg,
+    ) -> Result<std::sync::Arc<codec::CadDocument>, Task<Message>> {
+        if let Some(doc) = self.sheet_set.drawings.get(path) {
+            return Ok(doc);
+        }
+        let path = path.to_string();
+        Err(crate::app::update::background_task(
+            crate::t!("Sheet Set Manager"),
+            {
+                let path = path.clone();
+                move || crate::ui::window::sheet_set::read_drawing(&path)
+            },
+            move |read| Message::SheetSet(SheetSetMsg::DrawingRead(path, read, Box::new(then))),
+        ))
+    }
+
+    /// A block preview (`name` empty: the drawing's model space) of a cached
+    /// drawing, cached by `file|name`; returns its key.
     fn block_preview(&mut self, file: &str, name: &str) -> Option<String> {
         let key = format!("{}|{}", ss::path_key(file), name);
         if self.sheet_set.previews.contains_key(&key) {
             return Some(key);
         }
-        let doc = self.sheet_set.drawings.get(file)?;
+        // The cached drawing is lent to a scene for tessellation, not copied.
+        let (modified, doc) = self.sheet_set.drawings.take(file)?;
         let mut scene = crate::scene::Scene::new();
-        scene.document = (*doc).clone();
+        scene.document = std::sync::Arc::try_unwrap(doc).unwrap_or_else(|doc| (*doc).clone());
         let wires = if name.is_empty() {
             let model = scene.document.header.model_space_block_handle;
             let entities: Vec<codec::EntityType> = scene
@@ -1682,6 +1782,8 @@ impl OpenCADStudio {
         } else {
             scene.block_preview_wires(name)
         };
+        let doc = std::mem::take(&mut scene.document);
+        self.sheet_set.drawings.insert(file, modified, std::sync::Arc::new(doc));
         self.sheet_set.previews.insert(key.clone(), wires);
         Some(key)
     }
@@ -1697,19 +1799,17 @@ impl OpenCADStudio {
         Some((db.resolve_file(b), b.prop("Name").unwrap_or("").to_string()))
     }
 
-    /// Named model views of a drawing (read once, when its row is opened).
-    fn load_model_views(&mut self, path: &str) {
+    /// Named model views of a drawing (read once, when its row is opened);
+    /// `Err` reads the drawing first.
+    fn load_model_views(&mut self, path: &str) -> Result<(), Task<Message>> {
         let key = ss::path_key(path);
         if self.sheet_set.model_views.contains_key(&key) {
-            return;
+            return Ok(());
         }
-        let views = self
-            .sheet_set
-            .drawings
-            .get(path)
-            .map(|d| d.views.iter().filter(|v| !v.paper_space).map(|v| v.name.clone()).collect())
-            .unwrap_or_default();
+        let doc = self.drawing_or_read(path, SheetSetMsg::SeeViews(path.to_string()))?;
+        let views = doc.views.iter().filter(|v| !v.paper_space).map(|v| v.name.clone()).collect();
         self.sheet_set.model_views.insert(key, views);
+        Ok(())
     }
 
     /// The current set's sheet shown by the active tab at its current layout.
@@ -1748,28 +1848,38 @@ impl OpenCADStudio {
     }
 
     /// Place on Sheet: only on a sheet of this set open at its layout.
-    fn start_place_view(&mut self, drawing: String, view: Option<String>) {
+    /// The model drawing and the set's view label block drawing are read
+    /// first.
+    fn start_place_view(&mut self, drawing: String, view: Option<String>) -> Task<Message> {
         if self.tabs[self.active_tab].scene.current_layout.eq_ignore_ascii_case("Model") {
-            self.command_line
-                .push_error(crate::t!("Content cannot be placed into model space. Please switch to paper space and try again.").as_ref());
-            return;
+            self.command_line.push_error(
+                crate::t!("Content cannot be placed into model space. Please switch to paper space and try again.")
+                    .as_ref(),
+            );
+            return Task::none();
         }
         let Some((set, sheet)) = self.current_sheet() else {
             self.command_line
                 .push_error(crate::t!("Open a sheet of this sheet set at its layout to place a view on it.").as_ref());
-            return;
+            return Task::none();
         };
-        let size = self
-            .sheet_set
-            .drawings
-            .get(&drawing)
-            .and_then(|d| model_view(&d, view.as_deref()))
-            .map(|v| (v.width, v.height));
+        let again = || SheetSetMsg::PlaceOnSheet(drawing.clone(), view.clone());
+        let label = self.sheet_set.db().and_then(|db| db.sheet_set().named("DefLabelBlk").map(|b| db.resolve_file(b)));
+        if let Some(label) = label.filter(|l| Path::new(l).is_file()) {
+            if let Err(task) = self.drawing_or_read(&label, again()) {
+                return task;
+            }
+        }
+        let size = match self.drawing_or_read(&drawing, again()) {
+            Ok(doc) => model_view(&doc, view.as_deref()).map(|v| (v.width, v.height)),
+            Err(task) => return task,
+        };
         let Some(size) = size else {
             self.command_line.push_error(crate::tf!("{}: no view to place.", drawing).as_ref());
-            return;
+            return Task::none();
         };
         self.start_placing(Placing::View { set, sheet, drawing, view }, size);
+        Task::none()
     }
 
     /// A sheet view's commands.
@@ -1812,17 +1922,22 @@ impl OpenCADStudio {
                 self.command_line
                     .push_error(crate::t!("Open the view's sheet at its layout to place a block on it.").as_ref());
             }
-            ViewAction::Callout(block) => {
-                let Some(b) = db.find(&block) else { return Task::none() };
-                let (file, name) = (db.resolve_file(b), b.prop("Name").unwrap_or("").to_string());
-                self.start_placing(Placing::Block { set, sheet, view: id, file, name }, (0.0, 0.0));
-            }
-            ViewAction::Label => {
-                let Some(b) = db.sheet_set().named("DefLabelBlk") else {
-                    self.command_line.push_error(crate::t!("The sheet set has no label block for views.").as_ref());
+            ViewAction::Callout(_) | ViewAction::Label => {
+                let b = match &action {
+                    ViewAction::Callout(block) => db.find(block),
+                    _ => db.sheet_set().named("DefLabelBlk"),
+                };
+                let Some(b) = b else {
+                    if action == ViewAction::Label {
+                        self.command_line.push_error(crate::t!("The sheet set has no label block for views.").as_ref());
+                    }
                     return Task::none();
                 };
                 let (file, name) = (db.resolve_file(b), b.prop("Name").unwrap_or("").to_string());
+                // The block's drawing is read first.
+                if let Err(task) = self.drawing_or_read(&file, SheetSetMsg::ViewMenu(id.clone(), action)) {
+                    return task;
+                }
                 self.start_placing(Placing::Block { set, sheet, view: id, file, name }, (0.0, 0.0));
             }
         }
@@ -1963,24 +2078,20 @@ impl OpenCADStudio {
     }
 
     /// Select Block: read a drawing's named blocks.
-    fn select_block_file(&mut self, path: PathBuf) {
+    fn select_block_file(&mut self, path: PathBuf) -> Task<Message> {
         let file = path.to_string_lossy().to_string();
-        let names: Vec<(String, String, bool)> = match self.sheet_set.drawings.get(&file).ok_or_else(|| crate::t!("cannot be read").into_owned()) {
-            Ok(doc) => {
-                let mut n: Vec<(String, String, bool)> = doc
-                    .block_records
-                    .iter()
-                    .filter(|b| !b.name.starts_with('*') && !b.is_layout())
-                    .map(|b| (b.name.clone(), format!("{:X}", b.handle.value()), false))
-                    .collect();
-                n.sort();
-                n
-            }
-            Err(e) => {
-                self.command_line.push_error(&format!("{}: {e}", path.display()));
-                return;
-            }
+        let doc = match self.drawing_or_read(&file, SheetSetMsg::SelectBlockPicked(Some(path))) {
+            Ok(doc) => doc,
+            Err(task) => return task,
         };
+        let mut names: Vec<(String, String, bool)> = doc
+            .block_records
+            .iter()
+            .filter(|b| !b.name.starts_with('*') && !b.is_layout())
+            .map(|b| (b.name.clone(), format!("{:X}", b.handle.value()), false))
+            .collect();
+        names.sort();
+        drop(doc);
         // The whole drawing is the first preview.
         let preview = self.block_preview(&file, "");
         if let Some(SsDialog::SelectBlock(b)) = self.sheet_set.dialog.as_mut() {
@@ -1989,6 +2100,7 @@ impl OpenCADStudio {
             b.preview = preview;
             b.error = None;
         }
+        Task::none()
     }
 
     /// Model Views: each location folder of the current set and its drawings.
@@ -2057,20 +2169,23 @@ impl OpenCADStudio {
         self.sheet_set.status = status;
     }
 
-    fn properties_template(&mut self, path: PathBuf) {
-        let layouts = crate::io::load_file(&path).map(|d| paper_layouts(&d)).unwrap_or_default();
+    fn properties_template(&mut self, path: PathBuf) -> Task<Message> {
+        let file = path.to_string_lossy().to_string();
+        let layouts = match self.drawing_or_read(&file, SheetSetMsg::TemplatePicked(Some(path))) {
+            Ok(doc) => paper_layouts(&doc),
+            Err(task) => return task,
+        };
         if let Some(SsDialog::Template(t)) = self.sheet_set.dialog.as_mut() {
-            t.file = path.to_string_lossy().to_string();
+            t.file = file;
             t.layouts = layouts.into_iter().map(|(n, _)| n).collect();
             t.layout = 0;
-            return;
+            return Task::none();
         }
         let Some(SsDialog::Properties(p)) = self.sheet_set.dialog.as_mut() else {
-            return;
+            return Task::none();
         };
         match layouts.first() {
             Some((name, _)) => {
-                let file = path.to_string_lossy().to_string();
                 if let Some(row) = p.rows.iter_mut().find(|r| r.key == RowKey::Template) {
                     row.value = format!("{name} ({file})");
                 }
@@ -2079,6 +2194,7 @@ impl OpenCADStudio {
             }
             None => p.error = Some(crate::t!("The drawing has no layout to use as a sheet template.").into_owned()),
         }
+        Task::none()
     }
 
     fn sheet_set_dialog_ok(&mut self) -> Task<Message> {

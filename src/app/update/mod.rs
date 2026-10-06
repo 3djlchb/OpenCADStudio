@@ -96,6 +96,7 @@ mod blocks_palette;
 mod dialog;
 mod dynamic;
 mod file;
+pub(in crate::app) use file::background_task;
 mod page_setup_import;
 mod style;
 pub(in crate::app) mod util;
