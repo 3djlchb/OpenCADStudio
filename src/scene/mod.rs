@@ -3617,7 +3617,9 @@ impl Scene {
         // (the *T block) redrawn from the cells. Tables keeping their picture
         // (moved, restyled, opened from a file) are never redrawn: the block
         // may hold authored content the redraw does not reproduce.
+        // Its cell formulas are worked out again into that block.
         if !appearance_only {
+            let mut rebuilt = false;
             for (handle, kind) in &changes {
                 if !matches!(kind, ChangeKind::Removed)
                     && matches!(
@@ -3625,8 +3627,14 @@ impl Scene {
                         Some(EntityType::Table(t)) if t.block_record_handle.is_none()
                     )
                 {
-                    self.document.refresh_table_block(*handle);
+                    rebuilt |= self.document.refresh_table_block(*handle);
+                    rebuilt |= !crate::entities::field::refresh_table_formulas(&mut self.document, *handle)
+                        .is_empty();
                 }
+            }
+            // The block's cached drawing is stale once its texts change.
+            if rebuilt {
+                self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
             }
         }
         // A restyle (layer on/off, colour, text or dimension style) moves no
@@ -3694,20 +3702,6 @@ impl Scene {
                     self.images.insert(*handle, model);
                 }
             }
-        }
-        // An edited table lets go of its block; rebuild it from the cells so
-        // the drawing shows and saves the cell texts and grid it now holds.
-        let mut rebuilt_table_block = false;
-        for (handle, kind) in &changes {
-            if !matches!(kind, ChangeKind::Removed)
-                && matches!(self.document.get_entity(*handle), Some(EntityType::Table(t)) if t.block_record_handle.is_none())
-            {
-                rebuilt_table_block |= self.document.refresh_table_block(*handle);
-                rebuilt_table_block |= !crate::entities::field::refresh_table_formulas(&mut self.document, *handle).is_empty();
-            }
-        }
-        if rebuilt_table_block {
-            self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         }
         if !changes.is_empty() {
             self.refresh_dependency_index_for_changes(&changes);

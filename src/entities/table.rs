@@ -135,11 +135,14 @@ fn cell_text_height(
     content: &codec::entities::table::CellContent,
 ) -> Option<f64> {
     use codec::entities::table::CellStylePropertyFlags as P;
+    let set = |h: f64| (h > 1e-6).then_some(h);
     let own = content.sets(P::TEXT_HEIGHT);
-    own.then_some(content.text_height)
-        .or_else(|| style_for_property(table, row, column, cell, P::TEXT_HEIGHT).map(|s| s.text_height))
-        .or(Some(content.text_height))
-        .filter(|h| *h > 1e-6)
+    own.then(|| set(content.text_height))
+        .flatten()
+        .or_else(|| {
+            style_for_property(table, row, column, cell, P::TEXT_HEIGHT).and_then(|s| set(s.text_height))
+        })
+        .or_else(|| set(content.text_height))
 }
 
 /// A cell's text style: the content's own, else the cell, row, column or
@@ -1960,6 +1963,8 @@ pub fn tessellate_table(
                     .map(|style| style.rotation as f32)
                     .unwrap_or(cell.rotation as f32)
                 };
+                // FIELDDISPLAY boxes come from this same layout's cells.
+                let field_boxes = content.field_handle.is_some() && crate::entities::field::display();
                 let layout = layout_mtext(&MTextRenderOpts {
                     columns: Default::default(),
                     value: text,
@@ -1974,31 +1979,15 @@ pub fn tessellate_table(
                     exact_line_spacing: false,
                     rectangle_height: 0.0,
                     vertical_text: false,
-                    want_glyph_boxes: false,
+                    want_glyph_boxes: field_boxes,
                 });
                 // FIELDDISPLAY: a field cell's text on a gray box, one per line,
                 // from the same layout's character cells (screen only).
-                if content.field_handle.is_some() && crate::entities::field::display() {
-                    let cells = layout_mtext(&MTextRenderOpts {
-                        columns: Default::default(),
-                        value: text,
-                        insertion: [to.x as f64, to.y as f64, to.z as f64],
-                        height: cell_h,
-                        rect_w: (col_width - margin_left - margin_right).max(0.0),
-                        rotation: rot,
-                        style: &resolved,
-                        attach_h_anchor,
-                        v_anchor,
-                        line_spacing_factor: 1.0,
-                        exact_line_spacing: false,
-                        rectangle_height: 0.0,
-                        vertical_text: false,
-                        want_glyph_boxes: true,
-                    })
-                        .glyph_boxes;
+                if field_boxes {
+                    let cells = &layout.glyph_boxes;
                     let (sin_r, cos_r) = (rot as f64).sin_cos();
                     let mut lines: Vec<[f64; 4]> = Vec::new();
-                    for b in &cells {
+                    for b in cells {
                         let [l, base, r, top] = b.local.map(|v| v as f64);
                         match lines.last_mut() {
                             Some(c) if (c[1] - base).abs() <= 1e-3 * (top - base).max(c[3]) => {
