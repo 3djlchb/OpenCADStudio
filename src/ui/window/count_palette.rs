@@ -82,10 +82,11 @@ impl CountMode {
         }
     }
 
-    pub fn result(&self, doc: &CadDocument) -> CountResult {
+    /// The cached result, or one worked out from the drawing when there is none.
+    pub fn result(&self, doc: &CadDocument) -> std::borrow::Cow<'_, CountResult> {
         match &self.cache {
-            Some((result, _)) => result.clone(),
-            None => self.compute(doc).0,
+            Some((result, _)) => std::borrow::Cow::Borrowed(result),
+            None => std::borrow::Cow::Owned(self.compute(doc).0),
         }
     }
 
@@ -158,8 +159,8 @@ pub struct CountPalette {
     /// What a lost count boundary does without asking: 0 ask, 1 undo, 2 go
     /// on with all of model space (kept with the user settings).
     pub invalid_choice: u8,
-    /// The list's references for (document, geometry epoch, area).
-    pub list_cache: std::cell::RefCell<Option<(usize, u64, Option<Vec<[f64; 2]>>, std::rc::Rc<Vec<BlockInstance>>)>>,
+    /// The list's references for (document tab id, geometry epoch, area).
+    pub list_cache: std::cell::RefCell<Option<(u64, u64, Option<Vec<[f64; 2]>>, std::rc::Rc<Vec<BlockInstance>>)>>,
 }
 
 impl Default for CountPalette {
@@ -313,7 +314,7 @@ fn list_row<'a>(
     name: &str,
     key: CountKey,
     label: String,
-    count: String,
+    count: Option<usize>,
     errors: bool,
     depth: u16,
     expanded: Option<bool>,
@@ -323,7 +324,7 @@ fn list_row<'a>(
         let n = name.to_string();
         checkbox(on).size(14).on_toggle(move |v| msg(CountMsg::TableCheck(n.clone(), v))).into()
     } else if expanded == Some(true) {
-        container(text("−").size(13)).width(Length::Fixed(14.0)).into()
+        container(crate::ui::icons::themed(crate::ui::icons::MINUS, 12.0)).width(Length::Fixed(14.0)).into()
     } else {
         Space::new().width(Length::Fixed(14.0)).into()
     };
@@ -335,7 +336,11 @@ fn list_row<'a>(
     if errors {
         cells = cells.push(crate::ui::icons::themed_warning(WARNING_ICON, 12.0));
     }
-    cells = cells.push(text(count).size(12));
+    // An expanded row shows its counts on the rows below it.
+    cells = cells.push(match count {
+        Some(n) => Element::from(text(n.to_string()).size(12)),
+        None => crate::ui::icons::themed(crate::ui::icons::MORE, 12.0),
+    });
     let body = container(cells.spacing(6).align_y(iced::Center)).width(Fill).padding([4, 6]);
     let area = mouse_area(body)
         .on_press(msg(CountMsg::Open(name.to_string(), key.clone())))
@@ -345,14 +350,11 @@ fn list_row<'a>(
 }
 
 fn header_button<'a>(label: String, active: bool, descending: bool, m: CountMsg) -> Element<'a, Message> {
-    let arrow = if !active {
-        ""
-    } else if descending {
-        " ▼"
-    } else {
-        " ▲"
-    };
-    button(text(format!("{label}{arrow}")).size(11))
+    let mut content = row![text(label).size(11)].spacing(3).align_y(iced::Center);
+    if active {
+        content = content.push(crate::ui::icons::themed_arrow_toggle(!descending, 8.0));
+    }
+    button(content)
         .on_press(msg(m))
         .style(button::text)
         .padding([2, 4])
@@ -385,7 +387,7 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
     let mut list = column![].spacing(1);
     for r in rows(instances, palette) {
         let expansion = palette.expansion(&r.name).filter(|e| e.iter().any(|v| *v));
-        let count = if expansion.is_some() { "•••".to_string() } else { r.count.to_string() };
+        let count = expansion.is_none().then_some(r.count);
         list = list.push(list_row(
             palette,
             &r.name,
@@ -399,7 +401,7 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
         if let Some([l, s, m]) = expansion {
             for (key, n) in codec::count::expanded_counts(instances, &r.name, l, s, m) {
                 let label = key.label();
-                list = list.push(list_row(palette, &r.name, key, label, n.to_string(), false, 1, None));
+                list = list.push(list_row(palette, &r.name, key, label, Some(n), false, 1, None));
             }
         }
     }
@@ -525,16 +527,17 @@ pub fn view<'a>(
     palette: &'a CountPalette,
     mode: Option<&'a CountMode>,
     doc: &'a CadDocument,
+    doc_id: u64,
     epoch: u64,
     width: f32,
     auto_collapse: bool,
 ) -> Element<'a, Message> {
-    let title_bar = crate::ui::dock::title_bar(PanelId::Count, crate::t!("Count palette").into_owned(), auto_collapse);
+    let title_bar = crate::ui::dock::title_bar(PanelId::Count, crate::t!("Count").into_owned(), auto_collapse);
     let body = match mode {
         Some(mode) if mode.target.is_some() => mode_view(palette, mode, doc),
         _ => {
             let area = mode.and_then(|m| m.area.clone());
-            let key = (doc as *const CadDocument as usize, epoch);
+            let key = (doc_id, epoch);
             let mut cache = palette.list_cache.borrow_mut();
             let instances = match cache.as_ref() {
                 Some((d, e, a, list)) if (*d, *e) == key && *a == area => list.clone(),
@@ -567,13 +570,7 @@ pub fn toolbar<'a>(mode: &CountMode, doc: &CadDocument) -> Element<'a, Message> 
     let status: Element<'a, Message> = if !result.errors.is_empty() {
         crate::ui::icons::themed_warning(WARNING_ICON, 14.0)
     } else if has_target {
-        container(text("i").size(11).style(|theme: &Theme| text::Style { color: Some(theme.palette().primary.base.color) }))
-            .padding([0, 4])
-            .style(|theme: &Theme| container::Style {
-                border: Border { color: theme.palette().primary.base.color, width: 1.0, radius: 8.0.into() },
-                ..Default::default()
-            })
-            .into()
+        crate::ui::icons::themed_primary(crate::ui::icons::INFO, 14.0)
     } else {
         crate::ui::icons::themed_disabled(WARNING_ICON, 14.0)
     };
@@ -628,7 +625,7 @@ pub fn invalid_area_view<'a>(palette: &CountPalette, sizing: crate::ui::modal::M
     let action = |title: String, detail: String, m: CountMsg| -> Element<'a, Message> {
         button(
             row![
-                text("→").size(16).style(|theme: &Theme| text::Style { color: Some(theme.palette().primary.base.color) }),
+                crate::ui::icons::themed_primary(crate::ui::icons::ARROW_LONG_RIGHT, 16.0),
                 column![text(title).size(13), text(detail).size(11).style(muted_style)].spacing(2),
             ]
             .spacing(10)

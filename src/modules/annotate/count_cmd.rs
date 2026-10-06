@@ -9,8 +9,8 @@
 //
 // The command gathers its answers and hands them to the application as
 // `_COUNTRUN <area> L|T <handles>` (COUNTAREA: `_COUNTAREASET <area>`), the
-// area being `C` (current view), `E` (entire model space), `R x,y x,y`,
-// `P x,y x,y …` or `O <handle>`.
+// area being `C` (current area, which counts all of model space), `E`
+// (entire model space), `R x,y x,y`, `P x,y x,y …` or `O <handle>`.
 
 use codec::types::Handle;
 use codec::EntityType;
@@ -82,7 +82,7 @@ impl CountCommand {
                 self.step = Step::PolyStart;
                 CmdResult::NeedPoint
             }
-            _ => CmdResult::ReportError("Invalid option keyword.".into()),
+            _ => CmdResult::ReportError(crate::t!("Invalid option keyword.").into_owned()),
         }
     }
 
@@ -150,10 +150,11 @@ impl CadCommand for CountCommand {
         let found = handles.iter().filter(|h| !self.targets.contains(h)).count();
         let first = self.targets.is_empty();
         self.targets = handles;
+        let total = self.targets.len();
         CmdResult::ReportMeasurement(if first {
-            format!("{found} found")
+            crate::tf!("{found} found").into_owned()
         } else {
-            format!("{found} found, {} total", self.targets.len())
+            crate::tf!("{found} found, {total} total").into_owned()
         })
     }
 
@@ -175,8 +176,10 @@ impl CadCommand for CountCommand {
                 self.area_done(format!("O {:X}", handle.value()))
             }
             _ => CmdResult::CancelWithMessage(
-                "Invalid count area boundary object. Select a closed polyline consisting of line segments and does not intersect itself."
-                    .into(),
+                crate::t!(
+                    "Invalid count area boundary object. Select a closed polyline consisting of line segments and does not intersect itself."
+                )
+                .into_owned(),
             ),
         }
     }
@@ -298,18 +301,11 @@ impl CountTableCommand {
         let page: Vec<String> = self.pending.drain(..self.pending.len().min(22)).collect();
         if !self.pending.is_empty() {
             self.step = TableStep::Page;
-            return CmdResult::ReportMeasurement(page.join("
-"));
+            return CmdResult::ReportMeasurement(page.join("\n"));
         }
         CmdResult::Measurement(format!(
-            "{}
-
-User     External     Dependent   Unnamed
-Blocks   References   Blocks      Blocks
-{:>5}{:>10}{:>12}{:>12}
-",
-            page.join("
-"),
+            "{}\n\nUser     External     Dependent   Unnamed\nBlocks   References   Blocks      Blocks\n{:>5}{:>10}{:>12}{:>12}\n",
+            page.join("\n"),
             self.blocks.len(),
             self.others[0],
             self.others[1],
@@ -371,7 +367,11 @@ impl CadCommand for CountTableCommand {
                 for part in text.split(',').map(str::trim).filter(|p| !p.is_empty()) {
                     match self.blocks.iter().find(|b| b.eq_ignore_ascii_case(part)) {
                         Some(b) => names.push(b.clone()),
-                        None => return Some(CmdResult::CancelWithMessage(format!("Block \"{part}\" cannot be found."))),
+                        None => {
+                            return Some(CmdResult::CancelWithMessage(
+                                crate::tf!("Block \"{part}\" cannot be found.").into_owned(),
+                            ))
+                        }
                     }
                 }
                 self.names = names;
@@ -393,7 +393,7 @@ impl CadCommand for CountTableCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
-            TableStep::Point => CmdResult::ReportError("Invalid point.".into()),
+            TableStep::Point => CmdResult::ReportError(crate::t!("Invalid point.").into_owned()),
             _ => self.on_text_input("").unwrap_or(CmdResult::NeedPoint),
         }
     }

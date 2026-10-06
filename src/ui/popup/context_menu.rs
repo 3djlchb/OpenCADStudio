@@ -726,7 +726,7 @@ fn idle_rows(
     rows.push(MenuRow::Item(if has_selection {
         cmd(t!("Count Selection").into_owned(), "COUNT _C")
     } else {
-        cmd(t!("Count menu").into_owned(), "COUNT")
+        cmd(t!("Count").into_owned(), "COUNT")
     }));
     rows.push(MenuRow::Separator);
 

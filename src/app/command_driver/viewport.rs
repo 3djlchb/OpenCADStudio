@@ -418,7 +418,7 @@ impl OpenCADStudio {
         }
     }
 
-    pub(super) fn handle_zoom_to_window(&mut self, p1: glam::DVec3, p2: glam::DVec3) {
+    pub(in crate::app) fn handle_zoom_to_window(&mut self, p1: glam::DVec3, p2: glam::DVec3) {
         let i = self.active_tab;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;

@@ -926,8 +926,6 @@ impl OpenCADStudio {
                 };
                 Message::PcManager(PcManagerMsg::Toggle(handle, row))
             }
-            // Point Cloud Manager tree: "search=<text>", "collapse", "expand",
-            // "toggle_node=<key>" or "select=<key>".
             // Count palette and count mode: "search=<text>", "sort=name|count",
             // "open=NAME", "child=NAME:<n>" (an expanded row), "menu=<review|field|
             // layer|scale|mirror>:NAME", "create_table", "check=NAME:1",
@@ -1000,6 +998,8 @@ impl OpenCADStudio {
                     _ => return Err(bad()),
                 })
             }
+            // Point Cloud Manager tree: "search=<text>", "collapse", "expand",
+            // "toggle_node=<key>" or "select=<key>".
             "pc_manager" => {
                 use crate::ui::window::pc_manager::PcManagerMsg as M;
                 let value = string(req, "value")?;
