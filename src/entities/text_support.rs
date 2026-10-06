@@ -1072,6 +1072,69 @@ pub(crate) fn cjk_break_between(prev: char, next: char) -> bool {
     !CLOSING.contains(next) && !OPENING.contains(prev)
 }
 
+/// A word's font runs, in logical order: `true` for a stretch the shaper
+/// draws, `false` for one the stroke font draws. With a stroke font the
+/// reference draws a mixed word run by run — Latin, digits and punctuation
+/// in the style's font, the letters of a script that needs shaping (with the
+/// marks that close them) in a TrueType face — so `שלום|12` keeps a thin
+/// bar and digits. A TrueType style shapes the whole word.
+pub(crate) fn word_runs<'t>(text: &'t str, face: &Face) -> Vec<(&'t str, bool)> {
+    use crate::scene::text::web_font::requires_shaping;
+    if face.ttf_family().is_some() {
+        return vec![(text, true)];
+    }
+    if !requires_shaping(text) {
+        return vec![(text, false)];
+    }
+    let mut runs: Vec<(&str, bool)> = Vec::new();
+    let mut start = 0;
+    let mut shaped_run = None;
+    for (i, c) in text.char_indices() {
+        let mut buf = [0u8; 4];
+        let shaped = requires_shaping(c.encode_utf8(&mut buf))
+            || (shaped_run == Some(true)
+                && (c == LRM || unicode_bidi::bidi_class(c) == unicode_bidi::BidiClass::NSM));
+        match shaped_run {
+            Some(prev) if prev != shaped => {
+                runs.push((&text[start..i], prev));
+                start = i;
+            }
+            _ => {}
+        }
+        shaped_run = Some(shaped);
+    }
+    if let Some(shaped) = shaped_run {
+        runs.push((&text[start..], shaped));
+    }
+    runs
+}
+
+/// The shaper's face for a word run.
+fn run_family(face: &Face) -> &str {
+    face.ttf_family()
+        .unwrap_or_else(|| crate::scene::text::web_font::primary_script().family())
+}
+
+/// Advance of a stroke-font run (glyph units × `scale`).
+fn stroke_run_width(face: &Face, text: &str, tracking: f32, scale: f32) -> f32 {
+    text.chars()
+        .map(|ch| match face.glyph(ch) {
+            Some(g) => (g.advance + face.spacing_after(ch) * tracking) * scale,
+            None => (6.0 + face.letter_spacing() * tracking) * scale,
+        })
+        .sum()
+}
+
+/// Width of one word run, as it is drawn.
+pub(crate) fn run_width(face: &Face, text: &str, shaped: bool, tracking: f32, scale: f32) -> f32 {
+    if shaped {
+        if let Some(run) = crate::scene::text::ttf_glyph::shape_run(run_family(face), text) {
+            return run.advance * scale;
+        }
+    }
+    stroke_run_width(face, text, tracking, scale)
+}
+
 pub fn measure_word(
     text: &str,
     state: &RunState,
@@ -1082,23 +1145,10 @@ pub fn measure_word(
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
     let face = Face::resolve(&font_name);
-    let shaping_family = face.ttf_family().or_else(|| {
-        crate::scene::text::web_font::requires_shaping(text)
-            .then(|| crate::scene::text::web_font::primary_script().family())
-    });
-    if let Some(fam) = shaping_family {
-        if let Some(run) = crate::scene::text::ttf_glyph::shape_run(fam, text) {
-            return run.advance * scale;
-        }
-    }
-    let mut w = 0.0_f32;
-    for ch in text.chars() {
-        w += match face.glyph(ch) {
-            Some(g) => (g.advance + face.spacing_after(ch) * state.tracking) * scale,
-            None => (6.0 + face.letter_spacing() * state.tracking) * scale,
-        };
-    }
-    w
+    word_runs(text, &face)
+        .into_iter()
+        .map(|(run, shaped)| run_width(&face, run, shaped, state.tracking, scale))
+        .sum()
 }
 
 /// Per-character cells of a word laid out by the shaper — the visual
@@ -1116,19 +1166,37 @@ pub fn word_cells(
     let scale = run_scale(state, entity_h, base_wf);
     let font_name = resolve_font(state, base_font);
     let face = Face::resolve(&font_name);
-    let family = face.ttf_family().or_else(|| {
-        crate::scene::text::web_font::requires_shaping(text)
-            .then(|| crate::scene::text::web_font::primary_script().family())
-    })?;
-    let run = crate::scene::text::ttf_glyph::shape_run(family, text)?;
-    Some(
-        crate::scene::text::ttf_glyph::char_cells(&run, text)
-            .into_iter()
-            .zip(text.chars())
-            .filter(|(_, c)| *c != LRM)
-            .map(|((x0, x1), _)| (x0 * scale, x1 * scale))
-            .collect(),
-    )
+    let runs = word_runs(text, &face);
+    if !runs.iter().any(|(_, shaped)| *shaped) {
+        return None;
+    }
+    let mut cells = Vec::new();
+    let mut x = 0.0_f32;
+    for (run, shaped) in runs {
+        let shaped_run = shaped
+            .then(|| crate::scene::text::ttf_glyph::shape_run(run_family(&face), run))
+            .flatten();
+        match shaped_run {
+            Some(shaped_run) => {
+                cells.extend(
+                    crate::scene::text::ttf_glyph::char_cells(&shaped_run, run)
+                        .into_iter()
+                        .zip(run.chars())
+                        .filter(|(_, c)| *c != LRM)
+                        .map(|((x0, x1), _)| (x + x0 * scale, x + x1 * scale)),
+                );
+                x += shaped_run.advance * scale;
+            }
+            None => {
+                for ch in run.chars().filter(|c| *c != LRM) {
+                    let w = stroke_run_width(&face, ch.encode_utf8(&mut [0u8; 4]), state.tracking, scale);
+                    cells.push((x, x + w));
+                    x += w;
+                }
+            }
+        }
+    }
+    Some(cells)
 }
 
 /// The letter spacing a stroke-font word leaves after its last glyph (0 for
@@ -1139,9 +1207,9 @@ fn trailing_letter_gap(atom: &LayoutAtom, entity_h: f32, base_wf: f32, base_font
     };
     let font_name = resolve_font(&atom.state, base_font);
     let face = Face::resolve(&font_name);
-    if face.ttf_family().is_some() || crate::scene::text::web_font::requires_shaping(text) {
+    let Some((text, false)) = word_runs(text, &face).last().copied() else {
         return 0.0;
-    }
+    };
     text.chars()
         .rev()
         .find(|c| *c != LRM)
@@ -2399,41 +2467,60 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         ins_y + (line_base_y + world_dy) as f64,
                     ];
                     // Glyphs from the plain word — the SDF run and the stroke
-                    // fallback both draw clean characters.
-                    let (strokes, fill_tris) = lff::tessellate_text_run(
-                        [0.0, 0.0],
-                        run_h,
-                        rot,
-                        signed_wf,
-                        oblique,
-                        tracking,
-                        &font_name,
-                        text,
-                    );
-                    let glyph_n = strokes.len();
-                    all_strokes.push(TextStroke {
-                        strokes,
-                        origin,
-                        color,
-                        fill_tris,
-                        plane: None,
-                        run: Some(GlyphRun {
-                            text: text.clone(),
-                            font: font_name.to_string(),
-                            height: run_h,
-                            rotation: rot,
-                            width_factor: signed_wf,
+                    // fallback both draw clean characters. A mixed word draws
+                    // run by run (see `word_runs`), each at its own pen.
+                    let face = Face::resolve(&font_name);
+                    let run_scale_x = run_h / 9.0 * signed_wf.abs();
+                    let mut run_x = 0.0_f32;
+                    for (run_text, shaped) in word_runs(text, &face) {
+                        let (strokes, fill_tris) = lff::tessellate_text_run(
+                            [0.0, 0.0],
+                            run_h,
+                            rot,
+                            signed_wf,
                             oblique,
                             tracking,
-                            bold: atom.state.bold,
-                        }),
-                    });
+                            &font_name,
+                            run_text,
+                        );
+                        let (dx, dy) = (run_x * cos_r, run_x * sin_r);
+                        all_strokes.push(TextStroke {
+                            strokes,
+                            origin: [origin[0] + dx as f64, origin[1] + dy as f64],
+                            color,
+                            fill_tris,
+                            plane: None,
+                            run: Some(GlyphRun {
+                                text: run_text.to_string(),
+                                font: font_name.to_string(),
+                                height: run_h,
+                                rotation: rot,
+                                width_factor: signed_wf,
+                                oblique,
+                                tracking,
+                                bold: atom.state.bold,
+                            }),
+                        });
+                        run_x += run_width(&face, run_text, shaped, tracking, run_scale_x);
+                    }
                     // Underline / overline / strike are lines, not glyphs; a
                     // run-group's strokes are suppressed by the SDF path, so
                     // emit the decorations in their own RUN-LESS group. Reuse
                     // lff's exact positions by tessellating the decorated word
                     // and taking the strokes it appends after the glyphs.
                     if atom.state.underline || atom.state.overline || atom.state.strike {
+                        let glyph_n = lff::tessellate_text_run(
+                            [0.0, 0.0],
+                            run_h,
+                            rot,
+                            signed_wf,
+                            oblique,
+                            tracking,
+                            &font_name,
+                            text,
+                        )
+                        .0
+                        .len();
                         let body = decorated(text, &atom.state);
                         let (deco, _) = lff::tessellate_text_run(
                             [0.0, 0.0],
