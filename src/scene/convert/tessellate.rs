@@ -78,11 +78,7 @@ fn oriented_text_corners(
     ]
 }
 
-/// FIELDDISPLAY box extent around a line of field text, in text heights:
-/// from a third of the height below the baseline to 1.19 heights above it
-/// (the reference's box, measured at 2.5 and 10 unit text).
-const FIELD_BOX_BELOW: f64 = 0.345;
-const FIELD_BOX_ABOVE: f64 = 1.19;
+use crate::entities::field::{BOX_ABOVE as FIELD_BOX_ABOVE, BOX_BELOW as FIELD_BOX_BELOW};
 
 /// FIELDDISPLAY boxes: each field's shown text, one box per line it spans,
 /// placed from the text layout itself, in the text's own (rotated) frame —

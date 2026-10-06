@@ -1525,6 +1525,7 @@ pub fn tessellate_table(
 
     // Accumulators keyed by quantised colour (+ weight for borders).
     let mut fills: HashMap<[u8; 4], ([f32; 4], Vec<[f32; 3]>)> = HashMap::default();
+    let mut field_fills: Vec<[f32; 3]> = Vec::new();
     // SDF cell text: glyph quads (per-vertex coloured) collected across all
     // cells; emitted as one text-carrying wire at the end.
     let mut text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
@@ -1972,6 +1973,50 @@ pub fn tessellate_table(
                     vertical_text: false,
                     want_glyph_boxes: false,
                 });
+                // FIELDDISPLAY: a field cell's text on a gray box, one per line,
+                // from the same layout's character cells (screen only).
+                if content.field_handle.is_some() && crate::entities::field::display() {
+                    let cells = layout_mtext(&MTextRenderOpts {
+                        columns: Default::default(),
+                        value: text,
+                        insertion: [to.x as f64, to.y as f64, to.z as f64],
+                        height: cell_h,
+                        rect_w: (col_width - margin_left - margin_right).max(0.0),
+                        rotation: rot,
+                        style: &resolved,
+                        attach_h_anchor,
+                        v_anchor,
+                        line_spacing_factor: 1.0,
+                        exact_line_spacing: false,
+                        rectangle_height: 0.0,
+                        vertical_text: false,
+                        want_glyph_boxes: true,
+                    })
+                        .glyph_boxes;
+                    let (sin_r, cos_r) = (rot as f64).sin_cos();
+                    let mut lines: Vec<[f64; 4]> = Vec::new();
+                    for b in &cells {
+                        let [l, base, r, top] = b.local.map(|v| v as f64);
+                        match lines.last_mut() {
+                            Some(c) if (c[1] - base).abs() <= 1e-3 * (top - base).max(c[3]) => {
+                                c[0] = c[0].min(l);
+                                c[2] = c[2].max(r);
+                                c[3] = c[3].max(top - base);
+                            }
+                            _ => lines.push([l, base, r, top - base]),
+                        }
+                    }
+                    for [l, base, r, h] in lines.into_iter().filter(|[l, _, r, _]| r > l) {
+                        let (b, t) = (base - crate::entities::field::BOX_BELOW * h, base + crate::entities::field::BOX_ABOVE * h);
+                        let w = |x: f64, y: f64| [
+                            (to.x as f64 + x * cos_r - y * sin_r) as f32,
+                            (to.y as f64 + x * sin_r + y * cos_r) as f32,
+                            to.z as f32,
+                        ];
+                        let q = [w(l, b), w(r, b), w(r, t), w(l, t)];
+                        field_fills.extend([q[0], q[1], q[2], q[0], q[2], q[3]]);
+                    }
+                }
                 let tcol = if selected {
                     sel_col
                 } else if !matches!(
@@ -2130,6 +2175,11 @@ pub fn tessellate_table(
         if !tris.is_empty() {
             out.push(mk(color, vec![], tris, 1.0));
         }
+    }
+    if !field_fills.is_empty() {
+        let mut background = mk(crate::entities::field::BACKGROUND, vec![], field_fills, 1.0);
+        background.plot_visible = false;
+        out.push(background);
     }
     for (_, (color, lw, pts)) in borders {
         if !pts.is_empty() {
