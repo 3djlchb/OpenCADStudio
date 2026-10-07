@@ -176,7 +176,7 @@ impl OpenCADStudio {
             }
             self.tabs[i].dirty = true;
             self.command_line.push_output(
-                crate::tf!(
+                crate::t!(
                     "EXTRUDE: created %{created} object(s); %{failed} source(s) could not be extruded.",
                     created = created_handles.len(),
                     failed = failed
@@ -427,7 +427,7 @@ impl OpenCADStudio {
             }
             self.tabs[i].dirty = true;
             self.command_line.push_output(
-                crate::tf!(
+                crate::t!(
                     "REVOLVE: created %{created} object(s); %{failed} source(s) could not be revolved.",
                     created = created_handles.len(),
                     failed = failed

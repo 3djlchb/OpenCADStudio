@@ -453,7 +453,7 @@ fn collect_drawing_paths(
         return Ok(());
     }
     if !path.is_dir() {
-        return Err(crate::tf!("Data source not found: %{path}", path = path.display()).into_owned());
+        return Err(crate::t!("Data source not found: %{path}", path = path.display()).into_owned());
     }
     for entry in std::fs::read_dir(path).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;

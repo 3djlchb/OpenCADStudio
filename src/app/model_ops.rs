@@ -1148,7 +1148,7 @@ impl super::OpenCADStudio {
 
         if prepared.is_empty() {
             self.command_line.push_output(
-                crate::tf!(
+                crate::t!(
                     "INTERSECT: no positive-area common result; %{count} original object(s) retained.",
                     count = retained_without_change
                 )
@@ -1215,7 +1215,7 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::tf!(
+            crate::t!(
                 "INTERSECT: created %{count} result object(s).",
                 count = results.len()
             )
@@ -1423,7 +1423,7 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::tf!("UNION: created %{count} result object(s).", count = created.len()).as_ref(),
+            crate::t!("UNION: created %{count} result object(s).", count = created.len()).as_ref(),
         );
         Task::none()
     }
@@ -1695,7 +1695,7 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::tf!(
+            crate::t!(
                 "SUBTRACT: created %{count} result object(s).",
                 count = retained.len()
             )
@@ -1928,7 +1928,7 @@ impl super::OpenCADStudio {
         self.tabs[i].dirty = true;
         self.refresh_properties();
         self.command_line.push_output(
-            crate::tf!(
+            crate::t!(
                 "SLICE: created %{count} result object(s).",
                 count = retained.len()
             )
