@@ -162,6 +162,11 @@ pub(crate) fn tessellate_entity(
             }
             wires.extend(construction);
         }
+        for points in model::solid_history::composite_history_edges(document, handle) {
+            let selected = selected.contains(&handle);
+            let color = [1.0, 0.25, 0.25, 1.0];
+            wires.push(WireModel::solid_f64(handle.value().to_string(), points, color, selected));
+        }
     }
     wires
 }
@@ -10546,6 +10551,33 @@ impl Scene {
                 let mesh = set.geometry_lods().first()?;
                 Some((
                     target,
+                    mesh,
+                    set.instance_transform,
+                    mesh_interaction_aabb(set)?,
+                ))
+            }),
+            view_rot,
+            eye,
+            bounds,
+        )
+    }
+
+    /// The solid under the cursor and where the pick ray meets it.
+    pub fn solid_click_hit_point(
+        &self,
+        cursor: iced::Point,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+    ) -> Option<(Handle, glam::DVec3)> {
+        let meshes = self.interaction_meshes_arc();
+        pick::hit_test::mesh_click_handle_point(
+            cursor,
+            meshes.iter().filter_map(|set| {
+                let handle = set.entity_handle()?;
+                let mesh = set.geometry_lods().first()?;
+                Some((
+                    handle,
                     mesh,
                     set.instance_transform,
                     mesh_interaction_aabb(set)?,

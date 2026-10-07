@@ -135,6 +135,95 @@ pub fn select_operand(document: &codec::CadDocument, handle: codec::Handle, labe
     }
 }
 
+/// Pick the operand of a composite whose own surface passes through
+/// `point` — where a click landed on the composite — for editing. False when
+/// the solid has no boolean step or no operand surface is there.
+///
+/// The point comes from the displayed mesh, so it sits off the true surface
+/// by the tessellation's chord; the search widens until some operand's
+/// surface is in reach, and the first in reach wins.
+pub fn select_operand_at(
+    document: &codec::CadDocument,
+    handle: codec::Handle,
+    point: glam::DVec3,
+) -> bool {
+    let operands = placed_operands(document, handle);
+    let size = operands
+        .iter()
+        .filter_map(|(_, body)| kernel::brep::body_bounds(body))
+        .map(|bounds| {
+            (0..3)
+                .map(|axis| bounds.max[axis] - bounds.min[axis])
+                .fold(0.0_f64, f64::max)
+        })
+        .fold(0.0_f64, f64::max);
+    for reach in [1e-6, 1e-4, 1e-3, 1e-2] {
+        let found = operands.iter().find(|(_, body)| {
+            kernel::brep::contains_point(body, point.to_array(), reach * size)
+                == kernel::brep::Containment::OnBoundary
+        });
+        if let Some((id, _)) = found {
+            EDIT_OPERANDS.with(|operands| operands.borrow_mut().insert(handle, *id));
+            return true;
+        }
+    }
+    false
+}
+
+/// The solids a composite's booleans joined, each rebuilt where it sits in
+/// the composite, with its node id. Empty for a solid with no boolean step.
+fn placed_operands(
+    document: &codec::CadDocument,
+    handle: codec::Handle,
+) -> Vec<(i32, kernel::brep::Body)> {
+    let Some(tree) = document
+        .solid_history_tree(handle)
+        .filter(|tree| tree.has_boolean())
+    else {
+        return Vec::new();
+    };
+    tree.leaves()
+        .into_iter()
+        .filter_map(|operation| {
+            let id = operation.base()?.node_id();
+            let frame = ancestors_frame(&tree, id)?;
+            let mut placed = operation.clone();
+            let base = placed.base_mut()?;
+            base.transform = (frame * matrix(base.transform)?).to_cols_array();
+            Some((id, kernel::acis::rebuild_body(&placed).ok()?))
+        })
+        .collect()
+}
+
+/// With its history shown, a composite draws the solids its booleans joined,
+/// each where it sits: their edges, as world polylines.
+pub fn composite_history_edges(
+    document: &codec::CadDocument,
+    handle: codec::Handle,
+) -> Vec<Vec<[f64; 3]>> {
+    let Some((_, object_show_history, show_history_mode)) = history_flags(document, handle) else {
+        return Vec::new();
+    };
+    if !displayed_history_state(object_show_history, show_history_mode).0 {
+        return Vec::new();
+    }
+    placed_operands(document, handle)
+        .iter()
+        .flat_map(|(_, body)| {
+            kernel::brep::mesh::tessellate_wireframe(
+                body,
+                kernel::brep::mesh::TessellationTolerance::new(
+                    kernel::tessellation::DEFAULT_ANGLE,
+                    1e-9,
+                ),
+            )
+            .edges
+        })
+        .map(|edge| edge.positions)
+        .filter(|positions| positions.len() >= 2)
+        .collect()
+}
+
 /// The composite's history and the node id of the operand being edited: the
 /// one last chosen, or the first.
 fn selected_operand(

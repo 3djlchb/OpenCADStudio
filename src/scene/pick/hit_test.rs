@@ -904,6 +904,17 @@ pub(crate) fn mesh_click_point<'a>(
     mesh_click_result(cursor, meshes, view_rot, eye, bounds).map(|(_, _, point)| point)
 }
 
+/// The nearest mesh under the cursor and where the pick ray meets it.
+pub(crate) fn mesh_click_handle_point<'a>(
+    cursor: Point,
+    meshes: impl Iterator<Item = MeshPickItem<'a>>,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+) -> Option<(Handle, glam::DVec3)> {
+    mesh_click_result(cursor, meshes, view_rot, eye, bounds).map(|(_, handle, point)| (handle, point))
+}
+
 fn mesh_click_result<'a>(
     cursor: Point,
     meshes: impl Iterator<Item = MeshPickItem<'a>>,

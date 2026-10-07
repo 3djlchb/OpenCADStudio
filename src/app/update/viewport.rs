@@ -656,7 +656,7 @@ impl OpenCADStudio {
         }
     }
 
-    fn grip_edit_for_hit(
+    pub(in crate::app) fn grip_edit_for_hit(
         &mut self,
         i: usize,
         handle: Handle,
@@ -3735,6 +3735,36 @@ impl OpenCADStudio {
                 self.command_line
                     .push_info(&format!("{}: {url}", crate::t!("Hyperlink")));
                 return crate::sys::open_url(&url, self.main_window);
+            }
+        }
+
+        // Ctrl+click on a composite solid picks the solid of it under the
+        // cursor — the one the Properties palette and grips then edit.
+        if self.ctrl_down
+            && self.tabs[i].active_cmd.is_none()
+            && self.tabs[i].scene.current_layout == "Model"
+        {
+            let (view_rot, eye) = {
+                let cam = self.tabs[i].scene.camera.borrow();
+                (cam.view_proj_rte(bounds), cam.eye())
+            };
+            let hit = self.tabs[i].scene.solid_click_hit_point(p, view_rot, eye, bounds);
+            if let Some((handle, _)) = hit.filter(|(handle, point)| {
+                crate::scene::model::solid_history::select_operand_at(
+                    &self.tabs[i].scene.document,
+                    *handle,
+                    *point,
+                )
+            }) {
+                self.tabs[i]
+                    .scene
+                    .selection
+                    .borrow_mut()
+                    .clear_left_selection_gesture();
+                self.tabs[i].scene.deselect_all();
+                self.tabs[i].scene.select_entity(handle, false);
+                self.refresh_properties();
+                return Task::none();
             }
         }
 
