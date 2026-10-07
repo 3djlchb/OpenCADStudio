@@ -2193,10 +2193,27 @@ impl OpenCADStudio {
                         PropSection {
                             title: t!("General").into_owned(),
                             props: vec![
-                                read_only(
-                                    t!("AC Version").as_ref(),
-                                    doc.version.as_str().to_string(),
-                                ),
+                                read_only(t!("AC Version").as_ref(), {
+                                    use codec::DxfVersion::*;
+                                    let version = doc.dwg_source_version.unwrap_or(doc.version);
+                                    let release = match version {
+                                        AC1009 => "R11/R12",
+                                        AC1012 => "R13",
+                                        AC1014 => "R14",
+                                        AC1015 => "2000-2002",
+                                        AC1018 => "2004-2006",
+                                        AC1021 => "2007-2009",
+                                        AC1024 => "2010-2012",
+                                        AC1027 => "2013-2017",
+                                        AC1032 => "2018+",
+                                        Unknown => "",
+                                    };
+                                    if release.is_empty() {
+                                        version.as_str().to_string()
+                                    } else {
+                                        format!("{} ({release})", version.as_str())
+                                    }
+                                }),
                                 Property {
                                     label: t!("Color").into_owned(),
                                     field: "color",
