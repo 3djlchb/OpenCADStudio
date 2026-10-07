@@ -107,6 +107,18 @@ fn mirror_true_text_flags(e: &mut EntityType) {
     }
 }
 
+/// Transform one entity of a dimension's `*D` block. Its text reads the
+/// right way after a mirror, whatever MIRRTEXT says.
+fn transform_dimension_part(entity: &mut EntityType, t: &EntityTransform) {
+    let orient = matches!(t, EntityTransform::Mirror { .. })
+        .then(|| capture_text_orient(entity))
+        .flatten();
+    view::dispatch::apply_transform(entity, t);
+    if let Some(orient) = orient {
+        restore_text_orient(entity, &orient);
+    }
+}
+
 impl Scene {
     pub(crate) fn sync_displayed_annotation_context(&mut self, handle: Handle) -> bool {
         let scale = self.displayed_annotation_scale_handle();
@@ -357,7 +369,7 @@ impl Scene {
                 self.record_undo_before(*h, before);
             }
             if let Some(entity) = self.document.get_entity_mut(*h) {
-                view::dispatch::apply_transform(entity, t);
+                transform_dimension_part(entity, t);
             }
         }
         // The moved `*D` contents are a block definition the block cache holds;
@@ -639,7 +651,7 @@ impl Scene {
             .ok()?;
         for sub in subs {
             let mut sub = sub.clone();
-            view::dispatch::apply_transform(&mut sub, t);
+            transform_dimension_part(&mut sub, t);
             Self::reset_clone_subhandles(&mut self.document, &mut sub);
             sub.common_mut().handle = Handle::NULL;
             sub.common_mut().owner_handle = br_handle;
