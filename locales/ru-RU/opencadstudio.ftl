@@ -2332,6 +2332,7 @@ common =
     .load-linetypes = Загрузить типы линий
     .requires-two-positive-values = Требуются два положительных значения (x,y) или одно для обоих.
     .snap-marker-color = Цвет маркера привязки
+    .command-line-text-color = Цвет текста командной строки
     .linetypes-loaded = Загружено типов линий: __ocs_fmt_0__.
     .geometric-center-snap = Геометрический центр
     .no-trim-option = Без обрезки

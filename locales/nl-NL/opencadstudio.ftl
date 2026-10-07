@@ -2329,6 +2329,7 @@ common =
     .load-linetypes = Lijntypen laden
     .requires-two-positive-values = Vereist twee positieve waarden (x,y) of één voor beide.
     .snap-marker-color = Kleur van snapmarkering
+    .command-line-text-color = Tekstkleur opdrachtregel
     .linetypes-loaded = __ocs_fmt_0__ lijntype(n) geladen.
     .geometric-center-snap = Geometrisch middelpunt
     .no-trim-option = Niet trimmen

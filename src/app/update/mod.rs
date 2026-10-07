@@ -8060,6 +8060,20 @@ impl OpenCADStudio {
                     None => Message::Noop,
                 },
             ),
+            Message::CommandTextColorChanged(value) => {
+                self.command_text_color_input = value.clone();
+                let color = if value.trim().is_empty() {
+                    None
+                } else if let Some(rgb) = crate::app::config::parse_hex(&value) {
+                    Some(rgb)
+                } else {
+                    return Task::none();
+                };
+                self.command_text_color = color;
+                crate::ui::command_line::set_text_color(color);
+                self.persist_settings_if_changed();
+                Task::none()
+            }
             Message::SnapMarkerColorChanged(value) => {
                 self.snap_marker_color_input = value.clone();
                 if value.trim().is_empty() {
@@ -8532,7 +8546,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::OpenFolder(path) => crate::sys::open_url(&path, None),
+            Message::OpenFolder(path) => {
+                // The fonts folder exists only once something is put in it.
+                let _ = std::fs::create_dir_all(&path);
+                crate::sys::open_url(&path, None)
+            }
 
             Message::PickDragRectToggled(rectangle) => {
                 self.pick_drag_rect = rectangle;

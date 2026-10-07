@@ -376,6 +376,8 @@ impl OpenCADStudio {
                                         .map(|p| p.display().to_string()),
                                     autosave: crate::config::config_dir()
                                         .map(|_| std::env::temp_dir().display().to_string()),
+                                    fonts: crate::io::font_repo::fonts_dir()
+                                        .map(|p| p.display().to_string()),
                                 }
                             }
                             #[cfg(target_arch = "wasm32")]
@@ -391,6 +393,8 @@ impl OpenCADStudio {
                         &self.crosshair_color_input,
                         self.snap_marker_color,
                         &self.snap_marker_color_input,
+                        self.command_text_color,
+                        &self.command_text_color_input,
                         self.lineweight_display_scale,
                         &self.model_space,
                         &self.model_bg_input,

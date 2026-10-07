@@ -592,6 +592,10 @@ pub(super) struct OpenCADStudio {
     crosshair_color_input: String,
     /// Explicit object-snap marker colour; `None` keeps the automatic one.
     snap_marker_color: Option<[u8; 3]>,
+    /// Explicit command-line text colour; `None` keeps the theme's.
+    command_text_color: Option<[u8; 3]>,
+    /// Editable Options buffer for the command-line text colour.
+    command_text_color_input: String,
     /// Editable Options buffer for the snap marker colour.
     snap_marker_color_input: String,
     /// Defer the ISOLINES mesh rebuild until the slider is released.
@@ -2296,6 +2300,7 @@ pub enum Message {
     /// Edit the optional crosshair RGB value; blank restores automatic contrast.
     CrosshairColorChanged(String),
     SnapMarkerColorChanged(String),
+    CommandTextColorChanged(String),
     /// Options → Files: the default template for new drawings.
     QnewTemplateChanged(String),
     QnewTemplateBrowse,
@@ -4167,6 +4172,8 @@ impl OpenCADStudio {
             crosshair_color_input: String::new(),
             snap_marker_color: None,
             snap_marker_color_input: String::new(),
+            command_text_color: None,
+            command_text_color_input: String::new(),
             isolines_awaiting_regen: false,
             snap_angle_input: "0".to_string(),
             lineweight_display_scale: 100,

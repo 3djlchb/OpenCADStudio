@@ -2319,6 +2319,7 @@ common =
     .load-linetypes = 線種をロード
     .requires-two-positive-values = 2つの正の値 (x,y)、または両方に共通の1つの値が必要です。
     .snap-marker-color = スナップ マーカーの色
+    .command-line-text-color = コマンドラインの文字色
     .linetypes-loaded = __ocs_fmt_0__ 個の線種をロードしました。
     .geometric-center-snap = 図心
     .no-trim-option = トリムしない

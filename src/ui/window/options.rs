@@ -97,6 +97,9 @@ pub struct Folders {
     pub plot_styles: Option<String>,
     pub plugins: Option<String>,
     pub autosave: Option<String>,
+    /// Where `.shx` / `.ttf` fonts dropped in by the user (or downloaded for
+    /// a drawing) are found.
+    pub fonts: Option<String>,
 }
 
 /// Values read from the current drawing's header rather than from preferences.
@@ -217,6 +220,8 @@ pub fn view_window<'a>(
     crosshair_color_input: &'a str,
     snap_marker_color: Option<[u8; 3]>,
     snap_marker_color_input: &'a str,
+    command_text_color: Option<[u8; 3]>,
+    command_text_color_input: &'a str,
     lineweight_display_scale: i32,
     model_space: &'a crate::app::config::ModelSpaceThemeConfig,
     model_bg_input: &'a str,
@@ -526,6 +531,24 @@ pub fn view_window<'a>(
             ..Default::default()
         });
 
+    let command_rgb = command_text_color.unwrap_or([220, 220, 220]);
+    let command_swatch = container(Space::new())
+        .width(28)
+        .height(22)
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(iced::Color::from_rgb8(
+                command_rgb[0],
+                command_rgb[1],
+                command_rgb[2],
+            ))),
+            border: Border {
+                color: theme.palette().background.strong.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+
     let snap_rgb = snap_marker_color.unwrap_or([255, 230, 26]);
     let snap_swatch = container(Space::new())
         .width(28)
@@ -798,6 +821,18 @@ pub fn view_window<'a>(
                 snap_swatch,
                 text_input(crate::t!("#RRGGBB or blank").as_ref(), snap_marker_color_input)
                     .on_input(Message::SnapMarkerColorChanged)
+                    .width(150),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(10))
+        .push(
+            row![
+                text(crate::t!("Command line text color")).size(12).width(140),
+                command_swatch,
+                text_input(crate::t!("#RRGGBB or blank").as_ref(), command_text_color_input)
+                    .on_input(Message::CommandTextColorChanged)
                     .width(150),
             ]
             .spacing(10)
@@ -1700,6 +1735,8 @@ pub fn view_window<'a>(
         folder_row(crate::t!("Plugins"), folders.plugins.clone()),
         Space::new().height(12),
         folder_row(crate::t!("Autosave files"), folders.autosave.clone()),
+        Space::new().height(12),
+        folder_row(crate::t!("Fonts"), folders.fonts.clone()),
         Space::new().height(16),
         text(crate::t!("Default template for new drawings")).size(12),
         Space::new().height(4),

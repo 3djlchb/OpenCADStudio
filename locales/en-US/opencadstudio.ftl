@@ -2329,6 +2329,7 @@ common =
     .load-linetypes = Load Linetypes
     .requires-two-positive-values = Requires two positive values (x,y) or one for both.
     .snap-marker-color = Snap marker color
+    .command-line-text-color = Command line text color
     .linetypes-loaded = __ocs_fmt_0__ linetype(s) loaded.
     .geometric-center-snap = Geometric Center
     .no-trim-option = No trim

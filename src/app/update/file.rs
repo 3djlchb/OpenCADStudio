@@ -682,6 +682,7 @@ impl OpenCADStudio {
             cursor_type: self.cursor_type,
             crosshair_color: self.crosshair_color,
             snap_marker_color: self.snap_marker_color,
+            command_text_color: self.command_text_color,
             lineweight_display_scale: self.lineweight_display_scale,
             isometric_drafting: self.isometric_drafting,
             iso_plane: self.iso_plane,
@@ -798,6 +799,12 @@ impl OpenCADStudio {
             .snap_marker_color
             .map(crate::app::config::rgb_to_hex)
             .unwrap_or_default();
+        self.command_text_color = s.command_text_color;
+        self.command_text_color_input = s
+            .command_text_color
+            .map(crate::app::config::rgb_to_hex)
+            .unwrap_or_default();
+        crate::ui::command_line::set_text_color(s.command_text_color);
         self.lineweight_display_scale = s.lineweight_display_scale.clamp(25, 200);
         self.isometric_drafting = s.isometric_drafting;
         self.iso_plane = s.iso_plane;

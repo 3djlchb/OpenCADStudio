@@ -2328,6 +2328,7 @@ common =
     .load-linetypes = Зареждане на типове линии
     .requires-two-positive-values = Изискват се две положителни стойности (x,y) или една за двете.
     .snap-marker-color = Цвят на маркера за прихващане
+    .command-line-text-color = Цвят на текста в командния ред
     .linetypes-loaded = Заредени типове линии: __ocs_fmt_0__.
     .geometric-center-snap = Геометричен център
     .no-trim-option = Без подрязване

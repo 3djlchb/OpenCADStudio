@@ -432,6 +432,8 @@ pub struct UserSettings {
     pub crosshair_color: Option<[u8; 3]>,
     /// Explicit object-snap marker RGB. `None` keeps the automatic colour.
     pub snap_marker_color: Option<[u8; 3]>,
+    /// Explicit command-line text RGB. `None` keeps the theme's.
+    pub command_text_color: Option<[u8; 3]>,
     /// Model-space lineweight preview scale as a percentage.
     pub lineweight_display_scale: i32,
     /// Isometric drafting changes the grid and crosshair to the active axis
@@ -825,6 +827,7 @@ impl Default for UserSettings {
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,
             snap_marker_color: None,
+            command_text_color: None,
             lineweight_display_scale: 100,
             isometric_drafting: false,
             iso_plane: IsoPlane::Left,

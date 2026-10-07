@@ -801,12 +801,18 @@ impl CommandLine {
                 .on_input(Message::CommandInput)
                 .on_submit(Message::CommandSubmit);
         }
-        let input = input.size(11).padding(Padding {
-            top: 4.0,
-            right: 30.0,
-            bottom: 4.0,
-            left: 6.0,
-        });
+        let input = input
+            .size(11)
+            .padding(Padding {
+                top: 4.0,
+                right: 30.0,
+                bottom: 4.0,
+                left: 6.0,
+            })
+            .style(|theme: &Theme, status| text_input::Style {
+                value: text_color(theme),
+                ..text_input::default(theme, status)
+            });
         // Autocomplete suggestions panel, shown above the input row
         // when the user has typed a prefix that matches at least one
         // command. Each row is a button — clicking it dispatches the
@@ -1159,18 +1165,43 @@ fn header_btn_style(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// The user's command-line text colour, packed `0x01RRGGBB`; 0 keeps the
+/// theme's. Global because the history highlighter takes a plain `fn`.
+static TEXT_COLOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn set_text_color(rgb: Option<[u8; 3]>) {
+    let packed = rgb.map_or(0, |[r, g, b]| 1 << 24 | u32::from_be_bytes([0, r, g, b]));
+    TEXT_COLOR.store(packed, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn user_text_color() -> Option<Color> {
+    match TEXT_COLOR.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        packed => {
+            let [_, r, g, b] = packed.to_be_bytes();
+            Some(Color::from_rgb8(r, g, b))
+        }
+    }
+}
+
+fn text_color(theme: &Theme) -> Color {
+    user_text_color().unwrap_or(theme.palette().background.base.text)
+}
+
 fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
     let palette = theme.palette();
     match kind {
-        EntryKind::Command => palette.background.base.text,
-        EntryKind::Output => palette.background.base.text.scale_alpha(0.72),
+        EntryKind::Command => text_color(theme),
+        EntryKind::Output => text_color(theme).scale_alpha(0.72),
         EntryKind::Error => palette.danger.base.color,
-        EntryKind::Info => accessible_accent_threshold(
-            palette.primary.base.color,
-            palette.background.base.color,
-            palette.background.base.text,
-            4.5,
-        ),
+        EntryKind::Info => user_text_color().unwrap_or_else(|| {
+            accessible_accent_threshold(
+                palette.primary.base.color,
+                palette.background.base.color,
+                palette.background.base.text,
+                4.5,
+            )
+        }),
     }
 }
 

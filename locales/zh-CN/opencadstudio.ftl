@@ -2316,6 +2316,7 @@ common =
     .load-linetypes = 加载线型
     .requires-two-positive-values = 需要两个正值 (x,y)，或一个同时用于两者的值。
     .snap-marker-color = 捕捉标记颜色
+    .command-line-text-color = 命令行文字颜色
     .linetypes-loaded = 已加载 __ocs_fmt_0__ 个线型。
     .geometric-center-snap = 几何中心
     .no-trim-option = 不修剪

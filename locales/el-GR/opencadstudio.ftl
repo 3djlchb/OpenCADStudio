@@ -2328,6 +2328,7 @@ common =
     .load-linetypes = Φόρτωση τύπων γραμμής
     .requires-two-positive-values = Απαιτούνται δύο θετικές τιμές (x,y) ή μία και για τις δύο.
     .snap-marker-color = Χρώμα δείκτη έλξης
+    .command-line-text-color = Χρώμα κειμένου γραμμής εντολών
     .linetypes-loaded = Φορτώθηκαν __ocs_fmt_0__ τύποι γραμμής.
     .geometric-center-snap = Γεωμετρικό κέντρο
     .no-trim-option = Χωρίς περικοπή

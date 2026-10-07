@@ -2341,6 +2341,7 @@ common =
     .load-linetypes = تحميل أنواع الخطوط
     .requires-two-positive-values = يتطلب قيمتين موجبتين (x,y) أو قيمة واحدة لكليهما.
     .snap-marker-color = لون علامة الالتقاط
+    .command-line-text-color = لون نص سطر الأوامر
     .linetypes-loaded = تم تحميل __ocs_fmt_0__ من أنواع الخطوط.
     .geometric-center-snap = المركز الهندسي
     .no-trim-option = بدون تشذيب

@@ -2328,6 +2328,7 @@ common =
     .load-linetypes = Vonaltípusok betöltése
     .requires-two-positive-values = Két pozitív érték (x,y) vagy egy közös érték szükséges.
     .snap-marker-color = Illesztési jelölő színe
+    .command-line-text-color = Parancssor szövegszíne
     .linetypes-loaded = __ocs_fmt_0__ vonaltípus betöltve.
     .geometric-center-snap = Geometriai középpont
     .no-trim-option = Nincs vágás

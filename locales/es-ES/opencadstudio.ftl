@@ -2329,6 +2329,7 @@ common =
     .load-linetypes = Cargar tipos de línea
     .requires-two-positive-values = Requiere dos valores positivos (x,y) o uno para ambos.
     .snap-marker-color = Color del marcador de referencia
+    .command-line-text-color = Color del texto de la línea de comandos
     .linetypes-loaded = __ocs_fmt_0__ tipo(s) de línea cargado(s).
     .geometric-center-snap = Centro geométrico
     .no-trim-option = No recortar
