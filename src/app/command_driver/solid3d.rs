@@ -497,22 +497,34 @@ impl OpenCADStudio {
         let mut created_handles = Vec::new();
         let mut consumed = Vec::new();
         for (handle, profile) in profiles {
-            let result = path.as_ref().zip(options).and_then(|(path, options)| {
-                let mut record = sweep_model::sweep_record(&profile, path, options)?;
+            // A refused sweep reports the modeler error code, as the
+            // reference does.
+            let result = (|| -> Result<_, Option<u32>> {
+                let (path, options) = path.as_ref().zip(options).ok_or(None)?;
+                let mut record = sweep_model::sweep_record(&profile, path, options).ok_or(None)?;
                 record.flags_294_296[0] |= picked_base;
                 let (_, _, closed) = kernel::acis::sweep_profile_geometry(
-                    record.sweep_entity.as_ref()?,
+                    record.sweep_entity.as_ref().ok_or(None)?,
                     record.sweep_entity_transform,
                 )
-                .ok()?;
+                .map_err(|_| None)?;
                 let surface = mode == ExtrudeMode::Surface || !closed;
-                let body =
-                    kernel::acis::rebuild_sweep_with_mode(&record, surface).ok()?;
-                Some((body, record, surface))
-            });
-            let Some((body, record, surface)) = result else {
-                failed += 1;
-                continue;
+                let body = kernel::acis::rebuild_sweep_with_mode(&record, surface).map_err(|error| match error {
+                    kernel::acis::HistoryRebuildError::Refused(why) => Some(sweep_model::sweep_refusal_code(why)),
+                    _ => None,
+                })?;
+                Ok((body, record, surface))
+            })();
+            let (body, record, surface) = match result {
+                Ok(value) => value,
+                Err(code) => {
+                    if let Some(code) = code {
+                        self.command_line.push_output(crate::t!("Modeling Operation Error:").as_ref());
+                        self.command_line.push_output(crate::tf!("Error Code Number is {code}", code = code).as_ref());
+                    }
+                    failed += 1;
+                    continue;
+                }
             };
             let deletes_path =
                 crate::app::delobj_deletes_auxiliary(delete_objects, surface);
@@ -550,14 +562,9 @@ impl OpenCADStudio {
                 self.tabs[i].scene.select_entity(*handle, true);
             }
             self.tabs[i].dirty = true;
-            self.command_line.push_output(crate::tf!(
-                "SWEEP: created {created} object(s); {failed} source(s) could not be swept.",
-                created = created_handles.len(), failed = failed
-            ).as_ref());
-        } else {
-            self.command_line.push_error(
-                crate::t!("SWEEP: could not sweep the profile along the path.").as_ref(),
-            );
+        }
+        if failed > 0 {
+            self.command_line.push_output(crate::tf!("Unable to sweep {failed} selected objects.", failed = failed).as_ref());
         }
         if let Some(pending) = pending {
             self.commit_undo_delta(i, pending);

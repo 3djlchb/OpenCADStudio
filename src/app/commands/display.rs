@@ -817,6 +817,7 @@ impl OpenCADStudio {
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
                 let isolines = crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines);
                 let mut cmd = SweepCommand::new(color, isolines);
+                cmd.set_parameters(self.tabs[i].scene.named_parameters().clone());
                 let selected = self.tabs[i].scene.selected_handles_in_order()
                     .into_iter()
                     .filter_map(|handle| self.tabs[i].scene.document.get_entity(handle)

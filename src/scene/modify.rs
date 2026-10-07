@@ -1454,6 +1454,19 @@ impl Scene {
         self.rebuild_solid_history(handle, operation)
     }
 
+    /// The modeler error code the reference reports when it refuses a sweep
+    /// property edit (twist or scale along a path with a corner).
+    pub fn solid_history_property_refusal(&self, handle: Handle, field: &str, value: &str) -> Option<u32> {
+        let mut operation = crate::scene::model::solid_history::primitive_property_operation(&self.document, handle)?;
+        if !crate::scene::model::solid_history::apply_primitive_property(&mut operation, field, value) {
+            return None;
+        }
+        let codec::objects::SolidHistoryOperation::Sweep(record) = &operation else {
+            return None;
+        };
+        kernel::acis::sweep_history_refusal(record).map(crate::scene::model::sweep_model::sweep_refusal_code)
+    }
+
     pub fn apply_solid_position_property(
         &mut self,
         handle: Handle,
