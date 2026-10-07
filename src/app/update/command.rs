@@ -4656,6 +4656,37 @@ mod layer_name_target_tests {
             .collect();
         assert_eq!(before, after, "unknown name must change nothing");
     }
+
+    #[test]
+    fn layer_transparency_edit_pushes_undo() {
+        // #43: every sibling layer arm pushes an undo entry; transparency must too.
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        let _ = app.update(Message::LayerTransparencyEdit("0".to_string(), "50".to_string()));
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            before + 1,
+            "transparency edit must push an undo entry like its siblings"
+        );
+        let panel = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == "0")
+            .expect("layer 0 in panel");
+        assert_eq!(panel.transparency, 50);
+        app.undo_active_tab();
+        let panel = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == "0")
+            .expect("layer 0 in panel");
+        assert_eq!(panel.transparency, 0, "undo must restore transparency");
+    }
 }
 
 #[cfg(test)]

@@ -3717,23 +3717,25 @@ impl OpenCADStudio {
                 // Apply the edited transparency to every selected layer (#236).
                 if let Some(v) = val {
                     let targets = self.layer_row_action_targets(i, idx);
-                    for name in &targets {
-                        if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(name) {
-                            layer.transparency =
-                                codec::types::Transparency::from_percent(v as f64 / 100.0);
-                        }
-                        if let Some(pl) = self.tabs[i]
-                            .layers
-                            .layers
-                            .iter_mut()
-                            .find(|l| &l.name == name)
-                        {
-                            pl.transparency = v;
-                        }
-                    }
                     if !targets.is_empty() {
+                        let undo = self.begin_layer_undo(i, "LAYER TRANSPARENCY", &targets);
+                        for name in &targets {
+                            if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                layer.transparency =
+                                    codec::types::Transparency::from_percent(v as f64 / 100.0);
+                            }
+                            if let Some(pl) = self.tabs[i]
+                                .layers
+                                .layers
+                                .iter_mut()
+                                .find(|l| &l.name == name)
+                            {
+                                pl.transparency = v;
+                            }
+                        }
                         self.tabs[i].scene.invalidate_layer_dependencies(&targets);
                         self.tabs[i].dirty = true;
+                        self.commit_layer_undo(i, undo);
                     }
                 }
                 Task::none()
