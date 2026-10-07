@@ -341,6 +341,15 @@ impl OpenCADStudio {
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
+    /// Finish the pending history step, dropping it when it changed nothing
+    /// even if it was opened as a mark ([`Self::push_undo_mark`]).
+    pub(super) fn drop_unchanged_pending_history(&mut self, i: usize) {
+        if let Some(pending) = self.tabs[i].history.pending.as_mut() {
+            pending.keep_empty = false;
+        }
+        self.finish_pending_history(i);
+    }
+
     pub(super) fn finish_all_pending_history(&mut self) {
         for i in 0..self.tabs.len() {
             self.finish_pending_history(i);
