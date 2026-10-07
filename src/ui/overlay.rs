@@ -1898,7 +1898,10 @@ impl canvas::Program<Message> for SelectionCanvas {
             && !self.suppressed
             && self.crosshair.cursor_type == CursorType::Crosshair
         {
-            if let Some(cp) = self.selection.borrow().input.last_move_pos {
+            // Over a grip the crosshair locks onto it, so the click lands on
+            // the grip exactly.
+            let hovered_grip = self.grips.iter().find(|grip| grip.is_hovered).map(|grip| grip.pos);
+            if let Some(cp) = hovered_grip.or(self.selection.borrow().input.last_move_pos) {
                 let [r, g, b, a] = self.crosshair.color.map_or_else(
                     || {
                         crate::scene::view::render::adapt_to_bg(
