@@ -149,7 +149,7 @@ fn entity_history_handle(entity: &EntityType) -> Option<Handle> {
     .filter(|handle| handle.is_valid())
 }
 
-fn history_operation_name(operation: &SolidHistoryOperation) -> &'static str {
+pub(crate) fn history_operation_name(operation: &SolidHistoryOperation) -> &'static str {
     match operation {
         SolidHistoryOperation::Unknown => "Unknown",
         SolidHistoryOperation::Box(_) => "Box",

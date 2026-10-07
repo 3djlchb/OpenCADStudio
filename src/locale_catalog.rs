@@ -4895,6 +4895,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Requires two positive values (x,y) or one for both." => Some(("common", "requires-two-positive-values")),
         "Snap marker color" => Some(("common", "snap-marker-color")),
         "Command line text color" => Some(("common", "command-line-text-color")),
+        "Operand" => Some(("common", "operand")),
         "{added} linetype(s) loaded." => Some(("common", "linetypes-loaded")),
         "Geometric Center" => Some(("common", "geometric-center-snap")),
         "No trim" => Some(("common", "no-trim-option")),

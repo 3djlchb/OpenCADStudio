@@ -2330,6 +2330,7 @@ common =
     .requires-two-positive-values = Erfordert zwei positive Werte (x,y) oder einen für beide.
     .snap-marker-color = Farbe der Fangmarkierung
     .command-line-text-color = Textfarbe der Befehlszeile
+    .operand = Operand
     .linetypes-loaded = __ocs_fmt_0__ Linientyp(en) geladen.
     .geometric-center-snap = Geometrischer Mittelpunkt
     .no-trim-option = Nicht stutzen

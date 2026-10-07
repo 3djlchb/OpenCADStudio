@@ -2329,6 +2329,7 @@ common =
     .requires-two-positive-values = 양수 값 두 개(x,y) 또는 둘 다에 쓸 값 하나가 필요합니다.
     .snap-marker-color = 스냅 마커 색상
     .command-line-text-color = 명령줄 텍스트 색상
+    .operand = 피연산자
     .linetypes-loaded = 선종류 __ocs_fmt_0__개를 로드했습니다.
     .geometric-center-snap = 기하학적 중심
     .no-trim-option = 자르지 않기

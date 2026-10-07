@@ -2329,6 +2329,7 @@ common =
     .requires-two-positive-values = Richiede due valori positivi (x,y) o uno per entrambi.
     .snap-marker-color = Colore del marcatore di snap
     .command-line-text-color = Colore del testo della riga di comando
+    .operand = Operando
     .linetypes-loaded = __ocs_fmt_0__ tipo/i di linea caricato/i.
     .geometric-center-snap = Centro geometrico
     .no-trim-option = Non tagliare

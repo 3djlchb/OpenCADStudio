@@ -756,11 +756,12 @@ impl Scene {
             .iter()
             .filter(|handle| !self.solid_models.contains_key(handle))
             .filter_map(|&handle| {
-                let from_history = self
-                    .document
-                    .solid_history_operations(handle)
-                    .and_then(|operations| kernel::acis::rebuild_history(&operations).ok());
-                let body = from_history.or_else(|| match self.document.get_entity(handle) {
+                let tree = self.document.solid_history_tree(handle);
+                let rebuilt = || {
+                    tree.as_ref()
+                        .and_then(|tree| kernel::acis::rebuild_history_tree(tree).ok())
+                };
+                let stored = || match self.document.get_entity(handle) {
                     Some(EntityType::Solid3D(solid)) => {
                         crate::scene::convert::solid3d_tess::kernel_body(solid)
                     }
@@ -771,7 +772,14 @@ impl Scene {
                         crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
                     }
                     _ => None,
-                })?;
+                };
+                // A composite's saved body is what its booleans produced;
+                // replaying them is for edits, not for reading the file.
+                let body = if tree.as_ref().is_some_and(|tree| tree.has_boolean()) {
+                    stored().or_else(rebuilt)
+                } else {
+                    rebuilt().or_else(stored)
+                }?;
                 Some((handle, body))
             })
             .collect();

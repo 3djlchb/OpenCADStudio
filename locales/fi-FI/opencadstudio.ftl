@@ -2329,6 +2329,7 @@ common =
     .requires-two-positive-values = Vaatii kaksi positiivista arvoa (x,y) tai yhden molemmille.
     .snap-marker-color = Kohdistusmerkin väri
     .command-line-text-color = Komentorivin tekstin väri
+    .operand = Operandi
     .linetypes-loaded = Ladattu __ocs_fmt_0__ viivatyyppiä.
     .geometric-center-snap = Geometrinen keskipiste
     .no-trim-option = Ei trimmausta

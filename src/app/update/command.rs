@@ -2732,6 +2732,19 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                 self.tabs[i].properties.edit_choice_open = false;
                 return Task::none();
             }
+            if field == crate::scene::model::solid_history::PROP_OPERAND {
+                // Which solid of a composite to edit: palette state only.
+                for handle in &handles {
+                    crate::scene::model::solid_history::select_operand(
+                        &self.tabs[i].scene.document,
+                        *handle,
+                        &value,
+                    );
+                }
+                self.tabs[i].properties.edit_choice_open = false;
+                self.refresh_properties();
+                return Task::none();
+            }
             if crate::scene::model::solid_history::is_history_choice(field) {
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                     if app.tabs[i].scene.is_layer_locked(handle) {

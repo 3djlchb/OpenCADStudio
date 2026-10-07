@@ -2318,6 +2318,7 @@ common =
     .requires-two-positive-values = दो धनात्मक मान (x,y) या दोनों के लिए एक मान आवश्यक है।
     .snap-marker-color = स्नैप मार्कर का रंग
     .command-line-text-color = कमांड लाइन टेक्स्ट रंग
+    .operand = ऑपरेंड
     .linetypes-loaded = __ocs_fmt_0__ लाइनटाइप लोड हुए।
     .geometric-center-snap = ज्यामितीय केंद्र
     .no-trim-option = ट्रिम नहीं

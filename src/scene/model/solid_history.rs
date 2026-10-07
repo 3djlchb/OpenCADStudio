@@ -94,6 +94,112 @@ pub const PROP_LOFT_CLOSED: &str = "solid_history_loft_closed";
 pub const PROP_LOFT_PERIODIC: &str = "solid_history_loft_periodic";
 pub const PROP_HISTORY: &str = "solid_history_record";
 pub const PROP_SHOW_HISTORY: &str = "solid_history_show";
+/// Which of a composite's solids the palette and grips edit.
+pub const PROP_OPERAND: &str = "solid_history_operand";
+
+thread_local! {
+    /// The operand edited inside each composite solid, by history node id.
+    static EDIT_OPERANDS: std::cell::RefCell<rustc_hash::FxHashMap<codec::Handle, i32>> =
+        std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+}
+
+/// The solids a composite's booleans joined, as (node id, palette label) in
+/// operand order. Empty for a solid with no boolean step.
+pub fn composite_operands(
+    document: &codec::CadDocument,
+    handle: codec::Handle,
+) -> Vec<(i32, String)> {
+    let Some(tree) = document
+        .solid_history_tree(handle)
+        .filter(|tree| tree.has_boolean())
+    else {
+        return Vec::new();
+    };
+    tree.leaves()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, operation)| {
+            let name = crate::entities::object_data::history_operation_name(operation);
+            Some((operation.base()?.node_id(), format!("{}: {}", index + 1, t!(name))))
+        })
+        .collect()
+}
+
+/// Edit the operand the palette lists as `label` from now on.
+pub fn select_operand(document: &codec::CadDocument, handle: codec::Handle, label: &str) {
+    if let Some((id, _)) = composite_operands(document, handle)
+        .into_iter()
+        .find(|(_, candidate)| candidate == label)
+    {
+        EDIT_OPERANDS.with(|operands| operands.borrow_mut().insert(handle, id));
+    }
+}
+
+/// The composite's history and the node id of the operand being edited: the
+/// one last chosen, or the first.
+fn selected_operand(
+    document: &codec::CadDocument,
+    handle: codec::Handle,
+) -> Option<(codec::objects::SolidHistoryTree, i32)> {
+    let tree = document
+        .solid_history_tree(handle)
+        .filter(|tree| tree.has_boolean())?;
+    let ids = tree
+        .leaves()
+        .into_iter()
+        .filter_map(|operation| Some(operation.base()?.node_id()))
+        .collect::<Vec<_>>();
+    let chosen = EDIT_OPERANDS.with(|operands| operands.borrow().get(&handle).copied());
+    let id = chosen.filter(|id| ids.contains(id)).or(ids.first().copied())?;
+    Some((tree, id))
+}
+
+/// The placement the steps above node `id` add to it: the product of their
+/// transforms, outermost first.
+fn ancestors_frame(tree: &codec::objects::SolidHistoryTree, id: i32) -> Option<glam::DMat4> {
+    if tree.operation.base().is_some_and(|base| base.node_id() == id) {
+        return Some(glam::DMat4::IDENTITY);
+    }
+    let own = matrix(tree.operation.base()?.transform)?;
+    tree.operands
+        .iter()
+        .find_map(|operand| ancestors_frame(operand, id))
+        .map(|inner| own * inner)
+}
+
+/// The operand of a composite solid that the palette and grips edit, placed
+/// where it sits in the composite. None for a solid with no boolean step.
+pub fn edit_operand(
+    document: &codec::CadDocument,
+    handle: codec::Handle,
+) -> Option<SolidHistoryOperation> {
+    let (tree, id) = selected_operand(document, handle)?;
+    let frame = ancestors_frame(&tree, id)?;
+    let mut operation = tree.find(id)?.operation.clone();
+    let base = operation.base_mut()?;
+    base.transform = (frame * matrix(base.transform)?).to_cols_array();
+    Some(operation)
+}
+
+/// An operand from [`edit_operand`], edited where it sits, back in the frame
+/// its composite stores it in. `operation` itself when the solid has no
+/// boolean step.
+pub fn operand_to_history(
+    document: &codec::CadDocument,
+    handle: codec::Handle,
+    mut operation: SolidHistoryOperation,
+) -> Option<SolidHistoryOperation> {
+    let Some(tree) = document
+        .solid_history_tree(handle)
+        .filter(|tree| tree.has_boolean())
+    else {
+        return Some(operation);
+    };
+    let frame = ancestors_frame(&tree, operation.base()?.node_id())?;
+    let base = operation.base_mut()?;
+    base.transform = (frame.inverse() * matrix(base.transform)?).to_cols_array();
+    Some(operation)
+}
 pub const PROP_SURFACE_TYPE: &str = "surface_type";
 pub const PROP_SURFACE_WIREFRAME_TYPE: &str = "srf_wireframe_type";
 pub const PROP_SURFACE_U_ISOLINES: &str = "srf_u_isolines";
@@ -250,6 +356,9 @@ pub fn primitive_property_operation(
     document: &codec::CadDocument,
     handle: codec::Handle,
 ) -> Option<SolidHistoryOperation> {
+    if let Some(operand) = edit_operand(document, handle) {
+        return Some(operand);
+    }
     document
         .solid_history_operations(handle)
         .and_then(|operations| operations.into_iter().next())
@@ -1619,7 +1728,33 @@ pub fn primitive_properties(
         return brep_properties(document, handle);
     };
     corner_frame(&mut operation);
-    match &operation {
+    let mut sections = operation_properties(document, handle, &operation);
+    let operands = composite_operands(document, handle);
+    let selected = operation
+        .base()
+        .and_then(|base| operands.iter().find(|(id, _)| *id == base.node_id()));
+    if let (Some((_, selected)), Some(first)) = (selected, sections.first_mut()) {
+        first.props.insert(
+            0,
+            Property {
+                label: t!("Operand").into_owned(),
+                field: PROP_OPERAND,
+                value: PropValue::Choice {
+                    selected: selected.clone(),
+                    options: operands.iter().map(|(_, label)| label.clone()).collect(),
+                },
+            },
+        );
+    }
+    sections
+}
+
+fn operation_properties(
+    document: &codec::CadDocument,
+    handle: codec::Handle,
+    operation: &SolidHistoryOperation,
+) -> Vec<PropSection> {
+    match operation {
         SolidHistoryOperation::Box(value) => {
             rectangular_properties(document, handle, value, "Box")
         }
@@ -1706,7 +1841,7 @@ pub fn is_loft_geometry_choice(field: &str) -> bool {
 }
 
 pub fn is_specialized_property(field: &str) -> bool {
-    matches!(field, "solid_history_type" | PROP_BANK | PROP_SWEEP_LENGTH
+    matches!(field, "solid_history_type" | PROP_OPERAND | PROP_BANK | PROP_SWEEP_LENGTH
         | PROP_LOFT_TYPE | PROP_LOFT_SECTION_COUNT
         | PROP_EXTRUSION_DIRECTION_X | PROP_EXTRUSION_DIRECTION_Y | PROP_EXTRUSION_DIRECTION_Z
         | PROP_SURFACE_TYPE | PROP_SURFACE_WIREFRAME_TYPE
@@ -3372,16 +3507,12 @@ pub fn chamfer_distance_grips(
     handle: codec::Handle,
     value: &SolidHistoryChamfer,
 ) -> Vec<GripDef> {
-    let Some(operations) = document.solid_history_operations(handle) else {
-        return Vec::new();
-    };
-    let Some(chamfer_index) = operations
-        .iter()
-        .rposition(|operation| matches!(operation, SolidHistoryOperation::Chamfer(_)))
+    // The chamfer's edge ordinals name edges of the solid it was cut from.
+    let Some(source) = document
+        .solid_history_tree(handle)
+        .and_then(|tree| tree.find(value.base.node_id())?.operands.first().cloned())
+        .and_then(|operand| kernel::acis::rebuild_history_tree(&operand).ok())
     else {
-        return Vec::new();
-    };
-    let Ok(source) = kernel::acis::rebuild_history(&operations[..chamfer_index]) else {
         return Vec::new();
     };
     let edges = source.edge_keys().collect::<Vec<_>>();
@@ -3469,10 +3600,11 @@ pub fn primitive_grips(
     document: &codec::CadDocument,
     handle: codec::Handle,
 ) -> Vec<GripDef> {
-    let Some(operation) = document.solid_history_operation(handle) else {
+    let Some(mut operation) = edit_operand(document, handle)
+        .or_else(|| document.solid_history_operation(handle).cloned())
+    else {
         return Vec::new();
     };
-    let mut operation = operation.clone();
     corner_frame(&mut operation);
     let operation = &operation;
     if let SolidHistoryOperation::Fillet(value) = operation {

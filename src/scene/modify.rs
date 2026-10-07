@@ -913,6 +913,87 @@ impl Scene {
         true
     }
 
+    /// Make `target`'s history the boolean steps that built it: starting from
+    /// `first`'s history, each of `steps` joins a solid's history into the
+    /// result so far. When `first` is `target` its own history is kept; a
+    /// solid with no history starts from its body in `bodies`.
+    ///
+    /// False, with `target` left without a history, when one of the solids
+    /// cannot carry one.
+    pub fn join_boolean_histories(
+        &mut self,
+        target: Handle,
+        first: Handle,
+        steps: &[(Handle, u8)],
+        bodies: &std::collections::HashMap<Handle, kernel::brep::Body>,
+    ) -> bool {
+        let solids = std::iter::once(target)
+            .chain(std::iter::once(first))
+            .chain(steps.iter().map(|(handle, _)| *handle))
+            .collect::<Vec<_>>();
+        let solid = |handle: &Handle| {
+            matches!(self.document.get_entity(*handle), Some(EntityType::Solid3D(_)))
+        };
+        if !solids.iter().all(solid) {
+            return false;
+        }
+        for handle in solids.iter().skip(1) {
+            if self.document.solid_history_graph(*handle).is_some() {
+                continue;
+            }
+            let Some(body) = bodies.get(handle) else {
+                return false;
+            };
+            if !self.create_solid_history(
+                *handle,
+                crate::scene::model::solid_history::brep_op(body),
+            ) {
+                return false;
+            }
+        }
+        if first != target {
+            self.delete_solid_history(target);
+            if self.is_recording_undo() {
+                let before = self.document.get_entity_arc(target);
+                self.record_undo_before(target, before);
+            }
+            if !self.copy_solid_history(first, target) {
+                return false;
+            }
+        }
+        for &(tool, operation) in steps {
+            if !self.merge_solid_history_boolean(target, tool, operation) {
+                self.delete_solid_history(target);
+                return false;
+            }
+        }
+        true
+    }
+
+    fn merge_solid_history_boolean(&mut self, target: Handle, tool: Handle, operation: u8) -> bool {
+        let previous: Vec<Handle> = [target, tool]
+            .iter()
+            .filter_map(|handle| self.document.solid_history_graph(*handle))
+            .flat_map(|graph| graph.nodes.into_iter().chain(graph.evaluation_graph))
+            .collect();
+        self.record_solid_history_before(target);
+        self.record_solid_history_before(tool);
+        if self.is_recording_undo() {
+            // The tool loses its history link; undo must give it back.
+            let before = self.document.get_entity_arc(tool);
+            self.record_undo_before(tool, before);
+        }
+        let Some(graph) = self.document.merge_solid_history_boolean(target, tool, operation) else {
+            return false;
+        };
+        for node in graph.nodes.into_iter().chain(graph.evaluation_graph) {
+            if !previous.contains(&node) {
+                self.record_undo_object_before(node, None);
+            }
+        }
+        true
+    }
+
     pub(crate) fn sync_solid_reference_point(&mut self, handle: Handle) {
         let reference = self
             .document
@@ -971,26 +1052,9 @@ impl Scene {
                 kernel::acis::rebuild_body(operation).ok()
             }
             (EntityType::Solid3D(_), _) => {
-                let mut operations = self.document.solid_history_operations(handle)?;
-                let replacement_id = operation.base().map(|base| {
-                    if base.eval.node_id > 0 {
-                        base.eval.node_id
-                    } else {
-                        base.step_id
-                    }
-                })?;
-                let target = operations.iter_mut().find(|candidate| {
-                    candidate.base().is_some_and(|base| {
-                        let node_id = if base.eval.node_id > 0 {
-                            base.eval.node_id
-                        } else {
-                            base.step_id
-                        };
-                        node_id == replacement_id
-                    })
-                })?;
-                *target = operation.clone();
-                kernel::acis::rebuild_history(&operations).ok()
+                let mut tree = self.document.solid_history_tree(handle)?;
+                tree.find_mut(operation.base()?.node_id())?.operation = operation.clone();
+                kernel::acis::rebuild_history_tree(&tree).ok()
             }
             _ => None,
         }
@@ -1126,11 +1190,18 @@ impl Scene {
         if self.history_surface_data(handle, &operation).is_none() {
             return false;
         }
-        if self
+        // An operand inside a composite is a step below the active one.
+        let active = self
             .document
-            .update_solid_history(handle, operation)
-            .is_none()
-        {
+            .solid_history_operation(handle)
+            .and_then(|active| active.base())
+            .map(|base| base.node_id());
+        let updated = if operation.base().map(|base| base.node_id()) == active {
+            self.document.update_solid_history(handle, operation).is_some()
+        } else {
+            self.document.update_solid_history_step(handle, operation).is_some()
+        };
+        if !updated {
             return false;
         }
         let (isoline_counts, planar_isolines) = match self.document.get_entity(handle) {
@@ -1270,7 +1341,10 @@ impl Scene {
         grip_id: usize,
         apply: GripApply,
     ) -> bool {
-        let Some(mut operation) = self.document.solid_history_operation(handle).cloned() else {
+        let Some(mut operation) =
+            crate::scene::model::solid_history::edit_operand(&self.document, handle)
+                .or_else(|| self.document.solid_history_operation(handle).cloned())
+        else {
             return false;
         };
         if grip_id == crate::scene::model::solid_history::GRIP_FILLET_RADIUS {
@@ -1345,6 +1419,11 @@ impl Scene {
         {
             return false;
         }
+        let Some(operation) =
+            crate::scene::model::solid_history::operand_to_history(&self.document, handle, operation)
+        else {
+            return false;
+        };
         self.preview_solid_history(handle, operation)
     }
 
@@ -1367,6 +1446,11 @@ impl Scene {
         ) {
             return false;
         }
+        let Some(operation) =
+            crate::scene::model::solid_history::operand_to_history(&self.document, handle, operation)
+        else {
+            return false;
+        };
         self.rebuild_solid_history(handle, operation)
     }
 
