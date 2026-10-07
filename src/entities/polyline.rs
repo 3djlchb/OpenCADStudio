@@ -493,7 +493,13 @@ fn centerline_metadata_2d(
 
 impl RenderConvertible for Polyline2D {
     fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
-        Some(tessellate_polyline2d(self, document.header.fill_mode))
+        let mut render = tessellate_polyline2d(self, document.header.fill_mode);
+        // Arc segments offer their centres and quadrants.
+        if self.vertices.iter().any(|v| v.bulge != 0.0) {
+            let entity = codec::EntityType::Polyline2D(self.clone());
+            render.snap_pts.extend(crate::entities::curve::arc_segment_snaps(&entity));
+        }
+        Some(render)
     }
 }
 

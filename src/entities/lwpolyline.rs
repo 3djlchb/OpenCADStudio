@@ -1226,7 +1226,13 @@ fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
 
 impl RenderConvertible for LwPolyline {
     fn to_render(&self, document: &codec::CadDocument) -> Option<RenderEntity> {
-        Some(to_render(self, document.header.fill_mode))
+        let mut render = to_render(self, document.header.fill_mode);
+        // Arc segments offer their centres and quadrants.
+        if self.vertices.iter().any(|v| v.bulge != 0.0) {
+            let entity = codec::EntityType::LwPolyline(self.clone());
+            render.snap_pts.extend(crate::entities::curve::arc_segment_snaps(&entity));
+        }
+        Some(render)
     }
 }
 

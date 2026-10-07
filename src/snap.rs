@@ -1442,7 +1442,9 @@ impl Snapper {
             // 3D hints run on the separate 3D master + mode set; everything
             // else stays on the 2D master + mode set.
             let (snap_type, on) = match hint {
-                SnapHint::Center => (SnapType::Center, self.is_on(SnapType::Center)),
+                SnapHint::Center | SnapHint::ArcCenter => {
+                    (SnapType::Center, self.is_on(SnapType::Center))
+                }
                 SnapHint::GeometricCenter => (
                     SnapType::GeometricCenter,
                     self.is_on(SnapType::GeometricCenter),
@@ -2475,12 +2477,35 @@ impl Snapper {
         // so it can update the candidate state directly. (#152)
         // 2D master applies (this direct-evaluation pass bypasses `try_pt`).
         if self.snap_enabled && self.is_on(SnapType::Center) {
-            let mut offer = |wire: &WireModel, curve_d2: f32| {
+            // A polyline drawn piece by piece keeps its arc centres on one of
+            // its wires: the one with the same name that carries them.
+            let carries = |w: &WireModel| {
+                w.snap_pts.iter().any(|(_, hint)| matches!(hint, SnapHint::ArcCenter))
+            };
+            let arc_centre = |wire: &WireModel, on: (DVec3, DVec3)| -> Option<DVec3> {
+                if carries(wire) {
+                    return arc_segment_center(wire, on);
+                }
+                let carrier = wires
+                    .iter()
+                    .find(|w| !wire.name.is_empty() && w.name == wire.name && carries(w))?;
+                arc_segment_center(carrier, on)
+            };
+            let has_centre = |wire: &WireModel| {
+                wire.snap_pts.iter().any(|(_, hint)| matches!(hint, SnapHint::Center))
+                    || carries(wire)
+                    || (!wire.name.is_empty()
+                        && wires.iter().any(|w| w.name == wire.name && carries(w)))
+            };
+            // `on`: the piece of the wire under the cursor, which picks out
+            // the arc segment of a polyline whose centre is offered.
+            let mut offer = |wire: &WireModel, curve_d2: f32, on: Option<(DVec3, DVec3)>| {
                 let Some(center) = wire
                     .snap_pts
                     .iter()
                     .find(|(_, hint)| matches!(hint, SnapHint::Center))
                     .map(|&(c, _)| c)
+                    .or_else(|| arc_centre(wire, on?))
                 else {
                     return;
                 };
@@ -2517,16 +2542,12 @@ impl Snapper {
                 }
             };
             if let Some(segments) = &local_segments {
-                let mut distances: HashMap<u32, f32> = HashMap::default();
+                let mut distances: HashMap<u32, (f32, (DVec3, DVec3))> = HashMap::default();
                 for segment in segments {
                     let Some(wire) = wires.source_wire(segment.wire) else {
                         continue;
                     };
-                    if !wire
-                        .snap_pts
-                        .iter()
-                        .any(|(_, hint)| matches!(hint, SnapHint::Center))
-                    {
+                    if !has_centre(wire) {
                         continue;
                     }
                     let nearest = nearest_on_segment(cursor_world, segment.a, segment.b);
@@ -2534,31 +2555,38 @@ impl Snapper {
                         world_to_screen(nearest, view_rot, eye, bounds),
                         cursor_screen,
                     );
+                    let piece = (segment.a, segment.b);
                     distances
                         .entry(segment.wire)
-                        .and_modify(|best| *best = best.min(distance))
-                        .or_insert(distance);
+                        .and_modify(|best| {
+                            if distance < best.0 {
+                                *best = (distance, piece);
+                            }
+                        })
+                        .or_insert((distance, piece));
                 }
-                for (wire_idx, distance) in distances {
+                for (wire_idx, (distance, piece)) in distances {
                     if let Some(wire) = wires.source_wire(wire_idx) {
-                        offer(wire, distance);
+                        offer(wire, distance, Some(piece));
                     }
                 }
             } else {
                 for wire in in_range_wires.iter() {
                     let mut curve_d2 = f32::INFINITY;
+                    let mut piece = None;
                     for index in 0..wire.points.len().saturating_sub(1) {
-                        let nearest = nearest_on_segment(
-                            cursor_world,
-                            wp_f64(wire, index),
-                            wp_f64(wire, index + 1),
-                        );
-                        curve_d2 = curve_d2.min(dist2(
+                        let (a, b) = (wp_f64(wire, index), wp_f64(wire, index + 1));
+                        let nearest = nearest_on_segment(cursor_world, a, b);
+                        let distance = dist2(
                             world_to_screen(nearest, view_rot, eye, bounds),
                             cursor_screen,
-                        ));
+                        );
+                        if distance < curve_d2 {
+                            curve_d2 = distance;
+                            piece = Some((a, b));
+                        }
                     }
-                    offer(wire, curve_d2);
+                    offer(wire, curve_d2, piece);
                 }
             }
         }
@@ -2587,6 +2615,29 @@ impl Snapper {
 
         best
     }
+}
+
+/// The centre of the polyline arc segment a drawn piece `(a, b)` of `wire`
+/// belongs to: the one its two ends are equally far from. A piece joining two
+/// of the chain's own vertices is a straight segment, which has none.
+fn arc_segment_center(wire: &WireModel, (a, b): (DVec3, DVec3)) -> Option<DVec3> {
+    let vertex = |p: DVec3| {
+        wire.key_vertices
+            .iter()
+            .any(|v| DVec3::from_array(*v).distance_squared(p) <= 1e-18 * p.length_squared().max(1.0))
+    };
+    if vertex(a) && vertex(b) {
+        return None;
+    }
+    wire.snap_pts
+        .iter()
+        .filter(|(_, hint)| matches!(hint, SnapHint::ArcCenter))
+        .map(|&(c, _)| (c, (c.distance(a) - c.distance(b)).abs()))
+        // ponytail: a thousandth of the radius absorbs the drawn points' f32
+        // rounding far from the origin; two arcs that close would both fit.
+        .filter(|(c, gap)| *gap <= 1e-3 * c.distance(a).max(1e-9))
+        .min_by(|x, y| x.1.total_cmp(&y.1))
+        .map(|(c, _)| c)
 }
 
 // ── Object-snap priority ───────────────────────────────────────────────────
@@ -2769,10 +2820,14 @@ fn tracking_dirs_at<W: WireSource + ?Sized>(
 
         edges.len() >= 6 && perps.len() >= 6
     };
+    // A chain (polyline) keeps its straight segments even when an arc
+    // segment gives it quadrants.
     let is_round = |wire: &WireModel| {
-        wire.snap_pts
-            .iter()
-            .any(|(_, hint)| matches!(hint, SnapHint::Quadrant | SnapHint::Center))
+        wire.key_vertices.is_empty()
+            && wire
+                .snap_pts
+                .iter()
+                .any(|(_, hint)| matches!(hint, SnapHint::Quadrant | SnapHint::Center))
     };
     if let Some(segments) = indexed_segments(wires) {
         for segment in segments {

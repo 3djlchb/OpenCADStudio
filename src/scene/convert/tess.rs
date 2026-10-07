@@ -1766,6 +1766,23 @@ pub(crate) fn set_wire_aabb(w: &mut WireModel, entity_box: [f32; 4]) {
     for (i, &p) in w.pick_tris.iter().enumerate() {
         extend(p, w.pick_tris_low.get(i).copied().unwrap_or([0.0; 3]));
     }
+    // The entity's snap points ride one wire, which may be only one piece of
+    // it (a polyline drawn per segment): its box must reach them, or a snap
+    // on another piece — an arc segment's quadrant — is never tried.
+    let split = |x: f64| {
+        let high = x as f32;
+        [high, (x - high as f64) as f32]
+    };
+    let points = w
+        .snap_pts
+        .iter()
+        .map(|(p, _)| [p.x, p.y])
+        .chain(w.key_vertices.iter().map(|p| [p[0], p[1]]))
+        .collect::<Vec<_>>();
+    for [x, y] in points {
+        let ([xh, xl], [yh, yl]) = (split(x), split(y));
+        extend([xh, yh, 0.0], [xl, yl, 0.0]);
+    }
 
     w.aabb = out;
 }

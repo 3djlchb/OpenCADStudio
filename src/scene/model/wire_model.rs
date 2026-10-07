@@ -4,6 +4,9 @@
 pub enum SnapHint {
     /// Geometric center of a circle, arc, or ellipse.
     Center,
+    /// Centre of one arc segment of a chain (a polyline). Snaps like
+    /// `Center`, but does not make the wire count as round.
+    ArcCenter,
     /// Area centroid of a closed polyline.
     GeometricCenter,
     /// Point entity location.

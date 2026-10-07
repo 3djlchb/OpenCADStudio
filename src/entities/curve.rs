@@ -484,9 +484,9 @@ pub fn snap_from(curve: &PlanarCurve) -> CurveSnap {
     // there and let their midpoints be derived; everything else names its own
     // ends and middle explicitly.
     //
-    // The same distinction is why a polyline's arc-segment centres are not
-    // emitted: a wire carrying a centre is treated as round elsewhere, which
-    // a polyline with one bulge in it is not.
+    // The same distinction is why a polyline's arc-segment centres carry
+    // their own hint: a wire carrying a `Center` is treated as round
+    // elsewhere, which a polyline with one bulge in it is not.
     let chain = matches!(curve.curve, Curve::Line(_) | Curve::Polyline(_));
     let mut out = CurveSnap::default();
     let mut push = |world: [f64; 3], hint: SnapHint| {
@@ -499,11 +499,26 @@ pub fn snap_from(curve: &PlanarCurve) -> CurveSnap {
             SnapKind::Endpoint => push(world, SnapHint::Endpoint),
             SnapKind::Midpoint if !chain => push(world, SnapHint::Midpoint),
             SnapKind::Centre if !chain => push(world, SnapHint::Center),
+            SnapKind::Centre => push(world, SnapHint::ArcCenter),
             SnapKind::Quadrant => push(world, SnapHint::Quadrant),
             _ => {}
         }
     }
     out
+}
+
+/// The centres and quadrants of a polyline's arc segments, for a polyline
+/// render that names its vertices itself.
+pub fn arc_segment_snaps(entity: &EntityType) -> Vec<(glam::DVec3, SnapHint)> {
+    entity_curve(entity)
+        .map(|curve| {
+            snap_from(&curve)
+                .snap_pts
+                .into_iter()
+                .filter(|(_, hint)| matches!(hint, SnapHint::ArcCenter | SnapHint::Quadrant))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The magnitude the geometry's own coordinates sit at, for scaling a
@@ -804,6 +819,26 @@ mod tests {
         // Midpoints are derived from those by the snap engine, so emitting
         // them here as well would offer every one of them twice.
         assert!(snap.snap_pts.is_empty(), "{:?}", snap.snap_pts);
+    }
+
+    #[test]
+    fn a_polyline_arc_segment_offers_its_centre_and_quadrants() {
+        let mut polyline = LwPolylineEnt::default();
+        polyline.normal = v3(0.0, 0.0, 1.0);
+        let mut bend = LwVertex::from_coords(0.0, 0.0);
+        bend.bulge = 0.9999999999999999;
+        polyline.vertices = vec![LwVertex::from_coords(-20.0, 0.0), bend, LwVertex::from_coords(20.0, 0.0)];
+        let snaps = arc_segment_snaps(&EntityType::LwPolyline(polyline));
+        let at = |hint: SnapHint, x: f64, y: f64| {
+            snaps.iter().any(|(p, h)| {
+                std::mem::discriminant(h) == std::mem::discriminant(&hint)
+                    && (p.x - x).abs() < 1e-9
+                    && (p.y - y).abs() < 1e-9
+            })
+        };
+        assert!(at(SnapHint::ArcCenter, 10.0, 0.0), "{snaps:?}");
+        assert!(at(SnapHint::Quadrant, 10.0, -10.0), "{snaps:?}");
+        assert!(!at(SnapHint::Quadrant, 10.0, 10.0), "{snaps:?}");
     }
 
     #[test]
