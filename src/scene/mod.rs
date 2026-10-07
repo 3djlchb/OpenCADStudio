@@ -3424,13 +3424,14 @@ impl Scene {
 
     /// Update the fields an evaluation event re-evaluates (see
     /// [`crate::entities::field::update_fields`]) and redraw the hosts whose
-    /// text changed. Returns the number of fields the hosts hold.
-    pub fn update_fields(&mut self, event: i32, hosts: Option<&[Handle]>) -> usize {
-        let changed = crate::entities::field::update_fields(&mut self.document, event, hosts).0;
+    /// text changed. Returns the number of hosts whose text changed and the
+    /// number of fields the hosts hold.
+    pub fn update_fields(&mut self, event: i32, hosts: Option<&[Handle]>) -> (usize, usize) {
+        let (changed, found) = crate::entities::field::update_fields(&mut self.document, event, hosts);
         if !changed.is_empty() {
             self.bump_text_hosts(&changed);
         }
-        changed.len()
+        (changed.len(), found)
     }
 
     /// Redraw text hosts whose stored text changed (re-evaluated fields). An
