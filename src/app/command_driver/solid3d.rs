@@ -539,9 +539,14 @@ impl OpenCADStudio {
                 continue;
             }
             let created = if surface {
-                let mut entity = sweep_model::swept_surface_entity(&record);
-                sweep_model::link_sweep_expressions(&mut entity, &expressions);
-                self.add_surface_model(entity, body)
+                let created =
+                    self.add_surface_model(sweep_model::swept_surface_entity(&record), body);
+                sweep_model::link_sweep_expressions(
+                    &mut self.tabs[i].scene.document,
+                    created,
+                    &expressions,
+                );
+                created
             } else {
                 self.add_solid_model(
                     empty_solid3d(),

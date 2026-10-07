@@ -3189,14 +3189,8 @@ mod tests {
     }
 
     fn native_group_handle(document: &CadDocument, owner: Handle) -> Handle {
-        let dict = document
-            .extension_dictionary_handle(owner)
-            .expect("extension dictionary should exist");
-        let Some(ObjectType::Dictionary(dictionary)) = document.objects.get(&dict) else {
-            panic!("expected owner's extension dictionary object to exist");
-        };
-        let network_handle = dictionary
-            .get(NETWORK_DICTIONARY_KEY)
+        // The scope's network sits under a dictionary of its own.
+        let network_handle = native_scope_network_handle(document, owner)
             .expect("ACAD_ASSOCNETWORK entry should exist");
         let Some(ObjectType::Associative(AssociativeObject {
             data: AssociativeData::Network(network),

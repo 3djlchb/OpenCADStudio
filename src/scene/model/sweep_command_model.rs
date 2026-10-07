@@ -315,22 +315,26 @@ pub fn swept_with_options(profile: &EntityType, path: &EntityType, mode: Extrude
     kernel::acis::rebuild_sweep_with_mode(&record, mode == ExtrudeMode::Surface).ok()
 }
 
-/// Preserve native construction parameters alongside the sheet's saved B-rep.
 /// The application name of the expressions a swept surface stays linked to.
 pub const SWEEP_EXPRESSION_APP: &str = "OCS_SWEEP_EXPRESSION";
 
 /// Links a swept surface to its scale and twist expressions (kept as the
-/// surface's own data, so they are saved with the drawing).
-pub fn link_sweep_expressions(entity: &mut EntityType, expressions: &[Option<String>; 2]) {
-    if expressions.iter().all(Option::is_none) { return; }
-    let mut record = codec::xdata::ExtendedDataRecord::new(SWEEP_EXPRESSION_APP);
+/// surface's own data, under a registered application, so they are saved
+/// with the drawing).
+pub fn link_sweep_expressions(
+    document: &mut codec::CadDocument,
+    handle: codec::Handle,
+    expressions: &[Option<String>; 2],
+) {
+    if handle.is_null() || expressions.iter().all(Option::is_none) { return; }
+    let mut values = Vec::new();
     for (name, expression) in ["ScaleFactor", "TwistAngle"].iter().zip(expressions) {
         if let Some(expression) = expression {
-            record.add_value(codec::xdata::XDataValue::String(name.to_string()));
-            record.add_value(codec::xdata::XDataValue::String(expression.clone()));
+            values.push(codec::xdata::XDataValue::String(name.to_string()));
+            values.push(codec::xdata::XDataValue::String(expression.clone()));
         }
     }
-    entity.common_mut().extended_data.add_record(record);
+    crate::scene::view::dispatch::set_entity_xdata(document, handle, SWEEP_EXPRESSION_APP, Some(values));
 }
 
 /// The scale and twist expressions a swept surface is linked to.
@@ -382,6 +386,7 @@ pub fn surface_sweep_record(entity: &EntityType) -> Option<SolidHistorySweep> {
     })
 }
 
+/// Preserve native construction parameters alongside the sheet's saved B-rep.
 pub fn swept_surface_entity(record: &SolidHistorySweep) -> EntityType {
     let mut surface = Surface::new(SurfaceKind::Swept);
     if let Ok(point) = kernel::acis::sweep_history_reference_point(record) {

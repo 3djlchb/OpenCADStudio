@@ -1161,9 +1161,9 @@ impl Scene {
             }
         }
         for (handle, expressions) in links {
-            let Some(entity) = self.document.get_entity_mut(handle) else { continue };
+            let Some(entity) = self.document.get_entity(handle) else { continue };
             if crate::scene::model::sweep_model::sweep_expressions(entity).is_some() { continue; }
-            crate::scene::model::sweep_model::link_sweep_expressions(entity, &expressions);
+            crate::scene::model::sweep_model::link_sweep_expressions(&mut self.document, handle, &expressions);
         }
     }
 
