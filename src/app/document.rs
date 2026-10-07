@@ -901,4 +901,6 @@ pub(super) struct PendingHistorySnapshot {
     pub(super) dirty_before: bool,
     pub(super) structure_before: CadDocument,
     pub(super) recorder: Arc<codec::document::EntityChangeRecorder>,
+    /// Kept as an undo step even when nothing changed.
+    pub(super) keep_empty: bool,
 }

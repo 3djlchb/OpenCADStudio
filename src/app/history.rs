@@ -313,7 +313,8 @@ impl OpenCADStudio {
         let selected_after: Vec<Handle> = self.tabs[i].scene.selected.iter().copied().collect();
         let dirty_after = self.tabs[i].dirty;
         let active_layer_after = self.tabs[i].active_layer.clone();
-        if entities.is_empty()
+        if !pending.keep_empty
+            && entities.is_empty()
             && !structure_changed
             && pending.selected_before == selected_after
             && pending.dirty_before == dirty_after
@@ -365,7 +366,17 @@ impl OpenCADStudio {
             dirty_before,
             structure_before,
             recorder,
+            keep_empty: false,
         });
+    }
+
+    /// [`Self::push_undo_snapshot`] for a command that is an undo step even
+    /// when it changes nothing (UNDO and U then name it and undo nothing).
+    pub(super) fn push_undo_mark(&mut self, i: usize, label: impl Into<String>) {
+        self.push_undo_snapshot(i, label);
+        if let Some(pending) = self.tabs[i].history.pending.as_mut() {
+            pending.keep_empty = true;
+        }
     }
 
     /// Begin undo capture for an entity edit that will touch `touched` entities.

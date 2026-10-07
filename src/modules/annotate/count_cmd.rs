@@ -434,9 +434,7 @@ impl CadCommand for UpdateFieldCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        if self.selected.is_empty() {
-            return CmdResult::Cancel;
-        }
+        // An empty selection still runs (the reference keeps an undo step).
         let handles: Vec<String> = self.selected.iter().map(|h| format!("{:X}", h.value())).collect();
         CmdResult::Dispatch(format!("_UPDATEFIELDRUN {}", handles.join(",")))
     }
