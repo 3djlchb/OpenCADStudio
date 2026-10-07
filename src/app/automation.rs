@@ -814,10 +814,21 @@ impl OpenCADStudio {
                     let type_filter = req["type"].as_str();
                     let layer_filter = req["layer"].as_str();
                     if type_filter.is_some() || layer_filter.is_some() {
-                        let handles: Vec<codec::Handle> = self.tabs[i]
-                            .scene
+                        // Only what the current space draws: an entity inside a
+                        // block definition is not selectable on its own.
+                        let scene = &self.tabs[i].scene;
+                        let space = scene.current_layout_block_handle_pub();
+                        let listed: std::collections::HashSet<codec::Handle> = scene
+                            .document
+                            .block_records
+                            .iter()
+                            .find(|record| record.handle == space)
+                            .map(|record| record.entity_handles.iter().copied().collect())
+                            .unwrap_or_default();
+                        let handles: Vec<codec::Handle> = scene
                             .document
                             .entities()
+                            .filter(|e| e.common().owner_handle == space || listed.contains(&e.common().handle))
                             .filter(|e| type_filter.is_none_or(|t| entity_type_matches(e, t)))
                             .filter(|e| layer_filter.is_none_or(|l| e.common().layer == l))
                             .map(|e| e.common().handle)
