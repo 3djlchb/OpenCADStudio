@@ -308,11 +308,13 @@ impl OpenCADStudio {
         //   populate_missing_meshes_from_document / bumps … CALLER-SIDE
         let clipboard = self.clipboard.clone();
         let deps = self.clipboard_deps.clone();
+        let owner_override = self.tabs[i].scene.block_edit_block;
         let (by_index, handle_map) = paste_entities_kernel(
             &mut self.tabs[i].scene.document,
             &clipboard,
             &deps,
             translate.as_ref(),
+            owner_override,
         );
         // Batched equivalent of `add_entity`'s per-add bump (same pattern as
         // `Scene::add_entities`): fresh top-level solids tessellate once here
@@ -477,6 +479,7 @@ pub(crate) fn paste_entities_kernel(
     entities: &[codec::EntityType],
     deps: &crate::app::ClipboardDeps,
     translate: Option<&crate::command::EntityTransform>,
+    owner_override: Option<Handle>,
 ) -> (
     Vec<Handle>,
     rustc_hash::FxHashMap<Handle, Handle>,
@@ -517,7 +520,7 @@ pub(crate) fn paste_entities_kernel(
                     }
                 }
             }
-            add_entity_clone_doc(doc, entity)
+            add_entity_clone_doc(doc, entity, owner_override)
         })
         .collect();
 
@@ -583,7 +586,11 @@ pub(crate) fn paste_entities_kernel(
 /// two lines are mirrored here), NULL top-level/owner handles, then
 /// `doc.add_entity`. The `entity_mode` default (Model vs paper space) and all
 /// tessellation/render caching stay caller-side in the Scene shell.
-fn add_entity_clone_doc(doc: &mut codec::CadDocument, mut entity: codec::EntityType) -> Handle {
+fn add_entity_clone_doc(
+    doc: &mut codec::CadDocument,
+    mut entity: codec::EntityType,
+    owner_override: Option<Handle>,
+) -> Handle {
     match &mut entity {
         codec::EntityType::Insert(ins) => {
             for att in ins.attributes.iter_mut() {
@@ -598,7 +605,7 @@ fn add_entity_clone_doc(doc: &mut codec::CadDocument, mut entity: codec::EntityT
         _ => {}
     }
     entity.common_mut().handle = Handle::NULL;
-    entity.common_mut().owner_handle = Handle::NULL;
+    entity.common_mut().owner_handle = owner_override.unwrap_or(Handle::NULL);
     doc.add_entity(entity).unwrap_or(Handle::NULL)
 }
 
@@ -1154,7 +1161,7 @@ mod paste_entities_kernel_tests {
         let delta = glam::DVec3::new(5.0, 7.0, 0.0);
         let translate = crate::command::EntityTransform::Translate(delta);
         let (handles, handle_map) =
-            paste_entities_kernel(&mut dst, &entities, &deps, Some(&translate));
+            paste_entities_kernel(&mut dst, &entities, &deps, Some(&translate), None);
 
         assert_eq!(handles.len(), 1);
         let pasted = handles[0];
@@ -1187,7 +1194,7 @@ mod paste_entities_kernel_tests {
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[leader_handle, note]);
 
         let mut dst = codec::CadDocument::new();
-        let (handles, _) = paste_entities_kernel(&mut dst, &entities, &deps, None);
+        let (handles, _) = paste_entities_kernel(&mut dst, &entities, &deps, None, None);
 
         assert_eq!(handles.len(), 2);
         let pasted_leader = match dst.get_entity(handles[0]) {
@@ -1230,7 +1237,7 @@ mod paste_entities_kernel_tests {
 
         let mut dst = codec::CadDocument::new();
         let before: Vec<Handle> = dst.objects.keys().copied().collect();
-        let (handles, _) = paste_entities_kernel(&mut dst, &entities, &deps, None);
+        let (handles, _) = paste_entities_kernel(&mut dst, &entities, &deps, None, None);
 
         assert_eq!(handles.len(), 1);
         let pasted = handles[0];
@@ -1296,7 +1303,7 @@ mod headless_reuse_proof_tests {
         let translate =
             crate::command::EntityTransform::Translate(glam::DVec3::new(5.0, 7.0, 0.0));
         let (handles, handle_map) =
-            paste_entities_kernel(&mut doc_b, &entities, &deps, Some(&translate));
+            paste_entities_kernel(&mut doc_b, &entities, &deps, Some(&translate), None);
 
         assert_eq!(handles.len(), 1);
         let pasted = handles[0];
@@ -1352,4 +1359,62 @@ mod headless_reuse_proof_tests {
             other => panic!("expected matched Line, got {other:?}"),
         }
     }
+    #[test]
+    fn paste_owner_override_routes_entity_into_block_record() {
+        let mut source = codec::CadDocument::new();
+
+        let line = codec::entities::Line::from_points(
+            codec::types::Vector3::new(0.0, 0.0, 0.0),
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        );
+        let source_handle = source
+            .add_entity(codec::EntityType::Line(line))
+            .expect("source line");
+
+        let (entities, deps) =
+            copy_to_clipboard_kernel(&source, &[source_handle]);
+
+        let mut target = codec::CadDocument::new();
+
+        let block_handle = target.allocate_handle();
+        let mut block = codec::tables::BlockRecord::new("BEDIT_TARGET");
+        block.handle = block_handle;
+        target
+            .block_records
+            .add(block)
+            .expect("target block record");
+
+        let (handles, _) = paste_entities_kernel(
+            &mut target,
+            &entities,
+            &deps,
+            None,
+            Some(block_handle),
+        );
+
+        assert_eq!(handles.len(), 1);
+        let pasted = handles[0];
+        assert!(!pasted.is_null());
+
+        let entity = target
+            .get_entity(pasted)
+            .expect("pasted entity must exist");
+
+        assert_eq!(
+            entity.common().owner_handle,
+            block_handle,
+            "paste inside BEDIT must belong to the edited block record"
+        );
+
+        let record = target
+            .block_records
+            .get("BEDIT_TARGET")
+            .expect("block record must still exist");
+
+        assert!(
+            record.entity_handles.contains(&pasted),
+            "pasted entity must be registered as a member of the edited block"
+        );
+    }
+
 }
