@@ -200,6 +200,42 @@ fn serve_socket_with_idle(
     }
 }
 
+/// The entities inside block definitions: owned by (or listed in) a block
+/// record that is not a layout's model or paper space.
+fn definition_members(document: &codec::CadDocument) -> std::collections::HashSet<codec::Handle> {
+    let mut layouts: std::collections::HashSet<codec::Handle> = document
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            codec::objects::ObjectType::Layout(layout) if !layout.block_record.is_null() => Some(layout.block_record),
+            _ => None,
+        })
+        .collect();
+    layouts.extend(document.block_records.iter().filter_map(|record| {
+        let name = record.name.to_ascii_uppercase();
+        (name.starts_with("*MODEL_SPACE") || name.starts_with("*PAPER_SPACE")).then_some(record.handle)
+    }));
+    let definitions: std::collections::HashSet<codec::Handle> = document
+        .block_records
+        .iter()
+        .filter(|record| !layouts.contains(&record.handle))
+        .map(|record| record.handle)
+        .collect();
+    let mut members: std::collections::HashSet<codec::Handle> = document
+        .block_records
+        .iter()
+        .filter(|record| definitions.contains(&record.handle))
+        .flat_map(|record| record.entity_handles.iter().copied())
+        .collect();
+    members.extend(
+        document
+            .entities()
+            .filter(|e| definitions.contains(&e.common().owner_handle))
+            .map(|e| e.common().handle),
+    );
+    members
+}
+
 fn err(msg: impl std::fmt::Display) -> Value {
     json!({ "ok": false, "error": msg.to_string() })
 }
@@ -794,30 +830,58 @@ impl OpenCADStudio {
             }
             "select" => {
                 let i = self.active_tab;
+                // By explicit handles (hex, as returned by `query`). An entity
+                // inside a block definition is not selectable on its own.
+                let explicit: Vec<codec::Handle> = req["handles"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|h| h.as_str())
+                            .filter_map(|h| {
+                                let h = h.strip_prefix("0x").or_else(|| h.strip_prefix("0X")).unwrap_or(h);
+                                u64::from_str_radix(h, 16).ok().map(codec::Handle::new)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if req["clear"].as_bool() != Some(true) {
+                    let inside = definition_members(&self.tabs[i].scene.document);
+                    let refused: Vec<String> = explicit
+                        .iter()
+                        .filter(|h| inside.contains(h))
+                        .map(|h| format!("{:X}", h.value()))
+                        .collect();
+                    if !refused.is_empty() {
+                        return err(format!(
+                            "select: inside a block definition, not selectable: {}",
+                            refused.join(", ")
+                        ));
+                    }
+                }
                 self.tabs[i].scene.deselect_all();
                 if req["clear"].as_bool() != Some(true) {
-                    // By explicit handles (hex, as returned by `query`).
-                    if let Some(arr) = req["handles"].as_array() {
-                        for h in arr.iter().filter_map(|h| h.as_str()) {
-                            let h = h
-                                .strip_prefix("0x")
-                                .or_else(|| h.strip_prefix("0X"))
-                                .unwrap_or(h);
-                            if let Ok(v) = u64::from_str_radix(h, 16) {
-                                self.tabs[i]
-                                    .scene
-                                    .select_entity(codec::Handle::new(v), false);
-                            }
-                        }
+                    for h in explicit {
+                        self.tabs[i].scene.select_entity(h, false);
                     }
                     // Or by type / layer.
                     let type_filter = req["type"].as_str();
                     let layer_filter = req["layer"].as_str();
                     if type_filter.is_some() || layer_filter.is_some() {
-                        let handles: Vec<codec::Handle> = self.tabs[i]
-                            .scene
+                        // Only what the current space draws: an entity inside a
+                        // block definition is not selectable on its own.
+                        let scene = &self.tabs[i].scene;
+                        let space = scene.current_layout_block_handle_pub();
+                        let listed: std::collections::HashSet<codec::Handle> = scene
+                            .document
+                            .block_records
+                            .iter()
+                            .find(|record| record.handle == space)
+                            .map(|record| record.entity_handles.iter().copied().collect())
+                            .unwrap_or_default();
+                        let handles: Vec<codec::Handle> = scene
                             .document
                             .entities()
+                            .filter(|e| e.common().owner_handle == space || listed.contains(&e.common().handle))
                             .filter(|e| type_filter.is_none_or(|t| entity_type_matches(e, t)))
                             .filter(|e| layer_filter.is_none_or(|l| e.common().layer == l))
                             .map(|e| e.common().handle)

@@ -798,9 +798,14 @@ impl OpenCADStudio {
         {
             return self.dispatch_command(cmd);
         }
+        // Close an earlier step first so only what the probe opens is dropped below.
+        self.finish_pending_history(i);
         let start_task = self.dispatch_command(tokens[0]);
         if self.tabs[i].active_cmd.is_none() {
             // Not an interactive tool — an inline-argument command (`PDMODE 3`).
+            // The bare word only probed it: a step it kept without changing
+            // anything is not an undo step of its own.
+            self.drop_unchanged_pending_history(i);
             return self.dispatch_command(cmd);
         }
         let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();
