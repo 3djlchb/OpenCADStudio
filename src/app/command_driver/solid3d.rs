@@ -519,8 +519,8 @@ impl OpenCADStudio {
                 Ok(value) => value,
                 Err(code) => {
                     if let Some(code) = code {
-                        self.command_line.push_output(&format!("Modeling Operation Error:
-Error Code Number is {code}"));
+                        self.command_line.push_output(crate::t!("Modeling Operation Error:").as_ref());
+                        self.command_line.push_output(crate::tf!("Error Code Number is {code}", code = code).as_ref());
                     }
                     failed += 1;
                     continue;
@@ -564,7 +564,7 @@ Error Code Number is {code}"));
             self.tabs[i].dirty = true;
         }
         if failed > 0 {
-            self.command_line.push_output(&format!("Unable to sweep {failed} selected objects."));
+            self.command_line.push_output(crate::tf!("Unable to sweep {failed} selected objects.", failed = failed).as_ref());
         }
         if let Some(pending) = pending {
             self.commit_undo_delta(i, pending);

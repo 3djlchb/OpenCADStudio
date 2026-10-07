@@ -1623,6 +1623,8 @@ pub struct SweepCommand {
     reference_length: f64,
     new_length_start: Option<DVec3>,
     end_length: f64,
+    /// The drawing's named parameters, for Expression input.
+    parameters: crate::scene::named_parameters::ParameterTable,
     isolines: usize,
     color: [f32; 4],
 }
@@ -1642,6 +1644,8 @@ enum SweepStep {
     NewLength,
     NewLengthEnd,
     Twist,
+    ScaleExpression,
+    TwistExpression,
 }
 
 impl SweepCommand {
@@ -1662,9 +1666,21 @@ impl SweepCommand {
             reference_length: 1.0,
             new_length_start: None,
             end_length: 1.0,
+            parameters: Default::default(),
             isolines,
             color,
         }
+    }
+
+    pub fn set_parameters(&mut self, parameters: crate::scene::named_parameters::ParameterTable) {
+        self.parameters = parameters;
+    }
+
+    /// An Expression input, evaluated against the drawing's parameters.
+    fn evaluate(&self, text: &str) -> Option<f64> {
+        let mut table = self.parameters.clone();
+        table.set("sweepExpression", text).ok()?;
+        table.resolve("sweepExpression").ok().filter(|value| value.is_finite())
     }
 
     pub fn set_preselection(&mut self, profiles: Vec<(Handle, EntityType)>) {
@@ -1755,8 +1771,9 @@ impl CadCommand for SweepCommand {
             ),
             SweepStep::BasePoint => t!("SWEEP  Specify base point:").into_owned(),
             SweepStep::Scale => format!(
-                "{} <{}>:", t!("SWEEP  Enter scale factor or [Reference]"), self.options.scale,
+                "{}<{:.4}>:", t!("SWEEP  Enter scale factor or [Reference/Expression]"), self.options.scale,
             ),
+            SweepStep::ScaleExpression | SweepStep::TwistExpression => t!("SWEEP  Enter expression:").into_owned(),
             SweepStep::ReferenceLength => format!(
                 "{} <{}>:",
                 t!("SWEEP  Specify start reference length"),
@@ -1769,12 +1786,12 @@ impl CadCommand for SweepCommand {
                 crate::entities::common::format_length(self.end_length),
             ),
             SweepStep::Twist => format!(
-                "{} <{}>:",
-                t!("SWEEP  Specify twist angle or [Bank]"),
+                "{}<{}>:",
+                t!("SWEEP  Enter twist angle or allow banking for a non-planar sweep path [Bank/EXpression]"),
                 if self.options.bank {
                     "Bank".to_string()
                 } else {
-                    crate::entities::common::format_angle(self.options.twist_angle)
+                    format!("{:.4}", self.options.twist_angle.to_degrees())
                 },
             ),
         }
@@ -1791,8 +1808,8 @@ impl CadCommand for SweepCommand {
                 CmdOption::new("Twist", "TWIST"),
             ],
             SweepStep::Alignment => vec![CmdOption::new("Yes", "YES"), CmdOption::new("No", "NO")],
-            SweepStep::Scale => vec![CmdOption::new("Reference", "REFERENCE")],
-            SweepStep::Twist => vec![CmdOption::new("Bank", "BANK")],
+            SweepStep::Scale => vec![CmdOption::new("Reference", "REFERENCE"), CmdOption::new("Expression", "EXPRESSION")],
+            SweepStep::Twist => vec![CmdOption::new("Bank", "BANK"), CmdOption::new("EXpression", "EXPRESSION")],
             _ => Vec::new(),
         }
     }
@@ -1820,7 +1837,10 @@ impl CadCommand for SweepCommand {
         };
         if (self.options.scale - 1.0).abs() > 1e-12 {
             if let Some(message) = crate::scene::model::sweep_model::scaled_sweep_path_refusal(&path) {
-                return CmdResult::ReportMeasurement(message.to_string());
+                return CmdResult::ReportMeasurement(format!(
+                    "{}
+{}", t!(message), t!("The selected path curve is not valid."),
+                ));
             }
         }
         self.finish(handle)
@@ -1863,6 +1883,7 @@ impl CadCommand for SweepCommand {
             SweepStep::PickProfiles | SweepStep::Mode | SweepStep::PickPath
                 | SweepStep::Alignment | SweepStep::Scale | SweepStep::ReferenceLength
                 | SweepStep::NewLength | SweepStep::Twist
+                | SweepStep::ScaleExpression | SweepStep::TwistExpression
         )
     }
 
@@ -1915,7 +1936,9 @@ impl CadCommand for SweepCommand {
                 self.step = SweepStep::PickPath;
             }
             SweepStep::Scale => {
-                if "REFERENCE".starts_with(&keyword) {
+                if "EXPRESSION".starts_with(&keyword) {
+                    self.step = SweepStep::ScaleExpression;
+                } else if "REFERENCE".starts_with(&keyword) {
                     self.reference_start = None;
                     self.new_length_start = None;
                     self.step = SweepStep::ReferenceLength;
@@ -1937,8 +1960,25 @@ impl CadCommand for SweepCommand {
                     return None;
                 }
             }
+            SweepStep::ScaleExpression | SweepStep::TwistExpression => {
+                let Some(value) = self.evaluate(value) else {
+                    return Some(CmdResult::ReportMeasurement(t!(
+                        "The syntax is incorrect or a variable is not defined.  Reenter the expression or value."
+                    ).into_owned()));
+                };
+                if self.step == SweepStep::ScaleExpression {
+                    self.set_scale(value);
+                } else {
+                    self.options.twist_angle = value.to_radians();
+                    self.options.bank = false;
+                    SWEEP_BANK.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+                self.step = SweepStep::PickPath;
+            }
             SweepStep::Twist => {
-                if "BANK".starts_with(&keyword) {
+                if keyword.len() >= 2 && "EXPRESSION".starts_with(&keyword) {
+                    self.step = SweepStep::TwistExpression;
+                } else if "BANK".starts_with(&keyword) {
                     self.options.bank = true;
                     SWEEP_BANK.store(true, std::sync::atomic::Ordering::Relaxed);
                     self.step = SweepStep::PickPath;
@@ -1963,6 +2003,7 @@ impl CadCommand for SweepCommand {
             }
             SweepStep::Mode => self.step = SweepStep::PickProfiles,
             SweepStep::Alignment | SweepStep::Scale | SweepStep::Twist => self.step = SweepStep::PickPath,
+            SweepStep::ScaleExpression | SweepStep::TwistExpression => {}
             SweepStep::ReferenceLength => self.step = SweepStep::NewLength,
             SweepStep::NewLength => {
                 self.set_end_length(self.end_length);

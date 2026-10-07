@@ -76,11 +76,9 @@ pub fn scaled_sweep_path_refusal(path: &EntityType) -> Option<&'static str> {
         },
     };
     if closed {
-        Some("Cannot use scale option when path curve is closed.
-The selected path curve is not valid.")
+        Some("Cannot use scale option when path curve is closed.")
     } else if !smooth {
-        Some("Path curve must be smooth when using scale option.
-The selected path curve is not valid.")
+        Some("Path curve must be smooth when using scale option.")
     } else {
         None
     }
