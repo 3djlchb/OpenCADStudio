@@ -9652,12 +9652,28 @@ impl Scene {
                 }
             }
         }
+        let block = self.interaction_block_handle();
+        let frozen: Option<HashSet<Handle>> = self
+            .interaction_viewport_frozen_layers()
+            .map(|layers| layers.iter().copied().collect());
+        let annotation_scale_handle = self.displayed_annotation_scale_handle();
+        let all_visible = self.annotation_all_visible();
+
         let changed_live: Vec<Handle> = changes
             .iter()
             .filter_map(|(handle, kind)| {
-                (!matches!(kind, ChangeKind::Removed)
-                    && !self.entity_temporarily_hidden(*handle)
-                    && self.document.get_entity(*handle).is_some())
+                if matches!(kind, ChangeKind::Removed) {
+                    return None;
+                }
+
+                let entity = self.document.get_entity(*handle)?;
+                self.resident_entity_visible(
+                    entity,
+                    block,
+                    frozen.as_ref(),
+                    annotation_scale_handle,
+                    all_visible,
+                )
                 .then_some(*handle)
             })
             .collect();
@@ -11957,6 +11973,34 @@ vis_index={:.1} visible_probe={:.1}",
     /// block users re-expand, since their definitions bake the children's
     /// visibility. Nothing is recoloured.
     pub fn invalidate_layer_visibility(&mut self, names: &[String]) {
+        // Turning a layer off or freezing it removes its entities from the
+        // interactive scene as well as from rendering. Drop any entities that
+        // were already selected before the visibility change, otherwise a
+        // subsequent MOVE/ERASE/etc. could still modify invisible geometry.
+        let block = self.interaction_block_handle();
+        let frozen: Option<HashSet<Handle>> = self
+            .interaction_viewport_frozen_layers()
+            .map(|layers| layers.iter().copied().collect());
+        let annotation_scale_handle = self.displayed_annotation_scale_handle();
+        let all_visible = self.annotation_all_visible();
+
+        let visible_selection: Vec<Handle> = self
+            .selected_handles_in_order()
+            .into_iter()
+            .filter(|handle| {
+                self.document.get_entity(*handle).is_some_and(|entity| {
+                    self.resident_entity_visible(
+                        entity,
+                        block,
+                        frozen.as_ref(),
+                        annotation_scale_handle,
+                        all_visible,
+                    )
+                })
+            })
+            .collect();
+        self.replace_selection_exact(&visible_selection);
+
         let targets = self.dependency_targets(DependencyKind::Layer, names);
         if targets.render_handles.is_empty() {
             return;
