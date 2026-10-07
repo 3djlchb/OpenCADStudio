@@ -580,9 +580,9 @@ impl OpenCADStudio {
             .collect();
         let hosting = hosts.iter().any(|h| match doc.get_entity(*h) {
             Some(entity) => crate::entities::field::hosts_field(doc, entity),
-            None => attributes
-                .iter()
-                .any(|common| common.handle == *h && crate::entities::field::common_hosts_field(doc, common)),
+            None => attributes.iter().any(|common| {
+                common.handle == *h && crate::entities::field::common_hosts_field(doc, common)
+            }),
         });
         if !hosting {
             self.command_line.push_output(&crate::tf!("{found} field(s) found.", found = 0));

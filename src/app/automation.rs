@@ -202,18 +202,23 @@ fn serve_socket_with_idle(
 
 /// The entities inside block definitions: owned by (or listed in) a block
 /// record that is not a layout's model or paper space.
-fn definition_members(document: &codec::CadDocument) -> std::collections::HashSet<codec::Handle> {
+fn definition_members(
+    document: &codec::CadDocument,
+) -> std::collections::HashSet<codec::Handle> {
     let mut layouts: std::collections::HashSet<codec::Handle> = document
         .objects
         .values()
         .filter_map(|object| match object {
-            codec::objects::ObjectType::Layout(layout) if !layout.block_record.is_null() => Some(layout.block_record),
+            codec::objects::ObjectType::Layout(layout) if !layout.block_record.is_null() => {
+                Some(layout.block_record)
+            }
             _ => None,
         })
         .collect();
     layouts.extend(document.block_records.iter().filter_map(|record| {
         let name = record.name.to_ascii_uppercase();
-        (name.starts_with("*MODEL_SPACE") || name.starts_with("*PAPER_SPACE")).then_some(record.handle)
+        (name.starts_with("*MODEL_SPACE") || name.starts_with("*PAPER_SPACE"))
+            .then_some(record.handle)
     }));
     let definitions: std::collections::HashSet<codec::Handle> = document
         .block_records
@@ -838,7 +843,10 @@ impl OpenCADStudio {
                         arr.iter()
                             .filter_map(|h| h.as_str())
                             .filter_map(|h| {
-                                let h = h.strip_prefix("0x").or_else(|| h.strip_prefix("0X")).unwrap_or(h);
+                                let h = h
+                                    .strip_prefix("0x")
+                                    .or_else(|| h.strip_prefix("0X"))
+                                    .unwrap_or(h);
                                 u64::from_str_radix(h, 16).ok().map(codec::Handle::new)
                             })
                             .collect()
@@ -881,7 +889,10 @@ impl OpenCADStudio {
                         let handles: Vec<codec::Handle> = scene
                             .document
                             .entities()
-                            .filter(|e| e.common().owner_handle == space || listed.contains(&e.common().handle))
+                            .filter(|e| {
+                                e.common().owner_handle == space
+                                    || listed.contains(&e.common().handle)
+                            })
                             .filter(|e| type_filter.is_none_or(|t| entity_type_matches(e, t)))
                             .filter(|e| layer_filter.is_none_or(|l| e.common().layer == l))
                             .map(|e| e.common().handle)

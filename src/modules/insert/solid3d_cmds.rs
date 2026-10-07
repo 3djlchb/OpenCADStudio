@@ -1838,8 +1838,9 @@ impl CadCommand for SweepCommand {
         if (self.options.scale - 1.0).abs() > 1e-12 {
             if let Some(message) = crate::scene::model::sweep_model::scaled_sweep_path_refusal(&path) {
                 return CmdResult::ReportMeasurement(format!(
-                    "{}
-{}", t!(message), t!("The selected path curve is not valid."),
+                    "{}\n{}",
+                    t!(message),
+                    t!("The selected path curve is not valid."),
                 ));
             }
         }
