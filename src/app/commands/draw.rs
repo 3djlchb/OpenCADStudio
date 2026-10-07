@@ -2484,21 +2484,26 @@ impl OpenCADStudio {
             }
 
             // 3DROTATE [X|Y|Z] <angle> — rotate the selected solid about an axis.
+            // 3DROTATE — any objects about an axis through a base point.
             "3DROTATE" | "ROTATE3D" => {
-                use crate::command::SelectThenKeywordCommand;
-                let has_sel = !self.tabs[i].scene.selected_entities().is_empty();
-                let c = SelectThenKeywordCommand::new(
-                    "3DROTATE",
-                    "3DROTATE  rotation axis  [X / Y / Z]:",
-                    vec![
-                        ("X", "X", Some("3DROTATE  angle in degrees:")),
-                        ("Y", "Y", Some("3DROTATE  angle in degrees:")),
-                        ("Z", "Z", Some("3DROTATE  angle in degrees:")),
-                    ],
-                    has_sel,
-                );
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("3DROTATE");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                } else {
+                    use crate::modules::draw::modify::rotate::RotateCommand;
+                    let wires = self.tabs[i].scene.wire_models_for(&handles);
+                    let new_cmd = RotateCommand::new_3d(handles, wires);
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                }
             }
             cmd if cmd.starts_with("3DROTATE ") || cmd.starts_with("ROTATE3D ") => {
                 let parts: Vec<String> = cmd
