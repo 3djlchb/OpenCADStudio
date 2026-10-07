@@ -546,6 +546,9 @@ impl OpenCADStudio {
     /// its attributes and the texts of its block definition; a table, the
     /// cell texts of its drawing (its `*T` block).
     fn update_fields(&mut self, i: usize, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
         let doc = &self.tabs[i].scene.document;
         let mut hosts = handles.to_vec();
         for h in handles {
@@ -572,25 +575,26 @@ impl OpenCADStudio {
             })
             .flatten()
             .collect();
-        let found = hosts
-            .iter()
-            .filter(|h| match doc.get_entity(**h) {
-                Some(entity) => crate::entities::field::hosts_field(doc, entity),
-                None => attributes.iter().any(|common| {
-                    common.handle == **h && crate::entities::field::common_hosts_field(doc, common)
-                }),
-            })
-            .count();
-        self.command_line.push_output(&crate::tf!("{found} field(s) found."));
-        if found == 0 {
+        let hosting = hosts.iter().any(|h| match doc.get_entity(*h) {
+            Some(entity) => crate::entities::field::hosts_field(doc, entity),
+            None => attributes
+                .iter()
+                .any(|common| common.handle == *h && crate::entities::field::common_hosts_field(doc, common)),
+        });
+        if !hosting {
+            self.command_line.push_output(&crate::tf!("{found} field(s) found.", found = 0));
+            self.command_line.push_output(&crate::tf!("{updated} field(s) updated.", updated = 0));
             return;
         }
+        // The reference counts fields, not the texts holding them, and
+        // reports every field it evaluated as updated, changed or not.
         self.push_undo_snapshot(i, "UPDATEFIELD");
-        let updated = self.tabs[i].scene.update_fields(32, Some(&hosts));
-        if updated > 0 {
+        let (changed, found) = self.tabs[i].scene.update_fields(32, Some(&hosts));
+        if changed > 0 {
             self.tabs[i].dirty = true;
         }
-        self.command_line.push_output(&crate::tf!("{updated} field(s) updated."));
+        self.command_line.push_output(&crate::tf!("{found} field(s) found."));
+        self.command_line.push_output(&crate::tf!("{updated} field(s) updated.", updated = found));
     }
 
     /// A count table at `point`: `Item` | `Count`, one row per block (all
