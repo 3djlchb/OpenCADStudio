@@ -1606,6 +1606,10 @@ impl CadCommand for RevolveCommand {
 
 // ── SWEEP command ──────────────────────────────────────────────────────────
 
+/// Banking stays on for later sweeps until a twist angle is entered, as in
+/// the reference.
+static SWEEP_BANK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub struct SweepCommand {
     step: SweepStep,
     profiles: Vec<(Handle, EntityType)>,
@@ -1618,6 +1622,7 @@ pub struct SweepCommand {
     reference_start: Option<DVec3>,
     reference_length: f64,
     new_length_start: Option<DVec3>,
+    end_length: f64,
     isolines: usize,
     color: [f32; 4],
 }
@@ -1630,10 +1635,11 @@ enum SweepStep {
     Alignment,
     BasePoint,
     Scale,
+    /// The start reference length: a distance, or two points.
     ReferenceLength,
     ReferenceEnd,
+    /// The end reference length: a distance, or two points.
     NewLength,
-    NewLengthStart,
     NewLengthEnd,
     Twist,
 }
@@ -1648,10 +1654,14 @@ impl SweepCommand {
             preview_key: None,
             preview_cache: Vec::new(),
             mode: ExtrudeMode::Solid,
-            options: SweepOptions::default(),
+            options: SweepOptions {
+                bank: SWEEP_BANK.load(std::sync::atomic::Ordering::Relaxed),
+                ..SweepOptions::default()
+            },
             reference_start: None,
             reference_length: 1.0,
             new_length_start: None,
+            end_length: 1.0,
             isolines,
             color,
         }
@@ -1715,10 +1725,13 @@ impl SweepCommand {
         true
     }
 
-    fn length_anchor(&self) -> DVec3 {
-        self.reference_start
-            .or_else(|| self.selection_options().and_then(|options| options.base_point))
-            .unwrap_or(DVec3::ZERO)
+    /// The Reference scale is the start reference length over the end one.
+    fn set_end_length(&mut self, length: f64) -> bool {
+        if !length.is_finite() || length <= 1e-12 {
+            return false;
+        }
+        self.end_length = length;
+        self.set_scale(self.reference_length / length)
     }
 }
 
@@ -1746,21 +1759,23 @@ impl CadCommand for SweepCommand {
             ),
             SweepStep::ReferenceLength => format!(
                 "{} <{}>:",
-                t!("SWEEP  Specify reference length or first point"),
+                t!("SWEEP  Specify start reference length"),
                 crate::entities::common::format_length(self.reference_length),
             ),
-            SweepStep::ReferenceEnd => t!("SWEEP  Specify second reference point:").into_owned(),
+            SweepStep::ReferenceEnd | SweepStep::NewLengthEnd => t!("SWEEP  Specify second point:").into_owned(),
             SweepStep::NewLength => format!(
                 "{} <{}>:",
-                t!("SWEEP  Specify new length or [Points]"),
-                crate::entities::common::format_length(self.reference_length * self.options.scale),
+                t!("SWEEP  Specify end reference length"),
+                crate::entities::common::format_length(self.end_length),
             ),
-            SweepStep::NewLengthStart => t!("SWEEP  Specify first point of new length:").into_owned(),
-            SweepStep::NewLengthEnd => t!("SWEEP  Specify second point of new length:").into_owned(),
             SweepStep::Twist => format!(
                 "{} <{}>:",
                 t!("SWEEP  Specify twist angle or [Bank]"),
-                crate::entities::common::format_angle(self.options.twist_angle),
+                if self.options.bank {
+                    "Bank".to_string()
+                } else {
+                    crate::entities::common::format_angle(self.options.twist_angle)
+                },
             ),
         }
     }
@@ -1777,7 +1792,6 @@ impl CadCommand for SweepCommand {
             ],
             SweepStep::Alignment => vec![CmdOption::new("Yes", "YES"), CmdOption::new("No", "NO")],
             SweepStep::Scale => vec![CmdOption::new("Reference", "REFERENCE")],
-            SweepStep::NewLength => vec![CmdOption::new("Points", "POINTS")],
             SweepStep::Twist => vec![CmdOption::new("Bank", "BANK")],
             _ => Vec::new(),
         }
@@ -1801,11 +1815,15 @@ impl CadCommand for SweepCommand {
                 .filter(|(hovered, _)| *hovered == handle)
                 .map(|(_, entity)| entity.clone())
         });
-        if path.as_ref().is_some_and(crate::scene::model::sweep_model::is_sweep_path) {
-            self.finish(handle)
-        } else {
-            CmdResult::NeedPoint
+        let Some(path) = path.filter(crate::scene::model::sweep_model::is_sweep_path) else {
+            return CmdResult::NeedPoint;
+        };
+        if (self.options.scale - 1.0).abs() > 1e-12 {
+            if let Some(message) = crate::scene::model::sweep_model::scaled_sweep_path_refusal(&path) {
+                return CmdResult::ReportMeasurement(message.to_string());
+            }
         }
+        self.finish(handle)
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
@@ -1827,15 +1845,12 @@ impl CadCommand for SweepCommand {
                 }
             }
             SweepStep::NewLength => {
-                self.set_scale(point.distance(self.length_anchor()) / self.reference_length);
-            }
-            SweepStep::NewLengthStart => {
                 self.new_length_start = Some(point);
                 self.step = SweepStep::NewLengthEnd;
             }
             SweepStep::NewLengthEnd => {
                 if let Some(start) = self.new_length_start {
-                    self.set_scale(point.distance(start) / self.reference_length);
+                    self.set_end_length(point.distance(start));
                 }
             }
             _ => {}
@@ -1916,10 +1931,8 @@ impl CadCommand for SweepCommand {
                 }
             }
             SweepStep::NewLength => {
-                if "POINTS".starts_with(&keyword) {
-                    self.step = SweepStep::NewLengthStart;
-                } else if let Some(length) = crate::entities::common::parse_typed_length(value) {
-                    self.set_scale(length / self.reference_length);
+                if let Some(length) = crate::entities::common::parse_typed_length(value) {
+                    self.set_end_length(length);
                 } else {
                     return None;
                 }
@@ -1927,11 +1940,13 @@ impl CadCommand for SweepCommand {
             SweepStep::Twist => {
                 if "BANK".starts_with(&keyword) {
                     self.options.bank = true;
+                    SWEEP_BANK.store(true, std::sync::atomic::Ordering::Relaxed);
                     self.step = SweepStep::PickPath;
                 } else if let Some(angle) = crate::entities::common::parse_angle(value) {
                     if angle.is_finite() {
                         self.options.twist_angle = angle;
                         self.options.bank = false;
+                        SWEEP_BANK.store(false, std::sync::atomic::Ordering::Relaxed);
                         self.step = SweepStep::PickPath;
                     }
                 }
@@ -1947,9 +1962,11 @@ impl CadCommand for SweepCommand {
                 self.step = SweepStep::PickPath;
             }
             SweepStep::Mode => self.step = SweepStep::PickProfiles,
-            SweepStep::Alignment | SweepStep::Scale | SweepStep::Twist
-                | SweepStep::NewLength => self.step = SweepStep::PickPath,
+            SweepStep::Alignment | SweepStep::Scale | SweepStep::Twist => self.step = SweepStep::PickPath,
             SweepStep::ReferenceLength => self.step = SweepStep::NewLength,
+            SweepStep::NewLength => {
+                self.set_end_length(self.end_length);
+            }
             _ => return CmdResult::Cancel,
         }
         CmdResult::NeedPoint

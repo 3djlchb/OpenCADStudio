@@ -9,20 +9,25 @@ use kernel::brep::Body;
 use crate::command::{ExtrudeMode, SweepOptions};
 use super::sweep_model::{embedded_path, embedded_revolve_profile};
 
+/// A 3D polyline profile or path as the reference records it: a wire body.
 fn embedded_sweep_profile(entity: &EntityType) -> Option<(codec::entities::EmbeddedEntity, [f64; 16])> {
-    if let EntityType::Region(region) = entity {
-        Some((codec::entities::EmbeddedEntity::Region(region.clone()), glam::DMat4::IDENTITY.to_cols_array()))
-    } else {
-        embedded_revolve_profile(entity)
+    match entity {
+        EntityType::Region(region) => Some((codec::entities::EmbeddedEntity::Region(region.clone()), glam::DMat4::IDENTITY.to_cols_array())),
+        EntityType::Polyline3D(value) => Some((polyline_wire(value)?, glam::DMat4::IDENTITY.to_cols_array())),
+        _ => embedded_revolve_profile(entity),
     }
 }
 
 /// The sweep path as the reference records it: a 3D polyline as a wire
 /// body, anything else as its embedded entity.
 fn embedded_sweep_path(path: &EntityType) -> Option<codec::entities::EmbeddedEntity> {
-    let EntityType::Polyline3D(value) = path else {
-        return embedded_path(path);
-    };
+    match path {
+        EntityType::Polyline3D(value) => polyline_wire(value),
+        _ => embedded_path(path),
+    }
+}
+
+fn polyline_wire(value: &codec::entities::Polyline3D) -> Option<codec::entities::EmbeddedEntity> {
     let points = value.vertices.iter()
         .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
         .collect::<Vec<_>>();
@@ -39,6 +44,46 @@ pub fn is_sweep_profile(entity: &EntityType) -> bool {
     embedded_sweep_profile(entity).is_some_and(|(profile, transform)| {
         kernel::acis::sweep_profile_geometry(&profile, transform).is_ok()
     })
+}
+
+/// The modeling error code the reference reports for a refused sweep.
+pub fn sweep_refusal_code(refusal: kernel::brep::SweepRefusal) -> u32 {
+    match refusal {
+        kernel::brep::SweepRefusal::Scale => 5016,
+        kernel::brep::SweepRefusal::Twist => 115065,
+        kernel::brep::SweepRefusal::Bank => 115007,
+    }
+}
+
+/// Why the reference refuses a path for a scaled sweep: scaling needs an
+/// open path, and a spatial path must be smooth.
+pub fn scaled_sweep_path_refusal(path: &EntityType) -> Option<&'static str> {
+    let (closed, smooth) = match crate::entities::curve::entity_curve(path) {
+        Some(planar) => (planar.curve.is_closed(), true),
+        None => match path {
+            EntityType::Polyline3D(value) => {
+                let points = value.vertices.iter()
+                    .map(|vertex| glam::DVec3::new(vertex.position.x, vertex.position.y, vertex.position.z))
+                    .collect::<Vec<_>>();
+                let directions = points.windows(2)
+                    .filter_map(|pair| (pair[1] - pair[0]).try_normalize())
+                    .collect::<Vec<_>>();
+                let straight = directions.windows(2).all(|pair| pair[0].dot(pair[1]) >= 1.0 - 1e-9);
+                (value.is_closed(), straight && !value.is_closed())
+            }
+            EntityType::Spline(value) => (value.flags.closed, value.degree > 1),
+            _ => (false, true),
+        },
+    };
+    if closed {
+        Some("Cannot use scale option when path curve is closed.
+The selected path curve is not valid.")
+    } else if !smooth {
+        Some("Path curve must be smooth when using scale option.
+The selected path curve is not valid.")
+    } else {
+        None
+    }
 }
 
 pub fn is_sweep_path(entity: &EntityType) -> bool {

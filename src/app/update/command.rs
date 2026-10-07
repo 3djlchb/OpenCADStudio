@@ -3938,11 +3938,21 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                                         if crate::scene::model::solid_history::is_primitive_property(
                                             field,
                                         ) {
-                                            self.tabs[i].scene.apply_solid_history_property(
+                                            if !self.tabs[i].scene.apply_solid_history_property(
                                                 handle,
                                                 field,
                                                 &val,
-                                            );
+                                            ) {
+                                                if let Some(code) = self.tabs[i]
+                                                    .scene
+                                                    .solid_history_property_refusal(handle, field, &val)
+                                                {
+                                                    self.command_line.push_output(&format!(
+                                                        "Modeling Operation Error:
+Error Code Number is {code}"
+                                                    ));
+                                                }
+                                            }
                                         } else if self.tabs[i]
                                             .scene
                                             .apply_solid_position_property(
