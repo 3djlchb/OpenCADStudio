@@ -1356,6 +1356,9 @@ pub struct SweepOptions {
     pub scale: f64,
     /// Total twist along the path, in radians.
     pub twist_angle: f64,
+    /// Where the path was picked: an open path is swept from its end nearest
+    /// this point (seen from above), as the reference does.
+    pub path_pick: Option<DVec3>,
 }
 
 impl Default for SweepOptions {
@@ -1366,6 +1369,7 @@ impl Default for SweepOptions {
             base_point: None,
             scale: 1.0,
             twist_angle: 0.0,
+            path_pick: None,
         }
     }
 }
@@ -2100,6 +2104,9 @@ pub enum CmdResult {
         mode: ExtrudeMode,
         options: SweepOptions,
         color: [f32; 4],
+        /// Scale and twist expressions entered with the Expression option;
+        /// a swept surface stays linked to them.
+        expressions: [Option<String>; 2],
     },
     /// Loft through ordered cross-sections, with optional guides or a path.
     LoftEntities {
