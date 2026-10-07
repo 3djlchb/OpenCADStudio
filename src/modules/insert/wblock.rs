@@ -114,7 +114,7 @@ fn copy_with_dependencies(
         })
         .collect();
     let (entities, deps) = crate::app::copy_to_clipboard_kernel(src, &handles);
-    crate::app::paste_entities_kernel(out, &entities, &deps, translate);
+    crate::app::paste_entities_kernel(out, &entities, &deps, translate, None);
 }
 
 /// Translate every entity of `out` so the overall bounds minimum lands on
