@@ -546,6 +546,9 @@ impl OpenCADStudio {
     /// its attributes and the texts of its block definition; a table, the
     /// cell texts of its drawing (its `*T` block).
     fn update_fields(&mut self, i: usize, handles: &[Handle]) {
+        // Every run is an undo step, as in the reference, even with nothing
+        // selected, no field found or no value changed.
+        self.push_undo_mark(i, "UPDATEFIELD");
         if handles.is_empty() {
             return;
         }
@@ -588,7 +591,6 @@ impl OpenCADStudio {
         }
         // The reference counts fields, not the texts holding them, and
         // reports every field it evaluated as updated, changed or not.
-        self.push_undo_snapshot(i, "UPDATEFIELD");
         let (changed, found) = self.tabs[i].scene.update_fields(32, Some(&hosts));
         if changed > 0 {
             self.tabs[i].dirty = true;
