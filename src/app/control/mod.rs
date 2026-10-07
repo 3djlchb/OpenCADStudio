@@ -460,6 +460,7 @@ impl OpenCADStudio {
                 | "properties"
                 | "measure"
                 | "snap"
+                | "grips"
                 | "query"
                 | "records"
                 | "record_schema"
@@ -742,6 +743,7 @@ impl OpenCADStudio {
                         None => json!({"ok":true,"snap":null}),
                     }
                 }
+                "grips" => self.control_grips(),
                 "xdata_get" => self.xdata_read(&req),
                 "get_selection" => self.control_get_selection(),
                 "text_search" => self.control_text_search(&req).unwrap_or_else(|e| e),
@@ -980,6 +982,8 @@ impl OpenCADStudio {
                 Task::none()
             }
             "property" => self.control_set_property(req)?,
+            "grip_drag" => self.control_grip_drag(req)?,
+            "click" => self.control_click(req)?,
             "set_properties" => self.control_set_record_properties(req)?,
             "action" => self.control_ui_action(req)?,
             #[cfg(not(target_arch = "wasm32"))]

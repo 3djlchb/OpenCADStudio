@@ -733,6 +733,119 @@ impl OpenCADStudio {
         self.refresh_properties();
         json!({"ok":true,"sections":self.tabs[self.active_tab].properties.sections.iter().map(|s|json!({"title":s.title,"properties":s.props.iter().map(property_json).collect::<Vec<_>>()})).collect::<Vec<_>>()})
     }
+    /// The grips of the current selection, as the viewport shows them.
+    pub(super) fn control_grips(&self) -> Value {
+        let tab = &self.tabs[self.active_tab];
+        let grips = tab
+            .selected_grip_handles
+            .iter()
+            .zip(&tab.selected_grips)
+            .map(|(owner, grip)| {
+                json!({
+                    "handle": format!("{:X}", owner.value()),
+                    "grip_id": grip.id,
+                    "point": [grip.world.x, grip.world.y, grip.world.z],
+                    "shape": format!("{:?}", grip.shape),
+                    "moves_entity": grip.is_midpoint,
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({"ok": true, "grips": grips})
+    }
+
+    /// Drag one grip of an entity to a world point through the viewport's
+    /// own grip gesture: select the entity, engage the grip, move, place.
+    /// Object snaps, grid, ortho, polar and tracking are off for the move so
+    /// the grip lands on `point`.
+    pub(super) fn control_grip_drag(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let i = self.active_tab;
+        let target = handle(req)?;
+        let grip_id = req["grip_id"]
+            .as_u64()
+            .ok_or_else(|| failure("invalid_request", "Missing grip_id"))? as usize;
+        let to = point(req)?;
+        self.tabs[i].scene.deselect_all();
+        self.tabs[i].scene.select_entity(target, false);
+        self.refresh_properties();
+        let (world, moves_entity) = self.tabs[i]
+            .selected_grip_handles
+            .iter()
+            .zip(&self.tabs[i].selected_grips)
+            .find(|(owner, grip)| **owner == target && grip.id == grip_id)
+            .map(|(_, grip)| (grip.world, grip.is_midpoint))
+            .ok_or_else(|| failure("unknown_grip", "Read grips for the entity's grip ids"))?;
+        let edit = self.grip_edit_for_hit(i, target, grip_id, moves_entity, world);
+        self.tabs[i].active_grip = Some(edit);
+
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
+        let tile = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
+        let local = iced::Rectangle {
+            width: tile.width,
+            height: tile.height,
+            ..iced::Rectangle::default()
+        };
+        let Some(screen) = self.tabs[i].scene.camera.borrow().project(to, local) else {
+            self.cancel_active_grip_edit();
+            return Err(failure("invalid_point", "The point is not in view"));
+        };
+        let saved = (
+            self.snapper.snap_enabled,
+            self.snapper.snap3d_enabled,
+            self.snapper.grid_snap_on,
+            self.snapper.otrack_enabled,
+            self.ortho_mode,
+            self.polar_mode,
+        );
+        self.snapper.snap_enabled = false;
+        self.snapper.snap3d_enabled = false;
+        self.snapper.grid_snap_on = false;
+        self.snapper.otrack_enabled = false;
+        self.ortho_mode = false;
+        self.polar_mode = false;
+        let _ = self.on_viewport_move(iced::Point::new(screen.x + tile.x, screen.y + tile.y));
+        (
+            self.snapper.snap_enabled,
+            self.snapper.snap3d_enabled,
+            self.snapper.grid_snap_on,
+            self.snapper.otrack_enabled,
+            self.ortho_mode,
+            self.polar_mode,
+        ) = saved;
+        Ok(self.commit_active_grip_edit())
+    }
+
+    /// Click the viewport where `point` (world) shows, as the left button
+    /// would, holding Ctrl and/or Shift when `modifiers` names them.
+    pub(super) fn control_click(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let i = self.active_tab;
+        let at = point(req)?;
+        let modifiers = req["modifiers"].as_str().unwrap_or("").to_ascii_lowercase();
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
+        let tile = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
+        let local = iced::Rectangle {
+            width: tile.width,
+            height: tile.height,
+            ..iced::Rectangle::default()
+        };
+        let screen = self.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .project(at, local)
+            .ok_or_else(|| failure("invalid_point", "The point is not in view"))?;
+        let saved = (self.ctrl_down, self.shift_down);
+        self.ctrl_down = modifiers.contains("ctrl");
+        self.shift_down = modifiers.contains("shift");
+        let cursor = iced::Point::new(screen.x + tile.x, screen.y + tile.y);
+        let tasks = [
+            self.update(Message::ViewportMove(cursor)),
+            self.update(Message::ViewportLeftPress),
+            self.update(Message::ViewportLeftRelease),
+        ];
+        (self.ctrl_down, self.shift_down) = saved;
+        Ok(Task::batch(tasks))
+    }
+
     pub(super) fn control_set_property(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         self.refresh_properties();
         let field = string(req, "field")?;

@@ -223,6 +223,31 @@ pub static PROPERTY: OpDef = OpDef {
     example: r#"{"op":"property","field":"color","value":1}"#,
 };
 
+pub static GRIP_DRAG: OpDef = OpDef {
+    name: "grip_drag",
+    doc: "Drag one grip of an entity to a world point the way a grip pick-and-place in the viewport does. Read grips for the ids; object snaps, ortho and polar are off for the move.",
+    batchable: true,
+    params: &[
+        req("handle", Ty::Handle, "Entity whose grip moves."),
+        req("grip_id", Ty::Int, "Grip id from the grips read."),
+        req("point", Ty::Point, "World point [x, y, z] the grip moves to."),
+    ],
+    rules: &[],
+    example: r#"{"op":"grip_drag","handle":"2A","grip_id":0,"point":[10,0,0]}"#,
+};
+
+pub static CLICK: OpDef = OpDef {
+    name: "click",
+    doc: "Left-click the viewport where a world point shows, as the mouse would. modifiers holds ctrl and/or shift (e.g. Ctrl+click picks the solid of a composite under the cursor).",
+    batchable: true,
+    params: &[
+        req("point", Ty::Point, "World point [x, y, z] to click on."),
+        opt("modifiers", Ty::Str, "Keys held during the click: \"ctrl\", \"shift\" or \"ctrl+shift\"."),
+    ],
+    rules: &[],
+    example: r#"{"op":"click","point":[10,0,0],"modifiers":"ctrl"}"#,
+};
+
 pub static SET_PROPERTIES: OpDef = OpDef {
     name: "set_properties",
     doc: "Atomically update record properties by RFC 6901 JSON pointer paths.",
@@ -635,6 +660,8 @@ pub static OPS: &[&OpDef] = &[
     &REDO,
     &SELECT,
     &PROPERTY,
+    &GRIP_DRAG,
+    &CLICK,
     &SET_PROPERTIES,
     &ACTION,
     &EMBED_IMAGE,

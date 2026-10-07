@@ -29,7 +29,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// changes, so schema drift (new params, renamed tools) is always a conscious,
 /// reviewed edit — and clients can detect a stale bridge by comparing digests.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "bbecd61a9295ecd8e3fefe6a223252107d80d173da7544edacaa2880139683ad";
+const TOOL_SCHEMA_DIGEST: &str = "2ec01401ca96bc0574a9be41958d24dbd9c27a497dce80064c8afcca5258256e";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -52,6 +52,7 @@ const READ_OPS: &[&str] = &[
     "properties",
     "measure",
     "snap",
+    "grips",
     "history",
     "commands",
     "events",
@@ -75,6 +76,8 @@ const EXECUTE_OPS: &[&str] = &[
     "redo",
     "select",
     "property",
+    "grip_drag",
+    "click",
     "set_properties",
     "action",
     "embed_image",
@@ -117,6 +120,8 @@ const BATCH_STEP_OPS: &[&str] = &[
     "redo",
     "select",
     "property",
+    "grip_drag",
+    "click",
     "set_properties",
     "action",
     "embed_image",
