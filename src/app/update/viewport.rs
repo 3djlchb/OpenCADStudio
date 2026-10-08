@@ -626,6 +626,109 @@ impl OpenCADStudio {
     /// cursor exactly where the GPU draws it; otherwise the model/paper camera
     /// and the normal hit-test wires. `bounds` is the pane-local rectangle.
 
+    /// The entities a selection box from `a` to `p` (tile pixels) catches,
+    /// as a window or crossing, through the wire, hatch and mesh tests — the
+    /// one box test the drag and click-move-click gestures and automation
+    /// share. The selection filter is the caller's.
+    pub(in crate::app) fn box_selection_handles(
+        &self,
+        i: usize,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+        bounds: iced::Rectangle,
+        a: iced::Point,
+        p: iced::Point,
+        crossing: bool,
+    ) -> (Vec<Handle>, BoxSelectTiming) {
+        let (view_rot, eye, all_wires) = self.pick_view(i, edit_cam, bounds);
+        let world_aabb = [a, iced::Point::new(a.x, p.y), p, iced::Point::new(p.x, a.y)]
+            .map(|point| self.cursor_model_point(i, edit_cam, point, bounds))
+            .into_iter()
+            .fold(
+                [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY],
+                |mut aabb, world| {
+                    aabb[0] = aabb[0].min(world.x);
+                    aabb[1] = aabb[1].min(world.y);
+                    aabb[2] = aabb[2].max(world.x);
+                    aabb[3] = aabb[3].max(world.y);
+                    aabb
+                },
+            );
+        // A large box selection was slow and two guesses about which step
+        // owns the time were both wrong, so each step is timed.
+        let elapsed = |start: Option<Instant>| {
+            start.map_or(0.0, |start| start.elapsed().as_secs_f64() * 1000.0)
+        };
+        let mut timing = BoxSelectTiming::default();
+        let t_sel = crate::perf::enabled().then(Instant::now);
+        let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
+            all_wires,
+            world_aabb,
+            [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)],
+            view_rot,
+            eye,
+            bounds,
+        );
+        timing.candidates = elapsed(t_sel);
+        let t_hit = crate::perf::enabled().then(Instant::now);
+        let scene = &self.tabs[i].scene;
+        let candidate_handles = scene.interaction_candidate_handles(&area_candidates);
+        timing.handles = elapsed(t_hit);
+        let mut handles: Vec<Handle> = scene::pick::hit_test::box_hit(
+            a,
+            p,
+            crossing,
+            &area_candidates,
+            view_rot,
+            eye,
+            bounds,
+        )
+        .into_iter()
+        .filter_map(|s| Scene::handle_from_wire_name(s))
+        .collect();
+        timing.wires = elapsed(t_hit);
+        handles.extend(scene::pick::hit_test::box_hit_hatch(
+            a,
+            p,
+            crossing,
+            &scene.visible_hatches_for_click(candidate_handles.as_ref()),
+            view_rot,
+            eye,
+            bounds,
+            candidate_handles.as_ref(),
+        ));
+        handles.extend(scene::pick::hit_test::box_hit_insert_hatch(
+            a,
+            p,
+            crossing,
+            scene.insert_hatches_for_click().as_ref(),
+            view_rot,
+            eye,
+            bounds,
+            candidate_handles.as_ref(),
+        ));
+        timing.hatch = elapsed(t_hit);
+        handles.extend(scene.mesh_box_hit(
+            a,
+            p,
+            crossing,
+            view_rot,
+            eye,
+            bounds,
+            candidate_handles.as_ref(),
+        ));
+        handles.extend(scene.block_mesh_box_hit(
+            a,
+            p,
+            crossing,
+            view_rot,
+            eye,
+            bounds,
+            candidate_handles.as_ref(),
+        ));
+        timing.hit = elapsed(t_hit);
+        (handles, timing)
+    }
+
     pub(in crate::app) fn pick_view(
         &self,
         i: usize,
@@ -4802,101 +4905,17 @@ impl OpenCADStudio {
                     // it here on release.
                     if let Some(a) = box_anchor {
                         let crossing = box_crossing;
-                        let (view_rot, eye, all_wires) = self.pick_view(i, &edit_cam, bounds);
-                        let world_aabb =
-                            [a, iced::Point::new(a.x, p.y), p, iced::Point::new(p.x, a.y)]
-                                .map(|point| self.cursor_model_point(i, &edit_cam, point, bounds))
-                                .into_iter()
-                                .fold(
-                                    [
-                                        f64::INFINITY,
-                                        f64::INFINITY,
-                                        f64::NEG_INFINITY,
-                                        f64::NEG_INFINITY,
-                                    ],
-                                    |mut aabb, world| {
-                                        aabb[0] = aabb[0].min(world.x);
-                                        aabb[1] = aabb[1].min(world.y);
-                                        aabb[2] = aabb[2].max(world.x);
-                                        aabb[3] = aabb[3].max(world.y);
-                                        aabb
-                                    },
-                                );
-                        // A 186 k-entity box selection sits at ~800 ms in this
-                        // handler and two guesses about which step owns it have
-                        // both been wrong. Split it.
-                        let t_sel = crate::perf::enabled().then(Instant::now);
-                        let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
-                            all_wires,
-                            world_aabb,
-                            [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)],
-                            view_rot,
-                            eye,
-                            bounds,
-                        );
-                        let cand_ms = t_sel.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
-                        let t_hit = crate::perf::enabled().then(Instant::now);
-                        let candidate_handles = self.tabs[i]
-                            .scene
-                            .interaction_candidate_handles(&area_candidates);
-                        let mut handles: Vec<Handle> = scene::pick::hit_test::box_hit(
-                            a,
-                            p,
-                            crossing,
-                            &area_candidates,
-                            view_rot,
-                            eye,
-                            bounds,
-                        )
-                        .into_iter()
-                        .filter_map(|s| Scene::handle_from_wire_name(s))
-                        .collect();
-                        handles.extend(scene::pick::hit_test::box_hit_hatch(
-                            a,
-                            p,
-                            crossing,
-                            &self.tabs[i]
-                                .scene
-                                .visible_hatches_for_click(candidate_handles.as_ref()),
-                            view_rot,
-                            eye,
-                            bounds,
-                            candidate_handles.as_ref(),
-                        ));
-                        handles.extend(scene::pick::hit_test::box_hit_insert_hatch(
-                            a,
-                            p,
-                            crossing,
-                            self.tabs[i].scene.insert_hatches_for_click().as_ref(),
-                            view_rot,
-                            eye,
-                            bounds,
-                            candidate_handles.as_ref(),
-                        ));
-                        handles.extend(self.tabs[i].scene.mesh_box_hit(
-                            a,
-                            p,
-                            crossing,
-                            view_rot,
-                            eye,
-                            bounds,
-                            candidate_handles.as_ref(),
-                        ));
-                        handles.extend(self.tabs[i].scene.block_mesh_box_hit(
-                            a,
-                            p,
-                            crossing,
-                            view_rot,
-                            eye,
-                            bounds,
-                            candidate_handles.as_ref(),
-                        ));
+                        let (mut handles, timing) =
+                            self.box_selection_handles(i, &edit_cam, bounds, a, p, crossing);
+                        // The drag gesture applies the selection filter as the click one does.
+                        handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
+                        let cand_ms = timing.candidates;
                         // Box/lasso accumulates like individual picks
                         // (issue #83): a plain box adds to the current
                         // selection, Shift+box removes the boxed
                         // entities. Esc / empty-space click still clears.
                         // PICKADD 0 (#226): a plain box REPLACES.
-                        let hit_ms = t_hit.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                        let hit_ms = timing.hit;
                         let t_apply = crate::perf::enabled().then(Instant::now);
                         if self.shift_down || self.select_remove_mode {
                             self.tabs[i].scene.deselect_entities(&handles);
@@ -5208,101 +5227,11 @@ was_selected={}",
                     }
 
                     let crossing = box_crossing;
-                    let (view_rot, eye, all_wires) = self.pick_view(i, &edit_cam, bounds);
-                    let world_aabb = [a, iced::Point::new(a.x, p.y), p, iced::Point::new(p.x, a.y)]
-                        .map(|point| self.cursor_model_point(i, &edit_cam, point, bounds))
-                        .into_iter()
-                        .fold(
-                            [
-                                f64::INFINITY,
-                                f64::INFINITY,
-                                f64::NEG_INFINITY,
-                                f64::NEG_INFINITY,
-                            ],
-                            |mut aabb, world| {
-                                aabb[0] = aabb[0].min(world.x);
-                                aabb[1] = aabb[1].min(world.y);
-                                aabb[2] = aabb[2].max(world.x);
-                                aabb[3] = aabb[3].max(world.y);
-                                aabb
-                            },
-                        );
-                    // This is the path a click-move-click window takes, as
-                    // opposed to a press-drag; it is the one a large selection
-                    // actually goes through.
-                    let t_sel = crate::perf::enabled().then(Instant::now);
-                    let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
-                        all_wires,
-                        world_aabb,
-                        [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)],
-                        view_rot,
-                        eye,
-                        bounds,
-                    );
-                    let cand_ms = t_sel.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
-                    let t_hit = crate::perf::enabled().then(Instant::now);
-                    let candidate_handles = self.tabs[i]
-                        .scene
-                        .interaction_candidate_handles(&area_candidates);
-                    // `hit` covers five things, and which of them owns it has
-                    // never been separated: resolving candidate handles, the wire
-                    // box test, the two hatch tests and the two mesh tests.
-                    let m_handles = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
-                    let mut handles: Vec<Handle> = scene::pick::hit_test::box_hit(
-                        a,
-                        p,
-                        crossing,
-                        &area_candidates,
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .into_iter()
-                    .filter_map(|s| Scene::handle_from_wire_name(s))
-                    .collect();
-                    let m_wires = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
-                    handles.extend(scene::pick::hit_test::box_hit_hatch(
-                        a,
-                        p,
-                        crossing,
-                        &self.tabs[i]
-                            .scene
-                            .visible_hatches_for_click(candidate_handles.as_ref()),
-                        view_rot,
-                        eye,
-                        bounds,
-                        candidate_handles.as_ref(),
-                    ));
-                    handles.extend(scene::pick::hit_test::box_hit_insert_hatch(
-                        a,
-                        p,
-                        crossing,
-                        self.tabs[i].scene.insert_hatches_for_click().as_ref(),
-                        view_rot,
-                        eye,
-                        bounds,
-                        candidate_handles.as_ref(),
-                    ));
-                    let m_hatch = t_hit.map(|t| t.elapsed().as_secs_f64() * 1000.0);
-                    handles.extend(self.tabs[i].scene.mesh_box_hit(
-                        a,
-                        p,
-                        crossing,
-                        view_rot,
-                        eye,
-                        bounds,
-                        candidate_handles.as_ref(),
-                    ));
-                    handles.extend(self.tabs[i].scene.block_mesh_box_hit(
-                        a,
-                        p,
-                        crossing,
-                        view_rot,
-                        eye,
-                        bounds,
-                        candidate_handles.as_ref(),
-                    ));
-                    let hit_ms = t_hit.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                    let (mut handles, timing) =
+                        self.box_selection_handles(i, &edit_cam, bounds, a, p, crossing);
+                    let (cand_ms, hit_ms) = (timing.candidates, timing.hit);
+                    let (m_handles, m_wires, m_hatch) =
+                        (Some(timing.handles), Some(timing.wires), Some(timing.hatch));
                     let t_filter = crate::perf::enabled().then(Instant::now);
                     // Selection filter: keep only allowed types.
                     handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
@@ -8025,4 +7954,16 @@ mod selection_preview_tests {
             hit.world
         );
     }
+}
+
+/// Where a box selection spent its time, in milliseconds since each step's
+/// start (perf builds only; zero otherwise). `handles`, `wires` and `hatch`
+/// are cumulative within `hit`.
+#[derive(Default)]
+pub(in crate::app) struct BoxSelectTiming {
+    pub candidates: f64,
+    pub handles: f64,
+    pub wires: f64,
+    pub hatch: f64,
+    pub hit: f64,
 }
