@@ -663,6 +663,7 @@ impl OpenCADStudio {
             polar_increment_deg: self.polar_increment_deg,
             zoom_wheel_reversed: self.zoom_wheel_reversed,
             touchpad_pan: self.touchpad_pan,
+            ui_scale_percent: self.ui_scale_percent,
             zoom_factor: self.zoom_factor,
             cursor_size: self.cursor_size,
             pick_box: self.pick_box,
@@ -764,6 +765,7 @@ impl OpenCADStudio {
         self.polar_increment_deg = s.polar_increment_deg;
         self.zoom_wheel_reversed = s.zoom_wheel_reversed;
         self.touchpad_pan = s.touchpad_pan;
+        self.ui_scale_percent = crate::app::settings::clamp_ui_scale(s.ui_scale_percent);
         self.zoom_factor = crate::app::settings::clamp_zoom_factor(s.zoom_factor);
         // Like the drafting-rotation field below, the Options field edits a
         // buffer rather than the value, so it is reseeded whenever the value
