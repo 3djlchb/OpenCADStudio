@@ -1119,6 +1119,7 @@ impl OpenCADStudio {
                     | "DGNOSNAP"
                     | "UOSNAP"
                     | "FIELDDISPLAY"
+                    | "SURFACEASSOCIATIVITY"
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
                     | "PDFIMPORTLAYERS"
@@ -1322,6 +1323,28 @@ impl OpenCADStudio {
                                     "Enter new value for PDFIMPORTIMAGEPATH, or . for none <\"{}\">:",
                                     image_path()
                                 ));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "SURFACEASSOCIATIVITY" {
+                        use crate::scene::model::sweep_model;
+                        let current = i16::from(sweep_model::surface_associativity());
+                        match value.as_deref().map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v))) {
+                            Some(Some(mode)) => {
+                                if current != mode {
+                                    sweep_model::set_surface_associativity(mode == 1);
+                                    self.save_config();
+                                }
+                            }
+                            Some(None) => {
+                                self.command_line.push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                self.command_line.push_output(&format!("Enter new value for SURFACEASSOCIATIVITY <{current}>:"));
+                                self.pending_setvar = Some(name.clone());
+                            }
+                            None => {
+                                self.command_line.push_output(&format!("Enter new value for SURFACEASSOCIATIVITY <{current}>:"));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
