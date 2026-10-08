@@ -9,7 +9,7 @@ pub(crate) mod config;
 pub use automation::{export_headless, serve};
 mod annotation_data;
 mod command_driver;
-pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel};
+pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel, PasteSpace};
 pub(crate) mod commands;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
