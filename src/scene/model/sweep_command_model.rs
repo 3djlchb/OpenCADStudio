@@ -475,8 +475,10 @@ pub fn assoc_edge_curve(entity: &EntityType) -> Option<(i32, codec::objects::Ass
         EntityType::Arc(value) => {
             let normal = glam::DVec3::new(value.normal.x, value.normal.y, value.normal.z).try_normalize()?;
             let axis = arbitrary_x(normal);
-            let mut end = value.end_angle;
-            while end <= value.start_angle { end += std::f64::consts::TAU; }
+            // The end past the start by the arc's sweep; an equal pair is a
+            // full turn. (A loop adding TAU never ends on a huge angle.)
+            let sweep = (value.end_angle - value.start_angle).rem_euclid(std::f64::consts::TAU);
+            let end = value.start_angle + if sweep > 0.0 { sweep } else { std::f64::consts::TAU };
             Some((11, K::Arc, arc(glam::DVec3::new(value.center.x, value.center.y, value.center.z), normal, axis, value.radius, value.start_angle, end)))
         }
         EntityType::LwPolyline(polyline) => {

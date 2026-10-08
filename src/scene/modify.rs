@@ -1140,8 +1140,13 @@ impl Scene {
             .filter(|(_, kind)| !matches!(kind, crate::scene::ChangeKind::Removed))
             .map(|(handle, _)| *handle)
             .collect::<rustc_hash::FxHashSet<_>>();
-        if changed.is_empty() { return Vec::new(); }
+        // Every edit passes through here: a drawing with no associative
+        // swept surface (no application registered for them) skips the scan.
+        if changed.is_empty() || !self.document.app_ids.contains(sweep_model::SWEEP_SOURCES_APP) {
+            return Vec::new();
+        }
         let linked = self.document.entities()
+            .filter(|entity| matches!(entity, EntityType::Surface(_)))
             .filter_map(|entity| {
                 let handle = entity.common().handle;
                 let (profile, path) = sweep_model::sweep_sources(entity)?;
