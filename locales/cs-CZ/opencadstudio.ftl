@@ -13,6 +13,7 @@ language =
     .arabic = العربية
     .japanese = 日本語
     .korean = 한국어
+    .lao = ລາວ
     .czech = Čeština
     .italian = Italiano
     .finnish = Suomi
