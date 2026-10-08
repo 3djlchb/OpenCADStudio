@@ -4560,6 +4560,30 @@ impl OpenCADStudio {
             // (printers, media, scales, page setups, etc.) untouched.
             self.plot_dialog.copy_settings_from(&previous);
             self.plot_dialog.selected_setup = previous.selected_setup.clone();
+
+            // A custom ratio such as 1:3 may not exist in the drawing's named
+            // scale list. select_page_setup() normally adds it while loading a
+            // PlotSettings, but same-context reopening intentionally skips that
+            // reload. Keep the restored custom scale available to the picker so
+            // the validation below does not collapse it to 1:1.
+            if !self.plot_dialog.fit_to_paper
+                && !self
+                    .plot_dialog
+                    .scales
+                    .iter()
+                    .any(|(name, _)| name == &self.plot_dialog.scale)
+            {
+                let factor = plot_dialog_scale_factor(&self.plot_dialog);
+
+                if factor.is_finite() && factor > 0.0 {
+                    let name = self.plot_dialog.scale.clone();
+                    self.plot_dialog.scales.push((name, factor));
+                    self.plot_dialog.scales.sort_by(|a, b| {
+                        a.1.partial_cmp(&b.1)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+            }
         } else {
             // First open for this tab/layout: seed the editor from its actual
             // page setup. An explicit setup selection later still uses
