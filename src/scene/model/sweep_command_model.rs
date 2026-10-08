@@ -167,7 +167,11 @@ pub fn sweep_selection_options(profiles: &[EntityType], mut options: SweepOption
     }
     // Spatial profiles keep their own anchor.
     let profiles = profiles.iter().filter(|profile| spatial_profile(profile).is_none()).collect::<Vec<_>>();
-    if profiles.is_empty() {
+    // A single profile takes its base from the path it is swept along
+    // (`sweep_record`).
+    // ponytail: several profiles share the group anchor even when the path
+    // starts inside one of them; the reference rule for that case is unmeasured.
+    if profiles.len() < 2 {
         return Some(options);
     }
     let geometry = profiles.iter().map(|profile| {
@@ -229,10 +233,10 @@ pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptio
         return Some(record);
     }
     let (sweep_entity, sweep_entity_transform) = embedded_sweep_profile(profile)?;
-    let (plane, wires, _) = kernel::acis::sweep_profile_geometry(&sweep_entity, sweep_entity_transform).ok()?;
+    kernel::acis::sweep_profile_geometry(&sweep_entity, sweep_entity_transform).ok()?;
     let base_point = match options.base_point {
         Some(point) => point.to_array(),
-        None => kernel::brep::sweep_profile_base(plane, &wires)?,
+        None => kernel::acis::sweep_default_base(&sweep_entity, sweep_entity_transform, &embedded_sweep_path(path)?).ok()?,
     };
     let mut base = SolidHistoryNodeBase::new(1);
     base.transform = glam::DMat4::IDENTITY.to_cols_array();
