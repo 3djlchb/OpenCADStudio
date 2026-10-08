@@ -1449,6 +1449,7 @@ common =
     .user-preferences = تفضيلات المستخدم
     .zoom = التكبير
     .reverse-mouse-wheel-zoom-zoomwheel = عكس التكبير بعجلة الفأرة (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = لوحة اللمس: التمرير يحرك العرض، Ctrl+تمرير أو القرص يكبّر
     .zoom-factor = معامل التكبير
     .how-far-one-wheel-notch-zooms-zoomfactor = مقدار التكبير لكل درجة من العجلة (ZOOMFACTOR).
     .text-and-dimensions = النص والأبعاد

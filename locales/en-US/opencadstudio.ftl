@@ -1438,6 +1438,7 @@ common =
     .user-preferences = User Preferences
     .zoom = Zoom
     .reverse-mouse-wheel-zoom-zoomwheel = Reverse mouse wheel zoom (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: scroll pans, Ctrl+scroll or pinch zooms
     .zoom-factor = Zoom factor
     .how-far-one-wheel-notch-zooms-zoomfactor = How far one wheel notch zooms (ZOOMFACTOR).
     .text-and-dimensions = Text and Dimensions

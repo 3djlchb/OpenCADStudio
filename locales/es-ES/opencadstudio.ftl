@@ -1437,6 +1437,7 @@ common =
     .user-preferences = Preferencias de usuario
     .zoom = Zoom
     .reverse-mouse-wheel-zoom-zoomwheel = Invertir el zoom de la rueda del ratón (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Panel táctil: el desplazamiento encuadra, Ctrl+desplazamiento o pellizco hace zoom
     .zoom-factor = Factor de zoom
     .how-far-one-wheel-notch-zooms-zoomfactor = Cuánto amplía un paso de la rueda (ZOOMFACTOR).
     .text-and-dimensions = Texto y acotación

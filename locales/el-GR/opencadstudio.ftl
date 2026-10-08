@@ -1438,6 +1438,7 @@ common =
     .user-preferences = Προτιμήσεις χρήστη
     .zoom = Ζουμ
     .reverse-mouse-wheel-zoom-zoomwheel = Αντιστροφή ζουμ με τον τροχό (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Επιφάνεια αφής: η κύλιση μετακινεί, Ctrl+κύλιση ή τσίμπημα κάνει ζουμ
     .zoom-factor = Συντελεστής ζουμ
     .how-far-one-wheel-notch-zooms-zoomfactor = Πόσο ζουμάρει ένα σκαλί του τροχού (ZOOMFACTOR).
     .text-and-dimensions = Κείμενο και διαστάσεις

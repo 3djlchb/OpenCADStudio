@@ -1435,6 +1435,7 @@ common =
     .user-preferences = Gebruikersvoorkeuren
     .zoom = Zoomen
     .reverse-mouse-wheel-zoom-zoomwheel = Muiswielzoom omkeren (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: scrollen verschuift, Ctrl+scrollen of knijpen zoomt
     .zoom-factor = Zoomfactor
     .how-far-one-wheel-notch-zooms-zoomfactor = Hoeveel één wielklik zoomt (ZOOMFACTOR).
     .text-and-dimensions = Tekst en maatvoering

@@ -1423,6 +1423,7 @@ common =
     .user-preferences = Kullanıcı tercihleri
     .zoom = Yakınlaştırma
     .reverse-mouse-wheel-zoom-zoomwheel = Fare tekerleği yakınlaştırmasını ters çevir (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Dokunmatik yüzey: kaydırma kaydırır, Ctrl+kaydırma veya sıkıştırma yakınlaştırır
     .zoom-factor = Yakınlaştırma çarpanı
     .how-far-one-wheel-notch-zooms-zoomfactor = Bir tekerlek adımının ne kadar yakınlaştıracağı (ZOOMFACTOR).
     .text-and-dimensions = Metin ve ölçülendirme

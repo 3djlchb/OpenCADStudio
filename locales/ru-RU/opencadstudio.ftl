@@ -1440,6 +1440,7 @@ common =
     .user-preferences = Пользовательские настройки
     .zoom = Зумирование
     .reverse-mouse-wheel-zoom-zoomwheel = Обратить зумирование колесом мыши (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Тачпад: прокрутка панорамирует, Ctrl+прокрутка или щипок масштабирует
     .zoom-factor = Коэффициент зумирования
     .how-far-one-wheel-notch-zooms-zoomfactor = Насколько приближает один щелчок колеса (ZOOMFACTOR).
     .text-and-dimensions = Текст и размеры

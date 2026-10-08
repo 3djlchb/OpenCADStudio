@@ -8383,6 +8383,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::TouchpadPanChanged(enabled) => {
+                self.touchpad_pan = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+
             Message::ZoomFactorChanged(factor) => {
                 self.zoom_factor = crate::app::settings::clamp_zoom_factor(factor);
                 // The field beside the slider reads the same value, so the

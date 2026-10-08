@@ -1437,6 +1437,7 @@ common =
     .user-preferences = Préférences utilisateur
     .zoom = Zoom
     .reverse-mouse-wheel-zoom-zoomwheel = Inverser le zoom à la molette (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Pavé tactile : le défilement déplace, Ctrl+défilement ou pincement zoome
     .zoom-factor = Facteur de zoom
     .how-far-one-wheel-notch-zooms-zoomfactor = De combien zoome un cran de molette (ZOOMFACTOR).
     .text-and-dimensions = Texte et cotation
