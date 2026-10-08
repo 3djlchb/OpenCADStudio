@@ -1201,6 +1201,7 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_viewport_move(&mut self, p: Point) -> Task<Message> {
+        crate::perf::note_pointer_move();
         // A ribbon dropdown is open over the viewport. Its backdrop
         // cannot swallow cursor motion — in iced 0.14 mouse_area/opaque
         // capture only button presses, never CursorMoved — so the move
@@ -5683,6 +5684,7 @@ properties={:.1}ms picked={}",
     pub(super) fn on_viewport_scroll(&mut self, delta: mouse::ScrollDelta) -> Task<Message> {
         match scroll_intent(delta, self.touchpad_pan, self.ctrl_down) {
             ScrollIntent::Zoom { notches } => {
+                crate::perf::note_scroll_zoom();
                 let mut s =
                     notches * crate::app::settings::zoom_notch_steps(self.zoom_factor);
                 if self.zoom_wheel_reversed {
