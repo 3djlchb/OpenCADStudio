@@ -1883,6 +1883,11 @@ impl OpenCADStudio {
         // A file saved without the built-in Standard styles (foreign
         // or damaged) gets them re-seeded so nothing dangles (#366).
         crate::app::style_ops::ensure_standard_styles(&mut self.tabs[i].scene.document);
+        // Copies made by earlier releases kept their source's dimension
+        // association; such a file is reported as damaged elsewhere.
+        crate::scene::dimension_assoc::drop_stray_dimension_reactors(
+            &mut self.tabs[i].scene.document,
+        );
         // Follow the file's saved current UCS from the moment it opens.
         self.tabs[i].adopt_active_ucs_from_header();
         // Adopt the drawing's own Ortho ($ORTHOMODE) and running OSNAP

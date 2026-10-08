@@ -823,6 +823,7 @@ impl Scene {
 
             let _ = self.sync_displayed_annotation_context(leader_handle);
         }
+        remap_copied_reactors(&mut self.document, &handle_map);
         // Complete group copies record their new Group objects and dictionary
         // entry as targeted object deltas inside copy_complete_groups.
         self.copy_complete_groups(&handle_map);
@@ -1801,5 +1802,22 @@ impl Scene {
         if !hatch_changes.is_empty() {
             self.bump_entities(&hatch_changes);
         }
+    }
+}
+
+/// A copy reacts only to what was copied with it: each reactor of the source
+/// that maps to a copy follows it there, and the rest (the source's dimension
+/// association, group, associative hatch) are dropped. The association and
+/// group copies add their own reactors afterwards.
+pub(crate) fn remap_copied_reactors(
+    document: &mut codec::CadDocument,
+    handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+) {
+    for &copy in handle_map.values() {
+        let Some(entity) = document.get_entity_mut(copy) else {
+            continue;
+        };
+        let reactors = &mut entity.common_mut().reactors;
+        *reactors = reactors.iter().filter_map(|reactor| handle_map.get(reactor).copied()).collect();
     }
 }

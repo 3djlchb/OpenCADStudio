@@ -578,6 +578,8 @@ pub(crate) fn paste_entities_kernel(
     // A pasted associative hatch follows the pasted boundary, or drops the
     // association when the boundary was not pasted with it. (#1370)
     crate::scene::remap_hatch_associations(doc, &handle_map);
+    // Reactors on the source drawing's objects do not travel with the paste.
+    crate::scene::remap_copied_reactors(doc, &handle_map);
     let leader_links: Vec<(Handle, Handle)> = entities
         .iter()
         .filter_map(|source| {

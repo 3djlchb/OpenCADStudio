@@ -44,6 +44,7 @@ mod group_layer;
 mod layout;
 mod limits;
 mod modify;
+pub(crate) use modify::remap_copied_reactors;
 mod mspace;
 pub mod viewport_ref;
 pub mod viewport_dimension_pick;
