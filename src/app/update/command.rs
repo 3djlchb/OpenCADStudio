@@ -303,9 +303,22 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         // Live incremental search for INSERT/MINSERT (see CommandInput)
                         let live = self.command_line.input.clone();
                         let i = self.active_tab;
-                        let (should_update, opts, prompt) = if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                            if cmd.on_live_input(&live) { (true, cmd.options(), cmd.prompt()) } else { (false, Vec::new(), String::new()) }
-                        } else { (false, Vec::new(), String::new()) };
+                        let (should_update, opts, prompt, suggestions) =
+                            if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                                let changed = cmd.on_live_input(&live);
+                                let suggestions = cmd.text_suggestions(&live);
+                                if changed {
+                                    (true, cmd.options(), cmd.prompt(), suggestions)
+                                } else {
+                                    (false, Vec::new(), String::new(), suggestions)
+                                }
+                            } else {
+                                (false, Vec::new(), String::new(), Vec::new())
+                            };
+
+                        self.command_line
+                            .set_contextual_suggestions(suggestions);
+
                         if should_update {
                             self.command_line.set_step_options(opts);
                             if let Some(last) = self.command_line.history.last_mut() { if last.pinned { last.text = prompt; } }
@@ -726,6 +739,12 @@ pub(super) fn on_tab_close(&mut self, idx: usize) -> Task<Message> {
                         self.command_line.input.clear();
                         self.command_line.autocomplete_cursor = None;
                         return self.dispatch_command(&command);
+                    }
+                } else if self.command_line.has_contextual_suggestions() {
+                    // During an active command Enter accepts the highlighted
+                    // contextual value instead of the user's partial search.
+                    if let Some(value) = self.command_line.selected_suggestion() {
+                        self.command_line.input = value;
                     }
                 }
                 let i = self.active_tab;
