@@ -1640,6 +1640,18 @@ pub(crate) fn resolved_dimension_style(
     handle!(dimblk, DIMBLK);
     handle!(dimblk1, DIMBLK1);
     handle!(dimblk2, DIMBLK2);
+    // A per-dimension NULL arrow override means the default filled arrow, so
+    // do not let a name-only built-in such as ARCHTICK leak through from the
+    // parent style.
+    if ov::handle(data, ov::DIMBLK).is_some() && style.dimblk.is_null() {
+        style.dimblk_name.clear();
+    }
+    if ov::handle(data, ov::DIMBLK1).is_some() && style.dimblk1.is_null() {
+        style.dimblk1_name.clear();
+    }
+    if ov::handle(data, ov::DIMBLK2).is_some() && style.dimblk2.is_null() {
+        style.dimblk2_name.clear();
+    }
     handle!(dimltex_handle, DIMLTYPE);
     handle!(dimltex1_handle, DIMLTEX1);
     handle!(dimltex2_handle, DIMLTEX2);
@@ -3361,7 +3373,7 @@ use codec::{CadDocument, EntityType, Handle};
 
 use crate::scene::convert::tess_util::aci_to_rgba;
 use crate::scene::convert::tessellate::{
-    add_polyline, add_segment, append_arrow, arrow_from_block,
+    add_polyline, add_segment, append_arrow, arrow_from_block, arrow_from_block_name,
     arrow_from_block_with_deferred_hatch, normalized_or, ArrowKind, DimGeom,
 };
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
@@ -3760,6 +3772,18 @@ fn tessellate_dimension_inner(
                 &mut memo,
             )
     };
+    let style_arrow = |handle: Handle, stored_name: &str| {
+        if handle.is_null() && !stored_name.trim().is_empty() {
+            arrow_from_block_name(Some(stored_name), dimasz)
+        } else {
+            arrow_from_block_with_deferred_hatch(
+                document,
+                handle,
+                dimasz,
+                defer_arrow_hatches,
+            )
+        }
+    };
     let (arrow1, arrow2) = if dimtsz_raw > 1e-9 {
         let t = ArrowKind::Tick {
             size: (dimtsz_raw as f32).max(0.001),
@@ -3791,42 +3815,27 @@ fn tessellate_dimension_inner(
                 crate::entities::dim_override::DIMBLK2,
             )
             .unwrap_or(if dimsah { s.dimblk2 } else { s.dimblk });
+            let first_name = if dimsah {
+                &s.dimblk1_name
+            } else {
+                &s.dimblk_name
+            };
+            let second_name = if dimsah {
+                &s.dimblk2_name
+            } else {
+                &s.dimblk_name
+            };
             (
-                arrow_from_block_with_deferred_hatch(
-                    document,
-                    first,
-                    dimasz,
-                    defer_arrow_hatches,
-                ),
-                arrow_from_block_with_deferred_hatch(
-                    document,
-                    second,
-                    dimasz,
-                    defer_arrow_hatches,
-                ),
+                style_arrow(first, first_name),
+                style_arrow(second, second_name),
             )
         } else if dimsah {
             (
-                arrow_from_block_with_deferred_hatch(
-                    document,
-                    s.dimblk1,
-                    dimasz,
-                    defer_arrow_hatches,
-                ),
-                arrow_from_block_with_deferred_hatch(
-                    document,
-                    s.dimblk2,
-                    dimasz,
-                    defer_arrow_hatches,
-                ),
+                style_arrow(s.dimblk1, &s.dimblk1_name),
+                style_arrow(s.dimblk2, &s.dimblk2_name),
             )
         } else {
-            let a = arrow_from_block_with_deferred_hatch(
-                document,
-                s.dimblk,
-                dimasz,
-                defer_arrow_hatches,
-            );
+            let a = style_arrow(s.dimblk, &s.dimblk_name);
             (a.clone(), a)
         }
     } else {

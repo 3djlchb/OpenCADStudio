@@ -1190,8 +1190,16 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                     field,
                     "dimltex_handle" | "dimltex1_handle" | "dimltex2_handle"
                 );
-                let doc = &self.tabs[i].scene.document;
-                let handle = if value == "Default" || value == "ByBlock" {
+                let is_dim_arrow = matches!(field, "dimblk" | "dimblk1" | "dimblk2");
+                let tick_block = if is_dim_arrow {
+                    crate::ui::style::dimstyle::tick_arrow_block(&value)
+                } else {
+                    None
+                };
+                let doc = &mut self.tabs[i].scene.document;
+                let handle = if let Some(block) = tick_block {
+                    ensure_tick_arrow_block(doc, block)
+                } else if value == "Default" || value == "ByBlock" {
                     codec::types::Handle::NULL
                 } else if is_lt {
                     doc.line_types
@@ -1206,12 +1214,29 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                         .map(|b| b.handle)
                         .unwrap_or(codec::types::Handle::NULL)
                 };
+                // Keep the R13/R14 name field in step with the handle so a
+                // stale name-only arrowhead cannot outlive the pick.
+                let stored_arrow_name = doc
+                    .block_records
+                    .iter()
+                    .find(|b| !handle.is_null() && b.handle == handle)
+                    .map(|b| b.name.clone())
+                    .unwrap_or_default();
                 // Staged: persists on Apply.
                 if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {
                     match field {
-                        "dimblk" => ds.dimblk = handle,
-                        "dimblk1" => ds.dimblk1 = handle,
-                        "dimblk2" => ds.dimblk2 = handle,
+                        "dimblk" => {
+                            ds.dimblk = handle;
+                            ds.dimblk_name = stored_arrow_name;
+                        }
+                        "dimblk1" => {
+                            ds.dimblk1 = handle;
+                            ds.dimblk1_name = stored_arrow_name;
+                        }
+                        "dimblk2" => {
+                            ds.dimblk2 = handle;
+                            ds.dimblk2_name = stored_arrow_name;
+                        }
                         "dimldrblk" => ds.dimldrblk = handle,
                         "dimltex_handle" => ds.dimltex_handle = handle,
                         "dimltex1_handle" => ds.dimltex1_handle = handle,
@@ -1221,6 +1246,52 @@ pub(super) fn on_text_style_dialog_open(&mut self) -> Task<Message> {
                 }
                 Task::none()
     }
+}
+
+/// Handle of the drawing's block for a built-in tick arrowhead (`_OBLIQUE`,
+/// `_ARCHTICK`), creating AutoCAD's standard definition when it is missing.
+/// R2000+ DWG/DXF store DIMBLK only as a block handle, so a name-only
+/// arrowhead would silently fall back to the filled arrow on save.
+fn ensure_tick_arrow_block(
+    doc: &mut codec::CadDocument,
+    block_name: &str,
+) -> codec::types::Handle {
+    use codec::types::{Color, LineWeight, Vector2, Vector3};
+    let key = block_name.trim_start_matches('_');
+    if let Some(record) = doc
+        .block_records
+        .iter()
+        .find(|b| b.name.trim_start_matches('_').eq_ignore_ascii_case(key))
+    {
+        return record.handle;
+    }
+    let owner = doc.allocate_handle();
+    let mut record = codec::tables::BlockRecord::new(block_name);
+    record.handle = owner;
+    if doc.block_records.add(record).is_err() {
+        return codec::types::Handle::NULL;
+    }
+    crate::io::xref::ensure_block_entities(doc, block_name);
+    // A unit diagonal stroke; ARCHTICK draws it as a 0.15-wide polyline.
+    let mut stroke = if key.eq_ignore_ascii_case("ARCHTICK") {
+        let mut pl = codec::entities::LwPolyline::from_points(vec![
+            Vector2::new(-0.5, -0.5),
+            Vector2::new(0.5, 0.5),
+        ]);
+        pl.constant_width = 0.15;
+        codec::EntityType::LwPolyline(pl)
+    } else {
+        codec::EntityType::Line(codec::entities::Line::from_points(
+            Vector3::new(-0.5, -0.5, 0.0),
+            Vector3::new(0.5, 0.5, 0.0),
+        ))
+    };
+    let common = stroke.common_mut();
+    common.owner_handle = owner;
+    common.color = Color::ByBlock;
+    common.line_weight = LineWeight::ByBlock;
+    let _ = doc.add_entity(stroke);
+    owner
 }
 
 #[cfg(test)]
@@ -1289,5 +1360,70 @@ mod ds_set_handle_tests {
             ds.dimblk2, hb,
             "picking the first arrowhead must not touch the second"
         );
+    }
+
+    fn block_name(app: &OpenCADStudio, h: codec::types::Handle) -> Option<String> {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|b| b.handle == h)
+            .map(|b| b.name.clone())
+    }
+
+    // Tick arrowheads must land as a real block handle: R2000+ files keep
+    // DIMBLK only as a handle, so a name-only pick is lost on save.
+    #[test]
+    fn tick_pick_creates_block_and_sets_handle() {
+        let mut app = app_with_arrow_blocks();
+        let i = app.active_tab;
+        let name = app.dimstyle_selected.clone();
+        let _ = app.on_ds_set_handle("dimblk", "Architectural tick".to_string());
+        let ds = app.tabs[i].scene.document.dim_styles.get(&name).unwrap().clone();
+        assert!(!ds.dimblk.is_null(), "tick pick must not leave a null handle");
+        assert_eq!(block_name(&app, ds.dimblk).as_deref(), Some("_ARCHTICK"));
+        assert_eq!(ds.dimblk_name, "_ARCHTICK");
+        let record = app.tabs[i].scene.document.block_records.get("_ARCHTICK").unwrap();
+        assert!(!record.entity_handles.is_empty(), "arrow block carries its stroke");
+
+        // Re-picking reuses the block instead of adding another.
+        let _ = app.on_ds_set_handle("dimblk", "Architectural tick".to_string());
+        let again = app.tabs[i].scene.document.dim_styles.get(&name).unwrap().dimblk;
+        assert_eq!(again, ds.dimblk);
+    }
+
+    #[test]
+    fn oblique_and_archtick_stay_distinct() {
+        let mut app = app_with_arrow_blocks();
+        let i = app.active_tab;
+        let name = app.dimstyle_selected.clone();
+        let _ = app.on_ds_set_handle("dimblk1", "Oblique".to_string());
+        let _ = app.on_ds_set_handle("dimblk2", "Architectural tick".to_string());
+        let ds = app.tabs[i].scene.document.dim_styles.get(&name).unwrap().clone();
+        assert_eq!(block_name(&app, ds.dimblk1).as_deref(), Some("_OBLIQUE"));
+        assert_eq!(block_name(&app, ds.dimblk2).as_deref(), Some("_ARCHTICK"));
+
+        // The picks survive a DWG save and reload (R2000+ keeps handles only).
+        let bytes = codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
+        let reread = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+            .read()
+            .unwrap();
+        let rs = reread.dim_styles.get(&name).unwrap();
+        let reread_name = |h| {
+            reread
+                .block_records
+                .iter()
+                .find(|b| b.handle == h)
+                .map(|b| b.name.to_ascii_uppercase())
+        };
+        assert_eq!(reread_name(rs.dimblk1).as_deref(), Some("_OBLIQUE"));
+        assert_eq!(reread_name(rs.dimblk2).as_deref(), Some("_ARCHTICK"));
+
+        // Back to Default clears both the handle and the R14 name.
+        let _ = app.on_ds_set_handle("dimblk1", "Default".to_string());
+        let ds = app.tabs[i].scene.document.dim_styles.get(&name).unwrap();
+        assert!(ds.dimblk1.is_null());
+        assert!(ds.dimblk1_name.is_empty());
     }
 }

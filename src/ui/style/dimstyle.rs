@@ -104,6 +104,7 @@ pub struct DimStyleValues<'a> {
     pub dimltex2_name: String,
     // Dropdown option lists shared by the arrowhead / linetype fields.
     pub block_opts: Vec<String>,
+    pub arrow_opts: Vec<String>,
     pub lt_opts: Vec<String>,
     pub text_style_opts: Vec<String>,
     pub text_style_fixed_height: Option<f64>,
@@ -190,12 +191,41 @@ fn preview_arrow_kinds(
     dimblk2: &str,
     dimasz: f32,
 ) -> (ArrowKind, ArrowKind) {
-    let kind = |name: &str| arrow_from_block_name(Some(name), dimasz);
+    let kind = |name: &str| {
+        let block = tick_arrow_block(name).unwrap_or(name);
+        arrow_from_block_name(Some(block), dimasz)
+    };
     if dimsah {
         (kind(dimblk1), kind(dimblk2))
     } else {
         (kind(dimblk), kind(dimblk))
     }
+}
+
+/// Built-in tick arrowheads the arrowhead pickers always offer, even before
+/// the drawing has a block for them (the block is created when picked).
+pub(crate) const TICK_ARROW_BLOCKS: [&str; 2] = ["_OBLIQUE", "_ARCHTICK"];
+
+/// Picker label for a tick arrowhead block name (`_ARCHTICK`, `ArchTick`, …),
+/// or `None` for any other block.
+pub(crate) fn tick_arrow_label(block_name: &str) -> Option<String> {
+    match block_name
+        .trim()
+        .trim_start_matches('_')
+        .to_ascii_uppercase()
+        .as_str()
+    {
+        "OBLIQUE" => Some(t!("Oblique").into_owned()),
+        "ARCHTICK" => Some(t!("Architectural tick").into_owned()),
+        _ => None,
+    }
+}
+
+/// Canonical block name behind a tick arrowhead picker label.
+pub(crate) fn tick_arrow_block(label: &str) -> Option<&'static str> {
+    TICK_ARROW_BLOCKS
+        .into_iter()
+        .find(|block| tick_arrow_label(block).as_deref() == Some(label))
 }
 
 impl canvas::Program<Message> for DimensionPreview {
@@ -841,21 +871,21 @@ pub fn view_window<'a>(
             text(t!("Arrowheads")).size(11).style(primary_style),
             hrow_enabled(
                 t!("Both arrowheads"),
-                vals.block_opts.clone(),
+                vals.arrow_opts.clone(),
                 vals.dimblk_name.clone(),
                 "dimblk",
                 !vals.dimsah && !tick_on
             ),
             hrow_enabled(
                 t!("First arrowhead"),
-                vals.block_opts.clone(),
+                vals.arrow_opts.clone(),
                 vals.dimblk1_name.clone(),
                 "dimblk1",
                 vals.dimsah && !tick_on
             ),
             hrow_enabled(
                 t!("Second arrowhead"),
-                vals.block_opts.clone(),
+                vals.arrow_opts.clone(),
                 vals.dimblk2_name.clone(),
                 "dimblk2",
                 vals.dimsah && !tick_on

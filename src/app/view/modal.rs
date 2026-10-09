@@ -1421,6 +1421,18 @@ impl OpenCADStudio {
                     })
                     .map(|b| b.name.clone()),
             );
+            // Tick arrowheads are listed by label whether or not the drawing
+            // has their block yet; picking one creates it on the update side.
+            let mut arrow_opts: Vec<String> = block_opts
+                .iter()
+                .filter(|name| crate::ui::style::dimstyle::tick_arrow_label(name).is_none())
+                .cloned()
+                .collect();
+            arrow_opts.extend(
+                crate::ui::style::dimstyle::TICK_ARROW_BLOCKS
+                    .iter()
+                    .filter_map(|block| crate::ui::style::dimstyle::tick_arrow_label(block)),
+            );
             let mut lt_opts: Vec<String> = vec!["ByBlock".to_string()];
             lt_opts.extend(doc.line_types.iter().map(|lt| lt.name.clone()));
             let text_style_opts: Vec<String> =
@@ -1434,15 +1446,32 @@ impl OpenCADStudio {
                 .get(&self.ds_dimtxsty)
                 .map(|style| style.height)
                 .filter(|height| *height > 0.0);
-            let blk_name = |h: codec::types::Handle| -> String {
-                if h.is_null() {
-                    "Default".to_string()
+            // `stored_name` is the name-only arrowhead an R13/R14 style keeps
+            // with a null handle; `tick_labels` maps tick blocks to the labels
+            // in `arrow_opts` (the leader picker lists raw block names).
+            let blk_name = |
+                h: codec::types::Handle,
+                stored_name: &str,
+                tick_labels: bool,
+            | -> String {
+                let name = if h.is_null() {
+                    stored_name
                 } else {
                     doc.block_records
                         .iter()
                         .find(|b| b.handle == h)
-                        .map(|b| b.name.clone())
-                        .unwrap_or_else(|| "Default".to_string())
+                        .map(|b| b.name.as_str())
+                        .unwrap_or("")
+                };
+                let tick = if tick_labels {
+                    crate::ui::style::dimstyle::tick_arrow_label(name)
+                } else {
+                    None
+                };
+                match tick {
+                    Some(label) => label,
+                    None if h.is_null() || name.is_empty() => "Default".to_string(),
+                    None => name.to_string(),
                 }
             };
             let lt_name = |h: codec::types::Handle| -> String {
@@ -1529,10 +1558,10 @@ impl OpenCADStudio {
                 dimltex2_name,
             ) = match ds_sel {
                 Some(d) => (
-                    blk_name(d.dimblk),
-                    blk_name(d.dimblk1),
-                    blk_name(d.dimblk2),
-                    blk_name(d.dimldrblk),
+                    blk_name(d.dimblk, &d.dimblk_name, true),
+                    blk_name(d.dimblk1, &d.dimblk1_name, true),
+                    blk_name(d.dimblk2, &d.dimblk2_name, true),
+                    blk_name(d.dimldrblk, "", false),
                     lt_name(d.dimltex_handle),
                     lt_name(d.dimltex1_handle),
                     lt_name(d.dimltex2_handle),
@@ -1626,6 +1655,7 @@ impl OpenCADStudio {
                     dimltex1_name: dimltex1_name.clone(),
                     dimltex2_name: dimltex2_name.clone(),
                     block_opts: block_opts.clone(),
+                    arrow_opts: arrow_opts.clone(),
                     lt_opts: lt_opts.clone(),
                     text_style_opts: text_style_opts.clone(),
                     text_style_fixed_height,

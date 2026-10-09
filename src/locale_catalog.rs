@@ -1002,6 +1002,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Close" => Some(("common", "close")),
         "Closed" => Some(("properties", "closed")),
         "Closed filled" => Some(("common", "closed-filled")),
+        "Oblique" => Some(("common", "arrowhead-oblique")),
+        "Architectural tick" => Some(("common", "arrowhead-architectural-tick")),
         "Collapsed" => Some(("ui", "collapsed")),
         "Collect Leaders" => Some(("annotate", "collect-leaders")),
         "Color" => Some(("common", "color")),
