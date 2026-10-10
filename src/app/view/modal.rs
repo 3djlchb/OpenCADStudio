@@ -674,18 +674,26 @@ impl OpenCADStudio {
                         }
                     }
                     linetypes.sort_by_key(|name| name.to_lowercase());
+                    // Shared ownership: the build closure runs twice per frame
+                    // (INTRINSIC + FILL) and each row keeps its own copy, so a
+                    // borrow cannot work here — an Arc clone per row is a
+                    // refcount bump instead of N string clones (#21, cf. #34).
+                    let linetypes = std::sync::Arc::<[String]>::from(linetypes);
                     sized_flow(
                         ex,
                         1180,
                         560,
-                        |flow| {
-                            crate::ui::window::layer_state_manager::view_editor(
-                                state,
-                                &self.layer_state_edit_filter,
-                                self.layer_state_edit_color_open,
-                                linetypes.clone(),
-                                flow,
-                            )
+                        {
+                            let linetypes = std::sync::Arc::clone(&linetypes);
+                            move |flow| {
+                                crate::ui::window::layer_state_manager::view_editor(
+                                    state,
+                                    &self.layer_state_edit_filter,
+                                    self.layer_state_edit_color_open,
+                                    std::sync::Arc::clone(&linetypes),
+                                    flow,
+                                )
+                            }
                         },
                     )
                 } else {

@@ -116,13 +116,17 @@ pub fn view_window<'a>(
             .iter()
             .find(|state| state.name.eq_ignore_ascii_case(selected))
     });
-    let query = filter.trim().to_lowercase();
+    let query: Cow<str> = if filter.trim().is_empty() {
+        Cow::Borrowed("")
+    } else {
+        Cow::Owned(filter.trim().to_lowercase())
+    };
     let rows: Vec<Element<'_, Message>> = states
         .iter()
         .filter(|state| {
             query.is_empty()
-                || state.name.to_lowercase().contains(&query)
-                || state.description.to_lowercase().contains(&query)
+                || state.name.to_lowercase().contains(query.as_ref())
+                || state.description.to_lowercase().contains(query.as_ref())
         })
         .map(|state| {
             let is_selected =
@@ -402,7 +406,7 @@ fn editor_layer_row<'a>(
     index: usize,
     layer: &'a codec::LayerStateLayer,
     color_open: bool,
-    linetypes: Vec<String>,
+    linetypes: std::sync::Arc<[String]>,
 ) -> Element<'a, Message> {
     let current_linetype = Some(layer.line_type.clone());
     let current_lineweight = Some(LwItem(layer.line_weight));
@@ -491,7 +495,7 @@ pub fn view_editor<'a>(
     state: &'a LayerState,
     filter: &'a str,
     color_open: Option<usize>,
-    linetypes: Vec<String>,
+    linetypes: std::sync::Arc<[String]>,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let properties = [
@@ -517,20 +521,24 @@ pub fn view_editor<'a>(
         .iter()
         .map(|layer| layer.layer_name.clone())
         .collect();
-    let query = filter.trim().to_lowercase();
+    let query: Cow<str> = if filter.trim().is_empty() {
+        Cow::Borrowed("")
+    } else {
+        Cow::Owned(filter.trim().to_lowercase())
+    };
     let rows = state
         .layers
         .iter()
         .enumerate()
         .filter(|(_, layer)| {
-            query.is_empty() || layer.layer_name.to_lowercase().contains(&query)
+            query.is_empty() || layer.layer_name.to_lowercase().contains(query.as_ref())
         })
         .fold(column![].spacing(0), |rows, (index, layer)| {
             rows.push(editor_layer_row(
                 index,
                 layer,
                 color_open == Some(index),
-                linetypes.clone(),
+                std::sync::Arc::clone(&linetypes),
             ))
         });
 
@@ -621,4 +629,34 @@ pub fn view_editor<'a>(
     .width(sizing.width)
     .height(sizing.height)
     .into()
+}
+
+#[cfg(test)]
+mod borrowed_linetypes_tests {
+    // #21 RED: view_editor must take shared ownership of the linetype list
+    // (a borrow cannot cross the twice-per-frame build closure) instead of
+    // cloning per row — this call fails to compile until the signatures take
+    // Arc<[String]>.
+    use super::view_editor;
+
+    #[test]
+    fn view_editor_accepts_shared_linetypes() {
+        let state = codec::LayerState {
+            name: String::new(),
+            description: String::new(),
+            mask: codec::LayerStateMask::default(),
+            hidden: false,
+            current_layer: String::new(),
+            layers: Vec::new(),
+        };
+        let linetypes: std::sync::Arc<[String]> =
+            std::sync::Arc::from(vec!["Continuous".to_string()]);
+        let sizing = crate::ui::modal::ModalSizing {
+            width: iced::Length::Fixed(1180.0),
+            height: iced::Length::Fixed(560.0),
+        };
+        let _ = view_editor(&state, "", None, std::sync::Arc::clone(&linetypes), sizing);
+        // Shared ownership: the source stays usable after the call.
+        assert_eq!(linetypes.len(), 1);
+    }
 }
