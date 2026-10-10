@@ -1490,6 +1490,11 @@ pub(super) struct OpenCADStudio {
     ds_dimalttd: String,
     ds_dimaltrnd: String,
     ds_dimapost: String,
+    /// Staged style the preview was last drawn from, and that drawing.
+    ds_preview: Option<(
+        codec::tables::DimStyle,
+        std::sync::Arc<crate::ui::style::dimstyle::PreviewGeometry>,
+    )>,
     ds_dimaltz: String,
     ds_dimalttz: String,
     // Tolerances (extra)
@@ -4643,6 +4648,7 @@ impl OpenCADStudio {
             ds_dimalttd: "2".to_string(),
             ds_dimaltrnd: "0".to_string(),
             ds_dimapost: String::new(),
+            ds_preview: None,
             ds_dimaltz: "0".to_string(),
             ds_dimalttz: "0".to_string(),
             ds_dimtolj: "1".to_string(),

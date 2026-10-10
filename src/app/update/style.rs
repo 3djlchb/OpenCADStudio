@@ -357,16 +357,69 @@ impl OpenCADStudio {
     /// Write edit buffers back into the selected dim style document entry.
 
     pub(in crate::app) fn apply_dimstyle_bufs(&mut self, tab: usize) {
-        let doc = &mut self.tabs[tab].scene.document;
+        if self.ds_annotative {
+            self.ds_dimscale = "0".to_string();
+        }
+        let Some(mut ds) = self.tabs[tab]
+            .scene
+            .document
+            .dim_styles
+            .get(&self.dimstyle_selected)
+            .cloned()
+        else {
+            return;
+        };
+        self.write_dimstyle_bufs(tab, &mut ds);
+        if let Some(slot) = self.tabs[tab]
+            .scene
+            .document
+            .dim_styles
+            .get_mut(&self.dimstyle_selected)
+        {
+            *slot = ds;
+        }
 
-        let text_style_handle = doc
+        // Same reason as a per-dimension edit: every dimension on this style is
+        // drawn from a block made under the settings that just changed, so the
+        // pictures are stale. Drop them and let each be drawn again. Without
+        // this an edit here would move the numbers and leave the drawing alone.
+        let edited = self.dimstyle_selected.clone();
+        let stale: Vec<codec::Handle> = self.tabs[tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                codec::EntityType::Dimension(dim)
+                    if dim.base().style_name.eq_ignore_ascii_case(&edited) =>
+                {
+                    Some(entity.common().handle)
+                }
+                _ => None,
+            })
+            .collect();
+        for handle in stale {
+            if let Some(codec::EntityType::Dimension(dimension)) =
+                self.tabs[tab].scene.document.get_entity_mut(handle)
+            {
+                crate::entities::dimension::reset_automatic_text_position(dimension.base_mut());
+            }
+            self.tabs[tab].scene.invalidate_dim_block_recorded(handle);
+        }
+
+        self.command_line
+            .push_output(crate::tf!("DimStyle '{}' updated.", self.dimstyle_selected).as_ref());
+    }
+
+    /// Write the dialog's edit buffers into `ds` (the staged values a field
+    /// holds only as text until Apply).
+    fn write_dimstyle_bufs(&self, tab: usize, ds: &mut codec::tables::DimStyle) {
+        let text_style_handle = self.tabs[tab]
+            .scene
+            .document
             .text_styles
             .get(&self.ds_dimtxsty)
             .map(|style| style.handle)
             .unwrap_or(codec::types::Handle::NULL);
-        let Some(ds) = doc.dim_styles.get_mut(&self.dimstyle_selected) else {
-            return;
-        };
         macro_rules! set_f64 {
             ($field:ident, $buf:expr) => {
                 if let Ok(v) = $buf.trim().parse::<f64>() {
@@ -392,7 +445,6 @@ impl OpenCADStudio {
         set_f64!(dimtxt, self.ds_dimtxt);
         if self.ds_annotative {
             ds.dimscale = 0.0;
-            self.ds_dimscale = "0".to_string();
         } else {
             set_f64!(dimscale, self.ds_dimscale);
         }
@@ -459,36 +511,43 @@ impl OpenCADStudio {
         ds.dimtofl = self.ds_dimtofl;
         ds.dimalt = self.ds_dimalt;
         ds.dimapost = self.ds_dimapost.clone();
+    }
 
-        // Same reason as a per-dimension edit: every dimension on this style is
-        // drawn from a block made under the settings that just changed, so the
-        // pictures are stale. Drop them and let each be drawn again. Without
-        // this an edit here would move the numbers and leave the drawing alone.
-        let edited = self.dimstyle_selected.clone();
-        let stale: Vec<codec::Handle> = self.tabs[tab]
-            .scene
-            .document
-            .entities()
-            .filter_map(|entity| match entity {
-                codec::EntityType::Dimension(dim)
-                    if dim.base().style_name.eq_ignore_ascii_case(&edited) =>
-                {
-                    Some(entity.common().handle)
-                }
-                _ => None,
-            })
-            .collect();
-        for handle in stale {
-            if let Some(codec::EntityType::Dimension(dimension)) =
-                self.tabs[tab].scene.document.get_entity_mut(handle)
-            {
-                crate::entities::dimension::reset_automatic_text_position(dimension.base_mut());
-            }
-            self.tabs[tab].scene.invalidate_dim_block_recorded(handle);
+    /// Redraw the dimension style preview from the staged values whenever
+    /// they differ from what it last showed, by drawing a sample dimension
+    /// with the real dimension tessellator.
+    pub(in crate::app) fn refresh_dimstyle_preview(&mut self) {
+        if !matches!(self.active_modal, Some(crate::app::ModalKind::DimStyle)) {
+            self.ds_preview = None;
+            return;
         }
-
-        self.command_line
-            .push_output(crate::tf!("DimStyle '{}' updated.", self.dimstyle_selected).as_ref());
+        let tab = self.active_tab;
+        let name = self.dimstyle_selected.clone();
+        let Some(mut staged) = self
+            .tabs
+            .get(tab)
+            .and_then(|t| t.scene.document.dim_styles.get(&name))
+            .cloned()
+        else {
+            self.ds_preview = None;
+            return;
+        };
+        self.write_dimstyle_bufs(tab, &mut staged);
+        if self.ds_preview.as_ref().is_some_and(|(shown, _)| *shown == staged) {
+            return;
+        }
+        // The tessellator resolves the style by name, so lend it the staged
+        // values for the one sample and put the stored style back.
+        let doc = &mut self.tabs[tab].scene.document;
+        let Some(slot) = doc.dim_styles.get_mut(&name) else {
+            return;
+        };
+        let stored = std::mem::replace(slot, staged.clone());
+        let geometry = crate::ui::style::dimstyle::tessellate_preview(doc, &staged);
+        if let Some(slot) = doc.dim_styles.get_mut(&name) {
+            *slot = stored;
+        }
+        self.ds_preview = Some((staged, std::sync::Arc::new(geometry)));
     }
 
     /// Update a single string buffer field.
@@ -1370,6 +1429,33 @@ mod ds_set_handle_tests {
             .iter()
             .find(|b| b.handle == h)
             .map(|b| b.name.clone())
+    }
+
+    // Editing a field redraws the preview at once (before Apply), and the
+    // stored style is left untouched by the preview's borrowed values.
+    #[test]
+    fn field_edit_redraws_preview_before_apply() {
+        use crate::app::{DsField, Message};
+        let mut app = app_with_arrow_blocks();
+        let i = app.active_tab;
+        let _ = app.update(Message::DimStyleDialogOpen);
+        let name = app.dimstyle_selected.clone();
+        let stored = app.tabs[i].scene.document.dim_styles.get(&name).unwrap().clone();
+        let before = app.ds_preview.as_ref().map(|(_, g)| g.clone()).expect("preview drawn");
+
+        let _ = app.update(Message::DsEdit(DsField::Dimexe, format!("{}", stored.dimexe + 3.0)));
+        let after = app.ds_preview.as_ref().map(|(_, g)| g.clone()).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&before, &after), "edit must redraw the preview");
+        assert_eq!(
+            app.tabs[i].scene.document.dim_styles.get(&name).unwrap(),
+            &stored,
+            "preview must not stage the edit into the document"
+        );
+
+        // An update that changes nothing keeps the drawn preview.
+        let _ = app.update(Message::DimStyleDialogTab(1));
+        let same = app.ds_preview.as_ref().map(|(_, g)| g.clone()).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&after, &same));
     }
 
     // Tick arrowheads must land as a real block handle: R2000+ files keep

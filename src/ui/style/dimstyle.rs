@@ -1,7 +1,6 @@
 //! Dimension Style Manager window — fills the entire OS window.
 
 use crate::app::{ColorPickTarget, DsField, Message};
-use crate::scene::convert::tessellate::{arrow_from_block_name, ArrowKind};
 use iced::widget::{
     button, canvas, checkbox, column, container, row, scrollable, text, text_input, Space,
 };
@@ -115,6 +114,8 @@ pub struct DimStyleValues<'a> {
     pub in_use: bool,
     /// Colour field whose expanded palette is currently open.
     pub color_open: Option<DsField>,
+    /// The sample dimension drawn with the staged values.
+    pub preview: Option<std::sync::Arc<PreviewGeometry>>,
 }
 
 fn tab_btn_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
@@ -166,40 +167,114 @@ fn primary_style(theme: &Theme) -> iced::widget::text::Style {
     }
 }
 
-struct DimensionPreview {
-    ext1: bool,
-    ext2: bool,
-    dim1: bool,
-    dim2: bool,
-    tick: bool,
-    arrow_size: f32,
-    arrow1: ArrowKind,
-    arrow2: ArrowKind,
-    text_above: bool,
-    basic: bool,
-    text: String,
+/// A sample dimension drawn by the real dimension tessellator with the
+/// staged style, in drawing units. The canvas fits it to the preview box, so
+/// every size, offset, arrowhead and colour reads in true proportion.
+#[derive(Debug, Clone, Default)]
+pub struct PreviewGeometry {
+    /// Polylines with their colour and band width (drawing units, 0 = hairline).
+    strokes: Vec<(Vec<[f32; 2]>, [f32; 4], f32)>,
+    /// Filled triangles (arrowheads, text masks) with their colour.
+    fills: Vec<([[f32; 2]; 3], [f32; 4])>,
+    /// Dimension text runs: content, baseline origin, height, rotation, width.
+    texts: Vec<(String, [f32; 2], f32, f32, f32, [f32; 4])>,
+    /// The measured object edge the extension lines start from.
+    object: [[f32; 2]; 2],
 }
 
-/// Resolve the staged arrowhead block names to per-end preview kinds: the
-/// shared `dimblk` when Dimsah is off, the per-end blocks when on — the same
-/// selection the renderer makes. `dimasz` is the preview arrow size so
-/// size-scaled kinds (SMALL, DOTSMALL) keep their proportions.
-fn preview_arrow_kinds(
-    dimsah: bool,
-    dimblk: &str,
-    dimblk1: &str,
-    dimblk2: &str,
-    dimasz: f32,
-) -> (ArrowKind, ArrowKind) {
-    let kind = |name: &str| {
-        let block = tick_arrow_block(name).unwrap_or(name);
-        arrow_from_block_name(Some(block), dimasz)
+/// Colour handed to the tessellator for ByBlock / ByLayer parts; drawn in the
+/// theme's ink so the preview reads on light and dark themes alike.
+const PREVIEW_INK: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
+/// Draw a horizontal linear sample dimension with `style` (which `doc` must
+/// hold under its name) and keep the pieces the preview canvas paints.
+pub(crate) fn tessellate_preview(
+    doc: &codec::CadDocument,
+    style: &codec::tables::DimStyle,
+) -> PreviewGeometry {
+    use crate::entities::dimension::DimensionTess;
+    use codec::types::Vector3;
+    let scale = if style.dimscale > 1e-6 { style.dimscale } else { 1.0 };
+    // Size the sample from the style's own text and arrows, so a metric style
+    // (0.18 arrows) and an imperial one (2.5 arrows) both read in proportion.
+    let unit = style.dimtxt.abs().max(style.dimasz.abs()).max(1e-6) * scale;
+    let length = nice_length(unit * 24.0);
+    let mut linear = codec::entities::DimensionLinear::horizontal(
+        Vector3::new(0.0, 0.0, 0.0),
+        Vector3::new(length, 0.0, 0.0),
+    );
+    linear.definition_point = Vector3::new(0.0, unit * 4.0, 0.0);
+    linear.base.style_name = style.name.clone();
+    let mut dim = codec::entities::Dimension::Linear(linear);
+    dim.base_mut().actual_measurement = dim.measurement();
+    let wires = dim.tessellate(
+        doc,
+        codec::types::Handle::NULL,
+        false,
+        PREVIEW_INK,
+        1.0,
+        1.0,
+        &rustc_hash::FxHashSet::default(),
+        None,
+        [0.0, 0.0, 0.0, 1.0],
+        None,
+        None,
+    );
+    let mut out = PreviewGeometry {
+        object: [[(-unit * 2.0) as f32, 0.0], [(length + unit * 2.0) as f32, 0.0]],
+        ..Default::default()
     };
-    if dimsah {
-        (kind(dimblk1), kind(dimblk2))
-    } else {
-        (kind(dimblk), kind(dimblk))
+    let at = |points: &[[f32; 3]], low: &[[f32; 3]], i: usize| {
+        let l = low.get(i).copied().unwrap_or([0.0; 3]);
+        [points[i][0] + l[0], points[i][1] + l[1]]
+    };
+    for wire in wires.iter().filter(|w| w.display_visible && !w.snap_only) {
+        let mut run: Vec<[f32; 2]> = Vec::new();
+        for i in 0..wire.points.len() {
+            if wire.points[i][0].is_finite() && wire.points[i][1].is_finite() {
+                run.push(at(&wire.points, &wire.points_low, i));
+            } else if run.len() > 1 {
+                out.strokes.push((std::mem::take(&mut run), wire.color, wire.world_width.max(0.0)));
+            } else {
+                run.clear();
+            }
+        }
+        if run.len() > 1 {
+            out.strokes.push((run, wire.color, wire.world_width.max(0.0)));
+        }
+        for tri in wire.fill_tris.chunks_exact(3) {
+            out.fills.push((
+                [[tri[0][0], tri[0][1]], [tri[1][0], tri[1][1]], [tri[2][0], tri[2][1]]],
+                wire.color,
+            ));
+        }
+        for run in &wire.searchable_text {
+            out.texts.push((
+                run.text.clone(),
+                [run.origin[0] as f32, run.origin[1] as f32],
+                run.height,
+                run.rotation,
+                run.adv_width,
+                run.color,
+            ));
+        }
     }
+    out
+}
+
+/// Smallest 1-2-2.5-5 step at or above `x`, so the sample measures a round
+/// number (100, 250, 5…) rather than an arbitrary one.
+fn nice_length(x: f64) -> f64 {
+    let base = 10f64.powf(x.max(1e-9).log10().floor());
+    [1.0, 2.0, 2.5, 5.0, 10.0]
+        .into_iter()
+        .map(|step| step * base)
+        .find(|value| *value >= x * (1.0 - 1e-9))
+        .unwrap_or(base * 10.0)
+}
+
+struct DimensionPreview {
+    geometry: Option<std::sync::Arc<PreviewGeometry>>,
 }
 
 /// Built-in tick arrowheads the arrowhead pickers always offer, even before
@@ -240,162 +315,87 @@ impl canvas::Program<Message> for DimensionPreview {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let palette = theme.palette();
-        let ink = palette.background.base.text.scale_alpha(0.88);
-        let guide = palette.primary.base.color;
-        let stroke = canvas::Stroke::default().with_color(ink).with_width(1.2);
-        let x1 = 52.0;
-        let x2 = (bounds.width - 52.0).max(x1 + 40.0);
-        let y = bounds.height * 0.58;
-        let object_y = bounds.height - 18.0;
+        let Some(geometry) = self.geometry.as_deref() else {
+            return vec![frame.into_geometry()];
+        };
+        let ink = theme.palette().background.base.text.scale_alpha(0.88);
+        let color = |c: [f32; 4]| {
+            if c[0] > 0.98 && c[1] > 0.98 && c[2] > 0.98 {
+                ink
+            } else {
+                iced::Color::from_rgba(c[0], c[1], c[2], c[3])
+            }
+        };
 
-        let line = |a: Point, b: Point| canvas::Path::line(a, b);
+        // Fit everything drawn (and the object edge) into the box.
+        let mut min = [f32::MAX; 2];
+        let mut max = [f32::MIN; 2];
+        let mut grow = |p: [f32; 2]| {
+            min = [min[0].min(p[0]), min[1].min(p[1])];
+            max = [max[0].max(p[0]), max[1].max(p[1])];
+        };
+        geometry.object.iter().for_each(|p| grow(*p));
+        geometry.strokes.iter().flat_map(|(run, _, _)| run).for_each(|p| grow(*p));
+        geometry.fills.iter().flat_map(|(tri, _)| tri).for_each(|p| grow(*p));
+        for (_, origin, height, rotation, width, _) in &geometry.texts {
+            let (sin, cos) = rotation.sin_cos();
+            for (u, v) in [(0.0, 0.0), (*width, 0.0), (0.0, *height), (*width, *height)] {
+                grow([origin[0] + u * cos - v * sin, origin[1] + u * sin + v * cos]);
+            }
+        }
+        let pad = 14.0;
+        let span = [(max[0] - min[0]).max(1e-6), (max[1] - min[1]).max(1e-6)];
+        let k = ((bounds.width - 2.0 * pad) / span[0]).min((bounds.height - 2.0 * pad) / span[1]);
+        let ox = (bounds.width - span[0] * k) * 0.5 - min[0] * k;
+        let oy = (bounds.height + span[1] * k) * 0.5 + min[1] * k;
+        let px = |p: [f32; 2]| Point::new(ox + p[0] * k, oy - p[1] * k);
+
+        let [a, b] = geometry.object;
         frame.stroke(
-            &line(Point::new(x1 - 18.0, object_y), Point::new(x2 + 18.0, object_y)),
+            &canvas::Path::line(px(a), px(b)),
             canvas::Stroke::default().with_color(ink.scale_alpha(0.38)).with_width(1.0),
         );
-        if self.ext1 {
-            frame.stroke(&line(Point::new(x1, object_y), Point::new(x1, 22.0)), stroke.clone());
+        for (tri, c) in &geometry.fills {
+            let path = canvas::Path::new(|path| {
+                path.move_to(px(tri[0]));
+                path.line_to(px(tri[1]));
+                path.line_to(px(tri[2]));
+                path.close();
+            });
+            frame.fill(&path, color(*c));
         }
-        if self.ext2 {
-            frame.stroke(&line(Point::new(x2, object_y), Point::new(x2, 22.0)), stroke.clone());
-        }
-
-        let text_half = (self.text.chars().count() as f32 * 3.4 + 8.0).min((x2 - x1) * 0.34);
-        if self.dim1 {
-            frame.stroke(&line(Point::new(x1, y), Point::new((bounds.width * 0.5 - text_half).max(x1), y)), stroke.clone());
-        }
-        if self.dim2 {
-            frame.stroke(&line(Point::new((bounds.width * 0.5 + text_half).min(x2), y), Point::new(x2, y)), stroke.clone());
-        }
-
-        let size = self.arrow_size.clamp(5.0, 14.0);
-        // Per-end arrowheads: each end draws its own resolved kind so split
-        // (Dimsah) configurations read correctly. A global DIMTSZ tick still
-        // overrides both ends, matching AutoCAD precedence.
-        let tick_path = |tip_x: f32, tick_size: f32| {
-            canvas::Path::line(
-                Point::new(tip_x - tick_size * 0.55, y + tick_size * 0.75),
-                Point::new(tip_x + tick_size * 0.55, y - tick_size * 0.75),
-            )
-        };
-        for (kind, tip_x, sign) in [(&self.arrow1, x1, 1.0_f32), (&self.arrow2, x2, -1.0_f32)] {
-            if self.tick {
-                frame.stroke(
-                    &tick_path(tip_x, size),
-                    canvas::Stroke::default().with_color(guide).with_width(1.6),
-                );
-                continue;
-            }
-            match kind {
-                ArrowKind::None => {}
-                ArrowKind::Triangle { size, filled, size_mul } => {
-                    let s = size * size_mul;
-                    let arrow = canvas::Path::new(|path| {
-                        path.move_to(Point::new(tip_x, y));
-                        path.line_to(Point::new(tip_x + sign * s, y - s * 0.42));
-                        path.line_to(Point::new(tip_x + sign * s, y + s * 0.42));
-                        path.close();
-                    });
-                    if *filled {
-                        frame.fill(&arrow, guide);
-                    } else {
-                        frame.stroke(&arrow, canvas::Stroke::default().with_color(guide).with_width(1.4));
-                    }
+        for (run, c, width) in &geometry.strokes {
+            let path = canvas::Path::new(|path| {
+                path.move_to(px(run[0]));
+                for p in &run[1..] {
+                    path.line_to(px(*p));
                 }
-                ArrowKind::Open { size, half_angle } => {
-                    let (sin, cos) = half_angle.sin_cos();
-                    for side in [-1.0_f32, 1.0_f32] {
-                        frame.stroke(
-                            &line(
-                                Point::new(tip_x, y),
-                                Point::new(tip_x + sign * size * cos, y + side * size * sin),
-                            ),
-                            canvas::Stroke::default().with_color(guide).with_width(1.4),
-                        );
-                    }
-                }
-                ArrowKind::Dot { size, filled } => {
-                    let dot = canvas::Path::circle(Point::new(tip_x + sign * size * 0.5, y), size * 0.5);
-                    if *filled {
-                        frame.fill(&dot, guide);
-                    } else {
-                        frame.stroke(&dot, canvas::Stroke::default().with_color(guide).with_width(1.4));
-                    }
-                }
-                ArrowKind::Tick { size } => {
-                    frame.stroke(
-                        &tick_path(tip_x, *size),
-                        canvas::Stroke::default().with_color(guide).with_width(1.6),
-                    );
-                }
-                ArrowKind::Box_ { size, filled } => {
-                    let half = size * 0.45;
-                    let square = canvas::Path::rectangle(
-                        Point::new(tip_x + sign * half - half, y - half),
-                        iced::Size::new(half * 2.0, half * 2.0),
-                    );
-                    if *filled {
-                        frame.fill(&square, guide);
-                    } else {
-                        frame.stroke(&square, canvas::Stroke::default().with_color(guide).with_width(1.4));
-                    }
-                }
-                // Datum/Origin have dedicated CAD geometry; the preview keeps
-                // the schematic triangle/dot respectively.
-                ArrowKind::Datum { size, filled } => {
-                    let arrow = canvas::Path::new(|path| {
-                        path.move_to(Point::new(tip_x, y));
-                        path.line_to(Point::new(tip_x + sign * size, y - size * 0.42));
-                        path.line_to(Point::new(tip_x + sign * size, y + size * 0.42));
-                        path.close();
-                    });
-                    if *filled {
-                        frame.fill(&arrow, guide);
-                    } else {
-                        frame.stroke(&arrow, canvas::Stroke::default().with_color(guide).with_width(1.4));
-                    }
-                }
-                ArrowKind::Origin { size } => {
-                    let dot = canvas::Path::circle(Point::new(tip_x + sign * size * 0.5, y), size * 0.4);
-                    frame.stroke(&dot, canvas::Stroke::default().with_color(guide).with_width(1.4));
-                }
-                // Custom DWG block geometry cannot render in the schematic
-                // preview; fall back to the standard filled triangle.
-                ArrowKind::Custom { .. } => {
-                    let arrow = canvas::Path::new(|path| {
-                        path.move_to(Point::new(tip_x, y));
-                        path.line_to(Point::new(tip_x + sign * size, y - size * 0.42));
-                        path.line_to(Point::new(tip_x + sign * size, y + size * 0.42));
-                        path.close();
-                    });
-                    frame.fill(&arrow, guide);
-                }
-            }
-        }
-
-        let text_y = if self.text_above { y - 16.0 } else { y };
-        if self.basic {
-            let frame_width = (self.text.chars().count() as f32 * 7.0 + 12.0)
-                .min((x2 - x1) * 0.8);
+            });
             frame.stroke(
-                &canvas::Path::rectangle(
-                    Point::new(bounds.width * 0.5 - frame_width * 0.5, text_y - 9.0),
-                    iced::Size::new(frame_width, 18.0),
-                ),
-                canvas::Stroke::default().with_color(ink).with_width(1.0),
+                &path,
+                canvas::Stroke::default()
+                    .with_color(color(*c))
+                    .with_width((width * k).max(1.2)),
             );
         }
-        frame.fill_text(canvas::Text {
-            content: self.text.clone(),
-            position: Point::new(bounds.width * 0.5, text_y),
-            color: ink,
-            size: iced::Pixels(12.0),
-            align_x: iced::advanced::text::Alignment::Center,
-            align_y: iced::alignment::Vertical::Center,
-            shaping: iced::advanced::text::Shaping::Advanced,
-            ..Default::default()
-        });
+        for (content, origin, height, rotation, _, c) in &geometry.texts {
+            let at = px(*origin);
+            let size = (height * k).max(6.0);
+            frame.with_save(|frame| {
+                frame.translate(iced::Vector::new(at.x, at.y));
+                frame.rotate(-rotation);
+                frame.fill_text(canvas::Text {
+                    content: content.clone(),
+                    position: Point::ORIGIN,
+                    color: color(*c),
+                    size: iced::Pixels(size),
+                    align_x: iced::advanced::text::Alignment::Left,
+                    align_y: iced::alignment::Vertical::Bottom,
+                    shaping: iced::advanced::text::Shaping::Advanced,
+                    ..Default::default()
+                });
+            });
+        }
         vec![frame.into_geometry()]
     }
 }
@@ -1214,75 +1214,8 @@ pub fn view_window<'a>(
         .into(),
     };
 
-    let precision = vals.dimdec.trim().parse::<usize>().unwrap_or(2).min(8);
-    let factor = vals.dimlfac.trim().parse::<f64>().unwrap_or(1.0);
-    let mut measured = format!("{:.*}", precision, 125.0 * factor);
-    let zero_flags = vals.dimzin.trim().parse::<i16>().unwrap_or(0);
-    if zero_flags & 8 != 0 && measured.contains('.') {
-        while measured.ends_with('0') {
-            measured.pop();
-        }
-        if measured.ends_with('.') {
-            measured.pop();
-        }
-    }
-    if zero_flags & 4 != 0 && measured.starts_with("0.") {
-        measured.remove(0);
-    }
-    if vals.dimdsep.trim() == "44" {
-        measured = measured.replace('.', ",");
-    } else if vals.dimdsep.trim() == "32" {
-        measured = measured.replace('.', " ");
-    }
-    let mut preview_text = if vals.dimpost.contains("<>") {
-        vals.dimpost.replace("<>", &measured)
-    } else {
-        format!("{measured}{}", vals.dimpost)
-    };
-    if vals.dimalt {
-        let alternate = 125.0 * vals.dimaltf.trim().parse::<f64>().unwrap_or(1.0);
-        let alt_precision = vals.dimaltd.trim().parse::<usize>().unwrap_or(2).min(8);
-        let alt_value = format!("{:.*}", alt_precision, alternate);
-        let alternate_text = if vals.dimapost.contains("<>") {
-            vals.dimapost.replace("<>", &alt_value)
-        } else {
-            format!("{alt_value}{}", vals.dimapost)
-        };
-        preview_text.push_str(&format!("  [{alternate_text}]"));
-    }
-    if vals.dimlim {
-        preview_text = format!(
-            "{} / {}",
-            preview_text,
-            vals.dimtm.trim()
-        );
-    } else if vals.dimtol {
-        if vals.dimtp.trim() == vals.dimtm.trim() {
-            preview_text.push_str(&format!(" ±{}", vals.dimtp.trim()));
-        } else {
-            preview_text.push_str(&format!(" +{} −{}", vals.dimtp.trim(), vals.dimtm.trim()));
-        }
-    }
-    let arrow_size = vals.dimasz.trim().parse::<f32>().unwrap_or(1.0).abs() * 5.0 + 5.0;
-    let (arrow1, arrow2) = preview_arrow_kinds(
-        vals.dimsah,
-        &vals.dimblk_name,
-        &vals.dimblk1_name,
-        &vals.dimblk2_name,
-        arrow_size.clamp(5.0, 14.0),
-    );
     let preview = canvas(DimensionPreview {
-        ext1: !vals.dimse1,
-        ext2: !vals.dimse2,
-        dim1: !vals.dimsd1,
-        dim2: !vals.dimsd2,
-        tick: vals.dimtsz.trim().parse::<f32>().unwrap_or(0.0) > 0.0,
-        arrow_size,
-        arrow1,
-        arrow2,
-        text_above: vals.dimtad.trim() != "0",
-        basic: vals.dimgap.trim().starts_with('-'),
-        text: preview_text,
+        geometry: vals.preview.clone(),
     })
     .width(Length::Fill)
     .height(Length::Fixed(112.0));
@@ -1379,23 +1312,47 @@ pub fn view_window<'a>(
 }
 
 #[cfg(test)]
-mod preview_arrow_tests {
-    // Preview must resolve each end independently: shared block when Dimsah
-    // is off, per-end blocks when on.
-    use super::preview_arrow_kinds;
-    use crate::scene::convert::tessellate::ArrowKind;
+mod preview_tests {
+    use super::{nice_length, tessellate_preview};
 
     #[test]
-    fn shared_block_feeds_both_ends_when_dimsah_off() {
-        let (first, second) = preview_arrow_kinds(false, "OPEN", "DOT", "NONE", 10.0);
-        assert!(matches!(first, ArrowKind::Open { .. }));
-        assert!(matches!(second, ArrowKind::Open { .. }));
+    fn sample_length_is_a_round_number() {
+        assert_eq!(nice_length(4.32), 5.0);
+        assert_eq!(nice_length(60.0), 100.0);
+        assert_eq!(nice_length(0.2), 0.2);
+        assert_eq!(nice_length(2.4), 2.5);
     }
 
+    fn top(geometry: &super::PreviewGeometry) -> f32 {
+        geometry
+            .strokes
+            .iter()
+            .flat_map(|(run, _, _)| run)
+            .map(|p| p[1])
+            .fold(f32::MIN, f32::max)
+    }
+
+    // A metric style (0.18 arrows) must not shrink its arrows and offsets to
+    // nothing against a fixed sample length: everything scales with the style.
     #[test]
-    fn per_end_blocks_feed_each_end_when_dimsah_on() {
-        let (first, second) = preview_arrow_kinds(true, "OPEN", "DOT", "NONE", 10.0);
-        assert!(matches!(first, ArrowKind::Dot { .. }));
-        assert!(matches!(second, ArrowKind::None));
+    fn preview_follows_style_sizes() {
+        let mut doc = codec::CadDocument::new();
+        let style = doc.dim_styles.get_mut("Standard").unwrap();
+        style.dimasz = 0.18;
+        style.dimtxt = 0.18;
+        style.dimexe = 0.5;
+        style.dimexo = 0.5;
+        let style = style.clone();
+        let geometry = tessellate_preview(&doc, &style);
+        assert!(!geometry.texts.is_empty(), "the measurement is drawn");
+        // Extension lines run DIMEXE past the dimension line (at 4 x 0.18).
+        let first = top(&geometry);
+        assert!((first - (0.72 + 0.5)).abs() < 1e-3, "top {first}");
+
+        let style = doc.dim_styles.get_mut("Standard").unwrap();
+        style.dimexe = 1.0;
+        let style = style.clone();
+        let edited = top(&tessellate_preview(&doc, &style));
+        assert!((edited - (0.72 + 1.0)).abs() < 1e-3, "edited DIMEXE shows: {edited}");
     }
 }

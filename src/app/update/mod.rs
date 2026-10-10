@@ -330,6 +330,7 @@ impl OpenCADStudio {
             self.sync_underlay_tab();
         }
         self.sync_frame_dropdown();
+        self.refresh_dimstyle_preview();
         task
     }
 

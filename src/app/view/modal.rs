@@ -1665,6 +1665,7 @@ impl OpenCADStudio {
                     read_only,
                     in_use,
                     color_open: self.ds_color_open.clone(),
+                    preview: self.ds_preview.as_ref().map(|(_, geometry)| geometry.clone()),
                 },
                 self.style_rename.as_deref(),
                 &self.style_rename_buf,
