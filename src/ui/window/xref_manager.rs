@@ -196,6 +196,25 @@ pub enum XrefPaletteOp {
     Pathtype(Pathtype),
 }
 
+/// Stable row identity carried by row messages instead of the positional
+/// display index (#49): a rescan/reorder between view and dispatch must not
+/// retarget the row. Same `(key, saved_path)` pair `refresh` uses to preserve
+/// selection (key alone can collide across host/nested scopes).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XrefRowId {
+    pub key: u64,
+    pub saved_path: String,
+}
+
+impl XrefRowId {
+    pub fn of(key: u64, saved_path: &str) -> Self {
+        Self {
+            key,
+            saved_path: saved_path.to_string(),
+        }
+    }
+}
+
 impl XrefManagerPanel {
     /// Rebuild `entries` from `doc` via [`collect_entries_with_prev`] and
     /// recompute the parent → children linkage for tree mode. Selection/anchor
@@ -310,13 +329,24 @@ impl XrefManagerPanel {
             .collect()
     }
 
+    /// Resolve a row id to its current display index (entries reorder on
+    /// every rescan). `None` = row gone meanwhile; callers no-op (#49).
+    pub fn row_index(&self, id: &XrefRowId) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|e| e.key == id.key && e.saved_path == id.saved_path)
+    }
+
     /// Click handling for row picks with normal GUI list semantics:
     /// - plain click selects exactly one row (previous selection clears);
     /// - Ctrl/Cmd-click toggles one row;
     /// - Shift-click extends a contiguous range from the anchor (or the
     ///   clicked row when there is no anchor yet).
     /// Tree mode always single-selects per spec, whatever the modifiers.
-    pub fn click_select(&mut self, index: usize, extend: SelectExtend) {
+    pub fn click_select(&mut self, id: &XrefRowId, extend: SelectExtend) {
+        let Some(index) = self.row_index(id) else {
+            return;
+        };
         if index == HOST_ROW || index >= self.entries.len() {
             return;
         }
@@ -365,19 +395,29 @@ impl XrefManagerPanel {
     /// Legacy toggle entry point: Ctrl-style toggle in list mode, single
     /// select in tree mode. Kept for tests and non-pointer callers.
     pub fn toggle_select(&mut self, index: usize) {
-        self.click_select(index, SelectExtend::Toggle);
+        let Some(id) = self
+            .entries
+            .get(index)
+            .map(|e| XrefRowId::of(e.key, &e.saved_path))
+        else {
+            return;
+        };
+        self.click_select(&id, SelectExtend::Toggle);
     }
 
     /// Right-click selection: select the row alone when it is not already
     /// selected (standard right-click behavior — the menu then acts on the
     /// selection, which now includes this row). Keeps multi-selections when
     /// right-clicking inside them.
-    pub fn right_click_select(&mut self, index: usize) {
+    pub fn right_click_select(&mut self, id: &XrefRowId) {
+        let Some(index) = self.row_index(id) else {
+            return;
+        };
         if index == HOST_ROW || index >= self.entries.len() {
             return;
         }
         if !self.selected.contains(&index) {
-            self.click_select(index, SelectExtend::Single);
+            self.click_select(id, SelectExtend::Single);
         } else {
             self.ensure_preview_for_anchor();
         }
@@ -1627,14 +1667,14 @@ fn menu_separator() -> Element<'static, Message> {
 /// path tools. No Bind, no Attach/Overlay — those are DWG-only and
 /// hidden entirely. Change Path Type shows a right triangle and a
 /// second list adjacent to "Change Path Type" on hover.
-fn row_menu_for(index: usize, change_path_open: bool) -> Element<'static, Message> {
+fn row_menu_for(id: XrefRowId, change_path_open: bool) -> Element<'static, Message> {
     let item = |label: &str, op: XrefPaletteOp| -> Element<'static, Message> {
-        menu_row(label.to_string(), Message::XrefRowOp(index, op))
+        menu_row(label.to_string(), Message::XrefRowOp(id.clone(), op))
     };
     let pathtype_item = |label: &str, pt: Pathtype| -> Element<'static, Message> {
         submenu_row(
             label.to_string(),
-            Message::XrefRowOp(index, XrefPaletteOp::Pathtype(pt)),
+            Message::XrefRowOp(id.clone(), XrefPaletteOp::Pathtype(pt)),
         )
     };
     let change_path_row: Element<'static, Message> = mouse_area(
@@ -1681,11 +1721,11 @@ fn row_menu_for(index: usize, change_path_open: bool) -> Element<'static, Messag
             menu_separator(),
             menu_row(
                 crate::t!("Select New Path").into_owned(),
-                Message::XrefRowPathPick(index),
+                Message::XrefRowPathPick(id.clone()),
             ),
             menu_row(
                 crate::t!("Find and Replace...").into_owned(),
-                Message::XrefRowFindReplacePrompt(index),
+                Message::XrefRowFindReplacePrompt(id.clone()),
             ),
         ]
         .spacing(MENU_SPACING)
@@ -1821,6 +1861,8 @@ fn xref_row<'a>(
     .align_y(iced::Center);
 
     let index = display.index;
+    // #49: messages carry stable identity; the index stays for zebra striping only.
+    let row_id = XrefRowId::of(entry.key, &entry.saved_path);
     let row = mouse_area(
         container(content)
             .style(move |theme: &Theme| {
@@ -1847,9 +1889,12 @@ fn xref_row<'a>(
             .height(Length::Fixed(ROW_H))
             .width(Fill),
     )
-    .on_press(Message::XrefManagerSelect(index));
-    let cm = iced_aw::ContextMenu::new(row, move || row_menu_for(index, change_path_open));
-    RightClickArea::new(cm, Message::XrefRowRightClick(index)).into()
+    .on_press(Message::XrefManagerSelect(row_id.clone()));
+    let cm = iced_aw::ContextMenu::new(row, {
+        let row_id = row_id.clone();
+        move || row_menu_for(row_id.clone(), change_path_open)
+    });
+    RightClickArea::new(cm, Message::XrefRowRightClick(row_id)).into()
 }
 
 /// One tree-mode row: indent + optional expand arrow + file icon + name.
@@ -1883,6 +1928,8 @@ fn tree_row(
     );
     cells = cells.push(text(entry.name.clone()).size(TREE_FONT_SZ));
     let index = display.index;
+    // #49: messages carry stable identity; the index stays for zebra striping only.
+    let row_id = XrefRowId::of(entry.key, &entry.saved_path);
     let row = mouse_area(
         container(cells.spacing(4).width(Fill))
             .style(move |theme: &Theme| {
@@ -1908,9 +1955,12 @@ fn tree_row(
             })
             .width(Fill),
     )
-    .on_press(Message::XrefManagerSelect(index));
-    let cm = iced_aw::ContextMenu::new(row, move || row_menu_for(index, change_path_open));
-    RightClickArea::new(cm, Message::XrefRowRightClick(index)).into()
+    .on_press(Message::XrefManagerSelect(row_id.clone()));
+    let cm = iced_aw::ContextMenu::new(row, {
+        let row_id = row_id.clone();
+        move || row_menu_for(row_id.clone(), change_path_open)
+    });
+    RightClickArea::new(cm, Message::XrefRowRightClick(row_id)).into()
 }
 
 /// Tree-mode host root: home icon + name with the current-drawing marker.
@@ -2344,6 +2394,8 @@ mod tests {
     #[test]
     fn click_select_single_then_range() {
         use super::SelectExtend;
+        use super::XrefRowId;
+        let id = |key: u64, saved: &str| XrefRowId::of(key, saved);
         let mut panel = XrefManagerPanel::default();
         panel.entries = vec![
             entry(1, "A", "a.dwg"),
@@ -2351,27 +2403,27 @@ mod tests {
             entry(3, "C", "c.dwg"),
         ];
         // Plain click selects exactly one row.
-        panel.click_select(0, SelectExtend::Single);
-        panel.click_select(2, SelectExtend::Single);
+        panel.click_select(&id(1, "a.dwg"), SelectExtend::Single);
+        panel.click_select(&id(3, "c.dwg"), SelectExtend::Single);
         assert_eq!(panel.selected, HashSet::from([2]));
         assert_eq!(panel.anchor, Some(2));
         // Shift-click extends a contiguous range from the anchor.
-        panel.click_select(2, SelectExtend::Single);
-        panel.click_select(0, SelectExtend::Range);
+        panel.click_select(&id(3, "c.dwg"), SelectExtend::Single);
+        panel.click_select(&id(1, "a.dwg"), SelectExtend::Range);
         assert_eq!(panel.selected, HashSet::from([0, 1, 2]));
         // Repeated extends keep the original anchor — rows are never lost.
         panel.entries.push(entry(4, "D", "d.dwg"));
         panel.entries.push(entry(5, "E", "e.dwg"));
-        panel.click_select(4, SelectExtend::Range);
+        panel.click_select(&id(5, "e.dwg"), SelectExtend::Range);
         assert_eq!(panel.selected, HashSet::from([2, 3, 4]));
         assert_eq!(panel.anchor, Some(2));
         // Ctrl-click toggles one row.
-        panel.click_select(3, SelectExtend::Toggle);
+        panel.click_select(&id(4, "d.dwg"), SelectExtend::Toggle);
         assert_eq!(panel.selected, HashSet::from([2, 4]));
         // Range with no anchor starts at the clicked row.
         let mut fresh = XrefManagerPanel::default();
         fresh.entries = vec![entry(1, "A", "a.dwg"), entry(2, "B", "b.dwg")];
-        fresh.click_select(1, SelectExtend::Range);
+        fresh.click_select(&id(2, "b.dwg"), SelectExtend::Range);
         assert_eq!(fresh.selected, HashSet::from([1]));
     }
 
@@ -2570,9 +2622,10 @@ mod tests {
     /// opens it with a synthetic right-click on the underlay, mirroring a
     /// user right-clicking a reference row.
     fn open_row_menu(change_path_open: bool) -> MenuSimulator {
+        let row_id = XrefRowId::of(0, "");
         let mut ui = iced_test::simulator(iced_aw::ContextMenu::new(
             text("anchor"),
-            move || row_menu_for(0, change_path_open),
+            move || row_menu_for(row_id.clone(), change_path_open),
         ));
         let anchor = ui.find("anchor").expect("anchor underlay present");
         let center = anchor
@@ -2586,11 +2639,11 @@ mod tests {
         ui
     }
 
-    fn published_ops(ui: MenuSimulator) -> Vec<(usize, XrefPaletteOp)> {
+    fn published_ops(ui: MenuSimulator) -> Vec<(XrefRowId, XrefPaletteOp)> {
         let mut ops = Vec::new();
         for message in ui.into_messages() {
-            if let Message::XrefRowOp(index, op) = message {
-                ops.push((index, op));
+            if let Message::XrefRowOp(id, op) = message {
+                ops.push((id, op));
             }
         }
         ops
@@ -2603,8 +2656,8 @@ mod tests {
         ui.click(unload.as_str())
             .expect("Unload row is clickable inside the overlay");
         assert!(
-            published_ops(ui).contains(&(0, XrefPaletteOp::Unload)),
-            "clicking Unload must publish XrefRowOp(0, Unload)"
+            published_ops(ui).contains(&(XrefRowId::of(0, ""), XrefPaletteOp::Unload)),
+            "clicking Unload must publish XrefRowOp(row, Unload)"
         );
     }
 
@@ -2643,7 +2696,7 @@ mod tests {
         ui.click(make_absolute.as_str())
             .expect("flyout row is clickable inside the overlay");
         assert!(
-            published_ops(ui).contains(&(0, XrefPaletteOp::Pathtype(Pathtype::Full))),
+            published_ops(ui).contains(&(XrefRowId::of(0, ""), XrefPaletteOp::Pathtype(Pathtype::Full))),
             "clicking Make Absolute must publish the Full-pathtype op"
         );
     }
@@ -2671,7 +2724,7 @@ mod tests {
         // buttons again.
         use iced_core::Widget;
 
-        let mut menu = iced_aw::ContextMenu::new(text("anchor"), || row_menu_for(0, false));
+        let mut menu = iced_aw::ContextMenu::new(text("anchor"), || row_menu_for(XrefRowId::of(0, ""), false));
         let mut tree = iced_core::widget::Tree::new(
             &menu as &dyn Widget<Message, iced::Theme, iced::Renderer>,
         );

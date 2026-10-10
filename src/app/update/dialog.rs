@@ -1819,13 +1819,42 @@ mod tests {
     }
 
     #[test]
+    fn xref_rowop_unknown_id_is_noop() {
+        // #49 RED: row messages carry (key, saved_path) identity and resolve
+        // at dispatch; a deleted row's id must no-op instead of hitting whatever
+        // row now sits at the old index. Fails to compile until the payload
+        // carries XrefRowId instead of usize.
+        use crate::app::Message;
+        use crate::ui::window::xref_manager::{XrefPaletteOp, XrefRowId};
+        let mut app = fresh();
+        let i = app.active_tab;
+        let start = app.command_line.history.len();
+        let ghost = XrefRowId {
+            key: u64::MAX,
+            saved_path: "gone.dwg".to_string(),
+        };
+        let records_before = app.tabs[i].scene.document.block_records.iter().count();
+        let _ = app.update(Message::XrefRowOp(ghost, XrefPaletteOp::Detach));
+        assert_eq!(
+            app.tabs[i].scene.document.block_records.iter().count(),
+            records_before,
+            "no-op must not disturb the document"
+        );
+        let out = palette_output(&app, start);
+        assert!(
+            !out.contains("detached"),
+            "unknown id must not detach anything, got: {out:?}"
+        );
+    }
+
+    #[test]
     fn palette_rowop_nested_reports_per_entry() {
         // Behavioral matrix: every row op on a NESTED row via the GUI
         // message path. Nested rows must report per-entry errors (CLI
         // wording), never silently skip.
         use codec::tables::BlockRecord;
         use crate::app::Message;
-        use crate::ui::window::xref_manager::XrefPaletteOp;
+        use crate::ui::window::xref_manager::{XrefPaletteOp, XrefRowId};
         let dir = palette_tmpdir("nestedmatrix");
         let mut host_doc = codec::CadDocument::new();
         let mut inner = BlockRecord::new("INNER");
@@ -1843,8 +1872,9 @@ mod tests {
         app.tabs[i].scene.document.block_records.add(br).unwrap();
         app.tabs[i].current_path = Some(dir.join("app.dwg"));
         app.refresh_xref_manager();
-        let idx = app.xref_manager.entries.iter().position(|e| e.name == "INNER").expect("nested INNER listed");
-        assert!(app.xref_manager.entries[idx].parent_key.is_some());
+        let row = app.xref_manager.entries.iter().find(|e| e.name == "INNER").expect("nested INNER listed");
+        assert!(row.parent_key.is_some());
+        let row_id = XrefRowId::of(row.key, &row.saved_path);
         for op in [
             XrefPaletteOp::Detach,
             XrefPaletteOp::Unload,
@@ -1853,7 +1883,7 @@ mod tests {
             XrefPaletteOp::Overlay,
         ] {
             let start = app.command_line.history.len();
-            let _ = app.update(Message::XrefRowOp(idx, op));
+            let _ = app.update(Message::XrefRowOp(row_id.clone(), op));
             let out = palette_output(&app, start);
             assert!(out.contains("INNER"), "op {op:?} on nested row gave: {out:?}");
             assert!(
@@ -1870,7 +1900,7 @@ mod tests {
         // drive the exact GUI message path (row right-click menu item).
         use codec::tables::BlockRecord;
         use crate::app::Message;
-        use crate::ui::window::xref_manager::XrefPaletteOp;
+        use crate::ui::window::xref_manager::{XrefPaletteOp, XrefRowId};
         let mut app = fresh();
         let i = app.active_tab;
         for name in ["PLAN", "SITE"] {
@@ -1882,15 +1912,17 @@ mod tests {
         }
         app.tabs[i].current_path = Some(std::env::temp_dir().join("ocs_repro_host.dwg"));
         app.refresh_xref_manager();
-        let idx = app.xref_manager.entries.iter().position(|e| e.name == "PLAN").expect("PLAN listed");
+        let plan = app.xref_manager.entries.iter().find(|e| e.name == "PLAN").expect("PLAN listed").clone();
+        let plan_id = XrefRowId::of(plan.key, &plan.saved_path);
         let start = app.command_line.history.len();
-        let _ = app.update(Message::XrefRowOp(idx, XrefPaletteOp::Detach));
+        let _ = app.update(Message::XrefRowOp(plan_id, XrefPaletteOp::Detach));
         let out = palette_output(&app, start);
         assert!(out.contains("PLAN"), "detach output missing, got: {out:?}");
         assert!(app.tabs[i].scene.document.block_records.get("PLAN").is_none(), "PLAN definition must be gone");
-        let idx = app.xref_manager.entries.iter().position(|e| e.name == "SITE").expect("SITE listed");
+        let site = app.xref_manager.entries.iter().find(|e| e.name == "SITE").expect("SITE listed").clone();
+        let site_id = XrefRowId::of(site.key, &site.saved_path);
         let start = app.command_line.history.len();
-        let _ = app.update(Message::XrefRowOp(idx, XrefPaletteOp::Unload));
+        let _ = app.update(Message::XrefRowOp(site_id, XrefPaletteOp::Unload));
         let out = palette_output(&app, start);
         assert!(out.contains("SITE"), "unload output missing, got: {out:?}");
         assert_eq!(
@@ -1906,7 +1938,7 @@ mod tests {
         use codec::tables::BlockRecord;
         use crate::app::Message;
         use crate::io::xref_model::{Pathtype, RefType};
-        use crate::ui::window::xref_manager::XrefPaletteOp;
+        use crate::ui::window::xref_manager::{XrefPaletteOp, XrefRowId};
         let mut app = fresh();
         let i = app.active_tab;
         let mut br = BlockRecord::new("PLAN");
@@ -1916,16 +1948,17 @@ mod tests {
         app.tabs[i].scene.document.block_records.add(br).unwrap();
         app.tabs[i].current_path = Some(std::env::temp_dir().join("ocs_rowop_host.dwg"));
         app.refresh_xref_manager();
-        let idx = app.xref_manager.entries.iter().position(|e| e.name == "PLAN").expect("PLAN listed");
+        let plan = app.xref_manager.entries.iter().find(|e| e.name == "PLAN").expect("PLAN listed").clone();
+        let plan_id = XrefRowId::of(plan.key, &plan.saved_path);
         let start = app.command_line.history.len();
-        let _ = app.update(Message::XrefRowOp(idx, XrefPaletteOp::Overlay));
+        let _ = app.update(Message::XrefRowOp(plan_id.clone(), XrefPaletteOp::Overlay));
         let out = palette_output(&app, start);
         assert!(out.contains("PLAN"), "got: {out:?}");
         let br = app.tabs[i].scene.document.block_records.get("PLAN").unwrap();
         assert!(br.flags.is_xref_overlay && !br.flags.is_xref);
         assert_eq!(app.xref_manager.entries.iter().find(|e| e.name == "PLAN").unwrap().ref_type, RefType::Overlay);
         let start = app.command_line.history.len();
-        let _ = app.update(Message::XrefRowOp(idx, XrefPaletteOp::Pathtype(Pathtype::None)));
+        let _ = app.update(Message::XrefRowOp(plan_id, XrefPaletteOp::Pathtype(Pathtype::None)));
         let out = palette_output(&app, start);
         assert!(out.contains("PLAN"), "got: {out:?}");
         let br = app.tabs[i].scene.document.block_records.get("PLAN").unwrap();
