@@ -879,12 +879,7 @@ impl XrefManagerPanel {
             container(
                 text(crate::t!("XREF  No external references in this drawing."))
                     .size(12)
-                    .color(iced::Color {
-                        r: 0.55,
-                        g: 0.55,
-                        b: 0.55,
-                        a: 1.0,
-                    }),
+                    .style(muted_style),
             )
             .center_x(Fill)
             .center_y(Fill)

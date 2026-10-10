@@ -4588,28 +4588,39 @@ impl OpenCADStudio {
             }
             Message::AnnoObjectScaleToggle(name) => {
                 let i = self.active_tab;
-                if let Some(entity) = self.anno_object_scale_target {
-                    if self.tabs[i].scene.is_layer_locked(entity) {
-                        return Task::none();
+                let Some(entity) = self.anno_object_scale_target else {
+                    self.command_line.push_info(
+                        crate::t!("Select one object first, then run OBJECTSCALE.").as_ref(),
+                    );
+                    return Task::none();
+                };
+                if self.tabs[i].scene.is_layer_locked(entity) {
+                    self.command_line.push_info(
+                        crate::t!("The object is on a locked layer.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                if let Some(sh) = self.tabs[i].scene.scale_handle_ensuring(&name) {
+                    self.push_undo_snapshot(i, "OBJECTSCALE");
+                    let doc = &mut self.tabs[i].scene.document;
+                    let is_member =
+                        crate::scene::annotative::object_scale_memberships(doc, entity)
+                            .iter()
+                            .any(|(_, h)| *h == sh);
+                    if is_member {
+                        crate::scene::annotative::remove_annotation_context_for_scale(
+                            doc, entity, sh,
+                        );
+                    } else {
+                        crate::scene::annotative::create_annotation_context(doc, entity, sh);
                     }
-                    if let Some(sh) = self.tabs[i].scene.scale_handle_ensuring(&name) {
-                        self.push_undo_snapshot(i, "OBJECTSCALE");
-                        let doc = &mut self.tabs[i].scene.document;
-                        let is_member =
-                            crate::scene::annotative::object_scale_memberships(doc, entity)
-                                .iter()
-                                .any(|(_, h)| *h == sh);
-                        if is_member {
-                            crate::scene::annotative::remove_annotation_context_for_scale(
-                                doc, entity, sh,
-                            );
-                        } else {
-                            crate::scene::annotative::create_annotation_context(doc, entity, sh);
-                        }
-                        self.tabs[i].dirty = true;
-                        self.invalidate_property_targets(i, &[entity]);
-                        self.refresh_properties();
-                    }
+                    self.tabs[i].dirty = true;
+                    self.invalidate_property_targets(i, &[entity]);
+                    self.refresh_properties();
+                } else {
+                    self.command_line.push_info(
+                        crate::tf!("Unknown annotation scale '{name}'.").as_ref(),
+                    );
                 }
                 Task::none()
             }
@@ -11136,6 +11147,82 @@ mod prop_pointer_tests {
 
         let task = app.update(Message::PropPointerPressed);
         assert!(task.units() > 0);
+    }
+}
+
+#[cfg(test)]
+mod anno_scale_toggle_tests {
+    // #59: silent no-op toggles must explain themselves on the command line.
+    use super::Message;
+    use crate::app::OpenCADStudio;
+
+    fn app_with_target() -> (OpenCADStudio, usize) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut line = codec::entities::Line::new();
+        line.start = codec::types::Vector3::ZERO;
+        line.end = codec::types::Vector3::new(1.0, 0.0, 0.0);
+        let h = app
+            .commit_entity_handle(codec::EntityType::Line(line))
+            .expect("line commits");
+        app.anno_object_scale_target = Some(h);
+        (app, i)
+    }
+
+    #[test]
+    fn locked_layer_toggle_explains_itself() {
+        let (mut app, i) = app_with_target();
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get_mut("0")
+            .expect("layer 0 exists")
+            .flags
+            .locked = true;
+        let before = app.command_line.history.len();
+        let _ = app.update(Message::AnnoObjectScaleToggle("1:50".to_string()));
+        let new: Vec<String> = app.command_line.history[before..]
+            .iter()
+            .map(|e| e.text.clone())
+            .collect();
+        assert!(
+            new.iter().any(|t| t.to_lowercase().contains("locked")),
+            "locked-layer toggle must say so, got {new:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_scale_toggle_explains_itself() {
+        let (mut app, _i) = app_with_target();
+        let before = app.command_line.history.len();
+        let _ = app.update(Message::AnnoObjectScaleToggle("NOPE".to_string()));
+        let new: Vec<String> = app.command_line.history[before..]
+            .iter()
+            .map(|e| e.text.clone())
+            .collect();
+        assert!(
+            !new.is_empty(),
+            "unknown-scale toggle must say something, got silence"
+        );
+    }
+
+    #[test]
+    fn missing_target_toggle_explains_itself() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.anno_object_scale_target = None;
+        let before = app.command_line.history.len();
+        let _ = app.update(Message::AnnoObjectScaleToggle("1:50".to_string()));
+        let new: Vec<String> = app.command_line.history[before..]
+            .iter()
+            .map(|e| e.text.clone())
+            .collect();
+        assert!(
+            !new.is_empty(),
+            "target-less toggle must say something, got silence"
+        );
     }
 }
 
