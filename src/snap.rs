@@ -2171,25 +2171,17 @@ impl Snapper {
         // direct-evaluation pass).
         if self.snap_enabled && self.is_on(SnapType::Tangent) {
             let mut eval_tangent = |wire: &WireModel| {
+                let mut line_cursor = 0usize;
                 for tg in &wire.tangent_geoms {
                     let (world_pt, d2) = match tg {
                         TangentGeom::Line { p1, p2 } => {
-                            let sp0 = world_to_screen(
-                                glam::DVec3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64),
-                                view_rot,
-                                eye,
-                                bounds,
-                            );
-                            let sp1 = world_to_screen(
-                                glam::DVec3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64),
-                                view_rot,
-                                eye,
-                                bounds,
-                            );
+                            let (lp1, lp2) = tangent_line_endpoints(wire, *p1, *p2, &mut line_cursor);
+                            let sp0 = world_to_screen(lp1, view_rot, eye, bounds);
+                            let sp1 = world_to_screen(lp2, view_rot, eye, bounds);
                             let d2 = dist2_to_segment(cursor_screen, sp0, sp1);
-                            let t = t_on_segment(cursor_screen, sp0, sp1);
-                            let w = Vec3::from(*p1) + t * (Vec3::from(*p2) - Vec3::from(*p1));
-                            (w.as_dvec3(), d2)
+                            let t = t_on_segment(cursor_screen, sp0, sp1) as f64;
+                            let w = lp1 + t * (lp2 - lp1);
+                            (w, d2)
                         }
                         TangentGeom::Circle { center, radius } => {
                             let cv = Vec3::from(*center);
@@ -2440,10 +2432,14 @@ impl Snapper {
                         best_sub = sub;
                         best_d2 = d2;
                         let tangent_obj = match tg {
-                            TangentGeom::Line { p1, p2 } => TangentObject::Line {
-                                p1: glam::DVec3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64),
-                                p2: glam::DVec3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64),
-                            },
+                            TangentGeom::Line { p1, p2 } => {
+                                let mut cursor = 0usize;
+                                let (lp1, lp2) = tangent_line_endpoints(wire, *p1, *p2, &mut cursor);
+                                TangentObject::Line {
+                                    p1: lp1,
+                                    p2: lp2,
+                                }
+                            }
                             TangentGeom::Circle { center, radius } => TangentObject::Circle {
                                 center: glam::DVec3::new(
                                     center[0] as f64,
