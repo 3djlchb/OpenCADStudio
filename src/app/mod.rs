@@ -2618,6 +2618,12 @@ pub enum Message {
         shortcut: String,
         extend_selection: bool,
     },
+    /// A text field captured SPACE while it is rebound away from
+    /// COMMANDSPACE; run the binding only if the command input has focus.
+    CommandLineSpaceProbe,
+    /// The command input has focus: drop the space it just typed and run the
+    /// SPACE binding.
+    CommandLineSpaceResolved,
     /// A widget captured Up/Down; resolve it only if the command input owns
     /// keyboard focus.
     CommandLineArrowProbe {

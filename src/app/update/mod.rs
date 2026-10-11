@@ -23,6 +23,8 @@ fn is_modal_blocked_key_msg(msg: &Message) -> bool {
             | Message::ArrowKeyPressed { .. }
             | Message::CommandLineArrowProbe { .. }
             | Message::CommandLineArrowResolved { .. }
+            | Message::CommandLineSpaceProbe
+            | Message::CommandLineSpaceResolved
             | Message::DynTabNext
             | Message::DynTabPrev
             | Message::MTextCaretMove(_)
@@ -2312,6 +2314,24 @@ impl OpenCADStudio {
                 iced::widget::operation::move_cursor_to_end(iced::widget::Id::new(
                     crate::ui::command_line::CMD_INPUT_ID,
                 ))
+            }
+
+            Message::CommandLineSpaceProbe => iced::widget::operation::is_focused(
+                iced::widget::Id::new(crate::ui::command_line::CMD_INPUT_ID),
+            )
+            .map(|focused| {
+                if focused {
+                    Message::CommandLineSpaceResolved
+                } else {
+                    Message::Noop
+                }
+            }),
+
+            Message::CommandLineSpaceResolved => {
+                if self.command_line.input.ends_with(' ') {
+                    self.command_line.input.pop();
+                }
+                self.update(Message::ShortcutPressed("SPACE".to_string()))
             }
 
             Message::CommandLineArrowProbe {
