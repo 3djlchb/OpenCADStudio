@@ -2781,9 +2781,10 @@ impl<'a> HostSession<'a> {
     // ── XRecord objects (API v8, additive) ────────────────────────────────────
     //
     // XRecords are non-graphical objects: name-addressed typed group-code/value
-    // pairs stored under the drawing's named-object dictionary, like AutoCAD
-    // keeps application data. They give scripts a record carrier that lives in
-    // the file and survives model view entirely, with no carrier entity.
+    // pairs stored under the drawing's named-object dictionary, where a
+    // drawing keeps application data. They give scripts a record carrier that
+    // lives in the file and survives model view entirely, with no carrier
+    // entity.
 
     /// The dictionary addressed by `dictionary_path` under the named-object
     /// dictionary root (an empty path is the root itself). Nothing is created:
