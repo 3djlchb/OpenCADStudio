@@ -384,7 +384,11 @@ impl OpenCADStudio {
 
     /// Start `drag`, peeking `peek` (a pallet being dragged or resized stays
     /// shown on an auto-hiding edge).
-    fn dock_begin(&mut self, drag: crate::ui::dock::DockDrag, peek: Option<crate::ui::dock::PanelId>) {
+    fn dock_begin(
+        &mut self,
+        drag: crate::ui::dock::DockDrag,
+        peek: Option<crate::ui::dock::PanelId>,
+    ) {
         if let crate::ui::dock::DockDrag::Move { panel, .. } = drag {
             self.dock.raise_float(panel);
         }
@@ -501,7 +505,8 @@ impl OpenCADStudio {
     /// when it has no place yet (opened for the first time, or never moved).
     pub(crate) fn dock_open_at_default(&mut self, id: crate::ui::dock::PanelId) {
         if !self.dock.is_placed(id) {
-            self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
+            self.dock
+                .dock(id, crate::app::config::DockSide::Right, usize::MAX);
         }
         self.dock_reveal(id);
     }
@@ -517,7 +522,8 @@ impl OpenCADStudio {
             let (ww, wh) = self.dock_workspace_size();
             let (w, h) = self.dock_float_size(PanelId::Layers);
             let (x, y) = (((ww - w) * 0.5).max(0.0), ((wh - h) * 0.5).max(0.0));
-            self.dock.float(FloatPanel::new(PanelId::Layers, x, y, w, h));
+            self.dock
+                .float(FloatPanel::new(PanelId::Layers, x, y, w, h));
             self.save_config();
         }
         self.dock.raise_float(PanelId::Layers);
@@ -557,7 +563,13 @@ impl OpenCADStudio {
     pub(crate) fn dock_workspace_size(&self) -> (f32, f32) {
         (
             self.win_size.0,
-            self.tabs[self.active_tab].scene.selection.borrow().view.vp_size.1,
+            self.tabs[self.active_tab]
+                .scene
+                .selection
+                .borrow()
+                .view
+                .vp_size
+                .1,
         )
     }
 
@@ -745,7 +757,11 @@ impl OpenCADStudio {
                     .find(|(_, _, bottom)| p.y < *bottom)
                     .or(spans.last())
                 {
-                    let index = if p.y < (top + bottom) * 0.5 { pos } else { pos + 1 };
+                    let index = if p.y < (top + bottom) * 0.5 {
+                        pos
+                    } else {
+                        pos + 1
+                    };
                     return DropTarget::Join {
                         side,
                         group: gi,

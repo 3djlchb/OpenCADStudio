@@ -1,7 +1,7 @@
 use codec::tables::{Table, TableEntry};
 use iced::Task;
-use serde::{Serialize, de::DeserializeOwned};
-use serde_json::{Map, Value, json};
+use serde::{de::DeserializeOwned, Serialize};
+use serde_json::{json, Map, Value};
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 
@@ -1641,7 +1641,7 @@ mod tests {
     use codec::entities::{AttributeEntity, EntityType, Insert};
     use codec::objects::{Dictionary, ObjectType};
     use codec::types::{Handle, Vector3};
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     use super::OpenCADStudio;
 

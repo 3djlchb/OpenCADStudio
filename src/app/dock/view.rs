@@ -55,7 +55,11 @@ impl OpenCADStudio {
                         .on_right_press(Message::Dock(crate::ui::dock::DockMsg::EdgeMenu(None)))
                         .into(),
                 );
-                layers.push(place_at(dock_edge_menu(side, &checked), x.max(0.0), plus_top));
+                layers.push(place_at(
+                    dock_edge_menu(side, &checked),
+                    x.max(0.0),
+                    plus_top,
+                ));
             }
         }
         // An open floating title-bar menu, over its own click catcher.
@@ -82,21 +86,20 @@ impl OpenCADStudio {
             .height(Fill)
             .into();
         use crate::ui::dock::DockDrag;
-        let capturing = self.dock_drag.is_some()
-            || self.xref_col_drag.is_some()
-            || self.xref_split_drag;
+        let capturing =
+            self.dock_drag.is_some() || self.xref_col_drag.is_some() || self.xref_split_drag;
         let mut capture = mouse_area(workspace);
         if capturing {
             capture = capture
                 .on_move(move |p| Message::Dock(crate::ui::dock::DockMsg::DragMove(p)))
                 .on_release(Message::Dock(crate::ui::dock::DockMsg::DragRelease))
                 .interaction(match self.dock_drag {
-                    Some(DockDrag::FloatSize { from_left: true, .. }) => {
-                        iced::mouse::Interaction::ResizingDiagonallyUp
-                    }
-                    Some(DockDrag::FloatSize { from_left: false, .. }) => {
-                        iced::mouse::Interaction::ResizingDiagonallyDown
-                    }
+                    Some(DockDrag::FloatSize {
+                        from_left: true, ..
+                    }) => iced::mouse::Interaction::ResizingDiagonallyUp,
+                    Some(DockDrag::FloatSize {
+                        from_left: false, ..
+                    }) => iced::mouse::Interaction::ResizingDiagonallyDown,
                     Some(DockDrag::Split { .. }) => iced::mouse::Interaction::ResizingVertically,
                     Some(DockDrag::Move { .. }) => iced::mouse::Interaction::Grabbing,
                     // Widths, the Layer Manager column and the xref drags.
@@ -193,8 +196,8 @@ impl OpenCADStudio {
         let mut items: Vec<Element<'_, Message>> = Vec::new();
         for gi in self.dock_visible_groups(side) {
             let is_shown = shown == Some(gi);
-            let lit = target_group == Some(gi)
-                || (!dragging && self.dock_grip_hover == Some((side, gi)));
+            let lit =
+                target_group == Some(gi) || (!dragging && self.dock_grip_hover == Some((side, gi)));
             let group_dragged =
                 dragging && movement.is_some_and(|(_, group, _)| group == Some((side, gi)));
             let panels = self.dock_group_visible(side, gi);
@@ -204,7 +207,8 @@ impl OpenCADStudio {
             for id in panels {
                 let faded = group_dragged
                     || (dragging
-                        && movement.is_some_and(|(panel, group, _)| group.is_none() && panel == id));
+                        && movement
+                            .is_some_and(|(panel, group, _)| group.is_none() && panel == id));
                 let glyph = if faded {
                     crate::ui::icons::themed_disabled(id.icon(), 20.0)
                 } else if is_shown {
@@ -324,24 +328,27 @@ impl OpenCADStudio {
             );
         }
         items.push(Space::new().height(STRIP_PLUS_GAP).into());
-        let plus = button(crate::ui::icons::themed_secondary(crate::ui::icons::PLUS, 14.0))
-            .on_press(Message::Dock(DockMsg::EdgeMenu(Some(side))))
-            .style(|theme: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        theme.palette().background.weak.color
-                    }
-                    _ => theme.palette().background.weakest.color,
-                })),
-                border: Border {
-                    radius: 14.0.into(),
-                    ..Default::default()
-                },
+        let plus = button(crate::ui::icons::themed_secondary(
+            crate::ui::icons::PLUS,
+            14.0,
+        ))
+        .on_press(Message::Dock(DockMsg::EdgeMenu(Some(side))))
+        .style(|theme: &Theme, status| button::Style {
+            background: Some(Background::Color(match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    theme.palette().background.weak.color
+                }
+                _ => theme.palette().background.weakest.color,
+            })),
+            border: Border {
+                radius: 14.0.into(),
                 ..Default::default()
-            })
-            .width(Length::Fixed(28.0))
-            .height(Length::Fixed(28.0))
-            .padding(7);
+            },
+            ..Default::default()
+        })
+        .width(Length::Fixed(28.0))
+        .height(Length::Fixed(28.0))
+        .padding(7);
         items.push(container(plus).center_x(Length::Fixed(DOCK_STRIP_W)).into());
         container(column(items))
             .width(Length::Fixed(DOCK_STRIP_W))
@@ -377,15 +384,15 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, chrome)
             }
-            crate::ui::dock::PanelId::ExternalReferences => self.xref_manager.view(
-                width,
-                chrome,
-                tab.xref_missing,
-                &tab.scene.document,
-            ),
+            crate::ui::dock::PanelId::ExternalReferences => {
+                self.xref_manager
+                    .view(width, chrome, tab.xref_missing, &tab.scene.document)
+            }
             crate::ui::dock::PanelId::Browser => crate::ui::window::browser::view(
                 &tab.scene.document,
-                tab.sketch_session.as_ref().map(|session| session.name.as_str()),
+                tab.sketch_session
+                    .as_ref()
+                    .map(|session| session.name.as_str()),
                 width,
                 chrome,
             ),
@@ -444,7 +451,12 @@ impl OpenCADStudio {
         tab: &'a DocumentTab,
     ) -> Element<'a, Message> {
         use crate::ui::dock::DockMsg;
-        let FloatFrame { x, y, bar_left, hidden } = self.dock_float_frame(f);
+        let FloatFrame {
+            x,
+            y,
+            bar_left,
+            hidden,
+        } = self.dock_float_frame(f);
         let hovered = self.dock_title_hover == Some(f.id);
         let bar = floating_title_bar(f.id, self.dock.auto_collapse(f.id), bar_left, hovered);
         let content: Element<'_, Message> = if hidden {
@@ -533,7 +545,12 @@ impl OpenCADStudio {
         let hidden = self.dock.auto_collapse(f.id) && self.dock_peek != Some(f.id);
         // A hidden panel keeps its title bar where it sits when shown.
         let x = if hidden && !bar_left { f.x + f.w } else { f.x };
-        let frame = FloatFrame { x, y: f.y, bar_left, hidden };
+        let frame = FloatFrame {
+            x,
+            y: f.y,
+            bar_left,
+            hidden,
+        };
         // Keep the panel on screen when the window shrank since it was placed.
         FloatFrame {
             x: x.min(ww - frame.width(f)).max(0.0),
@@ -560,24 +577,29 @@ impl OpenCADStudio {
             frame.bar_x(f) + self.dock_float_menu_at.x,
             frame.y + self.dock_float_menu_at.y,
         );
-        let menu_x = if at.x + DOCK_MENU_W <= ww { at.x } else { at.x - DOCK_MENU_W };
+        let menu_x = if at.x + DOCK_MENU_W <= ww {
+            at.x
+        } else {
+            at.x - DOCK_MENU_W
+        };
         let menu_x = menu_x.clamp(0.0, (ww - DOCK_MENU_W).max(0.0));
         let menu_y = at.y.min(wh - FLOAT_MENU_H).max(0.0);
-        let item = |label: Element<'static, Message>, press: DockMsg| -> Element<'static, Message> {
-            button(label)
-                .on_press(Message::Dock(press))
-                .style(menu_row_style)
-                .padding([5, 8])
-                .width(Fill)
-                .into()
-        };
+        let item =
+            |label: Element<'static, Message>, press: DockMsg| -> Element<'static, Message> {
+                button(label)
+                    .on_press(Message::Dock(press))
+                    .style(menu_row_style)
+                    .padding([5, 8])
+                    .width(Fill)
+                    .into()
+            };
         let check: Element<'static, Message> = if f.docking {
             crate::ui::icons::themed(crate::ui::icons::CHECK, 12.0)
         } else {
             Space::new().width(12).height(12).into()
         };
-        let docking = row![text(t!("Allow docking")).size(12).width(Fill), check]
-            .align_y(iced::Center);
+        let docking =
+            row![text(t!("Allow docking")).size(12).width(Fill), check].align_y(iced::Center);
         let separator = container(Space::new())
             .width(Fill)
             .height(Length::Fixed(1.0))
@@ -588,8 +610,14 @@ impl OpenCADStudio {
         let menu = column![
             item(docking.into(), DockMsg::FloatDockingToggle(id)),
             container(separator).padding([3, 4]),
-            item(text(t!("Dock left")).size(12).into(), DockMsg::DockTo(id, DockSide::Left)),
-            item(text(t!("Dock right")).size(12).into(), DockMsg::DockTo(id, DockSide::Right)),
+            item(
+                text(t!("Dock left")).size(12).into(),
+                DockMsg::DockTo(id, DockSide::Left)
+            ),
+            item(
+                text(t!("Dock right")).size(12).into(),
+                DockMsg::DockTo(id, DockSide::Right)
+            ),
         ]
         .spacing(1)
         .padding(4);
@@ -629,7 +657,10 @@ impl OpenCADStudio {
                 .into()
         };
         let mut layers: Vec<Element<'_, Message>> = Vec::new();
-        let group_drag = self.dock_drag.and_then(|d| d.movement()).and_then(|(_, g, _)| g);
+        let group_drag = self
+            .dock_drag
+            .and_then(|d| d.movement())
+            .and_then(|(_, g, _)| g);
         let marks_side = match target {
             DropTarget::Edge { side, .. } | DropTarget::Join { side, .. } => Some(side),
             DropTarget::Float { x, y } => {
@@ -825,7 +856,9 @@ fn dock_icon_ghost(icons: &[crate::ui::dock::PanelId]) -> Element<'static, Messa
         .style(|theme: &Theme| {
             let palette = theme.palette();
             container::Style {
-                background: Some(Background::Color(palette.primary.base.color.scale_alpha(0.22))),
+                background: Some(Background::Color(
+                    palette.primary.base.color.scale_alpha(0.22),
+                )),
                 border: Border {
                     color: palette.primary.base.color,
                     width: 1.5,
@@ -941,10 +974,10 @@ fn floating_title_bar(
     let bar = bar
         .push(container(title).width(Fill).height(Fill).padding([6, 0]))
         .push(container(crate::ui::icons::themed(id.icon(), 16.0)).center_x(Fill))
-    .padding([4, 0])
-    .align_x(iced::Center)
-    .width(Length::Fixed(DOCK_FLOAT_BAR_W))
-    .height(Fill);
+        .padding([4, 0])
+        .align_x(iced::Center)
+        .width(Length::Fixed(DOCK_FLOAT_BAR_W))
+        .height(Fill);
     mouse_area(container(bar).style(|theme: &Theme| container::Style {
         background: Some(Background::Color(theme.palette().background.weak.color)),
         ..Default::default()
@@ -985,7 +1018,6 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
         .interaction(iced::mouse::Interaction::ResizingHorizontally)
         .into()
 }
-
 
 /// Width of the icon strip's pallet menu.
 const DOCK_MENU_W: f32 = 230.0;
@@ -1083,8 +1115,12 @@ fn dock_splitter(
             ..Default::default()
         });
     mouse_area(line)
-        .on_press(Message::Dock(crate::ui::dock::DockMsg::SplitGrab(side, gi, upper, lower)))
-        .on_double_click(Message::Dock(crate::ui::dock::DockMsg::SplitReset(side, gi)))
+        .on_press(Message::Dock(crate::ui::dock::DockMsg::SplitGrab(
+            side, gi, upper, lower,
+        )))
+        .on_double_click(Message::Dock(crate::ui::dock::DockMsg::SplitReset(
+            side, gi,
+        )))
         .interaction(iced::mouse::Interaction::ResizingVertically)
         .into()
 }

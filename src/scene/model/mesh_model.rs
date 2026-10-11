@@ -105,8 +105,7 @@ pub struct MeshLodSet {
     /// Face-level ACIS material overrides, resolved from each LOD's
     /// `triangle_material_handles`. Only handles actually referenced by the
     /// tessellation are retained.
-    pub face_materials:
-        rustc_hash::FxHashMap<codec::Handle, super::material_model::MeshMaterial>,
+    pub face_materials: rustc_hash::FxHashMap<codec::Handle, super::material_model::MeshMaterial>,
     /// Effective AcDbVisualStyle override resolved from the entity's full,
     /// face and edge style handles.
     pub visual_style: Option<super::visual_style_model::MeshVisualStyle>,
@@ -293,10 +292,12 @@ impl MeshLodSet {
     pub fn geometry_edges(&self) -> (&[[f32; 3]], &[[f32; 3]]) {
         self.instance_source.as_ref().map_or(
             (self.edge_verts.as_slice(), self.edge_verts_low.as_slice()),
-            |source| (
-                source.edge_verts.as_slice(),
-                source.edge_verts_low.as_slice(),
-            ),
+            |source| {
+                (
+                    source.edge_verts.as_slice(),
+                    source.edge_verts_low.as_slice(),
+                )
+            },
         )
     }
 

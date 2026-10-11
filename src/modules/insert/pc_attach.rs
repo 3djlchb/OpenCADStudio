@@ -42,7 +42,14 @@ impl Default for AttachOptions {
     fn default() -> Self {
         // The command line attaches with a relative path, as the dialog
         // does by default.
-        Self { stored: None, relative: true, locked: None, zoom: false, scale: None, rotation: None }
+        Self {
+            stored: None,
+            relative: true,
+            locked: None,
+            zoom: false,
+            scale: None,
+            rotation: None,
+        }
     }
 }
 

@@ -13,9 +13,7 @@ fn primary_style(theme: &Theme) -> iced::widget::text::Style {
 
 fn surface_style(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.weakest.color,
-        )),
+        background: Some(Background::Color(theme.palette().background.weakest.color)),
         border: Border {
             color: theme.palette().background.neutral.color,
             width: 1.0,
@@ -53,7 +51,10 @@ fn info_row<'a>(
 ) -> Element<'a, Message> {
     container(
         row![
-            text(label).size(11).style(muted_style).width(Length::Fixed(110.0)),
+            text(label)
+                .size(11)
+                .style(muted_style)
+                .width(Length::Fixed(110.0)),
             text(value).size(13).width(Fill),
         ]
         .spacing(8)
@@ -169,9 +170,7 @@ fn build_label() -> std::borrow::Cow<'static, str> {
     }
 }
 
-pub fn view_window(
-    sizing: crate::ui::modal::ModalSizing,
-) -> Element<'static, Message> {
+pub fn view_window(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Message> {
     // The hero carries the full build identity (`2026.36+194.gef189d77`);
     // the cards split it into the release version and the build details.
     let version = format!("v{}", env!("OCS_FULL_VERSION"));
@@ -260,9 +259,7 @@ pub fn view_window(
     .width(sizing.width)
     .height(sizing.height)
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(
-            theme.palette().background.base.color,
-        )),
+        background: Some(Background::Color(theme.palette().background.base.color)),
         ..Default::default()
     })
     .into()

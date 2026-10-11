@@ -3,10 +3,12 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::command::CadCommand;
-use crate::modules::annotate::field_cmd::{FieldObjectPickCommand, FieldPlaceCommand, FieldTablePickCommand};
+use crate::modules::annotate::field_cmd::{
+    FieldObjectPickCommand, FieldPlaceCommand, FieldTablePickCommand,
+};
 use crate::ui::window::field_dialog::{
-    fields_of, nav_props, object_properties, FieldDialogMsg, FieldDialogState, FieldTarget, DATE_FORMATS,
-    NAMED_TYPES,
+    fields_of, nav_props, object_properties, FieldDialogMsg, FieldDialogState, FieldTarget,
+    DATE_FORMATS, NAMED_TYPES,
 };
 use iced::Task;
 
@@ -18,7 +20,10 @@ impl OpenCADStudio {
                 Some(Task::none())
             }
             // FIELDEVAL — the events that update fields, kept in the drawing.
-            cmd if cmd == "FIELDEVAL" || cmd.starts_with("FIELDEVAL ") || cmd.starts_with("SETVAR FIELDEVAL") => {
+            cmd if cmd == "FIELDEVAL"
+                || cmd.starts_with("FIELDEVAL ")
+                || cmd.starts_with("SETVAR FIELDEVAL") =>
+            {
                 let value = cmd
                     .trim_start_matches("SETVAR ")
                     .trim_start_matches("FIELDEVAL")
@@ -44,8 +49,9 @@ impl OpenCADStudio {
                     }
                     _ => {
                         let (min, max) = (0, 31);
-                        self.command_line
-                            .push_error(&crate::tf!("Requires an integer between {min} and {max}."));
+                        self.command_line.push_error(&crate::tf!(
+                            "Requires an integer between {min} and {max}."
+                        ));
                         ask(self);
                     }
                 }
@@ -58,9 +64,14 @@ impl OpenCADStudio {
                     .and_then(|h| u64::from_str_radix(h, 16).ok())
                     .map(codec::Handle::new);
                 if let Some(state) = self.field_dialog.as_mut() {
-                    if let Some(entity) = handle.and_then(|h| self.tabs[i].scene.document.get_entity(h)) {
+                    if let Some(entity) =
+                        handle.and_then(|h| self.tabs[i].scene.document.get_entity(h))
+                    {
                         let props = object_properties(entity);
-                        state.object = Some((entity.common().handle, crate::t!(crate::entities::names::ui_name(entity)).into_owned()));
+                        state.object = Some((
+                            entity.common().handle,
+                            crate::t!(crate::entities::names::ui_name(entity)).into_owned(),
+                        ));
                         state.object_prop = props.first().copied();
                         state.object_props = props;
                     }
@@ -100,7 +111,11 @@ impl OpenCADStudio {
         let function = *parts.first()?;
         let cell = |at: &[&str]| -> Option<(codec::Handle, usize, usize)> {
             let handle = codec::Handle::new(u64::from_str_radix(at.first()?, 16).ok()?);
-            let point = glam::DVec3::new(at.get(1)?.parse().ok()?, at.get(2)?.parse().ok()?, at.get(3)?.parse().ok()?);
+            let point = glam::DVec3::new(
+                at.get(1)?.parse().ok()?,
+                at.get(2)?.parse().ok()?,
+                at.get(3)?.parse().ok()?,
+            );
             let document = &self.tabs[i].scene.document;
             let codec::EntityType::Table(table) = document.get_entity(handle)? else {
                 return None;
@@ -111,7 +126,11 @@ impl OpenCADStudio {
         let name = |row: usize, column: usize| format!("{}{}", column_letters(column), row + 1);
         let (table, row, column) = cell(parts.get(1..5)?)?;
         if function == "Cell" {
-            return Some(format!("Table(%<\\_ObjId {:X}>%).{}", table.value(), name(row, column)));
+            return Some(format!(
+                "Table(%<\\_ObjId {:X}>%).{}",
+                table.value(),
+                name(row, column)
+            ));
         }
         let (second_table, row2, column2) = cell(parts.get(5..9)?)?;
         if second_table != table {
@@ -139,7 +158,13 @@ impl OpenCADStudio {
             .collect();
         if let Some(db) = self.sheet_set.db() {
             let custom = codec::sheet_set::custom_properties(db.sheet_set());
-            let names = |flag: i32| custom.iter().filter(|(_, _, f)| f & flag != 0).map(|(n, _, _)| n.clone()).collect();
+            let names = |flag: i32| {
+                custom
+                    .iter()
+                    .filter(|(_, _, f)| f & flag != 0)
+                    .map(|(n, _, _)| n.clone())
+                    .collect()
+            };
             state.ss_sheet_custom = names(codec::sheet_set::CUSTOM_SHEET_PROP);
             state.ss_set_custom = names(codec::sheet_set::CUSTOM_SHEET_SET_PROP);
             state.ss_set_name = db.name().to_string();
@@ -153,8 +178,13 @@ impl OpenCADStudio {
     }
 
     fn field_value(&self, code: &str, objects: &[codec::Handle]) -> String {
-        crate::entities::field::evaluate(&self.tabs[self.active_tab].scene.document, code, objects, None)
-            .unwrap_or_else(|| "----".to_string())
+        crate::entities::field::evaluate(
+            &self.tabs[self.active_tab].scene.document,
+            code,
+            objects,
+            None,
+        )
+        .unwrap_or_else(|| "----".to_string())
     }
 
     fn refresh_field_preview(&mut self) {
@@ -165,7 +195,8 @@ impl OpenCADStudio {
         let preview = if state.complete() {
             if state.name == "BlockPlaceholder" {
                 // A placeholder shows its property name until a block reference resolves it.
-                let (label, _, _) = codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
+                let (label, _, _) =
+                    codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
                 text_case(label, state.text_case)
             } else {
                 self.field_value(&code, &objects)
@@ -191,16 +222,32 @@ impl OpenCADStudio {
                 .filter(|b| !b.name.starts_with('*'))
                 .map(|b| (b.name.clone(), b.handle))
                 .collect(),
-            "Dimstyle" => document.dim_styles.iter().map(|s| (s.name.clone(), s.handle)).collect(),
-            "Layer" => document.layers.iter().map(|l| (l.name.clone(), l.handle)).collect(),
-            "Linetype" => document.line_types.iter().map(|l| (l.name.clone(), l.handle)).collect(),
+            "Dimstyle" => document
+                .dim_styles
+                .iter()
+                .map(|s| (s.name.clone(), s.handle))
+                .collect(),
+            "Layer" => document
+                .layers
+                .iter()
+                .map(|l| (l.name.clone(), l.handle))
+                .collect(),
+            "Linetype" => document
+                .line_types
+                .iter()
+                .map(|l| (l.name.clone(), l.handle))
+                .collect(),
             "Textstyle" => document
                 .text_styles
                 .iter()
                 .filter(|s| !s.name.is_empty())
                 .map(|s| (s.name.clone(), s.handle))
                 .collect(),
-            "View" => document.views.iter().map(|v| (v.name.clone(), v.handle)).collect(),
+            "View" => document
+                .views
+                .iter()
+                .map(|v| (v.name.clone(), v.handle))
+                .collect(),
             _ => Vec::new(),
         };
         names.sort_by_key(|(n, _)| n.to_lowercase());
@@ -378,8 +425,9 @@ impl OpenCADStudio {
         match state.target {
             FieldTarget::NewText => {
                 self.close_active_modal();
-                let defaults =
-                    crate::scene::creation_style::current_text_defaults(&self.tabs[i].scene.document);
+                let defaults = crate::scene::creation_style::current_text_defaults(
+                    &self.tabs[i].scene.document,
+                );
                 let command = FieldPlaceCommand::new(
                     value,
                     field.expect("set above"),
@@ -416,8 +464,12 @@ impl OpenCADStudio {
         let target = self.field_dialog.take().map(|s| s.target);
         self.close_active_modal();
         self.active_modal = match target {
-            Some(FieldTarget::AttdefDefault) if self.attdef_dialog.is_some() => Some(crate::app::ModalKind::AttDef),
-            Some(FieldTarget::AttdefEdit) if self.attdef_edit.is_some() => Some(crate::app::ModalKind::AttDefEdit),
+            Some(FieldTarget::AttdefDefault) if self.attdef_dialog.is_some() => {
+                Some(crate::app::ModalKind::AttDef)
+            }
+            Some(FieldTarget::AttdefEdit) if self.attdef_edit.is_some() => {
+                Some(crate::app::ModalKind::AttDefEdit)
+            }
             _ => None,
         };
     }
@@ -445,14 +497,20 @@ fn text_case(value: &str, case: usize) -> String {
         3 => {
             let lower = value.to_lowercase();
             let mut chars = lower.chars();
-            chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+            chars
+                .next()
+                .map(|c| c.to_uppercase().chain(chars).collect())
+                .unwrap_or_default()
         }
         4 => value
             .split(' ')
             .map(|word| {
                 let lower = word.to_lowercase();
                 let mut chars = lower.chars();
-                chars.next().map(|c| c.to_uppercase().chain(chars).collect::<String>()).unwrap_or_default()
+                chars
+                    .next()
+                    .map(|c| c.to_uppercase().chain(chars).collect::<String>())
+                    .unwrap_or_default()
             })
             .collect::<Vec<_>>()
             .join(" "),

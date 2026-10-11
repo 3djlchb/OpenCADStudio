@@ -84,7 +84,10 @@ impl PointCloudGpu {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("point_cloud.bind_group1"),
             layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params.as_entire_binding(),
+            }],
         });
         Self {
             clouds: Vec::new(),
@@ -103,7 +106,11 @@ impl PointCloudGpu {
     /// Make `set` resident, keeping the buffers of clouds it already had.
     pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, set: &PointCloudSet) {
         let mut old = std::mem::take(&mut self.clouds);
-        for cloud in set.clouds.iter().filter(|cloud| !cloud.instances.is_empty()) {
+        for cloud in set
+            .clouds
+            .iter()
+            .filter(|cloud| !cloud.instances.is_empty())
+        {
             if let Some(at) = old.iter().position(|resident| resident.key == cloud.key) {
                 self.clouds.push(old.swap_remove(at));
                 continue;

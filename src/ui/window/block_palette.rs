@@ -245,9 +245,8 @@ impl BlockPalette {
     /// The items of the current tab that pass the filter.
     pub fn items(&self) -> Vec<Item> {
         let pattern = self.search.trim();
-        let pass = |name: &str| {
-            pattern.is_empty() || crate::io::xref_model::wildcard_match(name, pattern)
-        };
+        let pass =
+            |name: &str| pattern.is_empty() || crate::io::xref_model::wildcard_match(name, pattern);
         match self.tab {
             Tab::Current => self
                 .blocks
@@ -271,13 +270,21 @@ impl BlockPalette {
                 .library_entries
                 .iter()
                 .filter(|e| e.folder || pass(&display_name(&e.path)))
-                .map(|e| if e.folder { Item::Folder(e.path.clone()) } else { Item::File(e.path.clone()) })
+                .map(|e| {
+                    if e.folder {
+                        Item::Folder(e.path.clone())
+                    } else {
+                        Item::File(e.path.clone())
+                    }
+                })
                 .collect(),
         }
     }
 
     fn current_entry(&self, name: &str) -> Option<&BlockEntry> {
-        self.blocks.iter().find(|b| b.name.eq_ignore_ascii_case(name))
+        self.blocks
+            .iter()
+            .find(|b| b.name.eq_ignore_ascii_case(name))
     }
 }
 
@@ -287,7 +294,9 @@ pub fn short(v: f64) -> String {
 }
 
 fn display_name(path: &std::path::Path) -> String {
-    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Canvas program that draws a block's wires fit-to-box inside its bounds.
@@ -310,8 +319,12 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
         let pad = 4.0;
         let inner_w = (bounds.width - 2.0 * pad).max(1.0);
         let inner_h = (bounds.height - 2.0 * pad).max(1.0);
-        let (mut minx, mut miny, mut maxx, mut maxy) =
-            (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let (mut minx, mut miny, mut maxx, mut maxy) = (
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        );
         let mut any = false;
         for w in self.wires {
             for p in &w.points {
@@ -325,8 +338,19 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
             }
         }
         if !any {
-            let rect = Path::rectangle(iced::Point::new(pad, pad), iced::Size::new(inner_w, inner_h));
-            frame.fill(&rect, Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 });
+            let rect = Path::rectangle(
+                iced::Point::new(pad, pad),
+                iced::Size::new(inner_w, inner_h),
+            );
+            frame.fill(
+                &rect,
+                Color {
+                    r: 0.10,
+                    g: 0.10,
+                    b: 0.10,
+                    a: 1.0,
+                },
+            );
             return vec![frame.into_geometry()];
         }
         let span_x = (maxx - minx).max(1e-6);
@@ -334,9 +358,15 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
         let scale = (inner_w / span_x).min(inner_h / span_y);
         let ox = (bounds.width - span_x * scale) * 0.5;
         let oy = (bounds.height - span_y * scale) * 0.5;
-        let map = |x: f32, y: f32| iced::Point::new(ox + (x - minx) * scale, oy + (maxy - y) * scale);
+        let map =
+            |x: f32, y: f32| iced::Point::new(ox + (x - minx) * scale, oy + (maxy - y) * scale);
         for w in self.wires {
-            let col = Color { r: w.color[0], g: w.color[1], b: w.color[2], a: 0.55 };
+            let col = Color {
+                r: w.color[0],
+                g: w.color[1],
+                b: w.color[2],
+                a: 0.55,
+            };
             for tri in w.fill_tris.chunks(3) {
                 if tri.len() == 3 {
                     let path = Path::new(|p| {
@@ -350,7 +380,12 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
             }
         }
         for w in self.wires {
-            let col = Color { r: w.color[0], g: w.color[1], b: w.color[2], a: 1.0 };
+            let col = Color {
+                r: w.color[0],
+                g: w.color[1],
+                b: w.color[2],
+                a: 1.0,
+            };
             let width = if w.line_weight_px > 1.5 { 2.0 } else { 1.0 };
             let mut run: Vec<iced::Point> = Vec::new();
             let flush = |frame: &mut Frame, run: &mut Vec<iced::Point>| {
@@ -380,7 +415,10 @@ impl<'a> Program<Message> for BlockPreviewCanvas<'a> {
 
 /// A block preview (the palette's canvas) for other dialogs.
 pub(crate) fn preview_canvas<'a>(wires: &'a [WireModel], height: f32) -> Element<'a, Message> {
-    canvas(BlockPreviewCanvas { wires }).width(Fill).height(Length::Fixed(height)).into()
+    canvas(BlockPreviewCanvas { wires })
+        .width(Fill)
+        .height(Length::Fixed(height))
+        .into()
 }
 
 fn pm(m: BlockPaletteMsg) -> Message {
@@ -403,14 +441,23 @@ fn thumb<'a>(palette: &'a BlockPalette, item: &Item, size: f32) -> Element<'a, M
     let file_thumb = |path: &str| palette.file_thumbs.get(path).cloned().flatten();
     match item {
         Item::Current(name) => match wires(name) {
-            Some(w) => canvas(BlockPreviewCanvas { wires: w }).width(Fill).height(Length::Fixed(size)).into(),
+            Some(w) => canvas(BlockPreviewCanvas { wires: w })
+                .width(Fill)
+                .height(Length::Fixed(size))
+                .into(),
             None => blank(),
         },
         Item::Ref(r) => {
             if !r.drawing {
-                let seen = palette.ref_wires.get(&format!("{}|{}", r.source, r.name.to_ascii_uppercase()));
+                let seen =
+                    palette
+                        .ref_wires
+                        .get(&format!("{}|{}", r.source, r.name.to_ascii_uppercase()));
                 if let Some(w) = seen.map(|w| &w[..]).or_else(|| wires(&r.name)) {
-                    return canvas(BlockPreviewCanvas { wires: w }).width(Fill).height(Length::Fixed(size)).into();
+                    return canvas(BlockPreviewCanvas { wires: w })
+                        .width(Fill)
+                        .height(Length::Fixed(size))
+                        .into();
                 }
             }
             match file_thumb(&r.source) {
@@ -419,15 +466,23 @@ fn thumb<'a>(palette: &'a BlockPalette, item: &Item, size: f32) -> Element<'a, M
             }
         }
         Item::File(path) => {
-            match palette.library_entries.iter().find(|e| &e.path == path).and_then(|e| e.thumb.clone()) {
+            match palette
+                .library_entries
+                .iter()
+                .find(|e| &e.path == path)
+                .and_then(|e| e.thumb.clone())
+            {
                 Some(h) => image(h).width(Fill).height(Length::Fixed(size)).into(),
                 None => blank(),
             }
         }
-        Item::Folder(_) => container(crate::ui::icons::themed_secondary(crate::ui::icons::FOLDER_OPEN, size * 0.6))
-            .center_x(Fill)
-            .center_y(Length::Fixed(size))
-            .into(),
+        Item::Folder(_) => container(crate::ui::icons::themed_secondary(
+            crate::ui::icons::FOLDER_OPEN,
+            size * 0.6,
+        ))
+        .center_x(Fill)
+        .center_y(Length::Fixed(size))
+        .into(),
     }
 }
 
@@ -446,15 +501,24 @@ fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<
                 s
             });
         if enabled {
-            b.on_press(pm(BlockPaletteMsg::Menu(item.clone(), action))).into()
+            b.on_press(pm(BlockPaletteMsg::Menu(item.clone(), action)))
+                .into()
         } else {
             b.into()
         }
     };
     let favorite = if tab == Tab::Favorites {
-        entry(crate::t!("Remove from Favorites").into_owned(), MenuAction::Unfavorite, true)
+        entry(
+            crate::t!("Remove from Favorites").into_owned(),
+            MenuAction::Unfavorite,
+            true,
+        )
     } else {
-        entry(crate::t!("Add to Favorites").into_owned(), MenuAction::Favorite, !matches!(item, Item::Folder(_)))
+        entry(
+            crate::t!("Add to Favorites").into_owned(),
+            MenuAction::Favorite,
+            !matches!(item, Item::Folder(_)),
+        )
     };
     let remove_label = match tab {
         Tab::Recent | Tab::Favorites => crate::t!("Remove from List"),
@@ -467,15 +531,34 @@ fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<
     };
     container(
         column![
-            entry(crate::t!("Insert").into_owned(), MenuAction::Insert, !matches!(item, Item::Folder(_))),
-            entry(crate::t!("Redefine").into_owned(), MenuAction::Redefine, external),
+            entry(
+                crate::t!("Insert").into_owned(),
+                MenuAction::Insert,
+                !matches!(item, Item::Folder(_))
+            ),
+            entry(
+                crate::t!("Redefine").into_owned(),
+                MenuAction::Redefine,
+                external
+            ),
             favorite,
-            container(Space::new()).height(1).width(Fill).style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.neutral.color)),
-                ..Default::default()
-            }),
-            entry(crate::t!("Edit Block").into_owned(), MenuAction::Edit, in_drawing),
-            entry(remove_label.into_owned(), MenuAction::Remove, remove_enabled),
+            container(Space::new())
+                .height(1)
+                .width(Fill)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(theme.palette().background.neutral.color)),
+                    ..Default::default()
+                }),
+            entry(
+                crate::t!("Edit Block").into_owned(),
+                MenuAction::Edit,
+                in_drawing
+            ),
+            entry(
+                remove_label.into_owned(),
+                MenuAction::Remove,
+                remove_enabled
+            ),
         ]
         .spacing(1),
     )
@@ -496,11 +579,13 @@ fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<
 /// One item as a card / row, with press, release and the context menu.
 fn item_view<'a>(palette: &'a BlockPalette, item: Item) -> Element<'a, Message> {
     let name = item.name();
-    let placing = matches!(&item, Item::Current(n) if palette.placing.as_deref() == Some(n.as_str()));
+    let placing =
+        matches!(&item, Item::Current(n) if palette.placing.as_deref() == Some(n.as_str()));
     let in_drawing = palette.current_entry(&name).is_some()
         && !matches!(&item, Item::Ref(r) if r.drawing)
         && !matches!(item, Item::File(_) | Item::Folder(_));
-    let external = matches!(&item, Item::Ref(r) if !r.source.is_empty()) || matches!(item, Item::File(_));
+    let external =
+        matches!(&item, Item::Ref(r) if !r.source.is_empty()) || matches!(item, Item::File(_));
     let body: Element<'a, Message> = match palette.view.grid() {
         Some((_, size)) => column![
             thumb(palette, &item, size),
@@ -524,7 +609,8 @@ fn item_view<'a>(palette: &'a BlockPalette, item: Item) -> Element<'a, Message> 
                 let (ann, dynamic) = palette
                     .current_entry(&name)
                     .map_or((false, false), |e| (e.annotative, e.dynamic));
-                let yes_no = |v: bool| if v { crate::t!("Yes") } else { crate::t!("No") }.into_owned();
+                let yes_no =
+                    |v: bool| if v { crate::t!("Yes") } else { crate::t!("No") }.into_owned();
                 row![
                     container(thumb(palette, &item, 16.0)).width(Length::Fixed(40.0)),
                     text(name.clone()).size(11).width(Fill),
@@ -560,7 +646,10 @@ fn item_view<'a>(palette: &'a BlockPalette, item: Item) -> Element<'a, Message> 
         .on_release(pm(BlockPaletteMsg::Release(item.clone())))
         .interaction(iced::mouse::Interaction::Pointer);
     let tab = palette.tab;
-    iced_aw::ContextMenu::new(area, move || item_menu(tab, item.clone(), in_drawing, external)).into()
+    iced_aw::ContextMenu::new(area, move || {
+        item_menu(tab, item.clone(), in_drawing, external)
+    })
+    .into()
 }
 
 fn icon_button<'a>(icon: IconKind, tip: &str, msg: BlockPaletteMsg) -> Element<'a, Message> {
@@ -582,7 +671,11 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
             .into()
     };
     let num = |value: &'a str, f: fn(String) -> OptionMsg, enabled: bool| -> Element<'a, Message> {
-        let mut input = text_input("", value).size(11).padding([3, 6]).width(Length::Fixed(48.0)).style(field_style);
+        let mut input = text_input("", value)
+            .size(11)
+            .padding([3, 6])
+            .width(Length::Fixed(48.0))
+            .style(field_style);
         if enabled {
             input = input.on_input(move |v| pm(BlockPaletteMsg::Option(f(v))));
         }
@@ -590,7 +683,9 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
     };
     let header = mouse_area(
         row![
-            text(crate::t!("Options").to_uppercase()).size(10).style(accent_text),
+            text(crate::t!("Options").to_uppercase())
+                .size(10)
+                .style(accent_text),
             Space::new().width(Fill),
             if palette.options_collapsed {
                 crate::ui::icons::themed_arrow_right(12.0)
@@ -604,24 +699,39 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
     .interaction(iced::mouse::Interaction::Pointer);
     let mut content = column![header].spacing(6);
     if !palette.options_collapsed {
-        let scale_kinds = vec![crate::t!("Scale").into_owned(), crate::t!("Uniform Scale").into_owned()];
+        let scale_kinds = vec![
+            crate::t!("Scale").into_owned(),
+            crate::t!("Uniform Scale").into_owned(),
+        ];
         let current_kind = scale_kinds[o.uniform as usize].clone();
         let uniform_label = scale_kinds[1].clone();
         let kind = pick_list(Some(current_kind), scale_kinds, |v: &String| v.clone())
-            .on_select(move |v: String| pm(BlockPaletteMsg::Option(OptionMsg::Uniform(v == uniform_label))))
-        .text_size(11)
-        .padding([3, 6]);
+            .on_select(move |v: String| {
+                pm(BlockPaletteMsg::Option(OptionMsg::Uniform(
+                    v == uniform_label,
+                )))
+            })
+            .text_size(11)
+            .padding([3, 6]);
         let fields_on = !o.scale;
         let mut scale_row = row![
-            checkbox(o.scale).size(14).on_toggle(|v| pm(BlockPaletteMsg::Option(OptionMsg::Scale(v)))),
+            checkbox(o.scale)
+                .size(14)
+                .on_toggle(|v| pm(BlockPaletteMsg::Option(OptionMsg::Scale(v)))),
             kind,
         ]
         .spacing(6)
         .align_y(iced::Center);
         // The scale values sit on their own line under the switch.
-        let mut xyz_row = row![Space::new().width(Length::Fixed(20.0))].spacing(6).align_y(iced::Center);
+        let mut xyz_row = row![Space::new().width(Length::Fixed(20.0))]
+            .spacing(6)
+            .align_y(iced::Center);
         if o.scale {
-            scale_row = scale_row.push(text(crate::t!("specified on screen")).size(11).style(muted_style));
+            scale_row = scale_row.push(
+                text(crate::t!("specified on screen"))
+                    .size(11)
+                    .style(muted_style),
+            );
         } else if o.uniform {
             xyz_row = xyz_row.push(num(&palette.option_text[0], OptionMsg::X, fields_on));
         } else {
@@ -633,34 +743,73 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
                 .push(text("Z").size(11))
                 .push(num(&palette.option_text[2], OptionMsg::Z, fields_on));
         }
-        let mut rot_row = row![check(crate::t!("Rotation").into_owned(), o.rotation, OptionMsg::Rotation), Space::new().width(Fill)]
-            .spacing(6)
-            .align_y(iced::Center);
+        let mut rot_row = row![
+            check(
+                crate::t!("Rotation").into_owned(),
+                o.rotation,
+                OptionMsg::Rotation
+            ),
+            Space::new().width(Fill)
+        ]
+        .spacing(6)
+        .align_y(iced::Center);
         if o.rotation {
-            rot_row = rot_row.push(text(crate::t!("specified on screen")).size(11).style(muted_style));
+            rot_row = rot_row.push(
+                text(crate::t!("specified on screen"))
+                    .size(11)
+                    .style(muted_style),
+            );
         } else {
             rot_row = rot_row
                 .push(num(&palette.option_text[3], OptionMsg::Angle, true))
                 .push(text(crate::t!("Angle")).size(11));
         }
         content = content
-            .push(check(crate::t!("Insertion Point").into_owned(), o.insertion_point, OptionMsg::InsertionPoint))
+            .push(check(
+                crate::t!("Insertion Point").into_owned(),
+                o.insertion_point,
+                OptionMsg::InsertionPoint,
+            ))
             .push(scale_row);
         if !o.scale {
             content = content.push(xyz_row);
         }
         content = content
             .push(rot_row)
-            .push(check(crate::t!("Auto-Placement").into_owned(), o.auto_placement, OptionMsg::AutoPlacement))
-            .push(check(crate::t!("Repeat Placement").into_owned(), o.repeat, OptionMsg::Repeat))
-            .push(check(crate::t!("Explode").into_owned(), o.explode, OptionMsg::Explode));
+            .push(check(
+                crate::t!("Auto-Placement").into_owned(),
+                o.auto_placement,
+                OptionMsg::AutoPlacement,
+            ))
+            .push(check(
+                crate::t!("Repeat Placement").into_owned(),
+                o.repeat,
+                OptionMsg::Repeat,
+            ))
+            .push(check(
+                crate::t!("Explode").into_owned(),
+                o.explode,
+                OptionMsg::Explode,
+            ));
     }
-    container(content).padding([8, 10]).width(Fill).style(card_style).into()
+    container(content)
+        .padding([8, 10])
+        .width(Fill)
+        .style(card_style)
+        .into()
 }
 
 /// Build the docked panel element from the palette state.
-pub fn view(palette: &BlockPalette, width: f32, chrome: crate::ui::dock::Chrome) -> Element<'_, Message> {
-    let title_bar = crate::ui::dock::title_bar(PanelId::BlockPalette, crate::t!("Blocks").into_owned(), chrome);
+pub fn view(
+    palette: &BlockPalette,
+    width: f32,
+    chrome: crate::ui::dock::Chrome,
+) -> Element<'_, Message> {
+    let title_bar = crate::ui::dock::title_bar(
+        PanelId::BlockPalette,
+        crate::t!("Blocks").into_owned(),
+        chrome,
+    );
 
     let tabs = {
         let buttons = [Tab::Current, Tab::Recent, Tab::Favorites, Tab::Libraries].map(|t| {
@@ -682,12 +831,19 @@ pub fn view(palette: &BlockPalette, width: f32, chrome: crate::ui::dock::Chrome)
         .padding([4, 8])
         .size(12)
         .style(field_style);
-    let view_pick = pick_list(Some(palette.view.label()), ViewMode::ALL.map(|v| v.label()).to_vec(), |v: &String| v.clone())
-        .on_select(|label: String| {
-            pm(BlockPaletteMsg::View(
-                ViewMode::ALL.into_iter().find(|v| v.label() == label).unwrap_or_default(),
-            ))
-        })
+    let view_pick = pick_list(
+        Some(palette.view.label()),
+        ViewMode::ALL.map(|v| v.label()).to_vec(),
+        |v: &String| v.clone(),
+    )
+    .on_select(|label: String| {
+        pm(BlockPaletteMsg::View(
+            ViewMode::ALL
+                .into_iter()
+                .find(|v| v.label() == label)
+                .unwrap_or_default(),
+        ))
+    })
     .text_size(11)
     .width(Length::Fixed(118.0))
     .padding([3, 6]);
@@ -714,15 +870,21 @@ pub fn view(palette: &BlockPalette, width: f32, chrome: crate::ui::dock::Chrome)
                 .text_size(11)
                 .padding([3, 6])
                 .width(Fill),
-            button(crate::ui::icons::themed(crate::ui::icons::FOLDER_OPEN, 14.0))
-                .on_press(pm(BlockPaletteMsg::LibraryBrowse))
-                .style(button_style(false))
-                .padding([3, 8]),
+            button(crate::ui::icons::themed(
+                crate::ui::icons::FOLDER_OPEN,
+                14.0
+            ))
+            .on_press(pm(BlockPaletteMsg::LibraryBrowse))
+            .style(button_style(false))
+            .padding([3, 8]),
         ]
         .spacing(4)
         .align_y(iced::Center);
         let in_sub = palette.library_dir.as_ref().is_some_and(|d| {
-            palette.libraries.first().is_some_and(|root| d != &PathBuf::from(root))
+            palette
+                .libraries
+                .first()
+                .is_some_and(|root| d != &PathBuf::from(root))
         });
         if in_sub {
             lib_row = lib_row.push(
@@ -739,19 +901,36 @@ pub fn view(palette: &BlockPalette, width: f32, chrome: crate::ui::dock::Chrome)
                 Ok(rel) => rel.display().to_string(),
                 Err(_) => dir.display().to_string(),
             };
-            top = top.push(text(format!("{} {shown}", crate::t!("Path:"))).size(10).style(accent_text));
+            top = top.push(
+                text(format!("{} {shown}", crate::t!("Path:")))
+                    .size(10)
+                    .style(accent_text),
+            );
         }
     }
-    top = top.push(text(palette.tab.heading().to_uppercase()).size(10).style(accent_text));
+    top = top.push(
+        text(palette.tab.heading().to_uppercase())
+            .size(10)
+            .style(accent_text),
+    );
 
     let items = palette.items();
     let body: Element<'_, Message> = if items.is_empty() {
         let msg = match palette.tab {
-            Tab::Current if palette.cached_names.is_empty() => crate::t!("No blocks in this drawing"),
-            Tab::Libraries if palette.libraries.is_empty() => crate::t!("Choose a library folder with …"),
+            Tab::Current if palette.cached_names.is_empty() => {
+                crate::t!("No blocks in this drawing")
+            }
+            Tab::Libraries if palette.libraries.is_empty() => {
+                crate::t!("Choose a library folder with …")
+            }
             _ => crate::t!("No matches"),
         };
-        container(text(msg).size(12).style(muted_style)).center_x(Fill).center_y(Fill).width(Fill).height(Fill).into()
+        container(text(msg).size(12).style(muted_style))
+            .center_x(Fill)
+            .center_y(Fill)
+            .width(Fill)
+            .height(Fill)
+            .into()
     } else {
         let mut col = column![].spacing(4);
         match palette.view.grid() {
@@ -783,9 +962,18 @@ pub fn view(palette: &BlockPalette, width: f32, chrome: crate::ui::dock::Chrome)
                 if palette.view == ViewMode::Details {
                     col = col.push(
                         row![
-                            text(crate::t!("Icon")).size(11).style(muted_style).width(Length::Fixed(40.0)),
-                            text(crate::t!("Name")).size(11).style(muted_style).width(Fill),
-                            text(crate::t!("Annotative / Dynamic")).size(11).style(muted_style).width(Length::Fixed(140.0)),
+                            text(crate::t!("Icon"))
+                                .size(11)
+                                .style(muted_style)
+                                .width(Length::Fixed(40.0)),
+                            text(crate::t!("Name"))
+                                .size(11)
+                                .style(muted_style)
+                                .width(Fill),
+                            text(crate::t!("Annotative / Dynamic"))
+                                .size(11)
+                                .style(muted_style)
+                                .width(Length::Fixed(140.0)),
                         ]
                         .spacing(4),
                     );
@@ -795,13 +983,22 @@ pub fn view(palette: &BlockPalette, width: f32, chrome: crate::ui::dock::Chrome)
                 }
             }
         }
-        scrollable(container(col).padding(iced::Padding { top: 0.0, right: 8.0, bottom: 6.0, left: 0.0 }))
-            .width(Fill)
-            .height(Fill)
-            .into()
+        scrollable(container(col).padding(iced::Padding {
+            top: 0.0,
+            right: 8.0,
+            bottom: 6.0,
+            left: 0.0,
+        }))
+        .width(Fill)
+        .height(Fill)
+        .into()
     };
 
-    crate::ui::dock::frame(title_bar, column![top, body, options_card(palette)].spacing(6), width)
+    crate::ui::dock::frame(
+        title_bar,
+        column![top, body, options_card(palette)].spacing(6),
+        width,
+    )
 }
 
 /// Width of the ribbon's block gallery.
@@ -819,7 +1016,11 @@ pub fn gallery(palette: &BlockPalette) -> Element<'_, Message> {
         let mut r = row![].spacing(4).width(Fill);
         for block in chunk {
             let card = column![
-                canvas(BlockPreviewCanvas { wires: &block.wires }).width(Fill).height(Length::Fixed(48.0)),
+                canvas(BlockPreviewCanvas {
+                    wires: &block.wires
+                })
+                .width(Fill)
+                .height(Length::Fixed(48.0)),
                 text(crate::ui::text_util::elide(&block.name, 10))
                     .size(10)
                     .width(Fill)
@@ -841,14 +1042,23 @@ pub fn gallery(palette: &BlockPalette) -> Element<'_, Message> {
         grid = grid.push(r);
     }
     let blocks: Element<'_, Message> = if palette.blocks.is_empty() {
-        container(text(crate::t!("No blocks in this drawing")).size(11).style(muted_style))
-            .padding(10)
-            .center_x(Fill)
-            .into()
+        container(
+            text(crate::t!("No blocks in this drawing"))
+                .size(11)
+                .style(muted_style),
+        )
+        .padding(10)
+        .center_x(Fill)
+        .into()
     } else {
-        scrollable(container(grid).padding(iced::Padding { top: 0.0, right: 8.0, bottom: 0.0, left: 0.0 }))
-            .height(Length::Shrink)
-            .into()
+        scrollable(container(grid).padding(iced::Padding {
+            top: 0.0,
+            right: 8.0,
+            bottom: 0.0,
+            left: 0.0,
+        }))
+        .height(Length::Shrink)
+        .into()
     };
     let link = |label: std::borrow::Cow<'static, str>, tab: &str| -> Element<'_, Message> {
         button(text(label.into_owned()).size(11))
@@ -860,12 +1070,19 @@ pub fn gallery(palette: &BlockPalette) -> Element<'_, Message> {
     };
     container(
         column![
-            text(crate::t!("Current Drawing Blocks").to_uppercase()).size(10).style(accent_text),
-            container(blocks).height(Length::Fixed(((palette.blocks.len().div_ceil(4)) as f32 * 79.0).clamp(36.0, 260.0))),
-            container(Space::new()).height(1).width(Fill).style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.neutral.color)),
-                ..Default::default()
-            }),
+            text(crate::t!("Current Drawing Blocks").to_uppercase())
+                .size(10)
+                .style(accent_text),
+            container(blocks).height(Length::Fixed(
+                ((palette.blocks.len().div_ceil(4)) as f32 * 79.0).clamp(36.0, 260.0)
+            )),
+            container(Space::new())
+                .height(1)
+                .width(Fill)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(theme.palette().background.neutral.color)),
+                    ..Default::default()
+                }),
             link(crate::t!("Recent Blocks..."), "RECENT"),
             link(crate::t!("Favorite Blocks..."), "FAVORITES"),
             link(crate::t!("Blocks from Libraries..."), "LIBRARIES"),
@@ -880,15 +1097,20 @@ pub fn gallery(palette: &BlockPalette) -> Element<'_, Message> {
 
 /// Theme-aware foreground/background pair for a block card (normal,
 /// hovered/pressed, or the block being placed).
-pub(crate) fn block_card_colors(theme: &Theme, is_placing: bool, status: button::Status) -> (Color, Color) {
+pub(crate) fn block_card_colors(
+    theme: &Theme,
+    is_placing: bool,
+    status: button::Status,
+) -> (Color, Color) {
     let palette = theme.palette();
     if is_placing {
         (palette.primary.base.color, palette.primary.base.text)
     } else {
         match status {
-            button::Status::Hovered | button::Status::Pressed => {
-                (palette.background.strong.color, palette.background.strong.text)
-            }
+            button::Status::Hovered | button::Status::Pressed => (
+                palette.background.strong.color,
+                palette.background.strong.text,
+            ),
             _ => (palette.background.weak.color, palette.background.weak.text),
         }
     }

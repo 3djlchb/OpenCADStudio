@@ -225,8 +225,7 @@ mod tests {
     #[test]
     fn space_emits_no_quad_but_advances() {
         let mut atlas = GlyphAtlas::new(512, 512);
-        let (ab, _) =
-            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AA");
+        let (ab, _) = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AA");
         let (a_sp_a, _) =
             layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A A");
         assert_eq!(a_sp_a.len(), 2, "space produces no quad");
@@ -270,8 +269,7 @@ mod tests {
         let mut atlas = GlyphAtlas::new(512, 512);
         let (small, _) =
             layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A");
-        let (big, _) =
-            layout_glyph_quads(&mut atlas, 20.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A");
+        let (big, _) = layout_glyph_quads(&mut atlas, 20.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "A");
         let extent = |q: &GlyphQuad| {
             let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
             for p in &q.corners {
@@ -295,12 +293,16 @@ mod tests {
         let (plain, plain_adv) =
             layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "AB");
         // `\L…\l` underlines the run — same glyph quads plus one decoration quad.
-        let (under, under_adv) =
-            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "\\LAB\\l");
+        let (under, under_adv) = layout_glyph_quads(
+            &mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "\\LAB\\l",
+        );
         assert_eq!(under.len(), plain.len() + 1, "underline adds one quad");
         // The decoration quad samples the atlas's solid texel (degenerate UV).
         let deco = under.last().unwrap();
-        assert_eq!(deco.uv_min, deco.uv_max, "decoration quad uses the solid UV");
+        assert_eq!(
+            deco.uv_min, deco.uv_max,
+            "decoration quad uses the solid UV"
+        );
         assert_eq!(deco.uv_min, atlas.solid_uv());
         // Decorations don't move the pen: same advance either way, and the
         // advance covers both glyphs (positive, wider than one glyph).
@@ -328,8 +330,7 @@ mod tests {
             (wide / base - 2.0).abs() < 0.05,
             "double width factor ~ double advance: {wide} vs {base}"
         );
-        let (_, empty) =
-            layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "");
+        let (_, empty) = layout_glyph_quads(&mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, "");
         assert_eq!(empty, 0.0, "empty text advances nothing");
     }
 }

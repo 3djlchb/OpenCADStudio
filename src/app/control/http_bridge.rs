@@ -19,7 +19,7 @@ use iced::futures::{channel::mpsc, Stream};
 use serde_json::{json, Value};
 use std::io::ErrorKind;
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU64, AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -111,7 +111,10 @@ fn forward(
     let path = if path.is_empty() { "/" } else { path };
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     if segments.first() != Some(&"api") || segments.get(1) != Some(&"v1") {
-        return (404, json!({"ok": false, "code": "unknown_route", "error": "Use /api/v1/…"}));
+        return (
+            404,
+            json!({"ok": false, "code": "unknown_route", "error": "Use /api/v1/…"}),
+        );
     }
     let plan = rest::plan(&request.method, &segments[2..], request);
     // The picks park until the person answers; an `operation` call is itself
@@ -126,20 +129,27 @@ fn forward(
         Plan::Ready => {
             let state = transact(sender, json!({"protocol":1,"op":"state"}), wait, stream);
             harvest(document_cache, &state);
-            (200, json!({
-                "ok": true,
-                "ready": true,
-                "version": state["version"],
-                "session_id": state["session_id"],
-                "document_id": state["document_id"],
-            }))
+            (
+                200,
+                json!({
+                    "ok": true,
+                    "ready": true,
+                    "version": state["version"],
+                    "session_id": state["session_id"],
+                    "document_id": state["document_id"],
+                }),
+            )
         }
         Plan::Run { request, created } => {
             let response = transact(sender, prepare(request), wait, stream);
             harvest(document_cache, &response);
             (rest::map_status(response.clone(), created == 201), response)
         }
-        Plan::Mutate { op, fields, created } => {
+        Plan::Mutate {
+            op,
+            fields,
+            created,
+        } => {
             let cached = *document_cache.lock().unwrap();
             let mut response = transact(sender, mutate_request(&op, &fields, cached), wait, stream);
             let code = response["code"].as_str().unwrap_or("");
@@ -153,7 +163,10 @@ fn forward(
             }
             harvest(document_cache, &response);
             let status = rest::map_status(response.clone(), created == 201);
-            (if status == 200 { created } else { status }, compact(response))
+            (
+                if status == 200 { created } else { status },
+                compact(response),
+            )
         }
     }
 }
@@ -207,7 +220,9 @@ fn transact(
         && std::time::Instant::now() < deadline
     {
         if interactive && peer_gone(stream) {
-            eprintln!("[pick] {op} {request_id}: client disconnected -- cancelling the pending pick");
+            eprintln!(
+                "[pick] {op} {request_id}: client disconnected -- cancelling the pending pick"
+            );
             // The cancel reuses the pick's own request id: if the person
             // answered in the race window, the settled id makes the retract
             // a harmless no-op instead of an Escape into the live session.
@@ -436,7 +451,10 @@ mod tests {
         assert_eq!(body["status"], "completed");
         assert_eq!(body["result"]["count"], 1);
         assert_eq!(body["result"]["entities"][0]["handle"], handle.as_str());
-        assert!(body["result"]["entities"][0]["bounds"].is_object(), "{body}");
+        assert!(
+            body["result"]["entities"][0]["bounds"].is_object(),
+            "{body}"
+        );
         assert_eq!(body["result"]["entities"][0]["type"], "Line");
 
         // Unrouted paths are refused locally; the GUI is never woken for
@@ -508,8 +526,7 @@ mod tests {
                 // until the person answers. Simulate the click right away.
                 assert_eq!(reply["status"], "accepted", "{reply}");
                 envelope.reply.send(reply);
-                app.tabs[app.active_tab].last_cursor_world =
-                    glam::DVec3::new(1.5, 2.5, 0.0);
+                app.tabs[app.active_tab].last_cursor_world = glam::DVec3::new(1.5, 2.5, 0.0);
                 let _ = app.update(crate::app::Message::ViewportLeftPress);
             } else if envelope.request["op"] == "get_selection" {
                 envelope.reply.send(reply);
@@ -746,7 +763,11 @@ mod tests {
         let mut query_conn = get(port, "/api/v1/entities?type=Line&detail=full");
         drain(&mut app, &mut receiver, 1);
         let (_, body) = read_response(&mut query_conn);
-        assert_eq!(body["entities"][0]["start"], json!([5.0, 0.0, 0.0]), "{body}");
+        assert_eq!(
+            body["entities"][0]["start"],
+            json!([5.0, 0.0, 0.0]),
+            "{body}"
+        );
 
         // A stale cache (the person switched documents) costs one state
         // refresh and a retry, not an error.

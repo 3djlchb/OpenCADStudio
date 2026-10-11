@@ -8,7 +8,10 @@ use crate::scene::model::point_cloud::{self, UNASSIGNED_OFF};
 use crate::ui::dock::PanelId;
 use codec::entities::ExtendedEntityData;
 use codec::{CadDocument, EntityType, Handle};
-use iced::widget::{button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, tooltip, Space};
+use iced::widget::{
+    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, tooltip,
+    Space,
+};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use std::collections::HashSet;
 
@@ -52,7 +55,9 @@ impl Row {
             "cloud" => Some(Self::Cloud),
             "unassigned" => Some(Self::Unassigned),
             "scans" => Some(Self::Scans),
-            _ => text.strip_prefix("scan:").map(|name| Self::Scan(name.to_string())),
+            _ => text
+                .strip_prefix("scan:")
+                .map(|name| Self::Scan(name.to_string())),
         }
     }
 }
@@ -90,18 +95,30 @@ pub fn clouds(document: &CadDocument, selected: &[Handle]) -> Vec<Cloud> {
             let common = entity.common();
             let scans = point_cloud::resolve_source(document, data)
                 .and_then(|path| point_cloud::load(&path))
-                .map(|cloud| cloud.scan_ranges.iter().map(|s| (s.name.clone(), s.id.clone())).collect())
+                .map(|cloud| {
+                    cloud
+                        .scan_ranges
+                        .iter()
+                        .map(|s| (s.name.clone(), s.id.clone()))
+                        .collect()
+                })
                 .unwrap_or_default();
             Some(Cloud {
                 handle: common.handle,
-                name: if data.name.is_empty() { format!("{:X}", common.handle.value()) } else { data.name.clone() },
+                name: if data.name.is_empty() {
+                    format!("{:X}", common.handle.value())
+                } else {
+                    data.name.clone()
+                },
                 hidden: point_cloud::hidden(data),
                 scans,
             })
         })
         .collect();
     if all.iter().any(|cloud| selected.contains(&cloud.handle)) {
-        all.into_iter().filter(|cloud| selected.contains(&cloud.handle)).collect()
+        all.into_iter()
+            .filter(|cloud| selected.contains(&cloud.handle))
+            .collect()
     } else {
         all
     }
@@ -155,7 +172,10 @@ pub fn toggled(hidden: &[String], scans: &[(String, String)], row: &Row) -> Vec<
 
 /// Keys of the rows that fold: each cloud and its Scans.
 pub fn folding_keys(clouds: &[Cloud]) -> Vec<String> {
-    clouds.iter().flat_map(|c| [key(c.handle), format!("{}/scans", key(c.handle))]).collect()
+    clouds
+        .iter()
+        .flat_map(|c| [key(c.handle), format!("{}/scans", key(c.handle))])
+        .collect()
 }
 
 fn key(handle: Handle) -> String {
@@ -191,23 +211,39 @@ fn tree_row<'a>(
     };
     let enabled = switch.is_some();
     let label = text(label).size(12).width(Fill);
-    let label = if enabled { label } else { label.style(crate::ui::style::common::muted_style) };
+    let label = if enabled {
+        label
+    } else {
+        label.style(crate::ui::style::common::muted_style)
+    };
     let switch: Element<'a, Message> = match switch {
         // Mixed: a dash in the box, as the reference's indeterminate state.
-        Some((Switch::Mixed, message)) => button(crate::ui::icons::themed_primary(crate::ui::icons::MINUS, 10.0))
-            .on_press(message)
-            .style(button::secondary)
-            .padding(1)
-            .width(Length::Fixed(16.0))
-            .height(Length::Fixed(16.0))
+        Some((Switch::Mixed, message)) => button(crate::ui::icons::themed_primary(
+            crate::ui::icons::MINUS,
+            10.0,
+        ))
+        .on_press(message)
+        .style(button::secondary)
+        .padding(1)
+        .width(Length::Fixed(16.0))
+        .height(Length::Fixed(16.0))
+        .into(),
+        Some((on, message)) => checkbox(on == Switch::On)
+            .on_toggle(move |_| message.clone())
+            .size(14)
             .into(),
-        Some((on, message)) => checkbox(on == Switch::On).on_toggle(move |_| message.clone()).size(14).into(),
         None => checkbox(false).size(14).into(),
     };
     let selected = state.selected.as_deref() == Some(key.as_str());
-    let cells = row![Space::new().width(Length::Fixed(f32::from(depth) * 16.0)), arrow, icon, label, switch]
-        .spacing(5)
-        .align_y(iced::Center);
+    let cells = row![
+        Space::new().width(Length::Fixed(f32::from(depth) * 16.0)),
+        arrow,
+        icon,
+        label,
+        switch
+    ]
+    .spacing(5)
+    .align_y(iced::Center);
     mouse_area(
         container(cells)
             .width(Fill)
@@ -222,12 +258,18 @@ fn tree_row<'a>(
     .into()
 }
 
-fn fold_button<'a>(icon: &'static [u8], tip: String, message: PcManagerMsg) -> Element<'a, Message> {
+fn fold_button<'a>(
+    icon: &'static [u8],
+    tip: String,
+    message: PcManagerMsg,
+) -> Element<'a, Message> {
     let b = button(crate::ui::icons::themed_secondary(icon, 12.0))
         .on_press(msg(message))
         .style(button::subtle)
         .padding([2, 4]);
-    tooltip(b, text(tip).size(10), tooltip::Position::Bottom).gap(4).into()
+    tooltip(b, text(tip).size(10), tooltip::Position::Bottom)
+        .gap(4)
+        .into()
 }
 
 pub fn view<'a>(
@@ -237,8 +279,11 @@ pub fn view<'a>(
     width: f32,
     chrome: crate::ui::dock::Chrome,
 ) -> Element<'a, Message> {
-    let title_bar =
-        crate::ui::dock::title_bar(PanelId::PointCloudManager, crate::t!("Point Cloud Manager").into_owned(), chrome);
+    let title_bar = crate::ui::dock::title_bar(
+        PanelId::PointCloudManager,
+        crate::t!("Point Cloud Manager").into_owned(),
+        chrome,
+    );
     let query = state.search.trim().to_lowercase();
     let matches = |label: &str| query.is_empty() || label.to_lowercase().contains(&query);
     // Searching opens every node so the matches show.
@@ -250,7 +295,11 @@ pub fn view<'a>(
     let mut tree = column![].spacing(1);
     for cloud in clouds(document, selected) {
         let root = key(cloud.handle);
-        let scans: Vec<&(String, String)> = cloud.scans.iter().filter(|(name, _)| matches(name)).collect();
+        let scans: Vec<&(String, String)> = cloud
+            .scans
+            .iter()
+            .filter(|(name, _)| matches(name))
+            .collect();
         let show_scans = matches(&scans_label) || !scans.is_empty();
         let children = matches(&regions) || matches(&unassigned) || show_scans;
         if !matches(&cloud.name) && !children {
@@ -331,12 +380,22 @@ pub fn view<'a>(
             style: iced::font::Style::Italic,
             ..iced::Font::DEFAULT
         })
-        .style(|theme: &Theme| text::Style { color: Some(theme.palette().primary.base.color) })
+        .style(|theme: &Theme| text::Style {
+            color: Some(theme.palette().primary.base.color),
+        })
         .width(Fill);
     let header = row![
         heading,
-        fold_button(crate::ui::icons::MINUS, crate::t!("Collapse all").into_owned(), PcManagerMsg::CollapseAll),
-        fold_button(crate::ui::icons::PLUS, crate::t!("Expand all").into_owned(), PcManagerMsg::ExpandAll),
+        fold_button(
+            crate::ui::icons::MINUS,
+            crate::t!("Collapse all").into_owned(),
+            PcManagerMsg::CollapseAll
+        ),
+        fold_button(
+            crate::ui::icons::PLUS,
+            crate::t!("Expand all").into_owned(),
+            PcManagerMsg::ExpandAll
+        ),
     ]
     .spacing(2)
     .align_y(iced::Center);
@@ -346,7 +405,10 @@ pub fn view<'a>(
         .height(Fill)
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.weak.color)),
-            border: Border { radius: 4.0.into(), ..Default::default() },
+            border: Border {
+                radius: 4.0.into(),
+                ..Default::default()
+            },
             ..Default::default()
         });
     let search = text_input(&crate::t!("Search"), &state.search)

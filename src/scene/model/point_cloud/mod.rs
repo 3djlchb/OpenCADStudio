@@ -72,15 +72,27 @@ fn decode(path: &Path) -> Option<CloudPoints> {
         .is_some_and(|e| e.eq_ignore_ascii_case("rcp"));
     // A project lists its scans with their own transforms; a scan file
     // carries the same transform in its header.
-    let stem = |p: &Path| p.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let stem = |p: &Path| {
+        p.file_stem()
+            .map_or_else(String::new, |s| s.to_string_lossy().into_owned())
+    };
     let scans: Vec<(rcs::Scan, [[f64; 3]; 3], String, String)> = if is_project {
         rcp::scans(&bytes, path)?
             .into_iter()
             .filter_map(|entry| {
                 let scan = rcs::decode(&std::fs::read(&entry.path).ok()?)?;
                 // The project's identifier, else the scan file's own.
-                let id = if entry.id.is_empty() { scan.id.clone() } else { entry.id.clone() };
-                Some((scan, [entry.translation, entry.rotation, entry.scale], stem(&entry.path), id))
+                let id = if entry.id.is_empty() {
+                    scan.id.clone()
+                } else {
+                    entry.id.clone()
+                };
+                Some((
+                    scan,
+                    [entry.translation, entry.rotation, entry.scale],
+                    stem(&entry.path),
+                    id,
+                ))
             })
             .collect()
     } else {
@@ -108,12 +120,20 @@ fn decode(path: &Path) -> Option<CloudPoints> {
         let place = |p: &[f64; 3]| {
             let s = [p[0] * scale[0], p[1] * scale[1], p[2] * scale[2]];
             let r = rotate.map(|row| row[0] * s[0] + row[1] * s[1] + row[2] * s[2]);
-            [r[0] + translation[0], r[1] + translation[1], r[2] + translation[2]]
+            [
+                r[0] + translation[0],
+                r[1] + translation[1],
+                r[2] + translation[2],
+            ]
         };
         let first = cloud.positions.len();
         cloud.positions.extend(scan.local.iter().map(place));
         let id = if id.is_empty() { name.clone() } else { id };
-        cloud.scan_ranges.push(ScanRange { name, id, range: first..cloud.positions.len() });
+        cloud.scan_ranges.push(ScanRange {
+            name,
+            id,
+            range: first..cloud.positions.len(),
+        });
         let [lo, hi] = scan.bounds;
         for corner in 0..8 {
             let p = place(&[
@@ -135,7 +155,9 @@ fn decode(path: &Path) -> Option<CloudPoints> {
         }
         cloud.intensity.extend_from_slice(&scan.intensity);
         cloud.normals.extend(scan.normals.iter().map(|n| {
-            let r = rotate.map(|row| row[0] * f64::from(n[0]) + row[1] * f64::from(n[1]) + row[2] * f64::from(n[2]));
+            let r = rotate.map(|row| {
+                row[0] * f64::from(n[0]) + row[1] * f64::from(n[1]) + row[2] * f64::from(n[2])
+            });
             r.map(|v| v as f32)
         }));
     }
@@ -204,7 +226,11 @@ pub(crate) fn resolve_source(document: &CadDocument, data: &PointCloudExData) ->
     if path.is_absolute() && path.is_file() {
         return Some(path);
     }
-    if let Some(found) = sources().lock().ok().and_then(|map| map.get(stored).cloned()) {
+    if let Some(found) = sources()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(stored).cloned())
+    {
         if found.is_file() {
             return Some(found);
         }
@@ -291,7 +317,11 @@ pub(crate) fn shows_no_points(document: &CadDocument, data: &PointCloudExData) -
         return true;
     };
     data.hidden_regions.contains(&0)
-        || (!cloud.scan_ranges.is_empty() && cloud.scan_ranges.iter().all(|s| data.hidden_scans.contains(&s.id)))
+        || (!cloud.scan_ranges.is_empty()
+            && cloud
+                .scan_ranges
+                .iter()
+                .all(|s| data.hidden_scans.contains(&s.id)))
 }
 
 /// The points `data` shows, placed through its origin and axes and then
@@ -305,21 +335,31 @@ pub(crate) fn placed(
     hidden: &[String],
 ) -> Option<Arc<PlacedCloud>> {
     let cloud = load(&resolve_source(document, data)?)?;
-    let skipped: Vec<std::ops::Range<usize>> =
-        if hidden.iter().any(|h| h == UNASSIGNED_OFF) {
-            vec![0..cloud.positions.len()]
-        } else {
-            cloud.scan_ranges.iter().filter(|s| hidden.contains(&s.id)).map(|s| s.range.clone()).collect()
-        };
+    let skipped: Vec<std::ops::Range<usize>> = if hidden.iter().any(|h| h == UNASSIGNED_OFF) {
+        vec![0..cloud.positions.len()]
+    } else {
+        cloud
+            .scan_ranges
+            .iter()
+            .filter(|s| hidden.contains(&s.id))
+            .map(|s| s.range.clone())
+            .collect()
+    };
     // The points shown: POINTCLOUDDENSITY per cent of POINTCLOUDPOINTMAX,
     // in tenths by POINTCLOUDLOD, every n-th point of a larger cloud.
     let shown = |name| setting(name).map_or(0, |s| setting_value(document, s));
-    let limit =
-        (shown("POINTCLOUDPOINTMAX") * shown("POINTCLOUDDENSITY") / 100 * shown("POINTCLOUDLOD") / 10).max(1) as usize;
+    let limit = (shown("POINTCLOUDPOINTMAX") * shown("POINTCLOUDDENSITY") / 100
+        * shown("POINTCLOUDLOD")
+        / 10)
+        .max(1) as usize;
     let step = cloud.positions.len().div_ceil(limit).max(1);
     let style = Stylization::of(document, data, object_color);
     let mut origin = data.ucs_origin;
-    let mut axes = [data.ucs_x_direction, data.ucs_y_direction, data.ucs_z_direction];
+    let mut axes = [
+        data.ucs_x_direction,
+        data.ucs_y_direction,
+        data.ucs_z_direction,
+    ];
     if let Some(transform) = transform {
         let placed = transform.apply(origin);
         axes = axes.map(|axis| transform.apply(origin + axis) - placed);
@@ -345,7 +385,11 @@ pub(crate) fn placed(
     axes.iter().map(bits).for_each(|v| v.hash(&mut h));
     for crop in &crops {
         let frame = [crop.plane, crop.x_direction, crop.y_direction];
-        frame.iter().chain(&crop.points).map(bits).for_each(|v| v.hash(&mut h));
+        frame
+            .iter()
+            .chain(&crop.points)
+            .map(bits)
+            .for_each(|v| v.hash(&mut h));
         (crop.inside, crop.inverted).hash(&mut h);
     }
     step.hash(&mut h);
@@ -366,10 +410,13 @@ pub(crate) fn placed(
     let (low, high) = if data.elevation_apply_to_fixed_range {
         (data.elevation_min, data.elevation_max)
     } else {
-        cloud.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
-            let z = world(p).z;
-            (lo.min(z), hi.max(z))
-        })
+        cloud
+            .positions
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+                let z = world(p).z;
+                (lo.min(z), hi.max(z))
+            })
     };
     let scan_color = |i: usize| {
         if cloud.has_rgb {
@@ -382,33 +429,55 @@ pub(crate) fn placed(
     };
     // A value outside a scheme's range takes the end colour, the scan
     // colour, or is hidden (`None`), as the cloud's out-of-range choice says.
-    let along = |colors: &[[u8; 3]], t: f64, gradient: bool, out_of_range: i16, fixed: bool, i: usize| {
-        if fixed && !(0.0..=1.0).contains(&t) {
-            return match out_of_range {
-                0 => Some(ramp(colors, t, gradient)),
-                2 => None,
-                _ => Some(scan_color(i)),
-            };
-        }
-        Some(ramp(colors, t, gradient))
-    };
+    let along =
+        |colors: &[[u8; 3]], t: f64, gradient: bool, out_of_range: i16, fixed: bool, i: usize| {
+            if fixed && !(0.0..=1.0).contains(&t) {
+                return match out_of_range {
+                    0 => Some(ramp(colors, t, gradient)),
+                    2 => None,
+                    _ => Some(scan_color(i)),
+                };
+            }
+            Some(ramp(colors, t, gradient))
+        };
     let color = |i: usize, z: f64| -> Option<[u8; 4]> {
         let [r, g, b] = match &style {
             Stylization::Object(c) => *c,
             Stylization::Normal => match cloud.normals.get(i) {
                 Some(n) => {
-                    let w = axes[0] * f64::from(n[0]) + axes[1] * f64::from(n[1]) + axes[2] * f64::from(n[2]);
+                    let w = axes[0] * f64::from(n[0])
+                        + axes[1] * f64::from(n[1])
+                        + axes[2] * f64::from(n[2]);
                     let w = w / w.length().max(1e-12);
                     [w.x, w.y, w.z].map(|v| ((v + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8)
                 }
                 None => object_color,
             },
-            Stylization::Ramp { colors, gradient, intensity: true, range, out_of_range } => {
-                let percent = f64::from(cloud.intensity.get(i).copied().unwrap_or(0)) * 100.0 / 255.0;
+            Stylization::Ramp {
+                colors,
+                gradient,
+                intensity: true,
+                range,
+                out_of_range,
+            } => {
+                let percent =
+                    f64::from(cloud.intensity.get(i).copied().unwrap_or(0)) * 100.0 / 255.0;
                 let (from, to) = (range.0 as f64, range.1 as f64);
-                along(colors, (percent - from) / (to - from).max(1e-9), *gradient, *out_of_range, true, i)?
+                along(
+                    colors,
+                    (percent - from) / (to - from).max(1e-9),
+                    *gradient,
+                    *out_of_range,
+                    true,
+                    i,
+                )?
             }
-            Stylization::Ramp { colors, gradient, out_of_range, .. } => along(
+            Stylization::Ramp {
+                colors,
+                gradient,
+                out_of_range,
+                ..
+            } => along(
                 colors,
                 (z - low) / (high - low).max(1e-9),
                 *gradient,
@@ -431,7 +500,8 @@ pub(crate) fn placed(
         };
         let pos = [w.x as f32, w.y as f32, w.z as f32];
         let normal = cloud.normals.get(i).map_or([0; 4], |n| {
-            let v = axes[0] * f64::from(n[0]) + axes[1] * f64::from(n[1]) + axes[2] * f64::from(n[2]);
+            let v =
+                axes[0] * f64::from(n[0]) + axes[1] * f64::from(n[1]) + axes[2] * f64::from(n[2]);
             let v = v / v.length().max(1e-12);
             [v.x, v.y, v.z, 0.0].map(|c| (c * 127.0).round() as i8)
         });
@@ -525,7 +595,13 @@ enum Stylization {
     /// A colour scheme over intensity (per cent, in the range given) or
     /// elevation, blended or in bands; values out of range per
     /// `out_of_range` (0 end colours, 1 scan colours, 2 hidden).
-    Ramp { colors: Vec<[u8; 3]>, gradient: bool, intensity: bool, range: (i64, i64), out_of_range: i16 },
+    Ramp {
+        colors: Vec<[u8; 3]>,
+        gradient: bool,
+        intensity: bool,
+        range: (i64, i64),
+        out_of_range: i16,
+    },
 }
 
 impl Stylization {
@@ -533,31 +609,66 @@ impl Stylization {
         let (scheme, intensity, gradient) = match data.stylization_type {
             2 => return Self::Object(object_color),
             3 => return Self::Normal,
-            5 => (&data.intensity_color_scheme, true, data.intensity_as_gradient),
-            4 => (&data.current_color_scheme, false, data.elevation_as_gradient),
+            5 => (
+                &data.intensity_color_scheme,
+                true,
+                data.intensity_as_gradient,
+            ),
+            4 => (
+                &data.current_color_scheme,
+                false,
+                data.elevation_as_gradient,
+            ),
             // Classification has no data here: scan colours.
             _ => return Self::Scan,
         };
-        let colors = ramp_colors(document, scheme, if intensity { "Spectrum" } else { "Earth" });
+        let colors = ramp_colors(
+            document,
+            scheme,
+            if intensity { "Spectrum" } else { "Earth" },
+        );
         let range = if intensity && data.intensity_max > data.intensity_min {
             (i64::from(data.intensity_min), i64::from(data.intensity_max))
         } else {
             (0, 100)
         };
-        let out_of_range =
-            if intensity { data.intensity_out_of_range_behavior } else { data.elevation_out_of_range_behavior };
-        Self::Ramp { colors, gradient, intensity, range: (range.0, range.1), out_of_range }
+        let out_of_range = if intensity {
+            data.intensity_out_of_range_behavior
+        } else {
+            data.elevation_out_of_range_behavior
+        };
+        Self::Ramp {
+            colors,
+            gradient,
+            intensity,
+            range: (range.0, range.1),
+            out_of_range,
+        }
     }
 }
 
 /// The colour schemes a new drawing's colour map carries, high end first.
 const BUILTIN_RAMPS: [(&str, &[u32]); 7] = [
-    ("Hydro", &[0x00bfff, 0x007ca5, 0x005f7f, 0x00394c, 0x00264c, 0x00134c, 0x00004c, 0x000026]),
-    ("Grayscale", &[0xffffff, 0xcccccc, 0x999999, 0x666666, 0x333333, 0x000000]),
+    (
+        "Hydro",
+        &[
+            0x00bfff, 0x007ca5, 0x005f7f, 0x00394c, 0x00264c, 0x00134c, 0x00004c, 0x000026,
+        ],
+    ),
+    (
+        "Grayscale",
+        &[0xffffff, 0xcccccc, 0x999999, 0x666666, 0x333333, 0x000000],
+    ),
     ("Earth", &[0xffffc8, 0xf0d796, 0xe1af64, 0xd28732, 0xc35f00]),
     ("Blues", &[0x0000ff, 0x0000a5, 0x00007f, 0x00004c, 0x000026]),
-    ("Greens", &[0x00ff00, 0x00a500, 0x007f00, 0x004c00, 0x002600]),
-    ("Spectrum", &[0xff00ff, 0x0000ff, 0x00ffff, 0x00ff00, 0xffff00, 0xff0000]),
+    (
+        "Greens",
+        &[0x00ff00, 0x00a500, 0x007f00, 0x004c00, 0x002600],
+    ),
+    (
+        "Spectrum",
+        &[0xff00ff, 0x0000ff, 0x00ffff, 0x00ff00, 0xffff00, 0xff0000],
+    ),
     ("Reds", &[0xff0000, 0xa50000, 0x7f0000, 0x4c0000, 0x260000]),
 ];
 
@@ -580,7 +691,12 @@ pub(crate) fn schemes(document: &CadDocument) -> Vec<(String, String, Vec<[u8; 3
                 .color_ramps
                 .iter()
                 .map(|r| {
-                    let colors = r.colors.iter().filter(|c| c.visible).map(|c| rgb(c.color as u32)).collect();
+                    let colors = r
+                        .colors
+                        .iter()
+                        .filter(|c| c.visible)
+                        .map(|c| rgb(c.color as u32))
+                        .collect();
                     (r.id.clone(), r.name.clone(), colors)
                 })
                 .collect();
@@ -590,7 +706,11 @@ pub(crate) fn schemes(document: &CadDocument) -> Vec<(String, String, Vec<[u8; 3
         .iter()
         .map(|(name, colors)| {
             let id = crate::entities::extended::point_cloud_ramp_id(name).to_string();
-            (id, name.to_string(), colors.iter().map(|c| rgb(*c)).collect())
+            (
+                id,
+                name.to_string(),
+                colors.iter().map(|c| rgb(*c)).collect(),
+            )
         })
         .collect()
 }
@@ -627,9 +747,17 @@ fn ramp_colors(document: &CadDocument, id: &str, fallback: &str) -> Vec<[u8; 3]>
         let ClassObjectData::PointCloudColorMap(map) = &object.data else {
             continue;
         };
-        if let Some(found) = map.color_ramps.iter().find(|r| !id.is_empty() && r.id.eq_ignore_ascii_case(id)) {
-            let colors: Vec<[u8; 3]> =
-                found.colors.iter().filter(|c| c.visible).map(|c| rgb(c.color as u32)).collect();
+        if let Some(found) = map
+            .color_ramps
+            .iter()
+            .find(|r| !id.is_empty() && r.id.eq_ignore_ascii_case(id))
+        {
+            let colors: Vec<[u8; 3]> = found
+                .colors
+                .iter()
+                .filter(|c| c.visible)
+                .map(|c| rgb(c.color as u32))
+                .collect();
             if !colors.is_empty() {
                 return colors;
             }
@@ -642,14 +770,22 @@ fn ramp_colors(document: &CadDocument, id: &str, fallback: &str) -> Vec<[u8; 3]>
     BUILTIN_RAMPS
         .iter()
         .find(|(ramp, _)| *ramp == name)
-        .map_or_else(|| vec![[255; 3]], |(_, colors)| colors.iter().map(|c| rgb(*c)).collect())
+        .map_or_else(
+            || vec![[255; 3]],
+            |(_, colors)| colors.iter().map(|c| rgb(*c)).collect(),
+        )
 }
 
 /// The colour at `t` (0–1, clamped) along a scheme: blended between its
 /// colours, or the band `t` falls in. A scheme lists its high end first
 /// (Spectrum: magenta at the highest value, red at the lowest).
 fn ramp(colors: &[[u8; 3]], t: f64, gradient: bool) -> [u8; 3] {
-    let t = 1.0 - if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
+    let t = 1.0
+        - if t.is_finite() {
+            t.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
     if colors.len() < 2 {
         return colors.first().copied().unwrap_or([255; 3]);
     }
@@ -674,21 +810,96 @@ pub(crate) struct Setting {
 
 /// The reference's defaults and ranges.
 const SETTINGS: [Setting; 15] = [
-    Setting { name: "POINTCLOUDDENSITY", default: 15, min: 1, max: 100 },
-    Setting { name: "POINTCLOUDRTDENSITY", default: 5, min: 1, max: 100 },
-    Setting { name: "POINTCLOUDPOINTSIZE", default: 2, min: 1, max: 10 },
-    Setting { name: "POINTCLOUDLOD", default: 10, min: 1, max: 10 },
-    Setting { name: "POINTCLOUDLOCK", default: 0, min: 0, max: 1 },
-    Setting { name: "POINTCLOUDAUTOUPDATE", default: 0, min: 0, max: 1 },
-    Setting { name: "POINTCLOUDVISRETAIN", default: 1, min: 0, max: 1 },
-    Setting { name: "POINTCLOUDSHADING", default: 0, min: 0, max: 1 },
-    Setting { name: "POINTCLOUD2DVSDISPLAY", default: 0, min: 0, max: 1 },
-    Setting { name: "POINTCLOUDLIGHTSOURCE", default: 0, min: 0, max: 1 },
-    Setting { name: "POINTCLOUDLIGHTING", default: 0, min: 0, max: 2 },
-    Setting { name: "POINTCLOUDBOUNDARY", default: 1, min: 0, max: 2 },
-    Setting { name: "POINTCLOUDCACHESIZE", default: 512, min: 0, max: 32000 },
-    Setting { name: "POINTCLOUDPOINTMAX", default: 10_000_000, min: 1_000_000, max: 25_000_000 },
-    Setting { name: "POINTCLOUDPOINTMAXLEGACY", default: 1_500_000, min: 1_500_000, max: 10_000_000 },
+    Setting {
+        name: "POINTCLOUDDENSITY",
+        default: 15,
+        min: 1,
+        max: 100,
+    },
+    Setting {
+        name: "POINTCLOUDRTDENSITY",
+        default: 5,
+        min: 1,
+        max: 100,
+    },
+    Setting {
+        name: "POINTCLOUDPOINTSIZE",
+        default: 2,
+        min: 1,
+        max: 10,
+    },
+    Setting {
+        name: "POINTCLOUDLOD",
+        default: 10,
+        min: 1,
+        max: 10,
+    },
+    Setting {
+        name: "POINTCLOUDLOCK",
+        default: 0,
+        min: 0,
+        max: 1,
+    },
+    Setting {
+        name: "POINTCLOUDAUTOUPDATE",
+        default: 0,
+        min: 0,
+        max: 1,
+    },
+    Setting {
+        name: "POINTCLOUDVISRETAIN",
+        default: 1,
+        min: 0,
+        max: 1,
+    },
+    Setting {
+        name: "POINTCLOUDSHADING",
+        default: 0,
+        min: 0,
+        max: 1,
+    },
+    Setting {
+        name: "POINTCLOUD2DVSDISPLAY",
+        default: 0,
+        min: 0,
+        max: 1,
+    },
+    Setting {
+        name: "POINTCLOUDLIGHTSOURCE",
+        default: 0,
+        min: 0,
+        max: 1,
+    },
+    Setting {
+        name: "POINTCLOUDLIGHTING",
+        default: 0,
+        min: 0,
+        max: 2,
+    },
+    Setting {
+        name: "POINTCLOUDBOUNDARY",
+        default: 1,
+        min: 0,
+        max: 2,
+    },
+    Setting {
+        name: "POINTCLOUDCACHESIZE",
+        default: 512,
+        min: 0,
+        max: 32000,
+    },
+    Setting {
+        name: "POINTCLOUDPOINTMAX",
+        default: 10_000_000,
+        min: 1_000_000,
+        max: 25_000_000,
+    },
+    Setting {
+        name: "POINTCLOUDPOINTMAXLEGACY",
+        default: 1_500_000,
+        min: 1_500_000,
+        max: 10_000_000,
+    },
 ];
 
 /// How a value was refused: the lines to show, and whether the prompt asks
@@ -701,21 +912,33 @@ pub(crate) struct Refusal {
 impl Setting {
     pub(crate) fn check(&self, text: &str) -> Result<i64, Refusal> {
         let Ok(value) = text.trim().parse::<i64>() else {
-            return Err(Refusal { lines: vec!["Requires an integer value.".to_string()], ask_again: true });
+            return Err(Refusal {
+                lines: vec!["Requires an integer value.".to_string()],
+                ask_again: true,
+            });
         };
         if (self.min..=self.max).contains(&value) {
             return Ok(value);
         }
         Err(if self.max > 100 {
             Refusal {
-                lines: vec![format!("Cannot set {} to that value.", self.name), "*Invalid*".to_string()],
+                lines: vec![
+                    format!("Cannot set {} to that value.", self.name),
+                    "*Invalid*".to_string(),
+                ],
                 ask_again: false,
             }
         } else if self.min == 0 && self.max == 1 {
-            Refusal { lines: vec!["Requires 0 or 1 only.".to_string()], ask_again: true }
+            Refusal {
+                lines: vec!["Requires 0 or 1 only.".to_string()],
+                ask_again: true,
+            }
         } else {
             Refusal {
-                lines: vec![format!("Requires an integer between {} and {}.", self.min, self.max)],
+                lines: vec![format!(
+                    "Requires an integer between {} and {}.",
+                    self.min, self.max
+                )],
                 ask_again: true,
             }
         })
@@ -723,7 +946,10 @@ impl Setting {
 }
 
 pub(crate) fn setting(name: &str) -> Option<Setting> {
-    SETTINGS.iter().copied().find(|setting| setting.name.eq_ignore_ascii_case(name))
+    SETTINGS
+        .iter()
+        .copied()
+        .find(|setting| setting.name.eq_ignore_ascii_case(name))
 }
 
 /// A setting's value in the drawing, or its default.

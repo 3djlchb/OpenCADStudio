@@ -367,7 +367,8 @@ mod tests {
             .scene
             .selection
             .borrow_mut()
-            .view.vp_size = (800., 600.);
+            .view
+            .vp_size = (800., 600.);
         app.spacemouse_focused = true;
         app.spacemouse.test_connect();
         app.sync_spacemouse();

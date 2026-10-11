@@ -6,14 +6,21 @@ use codec::types::Vector3;
 use codec::EntityType;
 use kernel::brep::Body;
 
-use crate::command::{ExtrudeMode, SweepOptions};
 use super::sweep_model::{embedded_path, embedded_revolve_profile};
+use crate::command::{ExtrudeMode, SweepOptions};
 
 /// A 3D polyline profile or path as the reference records it: a wire body.
-fn embedded_sweep_profile(entity: &EntityType) -> Option<(codec::entities::EmbeddedEntity, [f64; 16])> {
+fn embedded_sweep_profile(
+    entity: &EntityType,
+) -> Option<(codec::entities::EmbeddedEntity, [f64; 16])> {
     match entity {
-        EntityType::Region(region) => Some((codec::entities::EmbeddedEntity::Region(region.clone()), glam::DMat4::IDENTITY.to_cols_array())),
-        EntityType::Polyline3D(value) => Some((polyline_wire(value)?, glam::DMat4::IDENTITY.to_cols_array())),
+        EntityType::Region(region) => Some((
+            codec::entities::EmbeddedEntity::Region(region.clone()),
+            glam::DMat4::IDENTITY.to_cols_array(),
+        )),
+        EntityType::Polyline3D(value) => {
+            Some((polyline_wire(value)?, glam::DMat4::IDENTITY.to_cols_array()))
+        }
         _ => embedded_revolve_profile(entity),
     }
 }
@@ -28,7 +35,9 @@ fn embedded_sweep_path(path: &EntityType) -> Option<codec::entities::EmbeddedEnt
 }
 
 fn polyline_wire(value: &codec::entities::Polyline3D) -> Option<codec::entities::EmbeddedEntity> {
-    let points = value.vertices.iter()
+    let points = value
+        .vertices
+        .iter()
         .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
         .collect::<Vec<_>>();
     let mut document = codec::entities::acis::SatDocument::new();
@@ -48,7 +57,9 @@ pub fn is_sweep_profile(entity: &EntityType) -> bool {
 
 /// The vertices of a 3D polyline profile that does not lie in one plane.
 pub fn spatial_profile(entity: &EntityType) -> Option<(Vec<[f64; 3]>, bool)> {
-    let EntityType::Polyline3D(_) = entity else { return None };
+    let EntityType::Polyline3D(_) = entity else {
+        return None;
+    };
     let (profile, transform) = embedded_sweep_profile(entity)?;
     kernel::acis::sweep_spatial_profile(&profile, transform)
 }
@@ -59,7 +70,11 @@ pub fn spatial_profile(entity: &EntityType) -> Option<(Vec<[f64; 3]>, bool)> {
 /// refuses it: along a path with a corner (85036), and when the profile seen
 /// from above crosses itself (85021); a side that is a point when seen from
 /// above cannot be swept at all (`None` code).
-pub fn spatial_sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptions) -> Result<SolidHistorySweep, Option<u32>> {
+pub fn spatial_sweep_record(
+    profile: &EntityType,
+    path: &EntityType,
+    options: SweepOptions,
+) -> Result<SolidHistorySweep, Option<u32>> {
     let (points, closed) = spatial_profile(profile).ok_or(None)?;
     let count = points.len();
     let sides = if closed { count } else { count - 1 };
@@ -71,11 +86,15 @@ pub fn spatial_sweep_record(profile: &EntityType, path: &EntityType, options: Sw
     for i in 0..sides {
         for j in i + 1..sides {
             // Neighbouring sides share a corner.
-            if j == i + 1 || (closed && i == 0 && j == sides - 1) { continue; }
+            if j == i + 1 || (closed && i == 0 && j == sides - 1) {
+                continue;
+            }
             let (p, r) = (plan(i), plan(i + 1) - plan(i));
             let (q, s) = (plan(j), plan(j + 1) - plan(j));
             let denominator = cross(r, s);
-            if denominator.abs() <= 1e-12 { continue; }
+            if denominator.abs() <= 1e-12 {
+                continue;
+            }
             let t = cross(q - p, s) / denominator;
             let u = cross(q - p, r) / denominator;
             if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
@@ -100,7 +119,9 @@ pub fn spatial_sweep_record(profile: &EntityType, path: &EntityType, options: Sw
         bank: options.bank,
         sweep_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
         path_entity_transform: glam::DMat4::IDENTITY.to_cols_array(),
-        reference_point: base_point.map_or(Vector3::new(0.0, 0.0, 0.0), |p| Vector3::new(p[0], p[1], p[2])),
+        reference_point: base_point.map_or(Vector3::new(0.0, 0.0, 0.0), |p| {
+            Vector3::new(p[0], p[1], p[2])
+        }),
         miter_option: 2,
         ..SolidHistorySweep::default()
     };
@@ -126,13 +147,20 @@ pub fn scaled_sweep_path_refusal(path: &EntityType) -> Option<&'static str> {
         Some(planar) => (planar.curve.is_closed(), true),
         None => match path {
             EntityType::Polyline3D(value) => {
-                let points = value.vertices.iter()
-                    .map(|vertex| glam::DVec3::new(vertex.position.x, vertex.position.y, vertex.position.z))
+                let points = value
+                    .vertices
+                    .iter()
+                    .map(|vertex| {
+                        glam::DVec3::new(vertex.position.x, vertex.position.y, vertex.position.z)
+                    })
                     .collect::<Vec<_>>();
-                let directions = points.windows(2)
+                let directions = points
+                    .windows(2)
                     .filter_map(|pair| (pair[1] - pair[0]).try_normalize())
                     .collect::<Vec<_>>();
-                let straight = directions.windows(2).all(|pair| pair[0].dot(pair[1]) >= 1.0 - 1e-9);
+                let straight = directions
+                    .windows(2)
+                    .all(|pair| pair[0].dot(pair[1]) >= 1.0 - 1e-9);
                 (value.is_closed(), straight && !value.is_closed())
             }
             EntityType::Spline(value) => (value.flags.closed, value.degree > 1),
@@ -151,8 +179,9 @@ pub fn scaled_sweep_path_refusal(path: &EntityType) -> Option<&'static str> {
 pub fn is_sweep_path(entity: &EntityType) -> bool {
     match embedded_path(entity) {
         Some(codec::entities::EmbeddedEntity::Spline(value)) => {
-            value.degree > 0 && (value.control_points.len() > value.degree as usize
-                || value.fit_points.len() >= 2)
+            value.degree > 0
+                && (value.control_points.len() > value.degree as usize
+                    || value.fit_points.len() >= 2)
         }
         Some(_) => crate::entities::curve::entity_curve(entity)
             .is_some_and(|curve| curve.curve.length().is_finite() && curve.curve.length() > 1e-9),
@@ -161,20 +190,30 @@ pub fn is_sweep_path(entity: &EntityType) -> bool {
 }
 
 /// All selected profiles use one base point, preserving their relative offsets.
-pub fn sweep_selection_options(profiles: &[EntityType], mut options: SweepOptions) -> Option<SweepOptions> {
+pub fn sweep_selection_options(
+    profiles: &[EntityType],
+    mut options: SweepOptions,
+) -> Option<SweepOptions> {
     if options.base_point.is_some() {
         return Some(options);
     }
     // Spatial profiles keep their own anchor.
-    let profiles = profiles.iter().filter(|profile| spatial_profile(profile).is_none()).collect::<Vec<_>>();
+    let profiles = profiles
+        .iter()
+        .filter(|profile| spatial_profile(profile).is_none())
+        .collect::<Vec<_>>();
     if profiles.is_empty() {
         return Some(options);
     }
-    let geometry = profiles.iter().map(|profile| {
-        let (entity, transform) = embedded_sweep_profile(profile)?;
-        let (plane, wires, _) = kernel::acis::sweep_profile_geometry(&entity, transform).ok()?;
-        Some((plane, wires))
-    }).collect::<Option<Vec<_>>>()?;
+    let geometry = profiles
+        .iter()
+        .map(|profile| {
+            let (entity, transform) = embedded_sweep_profile(profile)?;
+            let (plane, wires, _) =
+                kernel::acis::sweep_profile_geometry(&entity, transform).ok()?;
+            Some((plane, wires))
+        })
+        .collect::<Option<Vec<_>>>()?;
     options.base_point = Some(glam::DVec3::from_array(
         kernel::brep::sweep_profile_group_base(&geometry)?,
     ));
@@ -186,29 +225,45 @@ pub fn sweep_selection_options(profiles: &[EntityType], mut options: SweepOption
 fn reversed_toward_pick(path: &EntityType, pick: glam::DVec3) -> Option<EntityType> {
     let (start, end) = match path {
         EntityType::Polyline3D(value) if !value.is_closed() => {
-            let p = |v: &codec::entities::Vertex3DPolyline| glam::DVec3::new(v.position.x, v.position.y, v.position.z);
+            let p = |v: &codec::entities::Vertex3DPolyline| {
+                glam::DVec3::new(v.position.x, v.position.y, v.position.z)
+            };
             (p(value.vertices.first()?), p(value.vertices.last()?))
         }
         EntityType::Spline(value) if !value.flags.closed => {
-            let points = if value.control_points.is_empty() { &value.fit_points } else { &value.control_points };
+            let points = if value.control_points.is_empty() {
+                &value.fit_points
+            } else {
+                &value.control_points
+            };
             let p = |v: &codec::types::Vector3| glam::DVec3::new(v.x, v.y, v.z);
             (p(points.first()?), p(points.last()?))
         }
         _ => {
             let planar = crate::entities::curve::entity_curve(path)?;
-            if planar.curve.is_closed() { return None; }
-            let at = |t: f64| glam::DVec3::from_array(planar.plane.point_at(planar.curve.point_at(t)));
+            if planar.curve.is_closed() {
+                return None;
+            }
+            let at =
+                |t: f64| glam::DVec3::from_array(planar.plane.point_at(planar.curve.point_at(t)));
             (at(0.0), at(1.0))
         }
     };
     let flat = |p: glam::DVec3| p.truncate().distance(pick.truncate());
-    if flat(end) >= flat(start) { return None; }
+    if flat(end) >= flat(start) {
+        return None;
+    }
     match path {
         // An arc has one direction; reversed it is a one-segment polyline.
         EntityType::Arc(arc) => {
             let mut polyline = codec::LwPolyline::new();
             let sweep = (arc.end_angle - arc.start_angle).rem_euclid(std::f64::consts::TAU);
-            let at = |angle: f64| codec::types::Vector2::new(arc.center.x + arc.radius * angle.cos(), arc.center.y + arc.radius * angle.sin());
+            let at = |angle: f64| {
+                codec::types::Vector2::new(
+                    arc.center.x + arc.radius * angle.cos(),
+                    arc.center.y + arc.radius * angle.sin(),
+                )
+            };
             let mut first = codec::entities::LwVertex::new(at(arc.end_angle));
             first.bulge = -(sweep / 4.0).tan();
             polyline.vertices = vec![first, codec::entities::LwVertex::new(at(arc.start_angle))];
@@ -220,16 +275,31 @@ fn reversed_toward_pick(path: &EntityType, pick: glam::DVec3) -> Option<EntityTy
     }
 }
 
-pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptions) -> Option<SolidHistorySweep> {
+pub fn sweep_record(
+    profile: &EntityType,
+    path: &EntityType,
+    options: SweepOptions,
+) -> Option<SolidHistorySweep> {
     // Placed from the picked end; the record keeps the original path, and
     // the placed frame tells which end the sweep starts from.
-    if let Some(reversed) = options.path_pick.and_then(|pick| reversed_toward_pick(path, pick)) {
-        let mut record = sweep_record(profile, &reversed, SweepOptions { path_pick: None, ..options })?;
+    if let Some(reversed) = options
+        .path_pick
+        .and_then(|pick| reversed_toward_pick(path, pick))
+    {
+        let mut record = sweep_record(
+            profile,
+            &reversed,
+            SweepOptions {
+                path_pick: None,
+                ..options
+            },
+        )?;
         record.path_entity = Some(embedded_sweep_path(path)?);
         return Some(record);
     }
     let (sweep_entity, sweep_entity_transform) = embedded_sweep_profile(profile)?;
-    let (plane, wires, _) = kernel::acis::sweep_profile_geometry(&sweep_entity, sweep_entity_transform).ok()?;
+    let (plane, wires, _) =
+        kernel::acis::sweep_profile_geometry(&sweep_entity, sweep_entity_transform).ok()?;
     let base_point = match options.base_point {
         Some(point) => point.to_array(),
         None => kernel::brep::sweep_profile_base(plane, &wires)?,
@@ -258,7 +328,10 @@ pub fn sweep_record(profile: &EntityType, path: &EntityType, options: SweepOptio
 /// The record the reference reads: the profile stored already placed at the
 /// path start (base point, alignment and profile rotation applied) with flag
 /// 295 set, and no reference point.
-fn placed_sweep_record(profile: &EntityType, mut record: SolidHistorySweep) -> Option<SolidHistorySweep> {
+fn placed_sweep_record(
+    profile: &EntityType,
+    mut record: SolidHistorySweep,
+) -> Option<SolidHistorySweep> {
     let (placed, _) = kernel::acis::sweep_history_placements(&record).ok()?;
     let embedded_to_world = glam::DMat4::from_cols(
         glam::DVec4::new(placed.x_axis[0], placed.x_axis[1], placed.x_axis[2], 0.0),
@@ -267,7 +340,8 @@ fn placed_sweep_record(profile: &EntityType, mut record: SolidHistorySweep) -> O
         glam::DVec4::new(placed.origin[0], placed.origin[1], placed.origin[2], 1.0),
     );
     // Source world geometry -> placed world geometry.
-    let map = embedded_to_world * glam::DMat4::from_cols_array(&record.sweep_entity_transform).inverse();
+    let map =
+        embedded_to_world * glam::DMat4::from_cols_array(&record.sweep_entity_transform).inverse();
     let m = map.to_cols_array_2d();
     let transform = codec::types::Transform::from_matrix(codec::types::Matrix4 {
         m: [
@@ -283,10 +357,15 @@ fn placed_sweep_record(profile: &EntityType, mut record: SolidHistorySweep) -> O
     let (plane, _, _) = kernel::acis::sweep_profile_geometry(
         record.sweep_entity.as_ref()?,
         record.sweep_entity_transform,
-    ).ok()?;
+    )
+    .ok()?;
     let x_axis = glam::DVec3::from_array(plane.x_axis).try_normalize()?;
     let normal = glam::DVec3::from_array(plane.normal()?);
-    let base = glam::DVec3::new(record.reference_point.x, record.reference_point.y, record.reference_point.z);
+    let base = glam::DVec3::new(
+        record.reference_point.x,
+        record.reference_point.y,
+        record.reference_point.z,
+    );
     let source_frame = glam::DMat4::from_cols(
         x_axis.extend(0.0),
         normal.cross(x_axis).extend(0.0),
@@ -294,7 +373,10 @@ fn placed_sweep_record(profile: &EntityType, mut record: SolidHistorySweep) -> O
         base.extend(1.0),
     );
     let mut moved = profile.clone();
-    crate::scene::view::dispatch::apply_transform(&mut moved, &crate::command::EntityTransform::Affine(transform));
+    crate::scene::view::dispatch::apply_transform(
+        &mut moved,
+        &crate::command::EntityTransform::Affine(transform),
+    );
     let (sweep_entity, _) = embedded_sweep_profile(&moved)?;
     record.sweep_entity = Some(sweep_entity);
     record.sweep_entity_transform = source_frame.to_cols_array();
@@ -307,9 +389,18 @@ fn placed_sweep_record(profile: &EntityType, mut record: SolidHistorySweep) -> O
     Some(record)
 }
 
-pub fn swept_with_options(profile: &EntityType, path: &EntityType, mode: ExtrudeMode, options: SweepOptions) -> Option<Body> {
+pub fn swept_with_options(
+    profile: &EntityType,
+    path: &EntityType,
+    mode: ExtrudeMode,
+    options: SweepOptions,
+) -> Option<Body> {
     if spatial_profile(profile).is_some() {
-        return kernel::acis::rebuild_sweep_with_mode(&spatial_sweep_record(profile, path, options).ok()?, true).ok();
+        return kernel::acis::rebuild_sweep_with_mode(
+            &spatial_sweep_record(profile, path, options).ok()?,
+            true,
+        )
+        .ok();
     }
     let record = sweep_record(profile, path, options)?;
     kernel::acis::rebuild_sweep_with_mode(&record, mode == ExtrudeMode::Surface).ok()
@@ -326,7 +417,9 @@ pub fn link_sweep_expressions(
     handle: codec::Handle,
     expressions: &[Option<String>; 2],
 ) {
-    if handle.is_null() || expressions.iter().all(Option::is_none) { return; }
+    if handle.is_null() || expressions.iter().all(Option::is_none) {
+        return;
+    }
     let mut values = Vec::new();
     for (name, expression) in ["ScaleFactor", "TwistAngle"].iter().zip(expressions) {
         if let Some(expression) = expression {
@@ -334,17 +427,30 @@ pub fn link_sweep_expressions(
             values.push(codec::xdata::XDataValue::String(expression.clone()));
         }
     }
-    crate::scene::view::dispatch::set_entity_xdata(document, handle, SWEEP_EXPRESSION_APP, Some(values));
+    crate::scene::view::dispatch::set_entity_xdata(
+        document,
+        handle,
+        SWEEP_EXPRESSION_APP,
+        Some(values),
+    );
 }
 
 /// The scale and twist expressions a swept surface is linked to.
 pub fn sweep_expressions(entity: &EntityType) -> Option<[Option<String>; 2]> {
-    let record = entity.common().extended_data.records().iter()
+    let record = entity
+        .common()
+        .extended_data
+        .records()
+        .iter()
         .find(|record| record.application_name == SWEEP_EXPRESSION_APP)?;
-    let strings = record.values.iter().filter_map(|value| match value {
-        codec::xdata::XDataValue::String(text) => Some(text.clone()),
-        _ => None,
-    }).collect::<Vec<_>>();
+    let strings = record
+        .values
+        .iter()
+        .filter_map(|value| match value {
+            codec::xdata::XDataValue::String(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     let mut result = [None, None];
     for pair in strings.chunks(2) {
         if let [name, expression] = pair {
@@ -360,8 +466,18 @@ pub fn sweep_expressions(entity: &EntityType) -> Option<[Option<String>; 2]> {
 
 /// The sweep record a swept surface was made from.
 pub fn surface_sweep_record(entity: &EntityType) -> Option<SolidHistorySweep> {
-    let EntityType::Surface(surface) = entity else { return None };
-    let SurfaceData::Swept { sweep_entity, path_entity, options, .. } = &surface.surface_data else { return None };
+    let EntityType::Surface(surface) = entity else {
+        return None;
+    };
+    let SurfaceData::Swept {
+        sweep_entity,
+        path_entity,
+        options,
+        ..
+    } = &surface.surface_data
+    else {
+        return None;
+    };
     let mut base = SolidHistoryNodeBase::new(1);
     base.transform = glam::DMat4::IDENTITY.to_cols_array();
     Some(SolidHistorySweep {
@@ -380,7 +496,11 @@ pub fn surface_sweep_record(entity: &EntityType) -> Option<SolidHistorySweep> {
         sweep_entity_transform: options.sweep_entity_transform,
         path_entity_transform: options.path_entity_transform,
         reference_point: options.reference_vector,
-        flags_294_296: [false, options.sweep_entity_transform_computed, options.path_entity_transform_computed],
+        flags_294_296: [
+            false,
+            options.sweep_entity_transform_computed,
+            options.path_entity_transform_computed,
+        ],
         miter_option: 2,
         ..SolidHistorySweep::default()
     })

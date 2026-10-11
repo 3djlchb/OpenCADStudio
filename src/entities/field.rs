@@ -29,7 +29,10 @@ impl FieldContext for OcsFieldContext<'_> {
                 let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs_f64();
                 Some(secs / 86_400.0 + 2_440_587.5 + utc_offset_days())
             };
-            return Some((julian(meta.created().ok()?)?, julian(meta.modified().ok()?)?));
+            return Some((
+                julian(meta.created().ok()?)?,
+                julian(meta.modified().ok()?)?,
+            ));
         }
         #[cfg(target_arch = "wasm32")]
         None
@@ -94,7 +97,8 @@ impl FieldContext for OcsFieldContext<'_> {
 
 /// The sheet sets open in the Sheet Set Manager, for `\AcSm` fields. The
 /// manager replaces the list whenever a set opens, closes or changes.
-static SHEET_SETS: std::sync::RwLock<Vec<codec::sheet_set::SheetSetDatabase>> = std::sync::RwLock::new(Vec::new());
+static SHEET_SETS: std::sync::RwLock<Vec<codec::sheet_set::SheetSetDatabase>> =
+    std::sync::RwLock::new(Vec::new());
 
 pub fn set_sheet_sets(sets: Vec<codec::sheet_set::SheetSetDatabase>) {
     if let Ok(mut guard) = SHEET_SETS.write() {
@@ -126,7 +130,11 @@ pub fn update_fields(
     event: i32,
     hosts: Option<&[Handle]>,
 ) -> (Vec<Handle>, usize) {
-    let event = if event == 32 { event } else { event & fieldeval(document) };
+    let event = if event == 32 {
+        event
+    } else {
+        event & fieldeval(document)
+    };
     if event == 0 || document.fields.is_empty() {
         return (Vec::new(), 0);
     }
@@ -168,17 +176,55 @@ pub fn evaluate(
     objects: &[Handle],
     host: Option<Handle>,
 ) -> Option<String> {
-    codec::fields::evaluate_code(document, code, objects, host, &OcsFieldContext(Some(document)))
+    codec::fields::evaluate_code(
+        document,
+        code,
+        objects,
+        host,
+        &OcsFieldContext(Some(document)),
+    )
 }
 
 /// The system variables the Field dialog lists, in its order (lower case).
 pub const SYSVARS: &[&str] = &[
-    "aunits", "auprec", "celtscale", "chamfera", "chamferb", "chamferc", "chamferd",
-    "clayer", "dimscale", "dimtxt", "dwgname", "dwgprefix", "elevation", "filletrad",
-    "insbase", "insunits", "limmax", "limmin", "ltscale", "lunits", "luprec",
-    "measurement", "mirrtext", "pdmode", "pdsize", "textsize", "textstyle", "thickness",
-    "useri1", "useri2", "useri3", "useri4", "useri5", "userr1", "userr2", "userr3",
-    "userr4", "userr5",
+    "aunits",
+    "auprec",
+    "celtscale",
+    "chamfera",
+    "chamferb",
+    "chamferc",
+    "chamferd",
+    "clayer",
+    "dimscale",
+    "dimtxt",
+    "dwgname",
+    "dwgprefix",
+    "elevation",
+    "filletrad",
+    "insbase",
+    "insunits",
+    "limmax",
+    "limmin",
+    "ltscale",
+    "lunits",
+    "luprec",
+    "measurement",
+    "mirrtext",
+    "pdmode",
+    "pdsize",
+    "textsize",
+    "textstyle",
+    "thickness",
+    "useri1",
+    "useri2",
+    "useri3",
+    "useri4",
+    "useri5",
+    "userr1",
+    "userr2",
+    "userr3",
+    "userr4",
+    "userr5",
 ];
 
 /// Real system variables show six decimals, as the reference shows them
@@ -206,7 +252,13 @@ pub fn sysvar(document: &CadDocument, name: &str) -> Option<String> {
         "clayer" => h.current_layer_name.clone(),
         "dimscale" => num(h.dim_scale),
         "dimtxt" => num(h.dim_text_height),
-        "dwgname" => if file.is_empty() { "Drawing1.dwg".to_string() } else { file.to_string() },
+        "dwgname" => {
+            if file.is_empty() {
+                "Drawing1.dwg".to_string()
+            } else {
+                file.to_string()
+            }
+        }
         "dwgprefix" => folder.to_string(),
         "elevation" => num(h.elevation),
         "filletrad" => num(h.fillet_radius),
@@ -215,8 +267,16 @@ pub fn sysvar(document: &CadDocument, name: &str) -> Option<String> {
             format!("{},{},{}", num(p.x), num(p.y), num(p.z))
         }
         "insunits" => h.insertion_units.to_string(),
-        "limmax" => format!("{},{}", num(h.model_space_limits_max.x), num(h.model_space_limits_max.y)),
-        "limmin" => format!("{},{}", num(h.model_space_limits_min.x), num(h.model_space_limits_min.y)),
+        "limmax" => format!(
+            "{},{}",
+            num(h.model_space_limits_max.x),
+            num(h.model_space_limits_max.y)
+        ),
+        "limmin" => format!(
+            "{},{}",
+            num(h.model_space_limits_min.x),
+            num(h.model_space_limits_min.y)
+        ),
         "ltscale" => num(h.linetype_scale),
         "lunits" => h.linear_unit_format.to_string(),
         "luprec" => h.linear_unit_precision.to_string(),
@@ -287,7 +347,14 @@ fn os_date_locale() -> codec::fields::DateLocale {
         let info = |kind: u32| -> Option<String> {
             let mut buffer = [0u16; 128];
             // A null locale name is the user's default locale.
-            let len = unsafe { GetLocaleInfoEx(std::ptr::null(), kind, buffer.as_mut_ptr(), buffer.len() as i32) };
+            let len = unsafe {
+                GetLocaleInfoEx(
+                    std::ptr::null(),
+                    kind,
+                    buffer.as_mut_ptr(),
+                    buffer.len() as i32,
+                )
+            };
             (len > 1).then(|| String::from_utf16_lossy(&buffer[..len as usize - 1]))
         };
         let mut locale = codec::fields::DateLocale::default();
@@ -380,8 +447,14 @@ pub fn utc_offset_days() -> f64 {
         use windows_sys::Win32::Storage::FileSystem::FileTimeToLocalFileTime;
         // 100 ns ticks since 1601-01-01.
         let ticks = (epoch_secs() as u64 + 11_644_473_600) * 10_000_000;
-        let utc = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
-        let mut local = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+        let utc = FILETIME {
+            dwLowDateTime: ticks as u32,
+            dwHighDateTime: (ticks >> 32) as u32,
+        };
+        let mut local = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
         if unsafe { FileTimeToLocalFileTime(&utc, &mut local) } != 0 {
             let local = ((local.dwHighDateTime as u64) << 32) | local.dwLowDateTime as u64;
             return (local as i64 - ticks as i64) as f64 / 864_000_000_000.0;
@@ -397,10 +470,14 @@ pub fn utc_offset_days() -> f64 {
 pub fn local_header_dates(document: &mut CadDocument) {
     let h = &mut document.header;
     let offset = utc_offset_days();
-    if h.universal_create_date_julian != 0.0 && h.create_date_julian == h.universal_create_date_julian {
+    if h.universal_create_date_julian != 0.0
+        && h.create_date_julian == h.universal_create_date_julian
+    {
         h.create_date_julian = h.universal_create_date_julian + offset;
     }
-    if h.universal_update_date_julian != 0.0 && h.update_date_julian == h.universal_update_date_julian {
+    if h.universal_update_date_julian != 0.0
+        && h.update_date_julian == h.universal_update_date_julian
+    {
         h.update_date_julian = h.universal_update_date_julian + offset;
     }
 }
@@ -427,7 +504,8 @@ fn display_name() -> Option<String> {
         let mut buffer = [0u16; 256];
         let mut len = buffer.len() as u32;
         if unsafe { GetUserNameExW(NameDisplay, buffer.as_mut_ptr(), &mut len) } && len > 0 {
-            return Some(String::from_utf16_lossy(&buffer[..len as usize])).filter(|n| !n.trim().is_empty());
+            return Some(String::from_utf16_lossy(&buffer[..len as usize]))
+                .filter(|n| !n.trim().is_empty());
         }
         None
     }
@@ -454,7 +532,8 @@ pub fn refresh_sheet_set_fields(document: &mut CadDocument) -> Vec<Handle> {
         .filter(|f| f.evaluator.starts_with("AcSm"))
         .filter(|f| {
             let host = field_host(document, f.handle).unwrap_or(Handle::NULL);
-            codec::fields::resolve_handle(document, f.handle, host, &context).is_none_or(|v| v == "####")
+            codec::fields::resolve_handle(document, f.handle, host, &context)
+                .is_none_or(|v| v == "####")
         })
         .map(|f| (f.handle, f.evaluator.clone()))
         .collect();
@@ -509,19 +588,32 @@ pub fn long_date_time_now() -> String {
 }
 
 /// [`attach_attribute_fields`] with every field code passed through `map`.
-pub fn attach_attribute_fields_mapped(document: &mut CadDocument, insert: Handle, map: &dyn Fn(&str) -> String) -> Vec<Handle> {
+pub fn attach_attribute_fields_mapped(
+    document: &mut CadDocument,
+    insert: Handle,
+    map: &dyn Fn(&str) -> String,
+) -> Vec<Handle> {
     let context = OcsFieldContext(None);
     document.attach_attribute_fields_mapped(insert, &context, map)
 }
 
 /// Whether any attribute definition of `block` hosts a field.
 pub fn block_has_attribute_fields(document: &CadDocument, block: &str) -> bool {
-    let Some(record) = document.block_records.iter().find(|r| r.name.eq_ignore_ascii_case(block)) else {
+    let Some(record) = document
+        .block_records
+        .iter()
+        .find(|r| r.name.eq_ignore_ascii_case(block))
+    else {
         return false;
     };
-    record.entity_handles.iter().filter_map(|h| document.get_entity(*h)).any(|e| {
-        matches!(e, codec::entities::EntityType::AttributeDefinition(_)) && hosts_field(document, e)
-    })
+    record
+        .entity_handles
+        .iter()
+        .filter_map(|h| document.get_entity(*h))
+        .any(|e| {
+            matches!(e, codec::entities::EntityType::AttributeDefinition(_))
+                && hosts_field(document, e)
+        })
 }
 
 /// Give plot-time fields (PlotDate) the plot's time; returns the hosts whose

@@ -363,7 +363,9 @@ impl TryFrom<FloatRepr> for FloatPanel {
     type Error = &'static str;
 
     fn try_from(r: FloatRepr) -> Result<Self, Self::Error> {
-        let id = r.id.or(r.panels.first().copied()).ok_or("floating panel without id")?;
+        let id =
+            r.id.or(r.panels.first().copied())
+                .ok_or("floating panel without id")?;
         Ok(Self {
             docking: r.docking,
             ..Self::new(id, r.x, r.y, r.w, r.h)
@@ -490,7 +492,9 @@ impl DockState {
     /// keeps only its first placement.
     pub fn ensure_settings(&mut self) {
         for id in PanelId::ALL {
-            self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
+            self.panels
+                .entry(id)
+                .or_insert_with(|| DockPanel::for_id(id));
         }
         let mut seen = std::collections::BTreeSet::new();
         for side in [DockSide::Left, DockSide::Right] {
@@ -517,7 +521,11 @@ impl DockState {
     /// Where (if anywhere) a panel is docked: its side and group index.
     pub fn location(&self, id: PanelId) -> Option<(DockSide, usize)> {
         for side in [DockSide::Left, DockSide::Right] {
-            if let Some(i) = self.groups(side).iter().position(|g| g.panels.contains(&id)) {
+            if let Some(i) = self
+                .groups(side)
+                .iter()
+                .position(|g| g.panels.contains(&id))
+            {
                 return Some((side, i));
             }
         }
@@ -583,7 +591,10 @@ impl DockState {
     }
 
     pub fn set_auto_collapse(&mut self, id: PanelId, on: bool) {
-        let entry = self.panels.entry(id).or_insert_with(|| DockPanel::for_id(id));
+        let entry = self
+            .panels
+            .entry(id)
+            .or_insert_with(|| DockPanel::for_id(id));
         entry.auto_collapse = on;
     }
 
@@ -1010,8 +1021,7 @@ pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
             return StripHit::NewGroup(Some(g.group));
         }
         if y < g.icons_bottom() - STRIP_NEW_GROUP_SLOP {
-            let index = (((y - g.icons_top) / STRIP_CELL_H).round().max(0.0) as usize)
-                .min(g.icons);
+            let index = (((y - g.icons_top) / STRIP_CELL_H).round().max(0.0) as usize).min(g.icons);
             return StripHit::Join {
                 group: g.group,
                 index,
@@ -1055,7 +1065,11 @@ pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, 
         .align_y(iced::Center);
     if chrome.title_hovered {
         bar = bar
-            .push(pin_button(id, chrome.auto_collapse, tooltip::Position::Bottom))
+            .push(pin_button(
+                id,
+                chrome.auto_collapse,
+                tooltip::Position::Bottom,
+            ))
             .push(close_button(id, tooltip::Position::Bottom));
     }
     mouse_area(
@@ -1080,7 +1094,11 @@ const TITLE_BUTTON_H: f32 = 20.0;
 
 /// The auto-hide pin. While auto-hide is on the pin is drawn tilted instead
 /// of on a coloured background.
-pub fn pin_button<'a>(id: PanelId, auto_collapse: bool, tip: tooltip::Position) -> Element<'a, Message> {
+pub fn pin_button<'a>(
+    id: PanelId,
+    auto_collapse: bool,
+    tip: tooltip::Position,
+) -> Element<'a, Message> {
     let icon = crate::ui::icons::themed_secondary(
         if auto_collapse {
             crate::ui::icons::PIN_ACTIVE
@@ -1100,10 +1118,13 @@ pub fn pin_button<'a>(id: PanelId, auto_collapse: bool, tip: tooltip::Position) 
 
 /// The close button of a panel's title bar.
 pub fn close_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Message> {
-    let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
-        .on_press(Message::Dock(DockMsg::Close(id)))
-        .style(button::subtle)
-        .padding([3, 5]);
+    let close = button(crate::ui::icons::themed_secondary(
+        crate::ui::icons::CLOSE,
+        12.0,
+    ))
+    .on_press(Message::Dock(DockMsg::Close(id)))
+    .style(button::subtle)
+    .padding([3, 5]);
     tooltip(close, text(crate::t!("Close")).size(10), tip)
         .gap(4)
         .into()
@@ -1155,18 +1176,18 @@ pub fn frame<'a>(
         title_bar,
         container(content).padding(6).height(Length::Fill)
     ])
-        .width(Length::Fixed(width))
-        .height(Length::Fill)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
+    .width(Length::Fixed(width))
+    .height(Length::Fill)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        border: Border {
+            color: theme.palette().background.neutral.color,
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    })
+    .into()
 }
 
 #[cfg(test)]
@@ -1182,7 +1203,10 @@ mod tests {
         assert_eq!(state.width(PanelId::ExternalReferences, 3000.0), 460.0);
         state.dock(PanelId::ExternalReferences, DockSide::Right, 1);
         state.set_group_width(DockSide::Right, 1, 5000.0);
-        assert_eq!(state.group_width_px(DockSide::Right, 1, 3000.0), DOCK_MAX_W * 2.0);
+        assert_eq!(
+            state.group_width_px(DockSide::Right, 1, 3000.0),
+            DOCK_MAX_W * 2.0
+        );
         // Other panels keep the shared maximum.
         state.set_group_width(DockSide::Right, 0, 5000.0);
         assert_eq!(state.group_width_px(DockSide::Right, 0, 3000.0), DOCK_MAX_W);
@@ -1191,7 +1215,10 @@ mod tests {
     #[test]
     fn default_docks_each_known_panel_on_an_edge() {
         let state = DockState::default();
-        assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
+        assert_eq!(
+            state.location(PanelId::Properties),
+            Some((DockSide::Left, 0))
+        );
         assert_eq!(
             state.location(PanelId::BlockPalette),
             Some((DockSide::Right, 0))
@@ -1241,7 +1268,10 @@ mod tests {
         let mut state = DockState::default();
         state.set_group_width(DockSide::Right, 0, 500.0);
         // Window too narrow -> capped by the 0.45 fraction, not DOCK_MAX_W.
-        assert_eq!(state.group_width_px(DockSide::Right, 0, 800.0), DOCK_MAX_W.min(360.0));
+        assert_eq!(
+            state.group_width_px(DockSide::Right, 0, 800.0),
+            DOCK_MAX_W.min(360.0)
+        );
     }
 
     #[test]
@@ -1274,7 +1304,13 @@ mod tests {
         let mut state = DockState::default();
         state.join_group(PanelId::Browser, DockSide::Left, 0, 1);
         state.dock(PanelId::Count, DockSide::Left, 1);
-        state.float(FloatPanel::new(PanelId::SheetSetManager, 10.0, 20.0, 300.0, 400.0));
+        state.float(FloatPanel::new(
+            PanelId::SheetSetManager,
+            10.0,
+            20.0,
+            300.0,
+            400.0,
+        ));
         let json = serde_json::to_string(&state).unwrap();
         let back: DockState = serde_json::from_str(&json).unwrap();
         assert_eq!(back, state);
@@ -1369,7 +1405,10 @@ mod tests {
     #[test]
     fn shift_split_keeps_combined_share_and_minimum() {
         let mut state = DockState::default();
-        state.left = vec![DockGroup::stack(vec![PanelId::BlockPalette, PanelId::Properties])];
+        state.left = vec![DockGroup::stack(vec![
+            PanelId::BlockPalette,
+            PanelId::Properties,
+        ])];
         state.shift_split(DockSide::Left, 0, 0, 1, 0.5, 0.1);
         assert_eq!(state.left[0].weights, vec![1.5, 0.5]);
         state.shift_split(DockSide::Left, 0, 0, 1, 10.0, 0.1);
@@ -1420,7 +1459,10 @@ mod tests {
         state.right.push(DockGroup::single(PanelId::Properties));
         state.shown = (5, 7);
         state.ensure_settings();
-        assert_eq!(state.location(PanelId::Properties), Some((DockSide::Left, 0)));
+        assert_eq!(
+            state.location(PanelId::Properties),
+            Some((DockSide::Left, 0))
+        );
         assert_eq!(state.right.len(), 1);
         assert_eq!(state.shown, (0, 0));
     }
@@ -1454,7 +1496,10 @@ mod tests {
         // On the divider between the groups: a new group before group 2.
         assert_eq!(strip_hit(g0.bottom(), &layout), StripHit::NewGroup(Some(2)));
         // Below everything: a new last group.
-        assert_eq!(strip_hit(plus_top + 20.0, &layout), StripHit::NewGroup(None));
+        assert_eq!(
+            strip_hit(plus_top + 20.0, &layout),
+            StripHit::NewGroup(None)
+        );
     }
 
     #[test]
@@ -1468,7 +1513,10 @@ mod tests {
         assert!(state.is_placed(PanelId::Properties));
         assert!(state.dock(PanelId::Properties, DockSide::Right, 0));
         assert!(state.floating.is_empty());
-        assert_eq!(state.location(PanelId::Properties), Some((DockSide::Right, 0)));
+        assert_eq!(
+            state.location(PanelId::Properties),
+            Some((DockSide::Right, 0))
+        );
     }
 
     #[test]
@@ -1505,5 +1553,4 @@ mod tests {
             }
         }
     }
-
 }

@@ -9,10 +9,10 @@
 //   two points. The new absolute angle is then typed or picked from the center;
 //   the applied rotation is new-angle - reference-angle.
 
-use codec::Handle;
-use kernel::geom2d::{self, Curve as KernelCurve};
-use glam::DVec3;
 use crate::t;
+use codec::Handle;
+use glam::DVec3;
+use kernel::geom2d::{self, Curve as KernelCurve};
 
 use crate::command::{CadCommand, CmdResult, DynField, EntityTransform, WorkingPlane};
 use crate::modules::draw::defaults;
@@ -37,11 +37,23 @@ pub fn tool() -> ToolDef {
 enum Step {
     Center,
     /// 3DROTATE: the axis through the base point.
-    Axis { center: DVec3 },
-    Angle { center: DVec3 },
-    RefFirst { center: DVec3 },
-    RefSecond { center: DVec3, first: DVec3 },
-    RefNew { center: DVec3, ref_angle: f64 },
+    Axis {
+        center: DVec3,
+    },
+    Angle {
+        center: DVec3,
+    },
+    RefFirst {
+        center: DVec3,
+    },
+    RefSecond {
+        center: DVec3,
+        first: DVec3,
+    },
+    RefNew {
+        center: DVec3,
+        ref_angle: f64,
+    },
 }
 
 pub struct RotateCommand {
@@ -72,7 +84,10 @@ impl RotateCommand {
 
     /// 3DROTATE: any objects, about any axis through a base point.
     pub fn new_3d(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
-        Self { spatial: true, ..Self::new(handles, wire_models) }
+        Self {
+            spatial: true,
+            ..Self::new(handles, wire_models)
+        }
     }
 
     /// Turn about `axis` through `center`: the angle is then read in the plane
@@ -106,11 +121,7 @@ impl RotateCommand {
         )
     }
 
-    fn angle_arc(
-        center: [f64; 2],
-        radius: f64,
-        angle: f64,
-    ) -> Option<(geom2d::Arc, bool)> {
+    fn angle_arc(center: [f64; 2], radius: f64, angle: f64) -> Option<(geom2d::Arc, bool)> {
         let (start, end, reverse) = if angle > 0.0 {
             (0.0, angle, false)
         } else {
@@ -141,11 +152,8 @@ impl RotateCommand {
             return guides;
         }
 
-        let Some((arc, reverse)) = Self::angle_arc(
-            [center_local.x, center_local.y],
-            radius,
-            angle,
-        ) else {
+        let Some((arc, reverse)) = Self::angle_arc([center_local.x, center_local.y], radius, angle)
+        else {
             return guides;
         };
         let mut points = KernelCurve::Arc(arc).tessellate_angle(TAU / 64.0);
@@ -197,7 +205,8 @@ impl CadCommand for RotateCommand {
             )
             .into_owned(),
             Step::Axis { .. } => {
-                t!("3DROTATE  Specify rotation axis [X/Y/Z] or a second point on it <Z>:").into_owned()
+                t!("3DROTATE  Specify rotation axis [X/Y/Z] or a second point on it <Z>:")
+                    .into_owned()
             }
             Step::Angle { .. } if self.spatial => {
                 let a = format!("{:.4}", self.default_angle);
@@ -210,9 +219,7 @@ impl CadCommand for RotateCommand {
             Step::RefFirst { .. } => {
                 t!("ROTATE  Specify first reference point or type reference angle:").into_owned()
             }
-            Step::RefSecond { .. } => {
-                t!("ROTATE  Specify second reference point:").into_owned()
-            }
+            Step::RefSecond { .. } => t!("ROTATE  Specify second reference point:").into_owned(),
             Step::RefNew { ref_angle, .. } => {
                 let a = format!("{:.1}°", ref_angle.to_degrees());
                 t!("ROTATE  Specify new absolute angle  [ref=%{a}]:", a = a).into_owned()
@@ -223,7 +230,9 @@ impl CadCommand for RotateCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
-            Step::Axis { .. } => ["X", "Y", "Z"].map(|axis| CmdOption::new(axis, axis)).to_vec(),
+            Step::Axis { .. } => ["X", "Y", "Z"]
+                .map(|axis| CmdOption::new(axis, axis))
+                .to_vec(),
             Step::Angle { .. } => vec![CmdOption::new(t!("Reference").as_ref(), "R")],
             _ => vec![],
         }
@@ -318,10 +327,7 @@ impl CadCommand for RotateCommand {
             Step::RefFirst { center } => {
                 let center = *center;
                 let ref_angle = crate::entities::common::parse_typed_angle(t)?;
-                self.step = Step::RefNew {
-                    center,
-                    ref_angle,
-                };
+                self.step = Step::RefNew { center, ref_angle };
                 Some(CmdResult::NeedPoint)
             }
             Step::RefNew { center, ref_angle } => {
@@ -372,11 +378,7 @@ impl CadCommand for RotateCommand {
             .wire_models
             .iter()
             .map(|w| {
-                w.rotated_about_axis(
-                    center.as_vec3(),
-                    self.plane.z.as_vec3(),
-                    angle_rad as f32,
-                )
+                w.rotated_about_axis(center.as_vec3(), self.plane.z.as_vec3(), angle_rad as f32)
             })
             .collect();
         let radius = self.plane.vector_to_local(pt - center).truncate().length();
@@ -437,11 +439,7 @@ impl CadCommand for RotateCommand {
         let point = if angle.abs() <= f64::EPSILON {
             [center_local.x + radius, center_local.y]
         } else {
-            let (arc, _) = Self::angle_arc(
-                [center_local.x, center_local.y],
-                radius,
-                angle,
-            )?;
+            let (arc, _) = Self::angle_arc([center_local.x, center_local.y], radius, angle)?;
             KernelCurve::Arc(arc).point_at(0.5)
         };
         Some(

@@ -80,19 +80,19 @@ use crate::command::{CmdResult, SelectionEntity, StepInput};
 use codec::Handle;
 use iced::Task;
 
-mod utilities;
-mod parameters;
-mod tests;
-mod property_match;
-mod entity_commit;
-mod solid3d;
-mod viewport;
-mod transform;
 mod clipboard;
-mod modify;
-mod text_edit;
 mod constraint;
 mod dim_edit;
+mod entity_commit;
+mod modify;
+mod parameters;
+mod property_match;
+mod solid3d;
+mod tests;
+mod text_edit;
+mod transform;
+mod utilities;
+mod viewport;
 
 pub(crate) use clipboard::{
     copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference,
@@ -300,7 +300,11 @@ impl OpenCADStudio {
     /// Reports a refused command-line value and shows the prompt again.
     fn reprompt_active_command(&mut self, i: usize, message: &str) {
         self.command_line.push_error(message);
-        if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|command| command.prompt()) {
+        if let Some(prompt) = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.prompt())
+        {
             self.command_line.push_info(&prompt);
         }
     }
@@ -407,7 +411,6 @@ impl OpenCADStudio {
         handles
     }
 
-
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         if let Some(bind) = self.tabs[i]
@@ -480,7 +483,9 @@ impl OpenCADStudio {
             } => {
                 if !target.is_null() {
                     self.handle_vpclip(target, boundary, boundary_handle);
-                } else if let Some(task) = self.handle_mview_create_clipped(boundary, boundary_handle) {
+                } else if let Some(task) =
+                    self.handle_mview_create_clipped(boundary, boundary_handle)
+                {
                     return task;
                 }
             }
@@ -886,7 +891,11 @@ impl OpenCADStudio {
             result @ CmdResult::AlignSelected { .. } => {
                 self.handle_align_selected(result);
             }
-            CmdResult::LengthenEntity { handle, pick_pt, mode } => {
+            CmdResult::LengthenEntity {
+                handle,
+                pick_pt,
+                mode,
+            } => {
                 if let Some(task) = self.handle_lengthen_entity(handle, pick_pt, mode) {
                     return task;
                 }
@@ -920,7 +929,11 @@ impl OpenCADStudio {
             CmdResult::StretchWindow { handles, windows } => {
                 self.handle_stretch_window(handles, windows);
             }
-            CmdResult::StretchEntities { handles, windows, delta } => {
+            CmdResult::StretchEntities {
+                handles,
+                windows,
+                delta,
+            } => {
                 if let Some(task) = self.handle_stretch_entities(handles, windows, delta) {
                     return task;
                 }
@@ -941,7 +954,11 @@ impl OpenCADStudio {
             result @ CmdResult::PresspullPick { .. } => {
                 self.handle_presspull_pick(result);
             }
-            CmdResult::PresspullApply { targets, distance, color: _ } => {
+            CmdResult::PresspullApply {
+                targets,
+                distance,
+                color: _,
+            } => {
                 self.handle_presspull_apply(targets, distance);
             }
 
@@ -963,15 +980,33 @@ impl OpenCADStudio {
                 }
             }
 
-            result @ CmdResult::SolidEdgeBlend { .. } => return self.handle_solid_edge_blend(result),
+            result @ CmdResult::SolidEdgeBlend { .. } => {
+                return self.handle_solid_edge_blend(result)
+            }
 
-            CmdResult::SolidShell { handle, actions, distance } => return self.handle_solid_shell(handle, actions, distance),
+            CmdResult::SolidShell {
+                handle,
+                actions,
+                distance,
+            } => return self.handle_solid_shell(handle, actions, distance),
 
-            CmdResult::SolidSubtract { bases, cutters, convert_meshes } => return self.handle_solid_subtract(bases, cutters, convert_meshes),
+            CmdResult::SolidSubtract {
+                bases,
+                cutters,
+                convert_meshes,
+            } => return self.handle_solid_subtract(bases, cutters, convert_meshes),
 
-            CmdResult::SliceEntities { targets, plane, keep_point } => return self.handle_slice_entities(targets, plane, keep_point),
+            CmdResult::SliceEntities {
+                targets,
+                plane,
+                keep_point,
+            } => return self.handle_slice_entities(targets, plane, keep_point),
 
-            CmdResult::SliceSurfaceEntities { targets, cutter, keep_point } => return self.handle_slice_surface_entities(targets, cutter, keep_point),
+            CmdResult::SliceSurfaceEntities {
+                targets,
+                cutter,
+                keep_point,
+            } => return self.handle_slice_surface_entities(targets, cutter, keep_point),
 
             result @ CmdResult::HatcheditApply { .. } => {
                 if let Some(task) = self.handle_hatchedit_apply(result) {
@@ -1498,18 +1533,13 @@ impl OpenCADStudio {
     }
     // --- C2a handlers: property_match (thin-router targets, bodies moved verbatim) ---
 
-
     // --- C2a handlers: viewport (thin-router targets, bodies moved verbatim) ---
-
 
     // --- C2a handlers: text_edit (thin-router targets, bodies moved verbatim) ---
 
-
     // --- C2b handlers: entity_commit (thin-router targets, bodies moved verbatim) ---
 
-
     // --- C2b handlers: clipboard (thin-router targets, bodies moved verbatim) ---
-
 
     /// Restore the tangent-snap / ortho state that was in effect before the command started.
     /// Recreate clipboard-dependency records (layer / linetype / text + dim
@@ -1525,12 +1555,9 @@ impl OpenCADStudio {
         clipboard::merge_table_records(&mut self.tabs[i].scene.document, deps);
     }
 
-
     // --- C2d handlers: constraint (thin-router targets, bodies moved verbatim) ---
 
-
     // --- C2d handlers: dim_edit (thin-router targets, bodies moved verbatim) ---
-
 
     pub(super) fn restore_pre_cmd_tangent(&mut self) {
         if let Some(was_on) = self.pre_cmd_tangent.take() {
@@ -1570,23 +1597,28 @@ fn entity_at_typed_point(
         extent = extent
             .max((bounds.max.x - bounds.min.x).abs())
             .max((bounds.max.y - bounds.min.y).abs());
-        let distance = match crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point) {
-            Some(distance) => distance,
-            // A text or an ellipse answers by its extent, the way a click
-            // inside it picks it.
-            None if matches!(
-                entity,
-                codec::EntityType::Text(_)
-                    | codec::EntityType::MText(_)
-                    | codec::EntityType::Ellipse(_)
-            ) =>
-            {
-                let dx = (bounds.min.x - point.x).max(point.x - bounds.max.x).max(0.0);
-                let dy = (bounds.min.y - point.y).max(point.y - bounds.max.y).max(0.0);
-                dx.hypot(dy)
-            }
-            None => continue,
-        };
+        let distance =
+            match crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point) {
+                Some(distance) => distance,
+                // A text or an ellipse answers by its extent, the way a click
+                // inside it picks it.
+                None if matches!(
+                    entity,
+                    codec::EntityType::Text(_)
+                        | codec::EntityType::MText(_)
+                        | codec::EntityType::Ellipse(_)
+                ) =>
+                {
+                    let dx = (bounds.min.x - point.x)
+                        .max(point.x - bounds.max.x)
+                        .max(0.0);
+                    let dy = (bounds.min.y - point.y)
+                        .max(point.y - bounds.max.y)
+                        .max(0.0);
+                    dx.hypot(dy)
+                }
+                None => continue,
+            };
         if nearest.is_none_or(|(best, _)| distance < best) {
             nearest = Some((distance, common.handle));
         }
@@ -1597,9 +1629,7 @@ fn entity_at_typed_point(
         .map(|(_, handle)| handle)
 }
 
-
 // ── DIMSPACE helper ───────────────────────────────────────────────────────────
-
 
 fn apply_mleader_align(
     scene: &mut crate::scene::Scene,
@@ -1693,8 +1723,7 @@ fn apply_mleader_collect(
     }
     let px = point.x;
     let py = point.y;
-    let Some(codec::EntityType::MultiLeader(base)) = scene.document.get_entity(handles[0])
-    else {
+    let Some(codec::EntityType::MultiLeader(base)) = scene.document.get_entity(handles[0]) else {
         return false;
     };
     let base_block = base.block_content_handle;
@@ -1745,5 +1774,3 @@ fn apply_mleader_collect(
     scene.bump_entities(&[(handles[0], crate::scene::ChangeKind::Modified)]);
     true
 }
-
-

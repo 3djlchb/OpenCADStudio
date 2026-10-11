@@ -6,9 +6,9 @@
 //      (start→end) to the document; end becomes the new start point
 //   3. Enter / Escape → ends the command
 
+use crate::t;
 use codec::types::Vector3;
 use codec::{EntityType, Line};
-use crate::t;
 
 use crate::command::{CadCommand, CmdResult, TangentObject};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -106,7 +106,11 @@ impl CadCommand for LineCommand {
             // (A) The FIRST point is tangent to a circle or ellipse: defer it.
             // The tangent point depends on the line's direction, which the next pick gives.
             // Store a provisional point so the rubber band has an origin.
-            (None, _, Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. }))) => {
+            (
+                None,
+                _,
+                Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
+            ) => {
                 self.points.push(pt);
                 self.deferred_tangent = Some((target, pt));
                 Some(CmdResult::NeedPoint)
@@ -148,7 +152,11 @@ impl CadCommand for LineCommand {
             }
             // (D) First point was already placed (ordinary point or previous segment end),
             // and this pick IS tangent to a circle or ellipse:
-            (Some(last), None, Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. }))) => {
+            (
+                Some(last),
+                None,
+                Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
+            ) => {
                 let end = point_target_tangents(last, target)
                     .map(|(t0, t1)| {
                         if (t0 - pt).length_squared() <= (t1 - pt).length_squared() {
@@ -201,10 +209,7 @@ impl CadCommand for LineCommand {
                 // Need at least two points to draw a closing segment back to
                 // the start; then finish the command.
                 if self.points.len() >= 2 {
-                    let close = Self::line_between(
-                        *self.points.last().unwrap(),
-                        self.points[0],
-                    );
+                    let close = Self::line_between(*self.points.last().unwrap(), self.points[0]);
                     Some(CmdResult::CommitAndExit(close))
                 } else {
                     Some(CmdResult::NeedPoint)
@@ -243,7 +248,9 @@ impl CadCommand for LineCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        self.on_preview_wires_with_tangent(pt, None).into_iter().next()
+        self.on_preview_wires_with_tangent(pt, None)
+            .into_iter()
+            .next()
     }
 
     fn on_preview_wires_with_tangent(
@@ -257,16 +264,17 @@ impl CadCommand for LineCommand {
         };
 
         let (start, end) = match (self.deferred_tangent, tangent) {
-            (Some((target1, hit1)), Some(target2 @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. }))) => {
-                common_curve_tangents(target1, target2)
-                    .into_iter()
-                    .min_by(|a, b| {
-                        let da = (a.0 - hit1).length_squared() + (a.1 - pt).length_squared();
-                        let db = (b.0 - hit1).length_squared() + (b.1 - pt).length_squared();
-                        da.total_cmp(&db)
-                    })
-                    .unwrap_or((last, pt))
-            }
+            (
+                Some((target1, hit1)),
+                Some(target2 @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
+            ) => common_curve_tangents(target1, target2)
+                .into_iter()
+                .min_by(|a, b| {
+                    let da = (a.0 - hit1).length_squared() + (a.1 - pt).length_squared();
+                    let db = (b.0 - hit1).length_squared() + (b.1 - pt).length_squared();
+                    da.total_cmp(&db)
+                })
+                .unwrap_or((last, pt)),
             (Some((target1, hit1)), _) => {
                 let start = point_target_tangents(pt, target1)
                     .map(|(t0, t1)| {
@@ -279,7 +287,10 @@ impl CadCommand for LineCommand {
                     .unwrap_or(last);
                 (start, pt)
             }
-            (None, Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. }))) => {
+            (
+                None,
+                Some(target @ (TangentObject::Circle { .. } | TangentObject::Ellipse { .. })),
+            ) => {
                 let end = point_target_tangents(last, target)
                     .map(|(t0, t1)| {
                         if (t0 - pt).length_squared() <= (t1 - pt).length_squared() {
@@ -496,8 +507,14 @@ fn common_curve_tangents(target1: TangentObject, target2: TangentObject) -> Vec<
 #[cfg(test)]
 fn circle_circle_tangents(c1: DVec3, r1: f64, c2: DVec3, r2: f64) -> Vec<(DVec3, DVec3)> {
     common_curve_tangents(
-        TangentObject::Circle { center: c1, radius: r1 },
-        TangentObject::Circle { center: c2, radius: r2 },
+        TangentObject::Circle {
+            center: c1,
+            radius: r1,
+        },
+        TangentObject::Circle {
+            center: c2,
+            radius: r2,
+        },
     )
 }
 
@@ -533,8 +550,14 @@ mod tangent_tests {
             assert!(((*t2 - c2).length() - 1.0).abs() < 1e-9, "t2 off circle 2");
             // The tangent line t1→t2 is perpendicular to each radius.
             let line = *t2 - *t1;
-            assert!(perp_dot(*t1 - c1, line).abs() < 1e-6, "not tangent at c1 end");
-            assert!(perp_dot(*t2 - c2, line).abs() < 1e-6, "not tangent at c2 end");
+            assert!(
+                perp_dot(*t1 - c1, line).abs() < 1e-6,
+                "not tangent at c1 end"
+            );
+            assert!(
+                perp_dot(*t2 - c2, line).abs() < 1e-6,
+                "not tangent at c2 end"
+            );
         }
     }
 
@@ -565,7 +588,10 @@ mod tangent_tests {
             let grad = DVec3::new(t.x / (20.0 * 20.0), t.y / (10.0 * 10.0), 0.0);
             let line_dir = p - t;
             let dot = grad.dot(line_dir);
-            assert!(dot.abs() < 1e-6, "line is not tangent to ellipse: dot={dot}");
+            assert!(
+                dot.abs() < 1e-6,
+                "line is not tangent to ellipse: dot={dot}"
+            );
         }
 
         // A point inside the ellipse has no tangents
@@ -586,7 +612,11 @@ mod tangent_tests {
         };
 
         let tans = common_curve_tangents(e1, c2);
-        assert_eq!(tans.len(), 4, "separated ellipse and circle should have 4 common tangents");
+        assert_eq!(
+            tans.len(),
+            4,
+            "separated ellipse and circle should have 4 common tangents"
+        );
 
         for (t1, t2) in &tans {
             // t1 on ellipse
@@ -602,11 +632,17 @@ mod tangent_tests {
             // Line t1->t2 is tangent to ellipse at t1
             let grad_e = DVec3::new(dx1 / 400.0, dy1 / 100.0, 0.0);
             let line_dir = *t2 - *t1;
-            assert!(grad_e.dot(line_dir).abs() < 1e-4, "line not tangent to ellipse");
+            assert!(
+                grad_e.dot(line_dir).abs() < 1e-4,
+                "line not tangent to ellipse"
+            );
 
             // Line t1->t2 is tangent to circle at t2 (perpendicular to radius)
             let rad_c = *t2 - DVec3::new(30.0, 0.0, 0.0);
-            assert!(rad_c.dot(line_dir).abs() < 1e-4, "line not tangent to circle");
+            assert!(
+                rad_c.dot(line_dir).abs() < 1e-4,
+                "line not tangent to circle"
+            );
         }
     }
 
@@ -626,7 +662,11 @@ mod tangent_tests {
         };
 
         let tans = common_curve_tangents(e1, e2);
-        assert_eq!(tans.len(), 4, "separated two ellipses should have 4 common tangents");
+        assert_eq!(
+            tans.len(),
+            4,
+            "separated two ellipses should have 4 common tangents"
+        );
 
         for (t1, t2) in &tans {
             let dx1 = t1.x - (-35.0);
@@ -641,10 +681,16 @@ mod tangent_tests {
 
             let line_dir = *t2 - *t1;
             let grad1 = DVec3::new(dx1 / 400.0, dy1 / 100.0, 0.0);
-            assert!(grad1.dot(line_dir).abs() < 1e-4, "line not tangent to ellipse 1");
+            assert!(
+                grad1.dot(line_dir).abs() < 1e-4,
+                "line not tangent to ellipse 1"
+            );
 
             let grad2 = DVec3::new(dx2 / 225.0, dy2 / 81.0, 0.0);
-            assert!(grad2.dot(line_dir).abs() < 1e-4, "line not tangent to ellipse 2");
+            assert!(
+                grad2.dot(line_dir).abs() < 1e-4,
+                "line not tangent to ellipse 2"
+            );
         }
     }
 
@@ -682,6 +728,5 @@ mod tangent_tests {
     }
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["LINE"] });  // LineCommand
+inventory::submit!(crate::command::CommandRegistration { names: &["LINE"] }); // LineCommand

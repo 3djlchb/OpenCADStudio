@@ -43,10 +43,17 @@ pub enum XclipAction {
     Delete,
     Polyline,
     /// Boundary in WCS (two points = rectangle corners).
-    New { boundary: Vec<[f64; 2]>, inverted: bool },
+    New {
+        boundary: Vec<[f64; 2]>,
+        inverted: bool,
+    },
     /// Front and back clipping planes: `Some(None)` removes one, `None`
     /// leaves it. `rejected` prints that the front plane was not applied.
-    Depth { front: Option<Option<f64>>, back: Option<Option<f64>>, rejected: bool },
+    Depth {
+        front: Option<Option<f64>>,
+        back: Option<Option<f64>>,
+        rejected: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,7 +72,8 @@ enum Step {
     BackDistance,
 }
 
-const OPTION: &str = "Enter clipping option\n[ON/OFF/Clipdepth/Delete/generate Polyline/New boundary] <New>:";
+const OPTION: &str =
+    "Enter clipping option\n[ON/OFF/Clipdepth/Delete/generate Polyline/New boundary] <New>:";
 const OUTSIDE: &str = "Outside mode - Objects outside boundary will be hidden.";
 const INSIDE: &str = "Inside mode - Objects inside boundary will be hidden.";
 const BOUNDARY: &str = "Specify clipping boundary or select invert option:";
@@ -82,7 +90,8 @@ pub struct XclipCommand {
     front: Option<f64>,
 }
 
-pub const DEPTH_REJECTED: &str = "Error: Front clipping plane behind back clipping plane.  Clipdepth not applied.";
+pub const DEPTH_REJECTED: &str =
+    "Error: Front clipping plane behind back clipping plane.  Clipdepth not applied.";
 
 impl XclipCommand {
     pub fn new() -> Self {
@@ -141,7 +150,14 @@ impl XclipCommand {
         let token = text.trim().to_ascii_uppercase();
         let needs_boundary = matches!(
             token.as_str(),
-            "ON" | "OFF" | "D" | "DELETE" | "P" | "POLYLINE" | "GENERATE POLYLINE" | "C" | "CLIPDEPTH"
+            "ON" | "OFF"
+                | "D"
+                | "DELETE"
+                | "P"
+                | "POLYLINE"
+                | "GENERATE POLYLINE"
+                | "C"
+                | "CLIPDEPTH"
         );
         if needs_boundary && !self.clipped {
             return CmdResult::ReportError("No clip boundary found.".to_string());
@@ -235,7 +251,11 @@ impl XclipCommand {
                 back: Some(None),
                 rejected: true,
             }),
-            _ => self.act(XclipAction::Depth { front: Some(self.front), back: Some(Some(d)), rejected: false }),
+            _ => self.act(XclipAction::Depth {
+                front: Some(self.front),
+                back: Some(Some(d)),
+                rejected: false,
+            }),
         }
     }
 
@@ -289,7 +309,10 @@ impl CadCommand for XclipCommand {
             ],
             Step::PolyPoints if !self.points.is_empty() => vec![CmdOption::new("Undo", "U")],
             Step::Front | Step::Back => {
-                vec![CmdOption::new("Distance", "D"), CmdOption::new("Remove", "R")]
+                vec![
+                    CmdOption::new("Distance", "D"),
+                    CmdOption::new("Remove", "R"),
+                ]
             }
             _ => Vec::new(),
         }
@@ -429,7 +452,12 @@ impl CadCommand for XclipCommand {
         };
         let mut points: Vec<[f64; 3]> = ring.iter().map(|p| p.to_array()).collect();
         points.push(points[0]);
-        Some(WireModel::solid_f64("xclip_boundary".into(), points, WireModel::CYAN, false))
+        Some(WireModel::solid_f64(
+            "xclip_boundary".into(),
+            points,
+            WireModel::CYAN,
+            false,
+        ))
     }
 }
 
@@ -461,10 +489,14 @@ impl CadCommand for ClipCommand {
         self.inner.as_ref().map_or_else(Vec::new, |c| c.options())
     }
     fn input_kind(&self) -> InputKind {
-        self.inner.as_ref().map_or(InputKind::Point, |c| c.input_kind())
+        self.inner
+            .as_ref()
+            .map_or(InputKind::Point, |c| c.input_kind())
     }
     fn point_step_accepts_keywords(&self) -> bool {
-        self.inner.as_ref().is_some_and(|c| c.point_step_accepts_keywords())
+        self.inner
+            .as_ref()
+            .is_some_and(|c| c.point_step_accepts_keywords())
     }
     fn needs_entity_pick(&self) -> bool {
         self.inner.as_ref().is_none_or(|c| c.needs_entity_pick())
@@ -505,7 +537,9 @@ impl CadCommand for ClipCommand {
         }
     }
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        self.inner.as_mut().map_or(CmdResult::NeedPoint, |c| c.on_point(pt))
+        self.inner
+            .as_mut()
+            .map_or(CmdResult::NeedPoint, |c| c.on_point(pt))
     }
     fn inject_clipped(&mut self, clipped: &dyn Fn(Handle) -> bool) {
         if let Some(c) = self.inner.as_mut() {
@@ -516,7 +550,9 @@ impl CadCommand for ClipCommand {
         self.inner.as_mut().and_then(|c| c.on_text_input(text))
     }
     fn on_enter(&mut self) -> CmdResult {
-        self.inner.as_mut().map_or(CmdResult::Cancel, |c| c.on_enter())
+        self.inner
+            .as_mut()
+            .map_or(CmdResult::Cancel, |c| c.on_enter())
     }
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         self.inner.as_mut().and_then(|c| c.on_mouse_move(pt))

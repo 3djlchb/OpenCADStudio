@@ -2,7 +2,7 @@
 use super::{Message, OpenCADStudio};
 use crate::command::{InputKind, StepInput};
 use iced::Task;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{collections::VecDeque, sync::OnceLock};
 #[cfg(not(target_arch = "wasm32"))]
 mod transport;
@@ -679,7 +679,10 @@ impl OpenCADStudio {
                 );
             }
             if self.tabs[self.active_tab].id != id
-                && !matches!(op, "activate" | "switch_document" | "close" | "entities_copy_to")
+                && !matches!(
+                    op,
+                    "activate" | "switch_document" | "close" | "entities_copy_to"
+                )
             {
                 return (
                     failure(
@@ -689,19 +692,14 @@ impl OpenCADStudio {
                     Task::none(),
                 );
             }
-            // Interactive requests operate on the active tab by definition, so
-            // a client may omit document_id (the GUI-hosted REST channel does).
-            } else if !query
-                && !matches!(
-                    op,
-                    "new" | "open" | "stop" | "user_select" | "getpoint"
-                )
-            {
-                return (
-                    failure("document_required", "Read state and supply document_id"),
-                    Task::none(),
-                );
-            }
+        // Interactive requests operate on the active tab by definition, so
+        // a client may omit document_id (the GUI-hosted REST channel does).
+        } else if !query && !matches!(op, "new" | "open" | "stop" | "user_select" | "getpoint") {
+            return (
+                failure("document_required", "Read state and supply document_id"),
+                Task::none(),
+            );
+        }
         let tab = &self.tabs[self.active_tab];
         if req["revision"]
             .as_u64()
@@ -739,7 +737,9 @@ impl OpenCADStudio {
                     });
                     let i = self.active_tab;
                     match self.snap_query(i, world, from) {
-                        Some(hit) => json!({"ok":true,"snap":format!("{:?}", hit.snap_type),"world":[hit.world.x,hit.world.y,hit.world.z]}),
+                        Some(hit) => {
+                            json!({"ok":true,"snap":format!("{:?}", hit.snap_type),"world":[hit.world.x,hit.world.y,hit.world.z]})
+                        }
                         None => json!({"ok":true,"snap":null}),
                     }
                 }
@@ -758,7 +758,10 @@ impl OpenCADStudio {
         let client = req["client_id"].as_str().unwrap_or("default").to_owned();
         if tab.active_cmd.is_some()
             && (self.control.owner.as_ref() != Some(&(tab.id, client.clone()))
-                || matches!(op, "run" | "start" | "new" | "open" | "activate" | "switch_document"))
+                || matches!(
+                    op,
+                    "run" | "start" | "new" | "open" | "activate" | "switch_document"
+                ))
             && op != "cancel"
         {
             return (
@@ -1030,11 +1033,8 @@ impl OpenCADStudio {
                     Some(&path),
                 )
                 .map_err(|error| failure("invalid_target", error))?;
-                let dropped = crate::io::dropped_on_save_count(
-                    &self.tabs[i].scene.document,
-                    version,
-                    is_dxf,
-                );
+                let dropped =
+                    crate::io::dropped_on_save_count(&self.tabs[i].scene.document, version, is_dxf);
                 if dropped > 0 && req["allow_lossy"].as_bool() != Some(true) {
                     return Err(failure(
                         "lossy_conversion_not_acknowledged",
@@ -1104,7 +1104,9 @@ impl OpenCADStudio {
                         .map(codec::Handle::new)
                         .collect();
                     if !hex_handles.is_empty() {
-                        self.tabs[self.active_tab].scene.zoom_to_entities(&hex_handles);
+                        self.tabs[self.active_tab]
+                            .scene
+                            .zoom_to_entities(&hex_handles);
                     }
                 } else if let Some(bounds) = req.get("bounds").and_then(Value::as_array) {
                     if bounds.len() >= 4 {
@@ -1298,7 +1300,8 @@ impl OpenCADStudio {
             let Some(entity) = tab.scene.document.get_entity(handle) else {
                 continue;
             };
-            let (min, max) = crate::scene::convert::tess::entity_bounds_in(&tab.scene.document, entity);
+            let (min, max) =
+                crate::scene::convert::tess::entity_bounds_in(&tab.scene.document, entity);
             let metrics = tab
                 .scene
                 .meshes
@@ -1362,9 +1365,22 @@ impl OpenCADStudio {
                     .ok_or("Renderer returned malformed image data")?;
             let mut actual_scope = "window";
 
-            let (vp_w, vp_h) = self.tabs[self.active_tab].scene.selection.borrow().view.vp_size;
-            let mut vp_logical_width = if vp_w > 0.0 { vp_w } else { image.width() as f32 / s.scale_factor };
-            let mut vp_logical_height = if vp_h > 0.0 { vp_h } else { image.height() as f32 / s.scale_factor };
+            let (vp_w, vp_h) = self.tabs[self.active_tab]
+                .scene
+                .selection
+                .borrow()
+                .view
+                .vp_size;
+            let mut vp_logical_width = if vp_w > 0.0 {
+                vp_w
+            } else {
+                image.width() as f32 / s.scale_factor
+            };
+            let mut vp_logical_height = if vp_h > 0.0 {
+                vp_h
+            } else {
+                image.height() as f32 / s.scale_factor
+            };
 
             if requested_scope == "viewport" {
                 if let Some(bounds) = crate::ui::wrap_bar::dropdown_bounds(
@@ -1444,7 +1460,11 @@ impl OpenCADStudio {
                 .map_err(|e| e.to_string())?;
 
             let doc_unit = crate::app::properties::insunits_name(
-                self.tabs[self.active_tab].scene.document.header.insertion_units,
+                self.tabs[self.active_tab]
+                    .scene
+                    .document
+                    .header
+                    .insertion_units,
             );
 
             let spatial_obj = json!({
@@ -1488,8 +1508,8 @@ impl OpenCADStudio {
         }
     }
 }
-pub(crate) mod vision;
 mod actions;
+pub(crate) mod vision;
 pub(crate) use actions::property_json;
 mod entities;
 pub(crate) use entities::erase_block_definition;
@@ -1498,8 +1518,8 @@ pub(crate) mod http_bridge;
 mod interactive;
 mod sheets;
 pub(crate) use sheets::new_guid_v4;
-pub(crate) mod text_ops;
 pub(crate) mod spellcheck;
+pub(crate) mod text_ops;
 
 #[cfg(test)]
 mod p1_tests;
@@ -1537,12 +1557,10 @@ mod tests {
         );
         let started = request(&mut app, json!({"op":"start","cmd":"LINE"}));
         assert_eq!(started["status"], "waiting_input");
-        assert!(
-            started["state"]["command"]["accepts"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("point"))
-        );
+        assert!(started["state"]["command"]["accepts"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("point")));
         assert_eq!(
             started["state"]["command"]["input_example"]["kind"],
             "point"
@@ -1567,12 +1585,10 @@ mod tests {
         );
         assert_eq!(app.automation_op(r#"{"op":"entities"}"#)["total"], 1);
         request(&mut app, json!({"op":"select","type":"LINE"}));
-        assert!(
-            !app.control_properties()["sections"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert!(!app.control_properties()["sections"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         let changed = request(&mut app, json!({"op":"property","field":"color","value":1}));
         assert_eq!(changed["ok"], true, "{changed}");
         assert_eq!(
@@ -1907,8 +1923,11 @@ mod tests {
         assert_eq!(ole_count(&app), 1);
 
         // The entity must be queryable like any other and undoable as one step.
-        let queried =
-            app.automation_op(json!({"op":"entities","type":"OLE2FRAME"}).to_string().as_str());
+        let queried = app.automation_op(
+            json!({"op":"entities","type":"OLE2FRAME"})
+                .to_string()
+                .as_str(),
+        );
         assert_eq!(queried["total"], 1, "{queried}");
         request(&mut app, json!({"op":"undo"}));
         assert_eq!(ole_count(&app), 0);
@@ -1969,7 +1988,10 @@ mod tests {
     fn user_select_stays_running_until_the_user_confirms_then_returns_entities() {
         let mut app = OpenCADStudio::new_for_test();
         app.main_window = Some(iced::window::Id::unique());
-        assert_eq!(request(&mut app, json!({"op":"new"}))["status"], "completed");
+        assert_eq!(
+            request(&mut app, json!({"op":"new"}))["status"],
+            "completed"
+        );
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,10"}));
         let asked = request(
             &mut app,
@@ -2144,7 +2166,7 @@ mod tests {
             let tab = &mut app.tabs[i];
             tab.scene.selection.borrow_mut().view.vp_size = (1920.0, 1080.0);
             tab.scene.sync_tiles_from_panes(1920.0, 1080.0);
-            tab.scene.fit_all();   // bring the line into the pane so snaps can hit
+            tab.scene.fit_all(); // bring the line into the pane so snaps can hit
         }
         // Park a client pick: with no command running, a cursor move must
         // still run the object-snap engine so the marker shows and the
@@ -2174,8 +2196,7 @@ mod tests {
             )
         };
         let _ = app.update(Message::ViewportMove(iced::Point::new(
-            sx as f32,
-            sy as f32,
+            sx as f32, sy as f32,
         )));
 
         assert!(
@@ -2232,8 +2253,7 @@ mod tests {
             )
         };
         let _ = app.update(Message::ViewportMove(iced::Point::new(
-            sx as f32,
-            sy as f32,
+            sx as f32, sy as f32,
         )));
         assert!(
             app.tabs[i].snap_result.is_some(),
@@ -2248,7 +2268,9 @@ mod tests {
             .unwrap()
             .to_owned();
         let value = u64::from_str_radix(&handle, 16).unwrap();
-        app.tabs[i].scene.select_entity(codec::Handle::new(value), false);
+        app.tabs[i]
+            .scene
+            .select_entity(codec::Handle::new(value), false);
         let _ = app.update(Message::CommandFinalize);
         let done = user_select_result(&mut app, "us-snap");
         assert_eq!(done["status"], "completed", "{done}");
@@ -2290,7 +2312,9 @@ mod tests {
             json!({"op":"entities_create","entities":[{"type":"Circle","center":[0,0],"radius":2}]}),
         );
         let circle_handle = circle["result"]["handles"][0].as_str().unwrap().to_owned();
-        app.automation_op(&format!(r#"{{"op":"select","handles":["{circle_handle}"]}}"#));
+        app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{circle_handle}"]}}"#
+        ));
         let read = request(&mut app, json!({"op":"get_selection"}));
         assert_eq!(read["result"]["count"], 1);
         assert_eq!(read["result"]["entities"][0]["block"], Value::Null);
@@ -2330,7 +2354,8 @@ mod tests {
         // The plotted PDF carries two distinct pen widths — the per-layer
         // 0.13 mm / 0.50 mm hierarchy survives the plot style (thin clamps to
         // the 1 px floor, so the ratio is the clamped-pixel ratio 1.889).
-        let text = crate::io::pdf_export::pdf_stream_text(&std::fs::read(&pdf).expect("pdf written"));
+        let text =
+            crate::io::pdf_export::pdf_stream_text(&std::fs::read(&pdf).expect("pdf written"));
         let tokens: Vec<&str> = text.split_whitespace().collect();
         let mut widths: Vec<f32> = tokens
             .windows(2)
@@ -2345,7 +2370,11 @@ mod tests {
         widths.sort_by(|a, b| a.partial_cmp(b).unwrap());
         widths.dedup_by(|a, b| (*a - *b).abs() < 0.01);
         widths.retain(|width| *width > 0.2);
-        assert_eq!(widths.len(), 2, "two layer weights in the plotted PDF: {widths:?}");
+        assert_eq!(
+            widths.len(),
+            2,
+            "two layer weights in the plotted PDF: {widths:?}"
+        );
         assert!(
             (widths[1] / widths[0] - 1.889).abs() < 0.15,
             "0.50 mm vs 0.13 mm hierarchy: {widths:?}"
@@ -2391,7 +2420,8 @@ mod tests {
         );
         assert_eq!(response["status"], "completed", "{response}");
 
-        let text = crate::io::pdf_export::pdf_stream_text(&std::fs::read(&pdf).expect("pdf written"));
+        let text =
+            crate::io::pdf_export::pdf_stream_text(&std::fs::read(&pdf).expect("pdf written"));
         // Monochrome maps every index colour (ByLayer cyan frame, explicit
         // red) to black; the true-color line keeps its RGB by definition.
         assert!(
@@ -2413,10 +2443,15 @@ mod tests {
 
         // Without a plot style the same drawing keeps its colours: the cyan
         // frame plots as the dark-blue print remap, the red line stays red.
-        let plain = std::env::temp_dir().join(format!("ocs-plot-aci-plain-{}.pdf", std::process::id()));
-        let response = request(&mut app, json!({"op":"plot","path":plain.to_string_lossy()}));
+        let plain =
+            std::env::temp_dir().join(format!("ocs-plot-aci-plain-{}.pdf", std::process::id()));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","path":plain.to_string_lossy()}),
+        );
         assert_eq!(response["status"], "completed", "{response}");
-        let text = crate::io::pdf_export::pdf_stream_text(&std::fs::read(&plain).expect("pdf written"));
+        let text =
+            crate::io::pdf_export::pdf_stream_text(&std::fs::read(&plain).expect("pdf written"));
         let color_ops: Vec<[f32; 3]> = {
             let tokens: Vec<&str> = text.split_whitespace().collect();
             tokens
@@ -2470,28 +2505,37 @@ mod tests {
         let handle = lines["entities"][0]["handle"].as_str().unwrap().to_string();
 
         // Not one of the six whitelisted actions.
-        let rejected = request(&mut app, json!({
-            "op":"entities_transform",
-            "handles":[handle],
-            "action":"explode"
-        }));
+        let rejected = request(
+            &mut app,
+            json!({
+                "op":"entities_transform",
+                "handles":[handle],
+                "action":"explode"
+            }),
+        );
         assert_eq!(rejected["code"], "invalid_action", "{rejected}");
 
         // Whitespace-only is unknown too — not a panic.
-        let blank = request(&mut app, json!({
-            "op":"entities_transform",
-            "handles":[handle],
-            "action":"   "
-        }));
+        let blank = request(
+            &mut app,
+            json!({
+                "op":"entities_transform",
+                "handles":[handle],
+                "action":"   "
+            }),
+        );
         assert_eq!(blank["code"], "invalid_action", "{blank}");
 
         // A valid action is matched case- and whitespace-insensitively.
-        let moved = request(&mut app, json!({
-            "op":"entities_transform",
-            "handles":[handle],
-            "action":" move ",
-            "vector":[5,0,0]
-        }));
+        let moved = request(
+            &mut app,
+            json!({
+                "op":"entities_transform",
+                "handles":[handle],
+                "action":" move ",
+                "vector":[5,0,0]
+            }),
+        );
         assert_eq!(moved["ok"], true, "{moved}");
     }
 }

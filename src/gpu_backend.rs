@@ -800,7 +800,10 @@ pub fn resolve_gpu(cli_backend: Option<&str>, safe_mode: bool) -> GpuResolution 
     record_active(ActiveGpu {
         backend: d.backend_value.clone(),
         adapter: d.adapter_name.clone(),
-        driver: chosen.as_ref().map(|c| c.driver.clone()).unwrap_or_default(),
+        driver: chosen
+            .as_ref()
+            .map(|c| c.driver.clone())
+            .unwrap_or_default(),
         origin: if d.reason.is_some() && origin == "automatic" {
             "automatic (fallback)".to_string()
         } else {
@@ -996,7 +999,9 @@ fn exercise_adapter(adapter: &iced::wgpu::Adapter) -> Option<ProbeCaps> {
             max_storage: adapter.limits().max_storage_buffers_per_shader_stage,
             software: is_software_adapter(&info),
             legacy: !adapter.get_downlevel_capabilities().is_webgpu_compliant(),
-            driver: format!("{} {}", info.driver, info.driver_info).trim().to_string(),
+            driver: format!("{} {}", info.driver, info.driver_info)
+                .trim()
+                .to_string(),
         });
     }
     None
@@ -1387,10 +1392,17 @@ mod tests {
         unsafe { std::env::set_var(SENTINEL_DIR_ENV, &dir) };
 
         arm_sentinel("dx12");
-        assert_eq!(crashed_backends(), vec!["dx12".to_string()], "a young run blames its backend");
+        assert_eq!(
+            crashed_backends(),
+            vec!["dx12".to_string()],
+            "a young run blames its backend"
+        );
 
         mark_sentinel_survived();
-        assert!(previous_run_crashed(), "the sentinel still records that the run ended badly");
+        assert!(
+            previous_run_crashed(),
+            "the sentinel still records that the run ended badly"
+        );
         assert!(
             crashed_backends().is_empty(),
             "a backend that kept the app alive must not be skipped at the next launch"
@@ -1506,7 +1518,13 @@ mod tests {
         assert_eq!(order, cands(&["gl", "dx12", "vulkan"]));
         // GL probe passed: it wins silently.
         let results = vec![
-            ("dx12".to_string(), Some(ProbeCaps { legacy: true, ..ok_caps("dx12", 8) })),
+            (
+                "dx12".to_string(),
+                Some(ProbeCaps {
+                    legacy: true,
+                    ..ok_caps("dx12", 8)
+                }),
+            ),
             ("gl".to_string(), Some(ok_caps("gl", 8))),
         ];
         let d = decide_backend(None, None, false, &order, &[], &results, None, true);
@@ -1514,7 +1532,13 @@ mod tests {
         assert!(d.reason.is_none());
         // GL probe failed: the working DX12 stays.
         let results = vec![
-            ("dx12".to_string(), Some(ProbeCaps { legacy: true, ..ok_caps("dx12", 8) })),
+            (
+                "dx12".to_string(),
+                Some(ProbeCaps {
+                    legacy: true,
+                    ..ok_caps("dx12", 8)
+                }),
+            ),
             ("gl".to_string(), None),
         ];
         let d = decide_backend(

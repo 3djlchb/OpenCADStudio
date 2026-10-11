@@ -1121,7 +1121,12 @@ impl OpenCADStudio {
         // slide the origin / rotate the axis. Short-circuits pan & snap.
         if let Some(kind) = self.ucs_grip_drag {
             self.drag_ucs_grip(i, kind, p);
-            self.tabs[i].scene.selection.borrow_mut().input.last_move_pos = Some(p);
+            self.tabs[i]
+                .scene
+                .selection
+                .borrow_mut()
+                .input
+                .last_move_pos = Some(p);
             return Task::none();
         }
 
@@ -1174,7 +1179,8 @@ impl OpenCADStudio {
             let dy = p.y - press.y;
             let dist2 = dx * dx + dy * dy;
             let elapsed_ms = sel
-                .input.left_press_time
+                .input
+                .left_press_time
                 .map(|t| Instant::now().duration_since(t).as_millis())
                 .unwrap_or(u128::MAX);
             if !sel.input.left_dragging && elapsed_ms >= POLY_START_DELAY_MS && dist2 > 9.0 {
@@ -1220,7 +1226,11 @@ impl OpenCADStudio {
             }
         }
 
-        let (mid_down, mid_last, vp_size) = (sel.input.middle_down, sel.input.middle_last_pos, sel.view.vp_size);
+        let (mid_down, mid_last, vp_size) = (
+            sel.input.middle_down,
+            sel.input.middle_last_pos,
+            sel.view.vp_size,
+        );
         if mid_down {
             if let Some(last) = mid_last {
                 let (dx, dy) = (p.x - last.x, p.y - last.y);
@@ -1275,7 +1285,12 @@ impl OpenCADStudio {
                         self.tabs[i]
                             .scene
                             .record_nav_perf(crate::scene::NavPerfOp::Rotate, move_started);
-                        self.tabs[i].scene.selection.borrow_mut().input.middle_last_pos = Some(p);
+                        self.tabs[i]
+                            .scene
+                            .selection
+                            .borrow_mut()
+                            .input
+                            .middle_last_pos = Some(p);
                         return Task::none();
                     } else if self.tabs[i].scene.current_layout == "Model" {
                         if sel.orbit.pivot.is_none() {
@@ -1296,7 +1311,12 @@ impl OpenCADStudio {
                         self.tabs[i]
                             .scene
                             .record_nav_perf(crate::scene::NavPerfOp::Rotate, move_started);
-                        self.tabs[i].scene.selection.borrow_mut().input.middle_last_pos = Some(p);
+                        self.tabs[i]
+                            .scene
+                            .selection
+                            .borrow_mut()
+                            .input
+                            .middle_last_pos = Some(p);
                         return Task::none();
                     }
                     // Paper sheet is top-locked. Shift+MMB keeps its existing
@@ -1309,7 +1329,12 @@ impl OpenCADStudio {
                 // Drop `sel` before calling mutable scene methods.
                 drop(sel);
                 self.pan_active_view(i, dx, dy, move_started);
-                self.tabs[i].scene.selection.borrow_mut().input.middle_last_pos = Some(p);
+                self.tabs[i]
+                    .scene
+                    .selection
+                    .borrow_mut()
+                    .input
+                    .middle_last_pos = Some(p);
                 return Task::none();
             }
             sel.input.middle_last_pos = Some(p);
@@ -1402,7 +1427,9 @@ impl OpenCADStudio {
             // Wire entities use the overlay; solid meshes stay visible and move live.
             if self.grip_preview_handles.is_empty() {
                 let preview_handles = self.tabs[i].scene.parametric_connected_handles(
-                    self.tabs[i].current_parametric_scope(), &edited_handles, true,
+                    self.tabs[i].current_parametric_scope(),
+                    &edited_handles,
+                    true,
                 );
                 if self.grip_dirty_before.is_none() {
                     self.grip_dirty_before = Some(self.tabs[i].dirty);
@@ -1433,7 +1460,9 @@ impl OpenCADStudio {
                     .iter()
                     .map(|&handle| (handle, crate::scene::ChangeKind::Modified))
                     .collect();
-                self.tabs[i].scene.bump_entities_after_parametric_solve(&changes);
+                self.tabs[i]
+                    .scene
+                    .bump_entities_after_parametric_solve(&changes);
                 self.grip_preview_handles = preview_handles;
                 // Snapshot the entity's glyph quads once so each move can
                 // slide the already-shaped text rather than re-shaping it
@@ -1442,7 +1471,9 @@ impl OpenCADStudio {
                 // dimension re-tessellates) and a Square insertion grip (so
                 // an MTEXT width handle, a Triangle, still re-tessellates so
                 // the re-wrap is exact).
-                let snap = self.tabs[i].scene.wire_models_for(&self.grip_preview_handles);
+                let snap = self.tabs[i]
+                    .scene
+                    .wire_models_for(&self.grip_preview_handles);
 
                 // Preserve the exact geometry from the instant the grip drag began.
                 // This snapshot is visual/reference-only: do NOT append it to
@@ -1526,36 +1557,35 @@ impl OpenCADStudio {
             // style snaps can never pull the point back onto the old shape.
             // The grip's own starting point is skipped so it does not stick
             // where the drag began.
-            let reference_snap_hit =
-                if !self.grip_reference_wires.is_empty() {
-                    self.snapper
-                        .snap(
-                            raw,
-                            p,
-                            &self.grip_reference_wires,
-                            view_rot,
-                            eye,
-                            bounds,
-                            go,
-                            gr,
-                            None,
-                        )
-                        .filter(|hit| {
-                            matches!(
-                                hit.snap_type,
-                                crate::snap::SnapType::Endpoint
-                                    | crate::snap::SnapType::Midpoint
-                                    | crate::snap::SnapType::Center
-                                    | crate::snap::SnapType::Node
-                                    | crate::snap::SnapType::Quadrant
-                                    | crate::snap::SnapType::Intersection
-                                    | crate::snap::SnapType::Insertion
-                                    | crate::snap::SnapType::ApparentIntersection
-                            ) && hit.world.distance(grip.origin_world) > 1e-9
-                        })
-                } else {
-                    None
-                };
+            let reference_snap_hit = if !self.grip_reference_wires.is_empty() {
+                self.snapper
+                    .snap(
+                        raw,
+                        p,
+                        &self.grip_reference_wires,
+                        view_rot,
+                        eye,
+                        bounds,
+                        go,
+                        gr,
+                        None,
+                    )
+                    .filter(|hit| {
+                        matches!(
+                            hit.snap_type,
+                            crate::snap::SnapType::Endpoint
+                                | crate::snap::SnapType::Midpoint
+                                | crate::snap::SnapType::Center
+                                | crate::snap::SnapType::Node
+                                | crate::snap::SnapType::Quadrant
+                                | crate::snap::SnapType::Intersection
+                                | crate::snap::SnapType::Insertion
+                                | crate::snap::SnapType::ApparentIntersection
+                        ) && hit.world.distance(grip.origin_world) > 1e-9
+                    })
+            } else {
+                None
+            };
 
             // A real object snap on the rest of the drawing wins; otherwise the
             // reference point both shows and places the grip, so the marker is
@@ -1920,16 +1950,21 @@ impl OpenCADStudio {
                 }
             }
             self.solve_grip_constraints(i, &grip);
-            let mesh_changes: Vec<_> = self.grip_preview_handles
+            let mesh_changes: Vec<_> = self
+                .grip_preview_handles
                 .iter()
                 .copied()
                 .filter(|handle| self.tabs[i].scene.meshes.contains_key(handle))
                 .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                 .collect();
             if !mesh_changes.is_empty() {
-                self.tabs[i].scene.bump_entities_after_parametric_solve(&mesh_changes);
+                self.tabs[i]
+                    .scene
+                    .bump_entities_after_parametric_solve(&mesh_changes);
             }
-            self.tabs[i].scene.set_preview_hatches(&self.grip_preview_handles);
+            self.tabs[i]
+                .scene
+                .set_preview_hatches(&self.grip_preview_handles);
             self.tabs[i].dirty = true;
             if let Some(active) = self.tabs[i].active_grip.as_mut() {
                 active.last_world = snapped;
@@ -1955,7 +1990,9 @@ impl OpenCADStudio {
                 self.tabs[i].scene.set_preview_wires(Vec::new());
             } else {
                 // Current deformed geometry.
-                let mut preview = self.tabs[i].scene.grip_wire_models_for(&self.grip_preview_handles);
+                let mut preview = self.tabs[i]
+                    .scene
+                    .grip_wire_models_for(&self.grip_preview_handles);
 
                 // Also show the drag-start geometry as a faint ghost.
                 //
@@ -2050,8 +2087,7 @@ impl OpenCADStudio {
         // `last_cursor_world`); for `user_select` the marker is aiming feedback
         // — the click still selects the entity under the cursor. Inputs mirror
         // the command snap path below; OTRACK/polar/axis locks stay command-only.
-        if self.tabs[i].active_cmd.is_none() && self.client_pick_pending(i)
-        {
+        if self.tabs[i].active_cmd.is_none() && self.client_pick_pending(i) {
             let bounds = iced::Rectangle {
                 x: 0.0,
                 y: 0.0,
@@ -2084,7 +2120,9 @@ impl OpenCADStudio {
             self.snapper.grid_spacing = grid_spacing;
             let all_wires =
                 if let (Some(_), Some(h)) = (&edit_cam, self.tabs[i].scene.active_viewport) {
-                    self.tabs[i].scene.model_wires_for_viewport_arc(h, bounds.height)
+                    self.tabs[i]
+                        .scene
+                        .model_wires_for_viewport_arc(h, bounds.height)
                 } else {
                     self.tabs[i].scene.hit_test_wires()
                 };
@@ -2109,8 +2147,7 @@ impl OpenCADStudio {
                 None,
             );
             self.tabs[i].snap_result = snap_hit;
-            self.tabs[i].last_cursor_world =
-                snap_hit.map(|hit| hit.world).unwrap_or(cursor_world);
+            self.tabs[i].last_cursor_world = snap_hit.map(|hit| hit.world).unwrap_or(cursor_world);
         }
 
         // Rollover highlight: when idle (no active command, no
@@ -2154,14 +2191,14 @@ impl OpenCADStudio {
             // content), so snap / hit-test / preview run exactly like the
             // main model view — no paper projection, tracks pan/zoom/twist.
             let cursor_world = self.cursor_model_point(i, &edit_cam, p, bounds);
-        let (gx, gy, adaptive) = (self.grid_spacing_x, self.grid_spacing_y, self.grid_adaptive);
-        let visible_step = |distance: f32, fov_y: f32| {
-            let (sx, sy) = crate::ui::overlay::compute_grid_steps(
-                gx, gy, distance, fov_y, bounds, adaptive,
-            );
-            sx.max(sy)
-        };
-        let (view_rot, eye, grid_spacing) = match &edit_cam {
+            let (gx, gy, adaptive) = (self.grid_spacing_x, self.grid_spacing_y, self.grid_adaptive);
+            let visible_step = |distance: f32, fov_y: f32| {
+                let (sx, sy) = crate::ui::overlay::compute_grid_steps(
+                    gx, gy, distance, fov_y, bounds, adaptive,
+                );
+                sx.max(sy)
+            };
+            let (view_rot, eye, grid_spacing) = match &edit_cam {
                 Some(cam) => (
                     cam.view_proj_rte(bounds),
                     cam.eye(),
@@ -2314,9 +2351,7 @@ impl OpenCADStudio {
                 && (self
                     .snapper
                     .is_on_3d(crate::snap::SnapType::FacePerpendicular)
-                    || self
-                        .snapper
-                        .is_on_3d(crate::snap::SnapType::NearestFace))
+                    || self.snapper.is_on_3d(crate::snap::SnapType::NearestFace))
             {
                 let face_hit = self.tabs[i].scene.solid_face_snaps(
                     p,
@@ -2438,13 +2473,10 @@ impl OpenCADStudio {
             // acquired reference, and drive the alignment guide off it.
             // (#277)
             if axis_lock.is_none() && self.tabs[i].snap_result.is_none() && otrack_hit.is_none() {
-                if let Some(par) = self.snapper.parallel_snap(
-                    cursor_world,
-                    self.last_point,
-                    view_rot,
-                    eye,
-                    bounds,
-                ) {
+                if let Some(par) =
+                    self.snapper
+                        .parallel_snap(cursor_world, self.last_point, view_rot, eye, bounds)
+                {
                     if let (Some(base), Some((dir, _))) =
                         (self.last_point, self.snapper.parallel_ref)
                     {
@@ -2510,9 +2542,7 @@ impl OpenCADStudio {
                 if self.tabs[i].active_cmd.is_some()
                     && self.tabs[i].active_ucs.is_none()
                     && !uses_command_cursor_plane
-                    && !snap_keeps_elevation(
-                        self.tabs[i].snap_result.map(|s| s.snap_type),
-                    )
+                    && !snap_keeps_elevation(self.tabs[i].snap_result.map(|s| s.snap_type))
                 {
                     pt.z = 0.0;
                 }
@@ -2593,7 +2623,12 @@ impl OpenCADStudio {
                 .active_cmd
                 .as_ref()
                 .and_then(|c| c.window_first_corner());
-            self.tabs[i].scene.selection.borrow_mut().gesture.preview_box = if is_window_corner {
+            self.tabs[i]
+                .scene
+                .selection
+                .borrow_mut()
+                .gesture
+                .preview_box = if is_window_corner {
                 window_first.map(|c1| (proj(c1), p_full, true))
             } else {
                 None
@@ -2886,9 +2921,9 @@ impl OpenCADStudio {
                             plinegen: true,
                             fill_tris: vec![],
                             fill_tris_low: Vec::new(),
-                        
+
                             ..Default::default()
-};
+                        };
                         previews.push(guide);
                     }
                 }
@@ -3058,7 +3093,11 @@ impl OpenCADStudio {
         };
         let (view_rot, eye, px) = {
             let cam = self.tabs[i].scene.camera.borrow();
-            (cam.view_proj_rte(bounds), cam.eye(), cam.project(world, bounds)?)
+            (
+                cam.view_proj_rte(bounds),
+                cam.eye(),
+                cam.project(world, bounds)?,
+            )
         };
         let p = Point::new(px.x, px.y);
         let raw = self.cursor_model_point(i, &None, p, bounds);
@@ -3113,8 +3152,7 @@ impl OpenCADStudio {
         // Object/grid snap, same path as an entity grip or command drag: the
         // dragged UCS point sticks to endpoints/midpoints/grid under the cursor,
         // and the snap marker is published via `snap_result`.
-        let (dgx, dgy, dadaptive) =
-            (self.grid_spacing_x, self.grid_spacing_y, self.grid_adaptive);
+        let (dgx, dgy, dadaptive) = (self.grid_spacing_x, self.grid_spacing_y, self.grid_adaptive);
         let dvisible_step = |distance: f32, fov_y: f32| {
             let (sx, sy) = crate::ui::overlay::compute_grid_steps(
                 dgx, dgy, distance, fov_y, bounds, dadaptive,
@@ -3391,7 +3429,8 @@ impl OpenCADStudio {
             .scene
             .selection
             .borrow_mut()
-            .input.right_click_entered = false;
+            .input
+            .right_click_entered = false;
         // A click in the viewport dismisses any open ribbon dropdown
         // (e.g. the annotation style combo), which has no backdrop of
         // its own to catch outside clicks.
@@ -3451,7 +3490,10 @@ impl OpenCADStudio {
 
         if self.tabs[i].active_cmd.is_none() {
             if let Some((kind, references)) = self.constraint_glyph_under(i, p) {
-                let mut handles: Vec<_> = references.iter().map(|reference| reference.entity).collect();
+                let mut handles: Vec<_> = references
+                    .iter()
+                    .map(|reference| reference.entity)
+                    .collect();
                 handles.sort_unstable_by_key(|handle| handle.value());
                 handles.dedup();
                 self.tabs[i].scene.deselect_all();
@@ -3678,8 +3720,12 @@ impl OpenCADStudio {
                             }
                         };
                         let grabbed = match (edit.axis, edit.plane) {
-                            (Some(axis), _) => cursor_on_projected_axis(p, bounds, view_rot, eye, world, axis),
-                            (_, Some(normal)) => cursor_on_plane(p, bounds, view_rot, eye, world, normal),
+                            (Some(axis), _) => {
+                                cursor_on_projected_axis(p, bounds, view_rot, eye, world, axis)
+                            }
+                            (_, Some(normal)) => {
+                                cursor_on_plane(p, bounds, view_rot, eye, world, normal)
+                            }
                             _ => None,
                         };
                         edit.grab = grabbed.map(|point| point - world);
@@ -3748,7 +3794,9 @@ impl OpenCADStudio {
                 let cam = self.tabs[i].scene.camera.borrow();
                 (cam.view_proj_rte(bounds), cam.eye())
             };
-            let hit = self.tabs[i].scene.solid_click_hit_point(p, view_rot, eye, bounds);
+            let hit = self.tabs[i]
+                .scene
+                .solid_click_hit_point(p, view_rot, eye, bounds);
             if let Some((handle, _)) = hit.filter(|(handle, point)| {
                 crate::scene::model::solid_history::select_operand_at(
                     &self.tabs[i].scene.document,
@@ -3773,7 +3821,13 @@ impl OpenCADStudio {
         // Selection steps and drag-fence picks still wait for the release.
         let picks_on_press = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
             !command.is_selection_gathering() && !command.accepts_drag_selection()
-        }) && self.tabs[i].scene.selection.borrow().gesture.box_anchor.is_none();
+        }) && self.tabs[i]
+            .scene
+            .selection
+            .borrow()
+            .gesture
+            .box_anchor
+            .is_none();
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.input.left_down = true;
         // Stored in full-canvas space (like ViewportMove's cursor and
@@ -3902,7 +3956,13 @@ impl OpenCADStudio {
             .as_ref()
             .map(|c| c.is_selection_gathering())
             .unwrap_or(false);
-        let selection_box_active = self.tabs[i].scene.selection.borrow().gesture.box_anchor.is_some();
+        let selection_box_active = self.tabs[i]
+            .scene
+            .selection
+            .borrow()
+            .gesture
+            .box_anchor
+            .is_some();
         let selection_pick_add = self.pick_add
             || self.tabs[i]
                 .active_cmd
@@ -4080,9 +4140,7 @@ impl OpenCADStudio {
                     && (self
                         .snapper
                         .is_on_3d(crate::snap::SnapType::FacePerpendicular)
-                        || self
-                            .snapper
-                            .is_on_3d(crate::snap::SnapType::NearestFace))
+                        || self.snapper.is_on_3d(crate::snap::SnapType::NearestFace))
                 {
                     let face_hit = self.tabs[i].scene.solid_face_snaps(
                         p,
@@ -4713,7 +4771,8 @@ impl OpenCADStudio {
                         .scene
                         .selection
                         .borrow()
-                        .gesture.poly_points
+                        .gesture
+                        .poly_points
                         .iter()
                         .map(|point| iced::Point {
                             x: point.x - tile_off.x,
@@ -4926,7 +4985,8 @@ properties={:.1}ms picked={}",
                         let sel = self.tabs[i].scene.selection.borrow();
                         // Map lasso points into the active tile.
                         let pts: Vec<iced::Point> = sel
-                            .gesture.poly_points
+                            .gesture
+                            .poly_points
                             .iter()
                             .map(|pp| iced::Point {
                                 x: pp.x - tile_off.x,
@@ -5717,7 +5777,8 @@ properties={:.1}ms picked={}",
         let now = Instant::now();
         let is_double = {
             let sel = self.tabs[i].scene.selection.borrow();
-            sel.input.middle_last_press_time
+            sel.input
+                .middle_last_press_time
                 .map(|t| now.duration_since(t).as_millis() < 300)
                 .unwrap_or(false)
         };
@@ -5746,8 +5807,7 @@ properties={:.1}ms picked={}",
     pub(super) fn on_viewport_scroll(&mut self, delta: mouse::ScrollDelta) -> Task<Message> {
         match scroll_intent(delta) {
             ScrollIntent::Zoom { notches } => {
-                let mut s =
-                    notches * crate::app::settings::zoom_notch_steps(self.zoom_factor);
+                let mut s = notches * crate::app::settings::zoom_notch_steps(self.zoom_factor);
                 if self.zoom_wheel_reversed {
                     s = -s;
                 }
@@ -5874,7 +5934,12 @@ properties={:.1}ms picked={}",
     /// drawing instead of staying frozen at its original pixel. No-op when no
     /// box is in progress. (#234)
     pub(in crate::app) fn reproject_box_anchor(&mut self, i: usize, vw: f32, vh: f32) {
-        let world = self.tabs[i].scene.selection.borrow().gesture.box_anchor_world;
+        let world = self.tabs[i]
+            .scene
+            .selection
+            .borrow()
+            .gesture
+            .box_anchor_world;
         let Some(world) = world else { return };
         let tile_b = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
         let tile_local = iced::Rectangle {
@@ -6051,9 +6116,8 @@ properties={:.1}ms picked={}",
             return Task::none();
         }
         let cursor = self.tabs[i].scene.selection.borrow().input.last_move_pos;
-        self.constraint_glyph_tooltip = cursor.and_then(|point| {
-            self.constraint_glyph_under(i, point).map(|(kind, _)| kind)
-        });
+        self.constraint_glyph_tooltip =
+            cursor.and_then(|point| self.constraint_glyph_under(i, point).map(|(kind, _)| kind));
         let bounds = iced::Rectangle {
             x: 0.0,
             y: 0.0,
@@ -6644,8 +6708,7 @@ properties={:.1}ms picked={}",
                 .find(|(handle, _)| *handle == target.handle)
                 .map(|(_, entity)| entity)?;
             let current = self.tabs[i].scene.document.get_entity(target.handle)?;
-            is_added_polyline_vertex(original, current, target.grip_id)
-                .then_some(target.grip_id)
+            is_added_polyline_vertex(original, current, target.grip_id).then_some(target.grip_id)
         });
         // Keep originals available until every history shape has a valid
         // final display. A rejected rebuild cancels the entire gesture.
@@ -6704,7 +6767,9 @@ properties={:.1}ms picked={}",
                 .into_iter()
                 .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                 .collect();
-            self.tabs[i].scene.bump_entities_after_parametric_solve(&changes);
+            self.tabs[i]
+                .scene
+                .bump_entities_after_parametric_solve(&changes);
         }
         // Placement confirmed — keep the just-added leader.
         self.grip_add_provisional = None;
@@ -6747,7 +6812,9 @@ properties={:.1}ms picked={}",
                 }
                 self.tabs[i].scene.add_entity_clone(moved);
             }
-            self.tabs[i].scene.bump_entities_after_parametric_solve(&restored);
+            self.tabs[i]
+                .scene
+                .bump_entities_after_parametric_solve(&restored);
             self.finish_pending_history(i);
             self.tabs[i].dirty = true;
         }
@@ -6763,7 +6830,6 @@ properties={:.1}ms picked={}",
         self.refresh_properties();
         Task::none()
     }
-
 }
 
 #[cfg(test)]
@@ -6932,7 +6998,10 @@ mod snap_elevation_tests {
     #[test]
     fn only_object_snaps_keep_elevation() {
         assert!(!snap_keeps_elevation(None), "a miss stays on the plane");
-        assert!(!snap_keeps_elevation(Some(SnapType::Grid)), "grid stays planar");
+        assert!(
+            !snap_keeps_elevation(Some(SnapType::Grid)),
+            "grid stays planar"
+        );
         for t in [
             SnapType::Endpoint,
             SnapType::Midpoint,
@@ -6961,8 +7030,14 @@ mod selection_preview_tests {
 
     #[test]
     fn lower_endpoint_drag_previews_connected_tangent_profile_and_keeps_top_fixed() {
-        use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
-        use codec::{entities::{Arc, Line}, types::Vector3, EntityType};
+        use crate::scene::parametric_constraints::{
+            ConstraintKind, ParametricRef, ParametricScope,
+        };
+        use codec::{
+            entities::{Arc, Line},
+            types::Vector3,
+            EntityType,
+        };
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6980,24 +7055,43 @@ mod selection_preview_tests {
             ([-1.0, -1.0], [-1.0, 5.0]),
             ([4.0, 0.0], [0.0, 0.0]),
             ([4.0, -1.0], [-1.0, -1.0]),
-        ].map(|(a, b)| scene.add_entity(EntityType::Line(Line::from_points(
-            Vector3::new(a[0], a[1], 0.0), Vector3::new(b[0], b[1], 0.0),
-        ))));
+        ]
+        .map(|(a, b)| {
+            scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(a[0], a[1], 0.0),
+                Vector3::new(b[0], b[1], 0.0),
+            )))
+        });
         let top = scene.add_entity(EntityType::Arc(Arc::from_coords(
-            -0.5, 5.0, 0.0, 0.5, 0.0, std::f64::consts::PI,
+            -0.5,
+            5.0,
+            0.0,
+            0.5,
+            0.0,
+            std::f64::consts::PI,
         )));
         let right = scene.add_entity(EntityType::Arc(Arc::from_coords(
-            4.0, -0.5, 0.0, 0.5, -std::f64::consts::FRAC_PI_2,
+            4.0,
+            -0.5,
+            0.0,
+            0.5,
+            -std::f64::consts::FRAC_PI_2,
             std::f64::consts::FRAC_PI_2,
         )));
         let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
         for (a, ai, b, bi) in [
-            (outer, 1, top, 0), (top, 1, inner, 1),
-            (outer, 0, upper, 1), (upper, 0, right, 1),
-            (inner, 0, lower, 1), (right, 0, lower, 0),
+            (outer, 1, top, 0),
+            (top, 1, inner, 1),
+            (outer, 0, upper, 1),
+            (upper, 0, right, 1),
+            (inner, 0, lower, 1),
+            (right, 0, lower, 0),
         ] {
-            set.add(ConstraintKind::Coincident,
-                vec![ParametricRef::point(a, ai), ParametricRef::point(b, bi)], None);
+            set.add(
+                ConstraintKind::Coincident,
+                vec![ParametricRef::point(a, ai), ParametricRef::point(b, bi)],
+                None,
+            );
         }
         for (kind, a, b) in [
             (ConstraintKind::Parallel, outer, inner),
@@ -7008,11 +7102,20 @@ mod selection_preview_tests {
             (ConstraintKind::Tangent, lower, right),
             (ConstraintKind::Equal, top, right),
         ] {
-            set.add(kind, vec![ParametricRef::whole(a), ParametricRef::whole(b)], None);
+            set.add(
+                kind,
+                vec![ParametricRef::whole(a), ParametricRef::whole(b)],
+                None,
+            );
         }
-        set.add(ConstraintKind::Horizontal, vec![ParametricRef::whole(lower)], None);
+        set.add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(lower)],
+            None,
+        );
         let handles = if let Ok(path) = std::env::var("OCS_GRIP_TEST_DRAWING") {
-            let result = app.automation_op(&serde_json::json!({"op":"open","path":path}).to_string());
+            let result =
+                app.automation_op(&serde_json::json!({"op":"open","path":path}).to_string());
             assert_eq!(result["ok"], true, "{result}");
             app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             [0x57F, 0x57D, 0x57C, 0x57A, 0x57E, 0x57B].map(Handle::new)
@@ -7020,61 +7123,115 @@ mod selection_preview_tests {
             [outer, inner, upper, lower, top, right]
         };
         let inner = handles[1];
-        let geometry = |app: &OpenCADStudio| handles.map(|handle|
-            app.tabs[i].scene.document.get_entity(handle).unwrap().clone());
+        let geometry = |app: &OpenCADStudio| {
+            handles.map(|handle| {
+                app.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(handle)
+                    .unwrap()
+                    .clone()
+            })
+        };
         let before = geometry(&app);
-        let EntityType::Line(original_line) = &before[1] else { panic!("line") };
+        let EntityType::Line(original_line) = &before[1] else {
+            panic!("line")
+        };
         let lower_endpoint = original_line.start;
         let upper_endpoint = original_line.end;
-        let EntityType::Arc(original_arc) = &before[4] else { panic!("arc") };
+        let EntityType::Arc(original_arc) = &before[4] else {
+            panic!("arc")
+        };
         let radius = original_arc.radius;
         app.tabs[i].scene.selected.insert(inner);
         app.refresh_selected_grips();
         app.tabs[i].active_grip = Some(GripEdit::single(
-            inner, 0, false, glam::DVec3::new(lower_endpoint.x, lower_endpoint.y, 0.0),
+            inner,
+            0,
+            false,
+            glam::DVec3::new(lower_endpoint.x, lower_endpoint.y, 0.0),
         ));
         let check_profile = |app: &OpenCADStudio| {
             let entities = geometry(app);
-            let EntityType::Line(line) = &entities[1] else { panic!("line") };
+            let EntityType::Line(line) = &entities[1] else {
+                panic!("line")
+            };
             assert_eq!(line.end, upper_endpoint, "top endpoint drifted");
-            let EntityType::Arc(arc) = &entities[4] else { panic!("arc") };
-            assert!((arc.end_point() - line.end).length() < 1e-7, "top arc detached");
+            let EntityType::Arc(arc) = &entities[4] else {
+                panic!("arc")
+            };
+            assert!(
+                (arc.end_point() - line.end).length() < 1e-7,
+                "top arc detached"
+            );
             for index in [4, 5] {
-                let EntityType::Arc(arc) = &entities[index] else { panic!("arc") };
+                let EntityType::Arc(arc) = &entities[index] else {
+                    panic!("arc")
+                };
                 assert!((arc.radius - radius).abs() < 1e-7, "parallel gap changed");
             }
             for (line_index, arc_index, marker) in [(0, 4, 0), (1, 4, 1), (2, 5, 1), (3, 5, 0)] {
-                let EntityType::Line(line) = &entities[line_index] else { panic!("line") };
-                let EntityType::Arc(arc) = &entities[arc_index] else { panic!("arc") };
-                let contact = if marker == 0 { arc.start_point() } else { arc.end_point() };
+                let EntityType::Line(line) = &entities[line_index] else {
+                    panic!("line")
+                };
+                let EntityType::Arc(arc) = &entities[arc_index] else {
+                    panic!("arc")
+                };
+                let contact = if marker == 0 {
+                    arc.start_point()
+                } else {
+                    arc.end_point()
+                };
                 let endpoint = if line_index < 2 { line.end } else { line.start };
-                assert!((contact - endpoint).length() < 1e-7, "tangent contact detached");
+                assert!(
+                    (contact - endpoint).length() < 1e-7,
+                    "tangent contact detached"
+                );
                 let direction = line.end - line.start;
-                assert!(direction.dot(&(contact - arc.center)).abs() < 1e-7,
-                    "tangency lost: line={line:?}, arc={arc:?}, error={}", direction.dot(&(contact - arc.center)));
+                assert!(
+                    direction.dot(&(contact - arc.center)).abs() < 1e-7,
+                    "tangency lost: line={line:?}, arc={arc:?}, error={}",
+                    direction.dot(&(contact - arc.center))
+                );
             }
         };
         for offset in [[-0.4, -0.5], [-1.0, -1.0], [-1.0, -1.0], [0.3, 0.4]] {
             let target = [lower_endpoint.x + offset[0], lower_endpoint.y + offset[1]];
-            let cursor = app.tabs[i].scene.camera.borrow().project(
-                glam::DVec3::new(target[0], target[1], 0.0),
-                iced::Rectangle::with_size(iced::Size::new(800.0, 600.0)),
-            ).unwrap();
+            let cursor = app.tabs[i]
+                .scene
+                .camera
+                .borrow()
+                .project(
+                    glam::DVec3::new(target[0], target[1], 0.0),
+                    iced::Rectangle::with_size(iced::Size::new(800.0, 600.0)),
+                )
+                .unwrap();
             let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
             check_profile(&app);
             let EntityType::Line(line) = app.tabs[i].scene.document.get_entity(inner).unwrap()
-                else { panic!("line") };
+            else {
+                panic!("line")
+            };
             assert!((line.start - Vector3::new(target[0], target[1], 0.0)).length() < 1e-5);
             for handle in handles {
-                assert!(app.tabs[i].scene.preview_wires.iter().any(|wire|
-                    wire.name == handle.value().to_string() && wire.color[3] > 0.9),
-                    "connected entity {handle:?} missing from preview");
+                assert!(
+                    app.tabs[i]
+                        .scene
+                        .preview_wires
+                        .iter()
+                        .any(|wire| wire.name == handle.value().to_string() && wire.color[3] > 0.9),
+                    "connected entity {handle:?} missing from preview"
+                );
             }
         }
         let preview = geometry(&app);
         let _ = app.on_viewport_left_release();
         check_profile(&app);
-        assert_eq!(geometry(&app), preview, "release changed the preview solution");
+        assert_eq!(
+            geometry(&app),
+            preview,
+            "release changed the preview solution"
+        );
         app.undo_steps(1);
         assert_eq!(geometry(&app), before);
         app.redo_steps(1);
@@ -7163,7 +7320,9 @@ mod selection_preview_tests {
 
     #[test]
     fn constrained_rectangle_grips_distinguish_perpendicular_corner_and_free_ends() {
-        use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+        use crate::scene::parametric_constraints::{
+            ConstraintKind, ParametricRef, ParametricScope,
+        };
         use codec::{entities::LwPolyline, types::Vector2, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
@@ -7183,14 +7342,44 @@ mod selection_preview_tests {
             Vector2::new(0.0, 2.0),
         ]);
         rectangle.is_closed = true;
-        let handle = app.tabs[i].scene.add_entity(EntityType::LwPolyline(rectangle));
-        let set = app.tabs[i].scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
-        set.add(ConstraintKind::Parallel, vec![ParametricRef::segment(handle, 0), ParametricRef::segment(handle, 2)], None);
-        set.add(ConstraintKind::Parallel, vec![ParametricRef::segment(handle, 1), ParametricRef::segment(handle, 3)], None);
-        set.add(ConstraintKind::Perpendicular, vec![ParametricRef::segment(handle, 3), ParametricRef::segment(handle, 2)], None);
-        set.add(ConstraintKind::Horizontal, vec![ParametricRef::segment(handle, 2)], None);
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(EntityType::LwPolyline(rectangle));
+        let set = app.tabs[i]
+            .scene
+            .parametric_constraint_set_mut(ParametricScope::ModelSpace);
+        set.add(
+            ConstraintKind::Parallel,
+            vec![
+                ParametricRef::segment(handle, 0),
+                ParametricRef::segment(handle, 2),
+            ],
+            None,
+        );
+        set.add(
+            ConstraintKind::Parallel,
+            vec![
+                ParametricRef::segment(handle, 1),
+                ParametricRef::segment(handle, 3),
+            ],
+            None,
+        );
+        set.add(
+            ConstraintKind::Perpendicular,
+            vec![
+                ParametricRef::segment(handle, 3),
+                ParametricRef::segment(handle, 2),
+            ],
+            None,
+        );
+        set.add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::segment(handle, 2)],
+            None,
+        );
         let handle = if let Ok(path) = std::env::var("OCS_GRIP_TEST_DRAWING") {
-            let result = app.automation_op(&serde_json::json!({"op":"open","path":path}).to_string());
+            let result =
+                app.automation_op(&serde_json::json!({"op":"open","path":path}).to_string());
             assert_eq!(result["ok"], true, "{result}");
             app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             Handle::new(0x556)
@@ -7203,54 +7392,100 @@ mod selection_preview_tests {
             else {
                 panic!("expected polyline")
             };
-            polyline.vertices.iter().map(|vertex| vertex.location).collect::<Vec<_>>()
+            polyline
+                .vertices
+                .iter()
+                .map(|vertex| vertex.location)
+                .collect::<Vec<_>>()
         };
         let before = vertices(&app);
         let height = before[3].y - before[0].y;
         let width = before[1].x - before[0].x;
         for grip_id in 0..8 {
-        let vertex = if grip_id < 4 { before[grip_id] }
-            else { (before[grip_id - 4] + before[(grip_id - 3) % 4]) * 0.5 };
-        let origin = glam::DVec3::new(vertex.x, vertex.y, 0.0);
-        app.tabs[i].active_grip = Some(GripEdit::single(handle, grip_id, grip_id >= 4, origin));
-        for offset in [[-1.0, height], [-1.0, 3.0], [-2.0, 6.0], [-2.0, 6.0], [1.0, -4.0]] {
-            let target = origin + glam::DVec3::new(offset[0], offset[1], 0.0);
-            let cursor = app.tabs[i].scene.camera.borrow().project(target,
-                iced::Rectangle::with_size(iced::Size::new(800.0, 600.0))).unwrap();
-            let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
-            let after = vertices(&app);
-            let (left, right, bottom, top) = match grip_id {
-                0 => (target.x, target.x + width, target.y, before[3].y),
-                1 => (before[0].x, target.x, target.y, before[3].y),
-                2 => (before[0].x, target.x, target.y - height, target.y),
-                3 => (target.x, target.x + width, target.y - height, target.y),
-                4 => (before[0].x + offset[0], before[1].x + offset[0], target.y, before[3].y),
-                5 => (before[0].x, target.x, before[0].y + offset[1], before[3].y + offset[1]),
-                6 => (before[0].x + offset[0], before[1].x + offset[0], before[0].y, target.y),
-                7 => (target.x, before[1].x, before[0].y + offset[1], before[3].y + offset[1]),
-                _ => unreachable!(),
+            let vertex = if grip_id < 4 {
+                before[grip_id]
+            } else {
+                (before[grip_id - 4] + before[(grip_id - 3) % 4]) * 0.5
             };
-            let expected = [Vector2::new(left, bottom), Vector2::new(right, bottom),
-                Vector2::new(right, top), Vector2::new(left, top)];
-            for (actual, expected) in after.iter().zip(expected) {
-                assert!((*actual - expected).length_squared() < 1e-10,
+            let origin = glam::DVec3::new(vertex.x, vertex.y, 0.0);
+            app.tabs[i].active_grip = Some(GripEdit::single(handle, grip_id, grip_id >= 4, origin));
+            for offset in [
+                [-1.0, height],
+                [-1.0, 3.0],
+                [-2.0, 6.0],
+                [-2.0, 6.0],
+                [1.0, -4.0],
+            ] {
+                let target = origin + glam::DVec3::new(offset[0], offset[1], 0.0);
+                let cursor = app.tabs[i]
+                    .scene
+                    .camera
+                    .borrow()
+                    .project(
+                        target,
+                        iced::Rectangle::with_size(iced::Size::new(800.0, 600.0)),
+                    )
+                    .unwrap();
+                let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
+                let after = vertices(&app);
+                let (left, right, bottom, top) = match grip_id {
+                    0 => (target.x, target.x + width, target.y, before[3].y),
+                    1 => (before[0].x, target.x, target.y, before[3].y),
+                    2 => (before[0].x, target.x, target.y - height, target.y),
+                    3 => (target.x, target.x + width, target.y - height, target.y),
+                    4 => (
+                        before[0].x + offset[0],
+                        before[1].x + offset[0],
+                        target.y,
+                        before[3].y,
+                    ),
+                    5 => (
+                        before[0].x,
+                        target.x,
+                        before[0].y + offset[1],
+                        before[3].y + offset[1],
+                    ),
+                    6 => (
+                        before[0].x + offset[0],
+                        before[1].x + offset[0],
+                        before[0].y,
+                        target.y,
+                    ),
+                    7 => (
+                        target.x,
+                        before[1].x,
+                        before[0].y + offset[1],
+                        before[3].y + offset[1],
+                    ),
+                    _ => unreachable!(),
+                };
+                let expected = [
+                    Vector2::new(left, bottom),
+                    Vector2::new(right, bottom),
+                    Vector2::new(right, top),
+                    Vector2::new(left, top),
+                ];
+                for (actual, expected) in after.iter().zip(expected) {
+                    assert!((*actual - expected).length_squared() < 1e-10,
                     "grip {grip_id}: rectangle collapsed or drifted: {after:?}, expected {expected:?}");
+                }
             }
-        }
-        let preview = vertices(&app);
-        let _ = app.on_viewport_left_release();
-        assert_eq!(vertices(&app), preview);
-        app.undo_steps(1);
-        assert_eq!(vertices(&app), before);
-        app.redo_steps(1);
-        assert_eq!(vertices(&app), preview);
-        app.undo_steps(1);
+            let preview = vertices(&app);
+            let _ = app.on_viewport_left_release();
+            assert_eq!(vertices(&app), preview);
+            app.undo_steps(1);
+            assert_eq!(vertices(&app), before);
+            app.redo_steps(1);
+            assert_eq!(vertices(&app), preview);
+            app.undo_steps(1);
         }
     }
 
     #[test]
     fn axis_constrained_line_grip_changes_length_and_translates_normal_to_axis() {
-        use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+        use crate::scene::parametric_constraints::{
+            ConstraintKind, ParametricRef, ParametricScope,
+        };
         use codec::{entities::Line, types::Vector3, EntityType};
 
         for vertical in [false, true] {
@@ -7264,20 +7499,50 @@ mod selection_preview_tests {
             app.polar_mode = false;
             app.constraint_solve_mode = true;
             app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
-            let end = if vertical { Vector3::new(0.0, 4.0, 0.0) } else { Vector3::new(4.0, 0.0, 0.0) };
-            let handle = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(Vector3::ZERO, end)));
-            app.tabs[i].scene.parametric_constraint_set_mut(ParametricScope::ModelSpace).add(
-                if vertical { ConstraintKind::Vertical } else { ConstraintKind::Horizontal },
-                vec![ParametricRef::whole(handle)], None);
+            let end = if vertical {
+                Vector3::new(0.0, 4.0, 0.0)
+            } else {
+                Vector3::new(4.0, 0.0, 0.0)
+            };
+            let handle = app.tabs[i]
+                .scene
+                .add_entity(EntityType::Line(Line::from_points(Vector3::ZERO, end)));
+            app.tabs[i]
+                .scene
+                .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+                .add(
+                    if vertical {
+                        ConstraintKind::Vertical
+                    } else {
+                        ConstraintKind::Horizontal
+                    },
+                    vec![ParametricRef::whole(handle)],
+                    None,
+                );
             app.tabs[i].active_grip = Some(GripEdit::single(handle, 0, false, glam::DVec3::ZERO));
-            for target in [glam::DVec3::new(-1.0, 3.0, 0.0), glam::DVec3::new(2.0, -2.0, 0.0)] {
-                let cursor = app.tabs[i].scene.camera.borrow().project(target,
-                    iced::Rectangle::with_size(iced::Size::new(800.0, 600.0))).unwrap();
+            for target in [
+                glam::DVec3::new(-1.0, 3.0, 0.0),
+                glam::DVec3::new(2.0, -2.0, 0.0),
+            ] {
+                let cursor = app.tabs[i]
+                    .scene
+                    .camera
+                    .borrow()
+                    .project(
+                        target,
+                        iced::Rectangle::with_size(iced::Size::new(800.0, 600.0)),
+                    )
+                    .unwrap();
                 let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
                 let EntityType::Line(line) = app.tabs[i].scene.document.get_entity(handle).unwrap()
-                    else { panic!("line") };
-                let opposite = if vertical { Vector3::new(target.x, end.y, 0.0) }
-                    else { Vector3::new(end.x, target.y, 0.0) };
+                else {
+                    panic!("line")
+                };
+                let opposite = if vertical {
+                    Vector3::new(target.x, end.y, 0.0)
+                } else {
+                    Vector3::new(end.x, target.y, 0.0)
+                };
                 assert!((line.start - Vector3::new(target.x, target.y, 0.0)).length() < 1e-5);
                 assert!((line.end - opposite).length() < 1e-5, "{line:?}");
             }
@@ -7293,7 +7558,11 @@ mod selection_preview_tests {
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
         let cursor = |app: &OpenCADStudio, x: f64, y: f64| {
-            let at = app.tabs[i].scene.camera.borrow().project(glam::DVec3::new(x, y, 0.0), bounds);
+            let at = app.tabs[i]
+                .scene
+                .camera
+                .borrow()
+                .project(glam::DVec3::new(x, y, 0.0), bounds);
             let at = at.unwrap();
             iced::Point::new(at.x, at.y)
         };
@@ -7316,10 +7585,20 @@ mod selection_preview_tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(lines.len(), 1, "one point per click, not one per press and release");
+        assert_eq!(
+            lines.len(),
+            1,
+            "one point per click, not one per press and release"
+        );
         let line = &lines[0];
-        assert!((line.start.x - 40.0).abs() < 0.5 && (line.start.y - 30.0).abs() < 0.5, "{line:?}");
-        assert!((line.end.x - 80.0).abs() < 0.5 && (line.end.y - 30.0).abs() < 0.5, "{line:?}");
+        assert!(
+            (line.start.x - 40.0).abs() < 0.5 && (line.start.y - 30.0).abs() < 0.5,
+            "{line:?}"
+        );
+        assert!(
+            (line.end.x - 80.0).abs() < 0.5 && (line.end.y - 30.0).abs() < 0.5,
+            "{line:?}"
+        );
     }
 
     #[test]
@@ -7331,19 +7610,24 @@ mod selection_preview_tests {
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         // Base away from the model origin so the UCS icon cannot swallow
         // the press (it sits at the origin in a fresh drawing).
-        let handle = app.tabs[i].scene.add_entity(EntityType::XLine(
-            codec::entities::XLine::new(
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(EntityType::XLine(codec::entities::XLine::new(
                 Vector3::new(100.0, 50.0, 0.0),
                 Vector3::new(0.0, 1.0, 0.0),
-            ),
-        ));
+            )));
         app.tabs[i].scene.selected.insert(handle);
         app.refresh_selected_grips();
         assert_eq!(app.tabs[i].selected_grips.len(), 2);
         // Press on grip 1 (direction handle) and drag it to point along +X.
         let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
         let g1world = app.tabs[i].selected_grips[1].world;
-        let g1cursor = app.tabs[i].scene.camera.borrow().project(g1world, bounds).unwrap();
+        let g1cursor = app.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .project(g1world, bounds)
+            .unwrap();
         app.tabs[i].scene.selection.borrow_mut().input.last_move_pos =
             Some(iced::Point::new(g1cursor.x, g1cursor.y));
         let _ = app.on_viewport_left_press();
@@ -7353,10 +7637,17 @@ mod selection_preview_tests {
             "press on the direction grip must engage grip 1"
         );
         let dir_target = glam::DVec3::new(200.0, 50.0, 0.0);
-        let dir_cursor = app.tabs[i].scene.camera.borrow().project(dir_target, bounds).unwrap();
+        let dir_cursor = app.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .project(dir_target, bounds)
+            .unwrap();
         let _ = app.on_viewport_move(iced::Point::new(dir_cursor.x, dir_cursor.y));
         let EntityType::XLine(moved) = app.tabs[i].scene.document.get_entity(handle).unwrap()
-        else { panic!("expected xline") };
+        else {
+            panic!("expected xline")
+        };
         assert!(
             (moved.direction.x - 1.0).abs() < 1e-6 && moved.direction.y.abs() < 1e-6,
             "direction grip drag must point the xline along +X, got {:?}",
@@ -7366,17 +7657,21 @@ mod selection_preview_tests {
 
     #[test]
     fn constraint_glyph_tooltip_appears_after_hover_dwell() {
-        use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+        use crate::scene::parametric_constraints::{
+            ConstraintKind, ParametricRef, ParametricScope,
+        };
         use codec::{entities::Line, types::Vector3, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
-        let handle = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
-            Vector3::new(-1.0, 0.0, 0.0),
-            Vector3::new(1.0, 0.0, 0.0),
-        )));
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            )));
         app.constraint_bar_display = 3;
         let _ = app.apply_cmd_result(crate::command::CmdResult::AddParametricConstraint {
             kind: ConstraintKind::Horizontal,
@@ -7390,22 +7685,29 @@ mod selection_preview_tests {
             true,
             3,
             4095,
-        )[0].1;
-        let point = (-30..=30).find_map(|y| {
-            (-30..=30).find_map(|x| {
-                let point = Point::new(anchor.x + x as f32, anchor.y + y as f32);
-                app.constraint_glyph_under(i, point).is_some().then_some(point)
+        )[0]
+        .1;
+        let point = (-30..=30)
+            .find_map(|y| {
+                (-30..=30).find_map(|x| {
+                    let point = Point::new(anchor.x + x as f32, anchor.y + y as f32);
+                    app.constraint_glyph_under(i, point)
+                        .is_some()
+                        .then_some(point)
+                })
             })
-        }).expect("projected constraint glyph should be hit-testable");
+            .expect("projected constraint glyph should be hit-testable");
 
         let _ = app.on_viewport_move(point);
         assert_eq!(app.constraint_glyph_tooltip, None);
-        app.hover_dwell.as_mut().unwrap().last_move_at =
-            Instant::now()
-                - std::time::Duration::from_millis(crate::app::HOVER_DWELL_MS as u64 + 1);
+        app.hover_dwell.as_mut().unwrap().last_move_at = Instant::now()
+            - std::time::Duration::from_millis(crate::app::HOVER_DWELL_MS as u64 + 1);
         let _ = app.on_hover_dwell_tick();
 
-        assert_eq!(app.constraint_glyph_tooltip, Some(ConstraintKind::Horizontal));
+        assert_eq!(
+            app.constraint_glyph_tooltip,
+            Some(ConstraintKind::Horizontal)
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -7432,7 +7734,8 @@ mod selection_preview_tests {
             let handle = app.tabs[i].scene.add_entity(EntityType::Line(line));
             app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             let _ = app.run_command_line("ZOOM EXTENTS");
-            app.tabs[i].scene.selection.borrow_mut().input.last_move_pos = Some(Point::new(400.0, 300.0));
+            app.tabs[i].scene.selection.borrow_mut().input.last_move_pos =
+                Some(Point::new(400.0, 300.0));
             app.ctrl_down = mode != "plain";
             match mode {
                 "pan" => app.tabs[i].pan_mode = true,
@@ -7458,7 +7761,10 @@ mod selection_preview_tests {
                 let selection = app.tabs[i].scene.selection.borrow();
                 assert!(!selection.input.left_down && selection.gesture.box_anchor.is_none());
             } else if matches!(mode, "pan" | "orbit" | "zoom") {
-                assert!(app.tabs[i].scene.selection.borrow().input.middle_down, "{mode}");
+                assert!(
+                    app.tabs[i].scene.selection.borrow().input.middle_down,
+                    "{mode}"
+                );
             }
         }
     }
@@ -7510,8 +7816,8 @@ mod selection_preview_tests {
     /// point all carry the snapped Z instead of dropping to the XY plane.
     #[test]
     fn line_snap_to_3d_endpoint_keeps_elevation() {
-        use codec::{entities::Line, types::Vector3, EntityType};
         use crate::snap::SnapType;
+        use codec::{entities::Line, types::Vector3, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -7523,10 +7829,12 @@ mod selection_preview_tests {
         app.ortho_mode = false;
         app.polar_mode = false;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
-        app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 25.0),
-        )));
+        app.tabs[i]
+            .scene
+            .add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(10.0, 0.0, 25.0),
+            )));
         let _ = app.run_command_line("ZOOM EXTENTS");
         let _ = app.run_command_line("LINE");
         assert!(app.tabs[i].active_cmd.is_some(), "LINE did not start");
@@ -7563,8 +7871,8 @@ mod selection_preview_tests {
     /// separate 3D master toggle — the 2D Node mode must not catch them.
     #[test]
     fn line_snaps_to_box_corner() {
-        use codec::{entities::Solid3D, EntityType};
         use crate::snap::SnapType;
+        use codec::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -7580,9 +7888,8 @@ mod selection_preview_tests {
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         // In-app BOX equivalent: kernel box committed as a SAT solid.
-        let base =
-            crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
-                .expect("kernel box");
+        let base = crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
+            .expect("kernel box");
         let placed = crate::scene::model::solid_model::placed(
             &base,
             [1.0, 0.0, 0.0],
@@ -7658,8 +7965,8 @@ mod selection_preview_tests {
     /// Vertex mode is configured — and the 2D system must not catch them.
     #[test]
     fn box_corner_ignores_3d_master_off() {
-        use codec::{entities::Solid3D, EntityType};
         use crate::snap::SnapType;
+        use codec::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -7673,9 +7980,8 @@ mod selection_preview_tests {
         app.polar_mode = false;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
-        let base =
-            crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
-                .expect("kernel box");
+        let base = crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
+            .expect("kernel box");
         let placed = crate::scene::model::solid_model::placed(
             &base,
             [1.0, 0.0, 0.0],
@@ -7726,8 +8032,8 @@ mod selection_preview_tests {
     /// for the box's planar faces).
     #[test]
     fn line_snaps_to_box_face_center() {
-        use codec::{entities::Solid3D, EntityType};
         use crate::snap::SnapType;
+        use codec::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -7741,9 +8047,8 @@ mod selection_preview_tests {
         app.polar_mode = false;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
-        let base =
-            crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
-                .expect("kernel box");
+        let base = crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
+            .expect("kernel box");
         let placed = crate::scene::model::solid_model::placed(
             &base,
             [1.0, 0.0, 0.0],
@@ -7793,8 +8098,8 @@ mod selection_preview_tests {
     /// Nearest-to-face catches an interior face point with no base point.
     #[test]
     fn line_snaps_to_box_face_nearest() {
-        use codec::{entities::Solid3D, EntityType};
         use crate::snap::SnapType;
+        use codec::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -7808,9 +8113,8 @@ mod selection_preview_tests {
         app.polar_mode = false;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
-        let base =
-            crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
-                .expect("kernel box");
+        let base = crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
+            .expect("kernel box");
         let placed = crate::scene::model::solid_model::placed(
             &base,
             [1.0, 0.0, 0.0],
@@ -7869,9 +8173,8 @@ mod selection_preview_tests {
         let i = app.active_tab;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
-        let base =
-            crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
-                .expect("kernel box");
+        let base = crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
+            .expect("kernel box");
         let placed = crate::scene::model::solid_model::placed(
             &base,
             [1.0, 0.0, 0.0],
@@ -7917,9 +8220,9 @@ mod selection_preview_tests {
         );
 
         // No base → perpendicular cannot fire (nearest still can).
-        let hit = app.tabs[i].scene.solid_face_snaps(
-            cursor, view_rot, eye, bounds, 15.0, None, true, false,
-        );
+        let hit = app.tabs[i]
+            .scene
+            .solid_face_snaps(cursor, view_rot, eye, bounds, 15.0, None, true, false);
         assert!(hit.is_none(), "perp without a base must stay silent");
 
         // Neither mode wanted → silence.
@@ -7939,8 +8242,8 @@ mod selection_preview_tests {
     /// Edge midpoints snap as their own 3D type at the segment centre.
     #[test]
     fn line_snaps_to_box_edge_midpoint() {
-        use codec::{entities::Solid3D, EntityType};
         use crate::snap::SnapType;
+        use codec::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -7954,9 +8257,8 @@ mod selection_preview_tests {
         app.polar_mode = false;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
-        let base =
-            crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
-                .expect("kernel box");
+        let base = crate::scene::model::solid_model::box_solid([0.0, 0.0, 2.5], 10.0, 10.0, 5.0)
+            .expect("kernel box");
         let placed = crate::scene::model::solid_model::placed(
             &base,
             [1.0, 0.0, 0.0],
@@ -7986,12 +8288,13 @@ mod selection_preview_tests {
                     hi[2] as f64 + lo[2] as f64,
                 )
             };
-            let top = (0..edges.len()).map(at).map(|p| p.z).fold(f64::NEG_INFINITY, f64::max);
+            let top = (0..edges.len())
+                .map(at)
+                .map(|p| p.z)
+                .fold(f64::NEG_INFINITY, f64::max);
             (0..edges.len() / 2)
                 .map(|k| (at(2 * k), at(2 * k + 1)))
-                .find(|(a, b)| {
-                    (a.z - top).abs() < 1e-9 && (b.z - top).abs() < 1e-9
-                })
+                .find(|(a, b)| (a.z - top).abs() < 1e-9 && (b.z - top).abs() < 1e-9)
                 .map(|(a, b)| (a + b) * 0.5)
                 .expect("box mesh has no top edge")
         };

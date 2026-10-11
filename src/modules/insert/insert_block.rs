@@ -11,11 +11,11 @@
 //! A palette click asks only what its options leave open, with the shorter
 //! option list `[Basepoint/Scale/X/Y/Z/Rotate]`.
 
+use crate::t;
 use codec::entities::{AttributeDefinition, AttributeEntity, Entity, Insert};
 use codec::types::Vector3;
 use codec::EntityType;
 use glam::{DVec3, Vec3};
-use crate::t;
 
 use crate::app::settings::BlockInsertOptions;
 use crate::command::{CadCommand, CmdResult, DynField, InputKind, WorkingPlane};
@@ -163,7 +163,8 @@ impl InsertBlockCommand {
         catalog: BlockCatalog,
         default_name: String,
     ) -> Self {
-        let limit = (cliprompt_lines as usize).clamp(0, crate::modules::insert::picker::MAX_SUGGESTIONS);
+        let limit =
+            (cliprompt_lines as usize).clamp(0, crate::modules::insert::picker::MAX_SUGGESTIONS);
         let picker = crate::modules::insert::picker::BlockPicker::new(available, usage_rank, limit);
         let mut command = Self::base_state(Mode::Classic, picker);
         command.catalog = catalog;
@@ -174,7 +175,10 @@ impl InsertBlockCommand {
     /// `-INSERT` already given a block (a drawing just inserted as a block).
     pub fn classic_for_block(name: String, preview: Vec<WireModel>, units_line: String) -> Self {
         let mut command = Self::base_state(Mode::Classic, Self::single_picker(&name));
-        command.catalog.units.insert(name.to_ascii_uppercase(), units_line);
+        command
+            .catalog
+            .units
+            .insert(name.to_ascii_uppercase(), units_line);
         command.name = name;
         command.preview = preview;
         command.step = Step::Point;
@@ -255,7 +259,11 @@ impl InsertBlockCommand {
     /// After the insertion point: ask what is still open, else place.
     fn after_point(&mut self) -> CmdResult {
         if self.preset_scale[0].is_none() {
-            self.step = if self.ask_uniform { Step::Uniform } else { Step::ScaleX };
+            self.step = if self.ask_uniform {
+                Step::Uniform
+            } else {
+                Step::ScaleX
+            };
             return CmdResult::NeedPoint;
         }
         self.scale = [
@@ -322,7 +330,11 @@ impl InsertBlockCommand {
 
     /// The scaled, rotated block-space offset of `p`.
     fn local_offset(&self, p: DVec3) -> DVec3 {
-        let s = DVec3::new(p.x * self.scale[0], p.y * self.scale[1], p.z * self.scale[2]);
+        let s = DVec3::new(
+            p.x * self.scale[0],
+            p.y * self.scale[1],
+            p.z * self.scale[2],
+        );
         let (sin, cos) = self.rotation.sin_cos();
         DVec3::new(s.x * cos - s.y * sin, s.x * sin + s.y * cos, s.z)
     }
@@ -343,11 +355,18 @@ impl InsertBlockCommand {
 
     /// `-INSERT ?`: the reference's listing.
     fn listing(&self, pattern: &str) -> String {
-        let pattern = if pattern.trim().is_empty() { "*" } else { pattern.trim() };
+        let pattern = if pattern.trim().is_empty() {
+            "*"
+        } else {
+            pattern.trim()
+        };
         let mut out = String::from("Defined blocks.");
         let mut shown = 0;
         for name in &self.catalog.user {
-            if pattern.split(',').any(|p| crate::io::xref_model::wildcard_match(name, p.trim())) {
+            if pattern
+                .split(',')
+                .any(|p| crate::io::xref_model::wildcard_match(name, p.trim()))
+            {
                 out.push_str(&format!("\n  \"{name}\""));
                 shown += 1;
             }
@@ -571,7 +590,11 @@ impl CadCommand for InsertBlockCommand {
             Step::YesNo(ask) => self.answer(ask, None),
             Step::ScaleX | Step::XyzX => {
                 self.scale[0] = 1.0;
-                self.step = if matches!(self.step, Step::XyzX) { Step::XyzY } else { Step::ScaleY };
+                self.step = if matches!(self.step, Step::XyzX) {
+                    Step::XyzY
+                } else {
+                    Step::ScaleY
+                };
                 CmdResult::NeedPoint
             }
             Step::XyzY => {
@@ -702,7 +725,9 @@ impl CadCommand for InsertBlockCommand {
                             _ => {}
                         },
                         Some(_) => {
-                            return Some(CmdResult::ReportError("Value must be nonzero.".to_string()))
+                            return Some(CmdResult::ReportError(
+                                "Value must be nonzero.".to_string(),
+                            ))
                         }
                         None => {
                             return Some(CmdResult::ReportError(
@@ -733,7 +758,11 @@ impl CadCommand for InsertBlockCommand {
                 _ => match Self::number(t) {
                     Some(v) if v != 0.0 => {
                         self.scale[0] = v;
-                        self.step = if matches!(self.step, Step::XyzX) { Step::XyzY } else { Step::ScaleY };
+                        self.step = if matches!(self.step, Step::XyzX) {
+                            Step::XyzY
+                        } else {
+                            Step::ScaleY
+                        };
                         CmdResult::NeedPoint
                     }
                     Some(_) => CmdResult::ReportError("Value must be nonzero.".to_string()),
@@ -808,7 +837,10 @@ impl CadCommand for InsertBlockCommand {
         self.repeat
     }
 
-    fn attreq_set_attdefs(&mut self, attdefs: Vec<AttributeDefinition>) -> Option<codec::EntityType> {
+    fn attreq_set_attdefs(
+        &mut self,
+        attdefs: Vec<AttributeDefinition>,
+    ) -> Option<codec::EntityType> {
         self.step = Step::FillAttr {
             attdefs,
             idx: 0,
@@ -835,7 +867,11 @@ impl InsertBlockCommand {
             }
             Ask::Repeat => {
                 self.repeat = yes;
-                if yes { Step::YesNo(Ask::RepeatScale) } else { Step::Point }
+                if yes {
+                    Step::YesNo(Ask::RepeatScale)
+                } else {
+                    Step::Point
+                }
             }
             Ask::RepeatScale => {
                 self.repeat_scale = yes;
@@ -887,7 +923,12 @@ impl InsertBlockCommand {
         loop {
             let next = match &self.step {
                 Step::FillAttr { attdefs, idx, .. } => attdefs.get(*idx).map(|ad| {
-                    (*idx, ad.flags.constant, ad.flags.preset, ad.default_value.clone())
+                    (
+                        *idx,
+                        ad.flags.constant,
+                        ad.flags.preset,
+                        ad.default_value.clone(),
+                    )
                 }),
                 _ => return None,
             };
@@ -908,7 +949,9 @@ impl InsertBlockCommand {
 
     fn finish_insert(&mut self) -> Option<EntityType> {
         let (attdefs, values) = match &self.step {
-            Step::FillAttr { attdefs, values, .. } => (attdefs.clone(), values.clone()),
+            Step::FillAttr {
+                attdefs, values, ..
+            } => (attdefs.clone(), values.clone()),
             _ => return None,
         };
         let mut insert = self.pending_insert.take()?;
@@ -929,4 +972,6 @@ impl InsertBlockCommand {
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["INSERT", "-INSERT"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["INSERT", "-INSERT"]
+});

@@ -56,7 +56,10 @@ impl OpenCADStudio {
                     async {
                         let handle = rfd::AsyncFileDialog::new()
                             .set_title(crate::t!("Select Drawing to Insert as Block").as_ref())
-                            .add_filter(crate::t!("DWG/DXF Files").as_ref(), &["dwg", "dxf", "DWG", "DXF"])
+                            .add_filter(
+                                crate::t!("DWG/DXF Files").as_ref(),
+                                &["dwg", "dxf", "DWG", "DXF"],
+                            )
                             .pick_file()
                             .await;
                         match handle {
@@ -67,7 +70,9 @@ impl OpenCADStudio {
                     |r| Message::BlockPalette(BlockPaletteMsg::FilePicked(r)),
                 );
             }
-            BlockPaletteMsg::FilePicked(Ok(path)) => return self.palette_insert(Item::File(path), None),
+            BlockPaletteMsg::FilePicked(Ok(path)) => {
+                return self.palette_insert(Item::File(path), None)
+            }
             BlockPaletteMsg::FilePicked(Err(e)) | BlockPaletteMsg::LibraryPicked(Err(e)) => {
                 if e != "Cancelled" {
                     self.command_line.push_error(&e);
@@ -99,7 +104,12 @@ impl OpenCADStudio {
             BlockPaletteMsg::LibraryPicked(Ok(path)) => self.open_block_library(path),
             BlockPaletteMsg::LibrarySelect(path) => self.open_block_library(PathBuf::from(path)),
             BlockPaletteMsg::LibraryUp => {
-                if let Some(parent) = self.block_palette.library_dir.as_ref().and_then(|d| d.parent()) {
+                if let Some(parent) = self
+                    .block_palette
+                    .library_dir
+                    .as_ref()
+                    .and_then(|d| d.parent())
+                {
                     let parent = parent.to_path_buf();
                     self.list_block_library(parent);
                 }
@@ -165,17 +175,30 @@ impl OpenCADStudio {
                     return None;
                 }
                 if path.is_dir() {
-                    Some(LibraryEntry { path, folder: true, thumb: None })
+                    Some(LibraryEntry {
+                        path,
+                        folder: true,
+                        thumb: None,
+                    })
                 } else if is_drawing(&path) {
                     let thumb = crate::io::thumbnail::read_handle(&path);
-                    Some(LibraryEntry { path, folder: false, thumb })
+                    Some(LibraryEntry {
+                        path,
+                        folder: false,
+                        thumb,
+                    })
                 } else {
                     None
                 }
             })
             .collect();
         entries.sort_by_key(|e| {
-            (!e.folder, e.path.file_name().map(|n| n.to_string_lossy().to_lowercase()))
+            (
+                !e.folder,
+                e.path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_lowercase()),
+            )
         });
         self.block_palette.library_dir = Some(dir);
         self.block_palette.library_entries = entries;
@@ -270,7 +293,11 @@ impl OpenCADStudio {
 
     /// Insert `item` (a click, or a drop at `drop_at`), bringing its block
     /// into the drawing first when it lives elsewhere.
-    pub(crate) fn palette_insert(&mut self, item: Item, drop_at: Option<glam::DVec3>) -> Task<Message> {
+    pub(crate) fn palette_insert(
+        &mut self,
+        item: Item,
+        drop_at: Option<glam::DVec3>,
+    ) -> Task<Message> {
         match self.resolve_palette_block(&item) {
             Ok(name) => {
                 self.refresh_block_palette();
@@ -286,7 +313,12 @@ impl OpenCADStudio {
     }
 
     fn block_exists(&self, name: &str) -> bool {
-        self.tabs[self.active_tab].scene.document.block_records.get(name).is_some()
+        self.tabs[self.active_tab]
+            .scene
+            .document
+            .block_records
+            .get(name)
+            .is_some()
     }
 
     fn current_drawing_path(&self) -> String {
@@ -395,12 +427,16 @@ impl OpenCADStudio {
             MenuAction::Insert => return self.palette_insert(item, None),
             MenuAction::Redefine => {
                 let result = match &item {
-                    Item::Ref(r) if r.drawing => self.import_drawing_block(PathBuf::from(&r.source), true),
+                    Item::Ref(r) if r.drawing => {
+                        self.import_drawing_block(PathBuf::from(&r.source), true)
+                    }
                     Item::File(path) => self.import_drawing_block(path.clone(), true),
-                    Item::Ref(r) if !r.source.is_empty() => crate::io::load_file(Path::new(&r.source))
-                        .map_err(|e| e.to_string())
-                        .and_then(|doc| self.import_block_definition(&doc, &r.name, true))
-                        .map(|_| r.name.clone()),
+                    Item::Ref(r) if !r.source.is_empty() => {
+                        crate::io::load_file(Path::new(&r.source))
+                            .map_err(|e| e.to_string())
+                            .and_then(|doc| self.import_block_definition(&doc, &r.name, true))
+                            .map(|_| r.name.clone())
+                    }
                     _ => return Task::none(),
                 };
                 match result {
@@ -430,14 +466,22 @@ impl OpenCADStudio {
             MenuAction::Edit => {
                 let name = item.name();
                 let i = self.active_tab;
-                let reference = self.tabs[i].scene.document.entities().find_map(|e| match e {
-                    codec::EntityType::Insert(ins) if ins.block_name.eq_ignore_ascii_case(&name) => {
-                        Some(ins.common.handle)
-                    }
-                    _ => None,
-                });
+                let reference = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .find_map(|e| match e {
+                        codec::EntityType::Insert(ins)
+                            if ins.block_name.eq_ignore_ascii_case(&name) =>
+                        {
+                            Some(ins.common.handle)
+                        }
+                        _ => None,
+                    });
                 match reference {
-                    Some(handle) => return self.dispatch_command(&format!("BEDIT_BEGIN:{}", handle.value())),
+                    Some(handle) => {
+                        return self.dispatch_command(&format!("BEDIT_BEGIN:{}", handle.value()))
+                    }
                     None => self.command_line.push_error(&crate::tf!(
                         "Block \"{name}\" has no reference in the drawing to edit."
                     )),
@@ -458,7 +502,8 @@ impl OpenCADStudio {
                         self.push_undo_snapshot(i, "PURGE");
                         crate::app::control::erase_block_definition(&mut self.tabs[i].scene, &name);
                         self.tabs[i].dirty = true;
-                        self.command_line.push_output(&crate::tf!("Block \"{name}\" removed."));
+                        self.command_line
+                            .push_output(&crate::tf!("Block \"{name}\" removed."));
                         self.refresh_block_palette();
                     }
                 }
@@ -492,12 +537,20 @@ impl OpenCADStudio {
 
     /// Put `name` at the top of the Recent list (BLOCKMRULIST long).
     pub(crate) fn note_recent_block(&mut self, name: &str) {
-        let (source, drawing) = match self.block_palette.file_sources.get(&name.to_ascii_uppercase()) {
+        let (source, drawing) = match self
+            .block_palette
+            .file_sources
+            .get(&name.to_ascii_uppercase())
+        {
             Some(path) => (path.clone(), true),
             None => (self.current_drawing_path(), false),
         };
         let entry = PaletteBlockRef {
-            name: if drawing { file_stem(Path::new(&source)) } else { name.to_string() },
+            name: if drawing {
+                file_stem(Path::new(&source))
+            } else {
+                name.to_string()
+            },
             source,
             time: now_secs(),
             drawing,
@@ -509,7 +562,9 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn trim_recent_blocks(&mut self) {
-        self.block_palette.recent.truncate(self.block_mru_list as usize);
+        self.block_palette
+            .recent
+            .truncate(self.block_mru_list as usize);
     }
 
     /// Rebuild the Current Drawing list, and the previews kept for blocks
@@ -541,7 +596,9 @@ impl OpenCADStudio {
         let here = self.current_drawing_path();
         for entry in &entries {
             let key = format!("{here}|{}", entry.name.to_ascii_uppercase());
-            self.block_palette.ref_wires.insert(key, entry.wires.clone());
+            self.block_palette
+                .ref_wires
+                .insert(key, entry.wires.clone());
         }
         self.block_palette.blocks = entries;
         let drawings: Vec<String> = self
@@ -580,7 +637,10 @@ impl OpenCADStudio {
         let mut unnamed = 0;
         let mut units = rustc_hash::FxHashMap::default();
         for br in doc.block_records.iter() {
-            if br.flags.is_xref || br.name.eq_ignore_ascii_case("*Model_Space") || br.name.to_ascii_uppercase().starts_with("*PAPER_SPACE") {
+            if br.flags.is_xref
+                || br.name.eq_ignore_ascii_case("*Model_Space")
+                || br.name.to_ascii_uppercase().starts_with("*PAPER_SPACE")
+            {
                 continue;
             }
             if br.name.starts_with('*') {
@@ -602,6 +662,11 @@ impl OpenCADStudio {
         let search_path = std::env::current_dir()
             .map(|d| d.display().to_string())
             .unwrap_or_default();
-        BlockCatalog { user, unnamed, units, search_path }
+        BlockCatalog {
+            user,
+            unnamed,
+            units,
+            search_path,
+        }
     }
 }

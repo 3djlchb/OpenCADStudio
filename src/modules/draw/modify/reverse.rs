@@ -74,10 +74,8 @@ impl ReverseCommand {
                 Some(EntityType::Polyline3D(out))
             }
             EntityType::Spline(sp) => Some(EntityType::Spline(reverse_spline(sp))),
-            EntityType::Helix(helix) => {
-                crate::entities::helix::reversed(helix)
-                    .map(|helix| EntityType::Helix(Box::new(helix)))
-            }
+            EntityType::Helix(helix) => crate::entities::helix::reversed(helix)
+                .map(|helix| EntityType::Helix(Box::new(helix))),
             _ => None,
         }
     }

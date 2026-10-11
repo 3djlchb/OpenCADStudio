@@ -3,9 +3,8 @@
 use codec::objects::{
     Assoc2dConstraintGroup, AssocAction, AssocActionDependency, AssocConstraintNode,
     AssocConstraintNodeData, AssocDependency, AssocDimDependencyBody, AssocEvalValue,
-    AssocEvalVariant,
-    AssocGeomDependency, AssocNetwork, AssocPersistentSubentId, AssocValueDependency,
-    AssocVariable, AssociativeData, AssociativeObject, ObjectType,
+    AssocEvalVariant, AssocGeomDependency, AssocNetwork, AssocPersistentSubentId,
+    AssocValueDependency, AssocVariable, AssociativeData, AssociativeObject, ObjectType,
 };
 use codec::types::{Handle, Vector3};
 use codec::{CadDocument, EntityType};
@@ -625,11 +624,8 @@ impl<'a> GroupBuilder<'a> {
                 },
             );
         } else {
-            let arc = kernel::geom2d::BulgeArc::from_bulge(
-                [start.x, start.y],
-                [end.x, end.y],
-                bulge,
-            )?;
+            let arc =
+                kernel::geom2d::BulgeArc::from_bulge([start.x, start.y], [end.x, end.y], bulge)?;
             self.push_node(
                 node_id,
                 "AcConstrainedArc",
@@ -1451,7 +1447,11 @@ const ASSOC_CLASSES: &[(&str, &str, i32)] = &[
     ("ACDBASSOCGEOMDEPENDENCY", "AcDbAssocGeomDependency", 29),
     ("ACDBASSOCVALUEDEPENDENCY", "AcDbAssocValueDependency", 29),
     ("ACDBASSOCDEPENDENCY", "AcDbAssocDependency", 29),
-    ("ACDBASSOCDIMDEPENDENCYBODY", "AcDbAssocDimDependencyBody", 45),
+    (
+        "ACDBASSOCDIMDEPENDENCYBODY",
+        "AcDbAssocDimDependencyBody",
+        45,
+    ),
 ];
 
 fn ensure_associative_classes_registered(document: &mut CadDocument) {
@@ -1816,9 +1816,7 @@ fn directional_axis_reference(
         return None;
     };
     match document.get_entity(entity)? {
-        EntityType::Text(_) | EntityType::MText(_) => {
-            Some(ParametricRef::text_baseline(entity))
-        }
+        EntityType::Text(_) | EntityType::MText(_) => Some(ParametricRef::text_baseline(entity)),
         EntityType::Ellipse(ellipse) => {
             let [origin, axis_x, axis_y] = *work_plane;
             let normal = Vector3::new(
@@ -1826,9 +1824,8 @@ fn directional_axis_reference(
                 axis_x.z * axis_y.x - axis_x.x * axis_y.z,
                 axis_x.x * axis_y.y - axis_x.y * axis_y.x,
             );
-            let to_world = |point: Vector3| {
-                origin + axis_x * point.x + axis_y * point.y + normal * point.z
-            };
+            let to_world =
+                |point: Vector3| origin + axis_x * point.x + axis_y * point.y + normal * point.z;
             let direction = (to_world(*end_point) - to_world(*start_point)).normalize();
             let major = ellipse.major_axis.normalize();
             let ellipse_normal = ellipse.normal.normalize();
@@ -2381,18 +2378,18 @@ pub(super) fn native_constraint_set(
                     };
                     let local_direction = datum_id.and_then(|datum_id| {
                         group.nodes.iter().find_map(|datum| {
-                            (datum.node_id == datum_id).then_some(&datum.data).and_then(|data| {
-                                match data {
+                            (datum.node_id == datum_id)
+                                .then_some(&datum.data)
+                                .and_then(|data| match data {
                                     AssocConstraintNodeData::Line { direction, .. } => {
                                         Some(*direction)
                                     }
                                     _ => None,
-                                }
-                            })
+                                })
                         })
                     });
-                    if let Some(world) =
-                        local_direction.and_then(|local| work_plane_vector(&group.work_plane, local))
+                    if let Some(world) = local_direction
+                        .and_then(|local| work_plane_vector(&group.work_plane, local))
                     {
                         constraint.axis_direction = Some(world);
                     }
@@ -2589,7 +2586,10 @@ fn refresh_foreign_values(
         })) => {
             let mut table = parameters.clone();
             table.set("foreignExpression", &variable.expression).ok()?;
-            table.resolve("foreignExpression").ok().filter(|value| value.is_finite())
+            table
+                .resolve("foreignExpression")
+                .ok()
+                .filter(|value| value.is_finite())
         }
         _ => None,
     };
@@ -2617,7 +2617,9 @@ fn refresh_foreign_values(
         }
     }
     for (dependency, source) in dependencies {
-        let Some(value) = value_of(document, source) else { continue };
+        let Some(value) = value_of(document, source) else {
+            continue;
+        };
         if let Some(ObjectType::Associative(AssociativeObject {
             data: AssociativeData::ValueDependency(dependency),
             ..
@@ -2648,7 +2650,11 @@ fn refresh_foreign_values(
                     continue;
                 };
                 // Angle parameters are cached in radians.
-                let value = if param.unit_type == 2 { value.to_radians() } else { value };
+                let value = if param.unit_type == 2 {
+                    value.to_radians()
+                } else {
+                    value
+                };
                 updates.push((index, slot, value));
             }
         }
@@ -3319,9 +3325,7 @@ mod tests {
                 .iter()
                 .find(|constraint| constraint.kind == ConstraintKind::Horizontal)
                 .unwrap();
-            assert!(
-                (horizontal.axis_direction.unwrap() - horizontal_direction).length() < 1.0e-12
-            );
+            assert!((horizontal.axis_direction.unwrap() - horizontal_direction).length() < 1.0e-12);
         }
     }
 
@@ -3755,9 +3759,9 @@ mod tests {
         let mut block = BlockRecord::new("fixture");
         block.handle = scene.document.allocate_handle();
         scene.document.block_records.add(block).unwrap();
-        let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(
-            Vector3::new(1.0, 2.0, 0.0),
-        )));
+        let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(Vector3::new(
+            1.0, 2.0, 0.0,
+        ))));
         let insert = scene.add_entity(EntityType::Insert(Insert::new(
             "fixture",
             Vector3::new(3.0, 4.0, 0.0),
@@ -4699,5 +4703,4 @@ mod tests {
             assert_eq!(restored_sectors, sectors);
         }
     }
-
 }

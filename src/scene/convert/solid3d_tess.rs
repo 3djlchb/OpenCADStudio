@@ -59,9 +59,7 @@ pub(crate) fn body_transform(
             }
         }
     }
-    (values.len() >= 13
-        && values[..13].iter().all(|value| value.is_finite())
-        && values[12] > 0.0)
+    (values.len() >= 13 && values[..13].iter().all(|value| value.is_finite()) && values[12] > 0.0)
         .then(|| {
             (
                 [
@@ -170,11 +168,7 @@ pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
 }
 
 pub(crate) fn kernel_acis_body(acis: &codec::entities::AcisData) -> Option<KernelBody> {
-    let sat = parse_acis(
-        || acis.parse(),
-        acis.is_binary,
-        &acis.sab_data,
-    )?;
+    let sat = parse_acis(|| acis.parse(), acis.is_binary, &acis.sab_data)?;
     let (mut bodies, loss) = kernel::acis::lift(&sat);
     if !loss.is_empty() || bodies.len() != 1 {
         return None;
@@ -183,10 +177,7 @@ pub(crate) fn kernel_acis_body(acis: &codec::entities::AcisData) -> Option<Kerne
     bodies.pop()
 }
 
-fn remap_acis_material_bindings(
-    set: &mut MeshLodSet,
-    acis: &codec::entities::AcisData,
-) {
+fn remap_acis_material_bindings(set: &mut MeshLodSet, acis: &codec::entities::AcisData) {
     for lod in &mut set.lods {
         for handle in lod.triangle_material_handles.iter_mut().flatten() {
             let reference = handle.value() as i32;

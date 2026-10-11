@@ -36,17 +36,15 @@ pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
 pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
-pub use entity::CreateBlockOptions;
 pub use camera_ops::named_view_center;
+pub use entity::CreateBlockOptions;
+mod group_layer;
 #[cfg(test)]
 mod hatch_boundary;
-mod group_layer;
 mod layout;
 mod limits;
 mod modify;
 mod mspace;
-pub mod viewport_ref;
-pub mod viewport_dimension_pick;
 pub mod named_parameters;
 mod page_setup;
 mod paper;
@@ -54,6 +52,8 @@ mod preview;
 mod project;
 mod scene_markers;
 mod selection;
+pub mod viewport_dimension_pick;
+pub mod viewport_ref;
 pub(crate) use selection::{pe_url_description_of, pe_url_of};
 pub mod parametric_constraints;
 mod parametric_solve;
@@ -111,9 +111,9 @@ pub(crate) fn tessellate_entity(
                 // including holes, then sample only for this cached display.
                 let mut boundaries = Vec::new();
                 if let Ok(kernel::brep::LoftSection::Profile { plane, wires, .. }) =
-                    kernel::acis::loft_section_geometry(&[
-                        codec::entities::EmbeddedEntity::Region(region.clone()),
-                    ])
+                    kernel::acis::loft_section_geometry(&[codec::entities::EmbeddedEntity::Region(
+                        region.clone(),
+                    )])
                 {
                     let (color, _, _, line_weight_px, _) =
                         view::render::render_style_for_viewport(document, &source, active_viewport);
@@ -165,7 +165,12 @@ pub(crate) fn tessellate_entity(
         for points in model::solid_history::composite_history_edges(document, handle) {
             let selected = selected.contains(&handle);
             let color = [1.0, 0.25, 0.25, 1.0];
-            wires.push(WireModel::solid_f64(handle.value().to_string(), points, color, selected));
+            wires.push(WireModel::solid_f64(
+                handle.value().to_string(),
+                points,
+                color,
+                selected,
+            ));
         }
     }
     wires
@@ -208,9 +213,7 @@ impl Scene {
         {
             let (edges, lows) = set.geometry_edges();
             let mut seen = HashSet::default();
-            for (a, b) in
-                crate::scene::model::mesh_model::solid_edge_segments(edges, lows)
-            {
+            for (a, b) in crate::scene::model::mesh_model::solid_edge_segments(edges, lows) {
                 for (point, hint) in [(a, SnapHint::Vertex), (b, SnapHint::Vertex)] {
                     let key = [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()];
                     if seen.insert(key) {
@@ -309,8 +312,8 @@ impl Scene {
         want_nearest: bool,
     ) -> Option<crate::snap::SnapResult> {
         use crate::snap::{
-            closest_point_on_tri_2d, foot_on_triangle, snap_better, snap_priority,
-            snap_tier, SnapType,
+            closest_point_on_tri_2d, foot_on_triangle, snap_better, snap_priority, snap_tier,
+            SnapType,
         };
         if !want_perp && !want_nearest {
             return None;
@@ -354,8 +357,7 @@ impl Scene {
                         || (tier == *bt
                             && (d2 - *bd2).abs() <= 1e-4
                             && sub == *bs
-                            && (depth2 < *bdepth2
-                                || (depth2 == *bdepth2 && handle.value() < *bh)))
+                            && (depth2 < *bdepth2 || (depth2 == *bdepth2 && handle.value() < *bh)))
                 }
             };
             if better {
@@ -375,9 +377,7 @@ impl Scene {
                         extension_origin: None,
                         extension_dir: None,
                         viewport: None,
-                        source: Some(
-                            crate::command::DimensionAssociationSource::inferred(handle),
-                        ),
+                        source: Some(crate::command::DimensionAssociationSource::inferred(handle)),
                         secondary_source: None,
                         model_point: None,
                     },
@@ -430,7 +430,10 @@ impl Scene {
                 for (slot, index) in v.iter_mut().zip(tri.iter()) {
                     let (Some(high), low) = (
                         lod.verts.get(*index as usize),
-                        lod.verts_low.get(*index as usize).copied().unwrap_or([0.0; 3]),
+                        lod.verts_low
+                            .get(*index as usize)
+                            .copied()
+                            .unwrap_or([0.0; 3]),
                     ) else {
                         ok = false;
                         break;
@@ -454,14 +457,8 @@ impl Scene {
                     continue;
                 }
                 // Per-triangle screen reject before any 3D work.
-                let (tx0, ty0) = (
-                    sa[0].min(sb[0]).min(sc[0]),
-                    sa[1].min(sb[1]).min(sc[1]),
-                );
-                let (tx1, ty1) = (
-                    sa[0].max(sb[0]).max(sc[0]),
-                    sa[1].max(sb[1]).max(sc[1]),
-                );
+                let (tx0, ty0) = (sa[0].min(sb[0]).min(sc[0]), sa[1].min(sb[1]).min(sc[1]));
+                let (tx1, ty1) = (sa[0].max(sb[0]).max(sc[0]), sa[1].max(sb[1]).max(sc[1]));
                 if cursor[0] < tx0 - aperture_px
                     || cursor[0] > tx1 + aperture_px
                     || cursor[1] < ty0 - aperture_px
@@ -1845,10 +1842,7 @@ fn offset_mesh_lod_set(mut set: MeshLodSet) -> MeshLodSet {
 }
 
 /// Build a lightweight placement over immutable block-local geometry.
-fn transform_block_mesh_lod_set(
-    set: &MeshLodSet,
-    xform: &codec::types::Transform,
-) -> MeshLodSet {
+fn transform_block_mesh_lod_set(set: &MeshLodSet, xform: &codec::types::Transform) -> MeshLodSet {
     use codec::types::Vector3;
     let source = set.instance_source.clone().unwrap_or_else(|| {
         std::sync::Arc::new(model::mesh_model::MeshInstanceSource {
@@ -2285,8 +2279,7 @@ pub struct Scene {
         RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
     styled_wire_cache: RefCell<HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>>,
     styled_hatch_cache: RefCell<HashMap<(u64, usize, usize, String, u32), Arc<Vec<HatchModel>>>>,
-    styled_wire_fill_cache:
-        RefCell<HashMap<(u64, String, u32, u64), Arc<Vec<HatchModel>>>>,
+    styled_wire_fill_cache: RefCell<HashMap<(u64, String, u32, u64), Arc<Vec<HatchModel>>>>,
     /// Per-viewport projected wire cache for paper-space content viewports.
     /// Stores projected + clipped wires in paper-space coordinates.
     /// Maps vp_handle → (geometry_epoch, Vec<WireModel>).
@@ -2368,8 +2361,15 @@ pub struct Scene {
     layout_names_cache: RefCell<Option<(u64, std::sync::Arc<Vec<String>>)>>,
     /// Bump on any annotation-scale list mutation.
     scale_epoch: u64,
-    scale_picker_cache:
-        RefCell<Option<(u64, f64, Option<bool>, String, std::sync::Arc<Vec<(String, f32, f64)>>)>>,
+    scale_picker_cache: RefCell<
+        Option<(
+            u64,
+            f64,
+            Option<bool>,
+            String,
+            std::sync::Arc<Vec<(String, f32, f64)>>,
+        )>,
+    >,
     /// Bump on any named-UCS table mutation (UCS SAVE / DELETE / RENAME,
     /// record-API patch, file-open, undo Full-swap).
     ucs_epoch: u64,
@@ -2388,9 +2388,16 @@ pub struct Scene {
     /// Conservative hint for whether any Face3D entities exist in the document.
     pub(crate) has_face3d: std::cell::Cell<Option<bool>>,
     /// Cached resolved document render environment (fog and background image), keyed by (geometry_epoch, document.objects.len()).
-    document_render_env_cache: RefCell<Option<(u64, usize, crate::scene::view::render::CachedDocumentRenderEnvironment)>>,
+    document_render_env_cache: RefCell<
+        Option<(
+            u64,
+            usize,
+            crate::scene::view::render::CachedDocumentRenderEnvironment,
+        )>,
+    >,
     /// Memoized background image resolution to avoid repeated filesystem probes on each render frame.
-    background_image_cache: RefCell<HashMap<String, Option<crate::scene::model::image_model::DecodedImage>>>,
+    background_image_cache:
+        RefCell<HashMap<String, Option<crate::scene::model::image_model::DecodedImage>>>,
     /// Runtime parametric constraint sets decoded from standard graph scopes.
     pub(crate) parametric_constraints: Vec<parametric_constraints::ParametricConstraintSet>,
     /// CONSTRAINTNAMEFORMAT: what a dynamic dimension's text shows —
@@ -2616,9 +2623,8 @@ fn section_plane(
     let translation = codec::types::Vector3::new(matrix[0][3], matrix[1][3], matrix[2][3]);
     let origin = inverse
         .transform_point(codec::types::Vector3::new(origin.x, origin.y, origin.z) - translation);
-    let tangent = inverse.transform_point(codec::types::Vector3::new(
-        tangent.x, tangent.y, tangent.z,
-    ));
+    let tangent =
+        inverse.transform_point(codec::types::Vector3::new(tangent.x, tangent.y, tangent.z));
     let normal = linear
         .transpose()
         .transform_point(codec::types::Vector3::new(normal.x, normal.y, normal.z));
@@ -2836,7 +2842,9 @@ impl Scene {
             return;
         };
         let step = (f64::from(wpp).log2() * 4.0).ceil() as i32;
-        let current = self.underlay_world_per_pixel.map(|w| (w.log2() * 4.0).round() as i32);
+        let current = self
+            .underlay_world_per_pixel
+            .map(|w| (w.log2() * 4.0).round() as i32);
         if current == Some(step) {
             self.underlay_scale_pending = None;
             return;
@@ -2854,7 +2862,11 @@ impl Scene {
         }
         self.underlay_scale_pending = None;
         self.underlay_world_per_pixel = Some(2f64.powf(step as f64 / 4.0));
-        if self.document.entities().any(|e| matches!(e, EntityType::Underlay(_))) {
+        if self
+            .document
+            .entities()
+            .any(|e| matches!(e, EntityType::Underlay(_)))
+        {
             self.reseed_underlays();
         }
     }
@@ -2866,7 +2878,9 @@ impl Scene {
             return false;
         };
         let step = (f64::from(wpp).log2() * 4.0).ceil() as i32;
-        self.underlay_world_per_pixel.map(|w| (w.log2() * 4.0).round() as i32) != Some(step)
+        self.underlay_world_per_pixel
+            .map(|w| (w.log2() * 4.0).round() as i32)
+            != Some(step)
     }
 
     pub(super) fn world_per_pixel(&self) -> Option<f32> {
@@ -3113,9 +3127,7 @@ impl Scene {
         // rebuilding every glyph in the drawing on each mouse move.
         if let EntityType::RasterImage(image) = entity {
             let path = image.file_path.trim();
-            if !path.is_empty()
-                && crate::scene::model::image_model::resolve_image(path).is_none()
-            {
+            if !path.is_empty() && crate::scene::model::image_model::resolve_image(path).is_none() {
                 return true;
             }
         }
@@ -3427,7 +3439,8 @@ impl Scene {
     /// text changed. Returns the number of hosts whose text changed and the
     /// number of fields the hosts hold.
     pub fn update_fields(&mut self, event: i32, hosts: Option<&[Handle]>) -> (usize, usize) {
-        let (changed, found) = crate::entities::field::update_fields(&mut self.document, event, hosts);
+        let (changed, found) =
+            crate::entities::field::update_fields(&mut self.document, event, hosts);
         if !changed.is_empty() {
             self.bump_text_hosts(&changed);
         }
@@ -3453,7 +3466,9 @@ impl Scene {
             .objects
             .values()
             .filter_map(|object| match object {
-                ObjectType::Layout(layout) if !layout.block_record.is_null() => Some(layout.block_record),
+                ObjectType::Layout(layout) if !layout.block_record.is_null() => {
+                    Some(layout.block_record)
+                }
                 _ => None,
             })
             .collect();
@@ -3483,7 +3498,10 @@ impl Scene {
                 }
                 EntityType::Table(table) => {
                     if let Some(record) = table.block_record_handle {
-                        tables_of.entry(record).or_default().push(table.common.handle);
+                        tables_of
+                            .entry(record)
+                            .or_default()
+                            .push(table.common.handle);
                     }
                 }
                 _ => {}
@@ -3499,10 +3517,15 @@ impl Scene {
                     None => continue,
                 },
             };
-            let owner = self.document.get_entity(handle).map(|e| e.common().owner_handle);
-            let record = owner
-                .and_then(|owner| definitions.get(&owner))
-                .or_else(|| members.get(&handle).and_then(|record| definitions.get(record)));
+            let owner = self
+                .document
+                .get_entity(handle)
+                .map(|e| e.common().owner_handle);
+            let record = owner.and_then(|owner| definitions.get(&owner)).or_else(|| {
+                members
+                    .get(&handle)
+                    .and_then(|record| definitions.get(record))
+            });
             let Some((record_handle, name)) = record else {
                 targets.render_handles.insert(handle);
                 continue;
@@ -3514,7 +3537,9 @@ impl Scene {
                     targets.render_handles.extend(users.iter().copied());
                 }
             }
-            targets.render_handles.extend(tables_of.get(record_handle).into_iter().flatten().copied());
+            targets
+                .render_handles
+                .extend(tables_of.get(record_handle).into_iter().flatten().copied());
             targets.touches_block_definition = true;
         }
         self.invalidate_dependency_targets(targets);
@@ -3556,7 +3581,10 @@ impl Scene {
     }
 
     /// Refresh display and associations after a solved grip or exact history restore.
-    pub(crate) fn bump_entities_after_parametric_solve(&mut self, changes: &[(Handle, ChangeKind)]) {
+    pub(crate) fn bump_entities_after_parametric_solve(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+    ) {
         self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, false);
     }
 
@@ -3640,8 +3668,11 @@ impl Scene {
                     )
                 {
                     rebuilt |= self.document.refresh_table_block(*handle);
-                    rebuilt |= !crate::entities::field::refresh_table_formulas(&mut self.document, *handle)
-                        .is_empty();
+                    rebuilt |= !crate::entities::field::refresh_table_formulas(
+                        &mut self.document,
+                        *handle,
+                    )
+                    .is_empty();
                 }
             }
             // The block's cached drawing is stale once its texts change.
@@ -3743,7 +3774,10 @@ impl Scene {
             self.lighting_cache.borrow_mut().clear();
         }
         if let Some(true) = self.has_face3d.get() {
-            if changes.iter().any(|(_, k)| matches!(k, ChangeKind::Removed)) {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
                 self.has_face3d.set(None);
             }
         } else if changes.iter().any(|(h, _)| {
@@ -4045,7 +4079,10 @@ impl Scene {
                 crate::entities::solid3d::surface_isoline_counts(surface),
                 crate::entities::solid3d::surface_property_state(surface).isolines,
             ),
-            _ => ([crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines); 2], false),
+            _ => (
+                [crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines); 2],
+                false,
+            ),
         };
         let (mut set, wires, center) = crate::scene::model::solid_model::display_from_solid(
             solid,
@@ -4320,7 +4357,10 @@ impl Scene {
             .filter(|h| recoloured || class(&old, h) != class(new, h))
             .collect();
         self.recolor_meshes_for_handles(&changed);
-        let changes: Vec<(Handle, ChangeKind)> = changed.into_iter().map(|h| (h, ChangeKind::Modified)).collect();
+        let changes: Vec<(Handle, ChangeKind)> = changed
+            .into_iter()
+            .map(|h| (h, ChangeKind::Modified))
+            .collect();
         self.bump_entities_restyled(&changes);
     }
 
@@ -4351,7 +4391,10 @@ impl Scene {
                 let (color, class) = match Self::handle_from_wire_name(&w.name) {
                     Some(h) if count.errors.contains(&h) => (count.error_color, 2u64),
                     Some(h) if count.counted.contains(&h) => (count.color, 1),
-                    _ => (crate::scene::cache::block_cache::fade_toward_bg(w.color, bg), 0),
+                    _ => (
+                        crate::scene::cache::block_cache::fade_toward_bg(w.color, bg),
+                        0,
+                    ),
                 };
                 w.color = color;
                 // Instances of one definition draw in one colour: counted and
@@ -4690,7 +4733,9 @@ impl Scene {
             .document
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Viewport(v) if v.common.owner_handle == layout_block => Some(v.id),
+                codec::EntityType::Viewport(v) if v.common.owner_handle == layout_block => {
+                    Some(v.id)
+                }
                 _ => None,
             })
             .max()
@@ -6428,15 +6473,20 @@ impl Scene {
             return false;
         };
         let unit_factor = self.annotation_scale_unit_factor();
-        let named = self.document.objects.values().find_map(|object| match object {
-            ObjectType::Scale(scale)
-                if !scale.is_temporary
-                    && (scale.factor() * unit_factor - factor).abs() <= 1.0e-9 * factor.max(1.0) =>
-            {
-                Some(scale.name.clone())
-            }
-            _ => None,
-        });
+        let named = self
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                ObjectType::Scale(scale)
+                    if !scale.is_temporary
+                        && (scale.factor() * unit_factor - factor).abs()
+                            <= 1.0e-9 * factor.max(1.0) =>
+                {
+                    Some(scale.name.clone())
+                }
+                _ => None,
+            });
         if let Some(name) = named {
             return self.set_viewport_scale_named_for(viewport, &name).is_some();
         }
@@ -6542,7 +6592,8 @@ impl Scene {
             }
         }
         let names = std::sync::Arc::new(self.layout_names());
-        *self.layout_names_cache.borrow_mut() = Some((self.layout_epoch, std::sync::Arc::clone(&names)));
+        *self.layout_names_cache.borrow_mut() =
+            Some((self.layout_epoch, std::sync::Arc::clone(&names)));
         names
     }
 
@@ -6611,8 +6662,7 @@ impl Scene {
             .filter(|n| !n.is_empty())
             .collect::<Vec<_>>()
             .into();
-        *self.ucs_names_cache.borrow_mut() =
-            Some((self.ucs_epoch, std::sync::Arc::clone(&names)));
+        *self.ucs_names_cache.borrow_mut() = Some((self.ucs_epoch, std::sync::Arc::clone(&names)));
         names
     }
 
@@ -7918,8 +7968,15 @@ impl Scene {
         all_visible: bool,
         viewport: Option<Handle>,
     ) -> Vec<ImageModel> {
-        self.collect_images(target_block, frozen, annotation_scale_handle, all_visible,
-            viewport, false, |image, _| image)
+        self.collect_images(
+            target_block,
+            frozen,
+            annotation_scale_handle,
+            all_visible,
+            viewport,
+            false,
+            |image, _| image,
+        )
     }
 
     pub fn paper_plot_images(&self) -> Vec<crate::io::pdf_export::PlotImage> {
@@ -7928,8 +7985,14 @@ impl Scene {
         } else {
             self.paper_annotation_scale_handle()
         };
-        self.placed_images(self.current_layout_block_handle(), None,
-            scale, self.annotation_all_visible(), None, true)
+        self.placed_images(
+            self.current_layout_block_handle(),
+            None,
+            scale,
+            self.annotation_all_visible(),
+            None,
+            true,
+        )
     }
 
     fn placed_images(
@@ -7941,11 +8004,18 @@ impl Scene {
         viewport: Option<Handle>,
         plotting: bool,
     ) -> Vec<crate::io::pdf_export::PlotImage> {
-        self.collect_images(target_block, frozen, annotation_scale_handle, all_visible,
-            viewport, plotting, |image, context| crate::io::pdf_export::PlotImage {
+        self.collect_images(
+            target_block,
+            frozen,
+            annotation_scale_handle,
+            all_visible,
+            viewport,
+            plotting,
+            |image, context| crate::io::pdf_export::PlotImage {
                 image,
                 clips: context.clips.clone(),
-            })
+            },
+        )
     }
 
     fn collect_images<T>(
@@ -7986,8 +8056,12 @@ impl Scene {
         graph.walk_root(
             root,
             |entity, context| {
-                (!plotting || self.document.layers.get(&entity.common().layer)
-                    .is_none_or(|layer| layer.is_plottable))
+                (!plotting
+                    || self
+                        .document
+                        .layers
+                        .get(&entity.common().layer)
+                        .is_none_or(|layer| layer.is_plottable))
                     && (context.is_instanced()
                         || !self.entity_temporarily_hidden(entity.common().handle))
             },
@@ -8080,21 +8154,17 @@ impl Scene {
                     // also invalidate. Block-definition edits route through
                     // bump_geometry (a full delta) and invalidate regardless.
                     Some((cached_epoch, arc))
-                        if self.category_cache_valid(
-                            *cached_epoch,
-                            CACHE_CATEGORY_MESH,
-                            |h| {
-                                self.meshes.contains_key(&h)
-                                    || match self.document.get_entity(h) {
-                                        Some(EntityType::Insert(_)) => true,
-                                        Some(EntityType::Extended(extended)) => matches!(
-                                            extended.data,
-                                            codec::entities::ExtendedEntityData::SectionObject(_)
-                                        ),
-                                        _ => false,
-                                    }
-                            },
-                        ) =>
+                        if self.category_cache_valid(*cached_epoch, CACHE_CATEGORY_MESH, |h| {
+                            self.meshes.contains_key(&h)
+                                || match self.document.get_entity(h) {
+                                    Some(EntityType::Insert(_)) => true,
+                                    Some(EntityType::Extended(extended)) => matches!(
+                                        extended.data,
+                                        codec::entities::ExtendedEntityData::SectionObject(_)
+                                    ),
+                                    _ => false,
+                                }
+                        }) =>
                     {
                         Some(Arc::clone(arc))
                     }
@@ -8582,7 +8652,12 @@ impl Scene {
         };
         // ponytail: full entity scan per call, gated to drawings declaring the
         // class; memoize per geometry epoch if large Inventor sheets show up.
-        if self.document.classes.get_by_name("ACIDBLOCKREFERENCE").is_some() {
+        if self
+            .document
+            .classes
+            .get_by_name("ACIDBLOCKREFERENCE")
+            .is_some()
+        {
             let model = self.model_space_block_handle();
             hidden.extend(self.document.entities().filter_map(|e| match e {
                 EntityType::Insert(i)
@@ -8772,7 +8847,8 @@ impl Scene {
             graph.walk_root(
                 self.render_scene_root(target_block),
                 |entity, context| {
-                    context.is_instanced() || !self.entity_temporarily_hidden(entity.common().handle)
+                    context.is_instanced()
+                        || !self.entity_temporarily_hidden(entity.common().handle)
                 },
                 |entity, context| {
                     let EntityType::Extended(extended) = entity else {
@@ -8829,7 +8905,8 @@ impl Scene {
     pub(super) fn point_cloud_2d_wires(&self) -> Vec<WireModel> {
         use crate::scene::model::point_cloud::{resolve_source, setting, setting_value};
         if !crate::scene::model::point_cloud::any_definition(&self.document)
-            || setting("POINTCLOUD2DVSDISPLAY").is_some_and(|s| setting_value(&self.document, s) == 1)
+            || setting("POINTCLOUD2DVSDISPLAY")
+                .is_some_and(|s| setting_value(&self.document, s) == 1)
         {
             return Vec::new();
         }
@@ -8844,13 +8921,21 @@ impl Scene {
             let common = entity.common();
             if common.invisible
                 || self.entity_temporarily_hidden(common.handle)
-                || self.document.layers.get(&common.layer).is_some_and(|layer| layer.is_off() || layer.is_frozen())
+                || self
+                    .document
+                    .layers
+                    .get(&common.layer)
+                    .is_some_and(|layer| layer.is_off() || layer.is_frozen())
                 || resolve_source(&self.document, data).is_none()
             {
                 continue;
             }
             let color = if matches!(common.color, codec::types::Color::ByLayer) {
-                self.document.layers.get(&common.layer).map(|layer| layer.color.clone()).unwrap_or(common.color.clone())
+                self.document
+                    .layers
+                    .get(&common.layer)
+                    .map(|layer| layer.color.clone())
+                    .unwrap_or(common.color.clone())
             } else {
                 common.color.clone()
             };
@@ -8858,7 +8943,12 @@ impl Scene {
             wires.push(WireModel::solid_f64(
                 common.handle.value().to_string(),
                 crate::entities::extended::point_cloud_2d_style_lines(data),
-                [f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0],
+                [
+                    f32::from(r) / 255.0,
+                    f32::from(g) / 255.0,
+                    f32::from(b) / 255.0,
+                    1.0,
+                ],
                 false,
             ));
         }
@@ -9078,7 +9168,10 @@ impl Scene {
                     );
                 }
                 if self.count_display.is_some() {
-                    let own = transformed.instance_color.or(set.display_color()).unwrap_or([1.0; 4]);
+                    let own = transformed
+                        .instance_color
+                        .or(set.display_color())
+                        .unwrap_or([1.0; 4]);
                     let color = self.count_color(context.root_handle, own, self.current_bg());
                     transformed.instance_color = Some(color);
                     if let Some(material) = transformed.material.as_mut() {
@@ -11151,8 +11244,14 @@ impl Scene {
         let t_build = perf.then(iced::time::Instant::now);
         let mut wires: Vec<WireModel> = if memo_active {
             // Invalidate when any baked display input changes.
-            let guard =
-                tess_memo_guard(view_aabb, anno, annotation_scale_handle, all_visible, bg, avp);
+            let guard = tess_memo_guard(
+                view_aabb,
+                anno,
+                annotation_scale_handle,
+                all_visible,
+                bg,
+                avp,
+            );
             let (memo_cell, guard_cell) = if resident {
                 (&self.resident_tess_memo, &self.resident_tess_guard)
             } else {
@@ -11218,8 +11317,7 @@ impl Scene {
                 for (h, a) in miss_pairs {
                     // Uniquely owned (just built above): enrich solid shells
                     // with B-rep vertex snaps before the memo/assembly split.
-                    let mut wires =
-                        Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
+                    let mut wires = Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
                     self.attach_solid_snaps(h, &mut wires);
                     let a = Arc::new(wires);
                     out.extend(a.iter().cloned());
@@ -12525,11 +12623,12 @@ mod section_tests {
     #[test]
     fn instance_transform_pulls_the_section_plane_into_body_space() {
         let body = kernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
-        let transform =
-            codec::types::Transform::from_scaling(codec::types::Vector3::new(2.0, 1.0, 1.0))
-                .then(&codec::types::Transform::from_translation(
-                    codec::types::Vector3::new(10.0, 0.0, 0.0),
-                ));
+        let transform = codec::types::Transform::from_scaling(codec::types::Vector3::new(
+            2.0, 1.0, 1.0,
+        ))
+        .then(&codec::types::Transform::from_translation(
+            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        ));
         let mut data = section(1, 0.0);
         for point in &mut data.vertices {
             point.x = 20.0;
@@ -13042,8 +13141,19 @@ mod journal_tests {
         hatch.common.layer = "Shadows".to_string();
         let handle = scene.add_entity(EntityType::Hatch(hatch));
         let model = scene.model_space_block_handle();
-        assert_eq!(scene.document.get_entity(handle).unwrap().common().owner_handle, model);
-        scene.document.objects.retain(|_, object| !matches!(object, ObjectType::Layout(_)));
+        assert_eq!(
+            scene
+                .document
+                .get_entity(handle)
+                .unwrap()
+                .common()
+                .owner_handle,
+            model
+        );
+        scene
+            .document
+            .objects
+            .retain(|_, object| !matches!(object, ObjectType::Layout(_)));
         scene.invalidate_dependency_index();
 
         let targets = scene.dependency_targets(DependencyKind::Layer, &["Shadows".to_string()]);
@@ -13054,7 +13164,10 @@ mod journal_tests {
         scene.document.layers.get_mut("Shadows").unwrap().flags.off = true;
         let epoch = scene.geometry_epoch;
         scene.invalidate_layer_dependencies(&["Shadows".to_string()]);
-        assert_ne!(scene.geometry_epoch, epoch, "the cached hatch needs an entity delta");
+        assert_ne!(
+            scene.geometry_epoch, epoch,
+            "the cached hatch needs an entity delta"
+        );
     }
 
     /// The loader's handed-over draw depths must equal a local rebuild.

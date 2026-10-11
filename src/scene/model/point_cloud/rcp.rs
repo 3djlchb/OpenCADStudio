@@ -54,7 +54,12 @@ pub fn scans(bytes: &[u8], project: &Path) -> Option<Vec<ScanEntry>> {
         if nodes.is_empty() {
             continue;
         }
-        return Some(nodes.into_iter().filter_map(|node| entry(node, folder)).collect());
+        return Some(
+            nodes
+                .into_iter()
+                .filter_map(|node| entry(node, folder))
+                .collect(),
+        );
     }
     None
 }

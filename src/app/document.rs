@@ -509,8 +509,7 @@ impl DocumentTab {
                     false,
                 ),
             };
-            if let Some(codec::EntityType::Viewport(vp)) = self.scene.document.get_entity_mut(h)
-            {
+            if let Some(codec::EntityType::Viewport(vp)) = self.scene.document.get_entity_mut(h) {
                 vp.ucs_origin = o;
                 vp.ucs_x_axis = x;
                 vp.ucs_y_axis = y;

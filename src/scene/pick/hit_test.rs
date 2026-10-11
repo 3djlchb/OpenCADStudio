@@ -552,7 +552,11 @@ pub fn click_hits_all<'a, W: WireSource + ?Sized>(
             previous = Some(screen);
         }
     }
-    hits.extend(marker_hits.into_iter().map(|(name, distance)| (distance, name)));
+    hits.extend(
+        marker_hits
+            .into_iter()
+            .map(|(name, distance)| (distance, name)),
+    );
     if let Some(segments) = wires.segments() {
         let mut best_by_wire: HashMap<u32, f32> = HashMap::default();
         for segment in segments {
@@ -817,11 +821,7 @@ pub(crate) fn mesh_edge_click_hit<'a>(
     bounds: Rectangle,
     tolerance_px: f32,
 ) -> Option<Handle> {
-    if cursor.x < 0.0
-        || cursor.x > bounds.width
-        || cursor.y < 0.0
-        || cursor.y > bounds.height
-    {
+    if cursor.x < 0.0 || cursor.x > bounds.width || cursor.y < 0.0 || cursor.y > bounds.height {
         return None;
     }
     let tolerance = tolerance_px.max(1.0);
@@ -831,9 +831,7 @@ pub(crate) fn mesh_edge_click_hit<'a>(
             continue;
         }
         let model = transform.map(codec_transform_matrix);
-        if model.is_some_and(|matrix| {
-            !matrix.is_finite() || matrix.determinant().abs() <= 1e-18
-        }) {
+        if model.is_some_and(|matrix| !matrix.is_finite() || matrix.determinant().abs() <= 1e-18) {
             continue;
         }
         for pair_start in (0..edges.len() - 1).step_by(2) {
@@ -863,11 +861,8 @@ pub(crate) fn mesh_edge_click_hit<'a>(
                     (1.0 - point.y) * 0.5 * bounds.height,
                 )
             };
-            let distance = dist_point_to_segment(
-                cursor,
-                to_screen(first_ndc),
-                to_screen(second_ndc),
-            );
+            let distance =
+                dist_point_to_segment(cursor, to_screen(first_ndc), to_screen(second_ndc));
             if distance > tolerance {
                 continue;
             }
@@ -912,7 +907,8 @@ pub(crate) fn mesh_click_handle_point<'a>(
     eye: glam::DVec3,
     bounds: Rectangle,
 ) -> Option<(Handle, glam::DVec3)> {
-    mesh_click_result(cursor, meshes, view_rot, eye, bounds).map(|(_, handle, point)| (handle, point))
+    mesh_click_result(cursor, meshes, view_rot, eye, bounds)
+        .map(|(_, handle, point)| (handle, point))
 }
 
 fn mesh_click_result<'a>(
@@ -960,7 +956,9 @@ fn mesh_click_result<'a>(
             }
             let inverse = model.inverse();
             let origin = inverse.transform_point3(near);
-            let direction = inverse.transform_vector3(world_direction).normalize_or_zero();
+            let direction = inverse
+                .transform_vector3(world_direction)
+                .normalize_or_zero();
             (origin, direction)
         } else {
             (near, world_direction)
@@ -1017,10 +1015,22 @@ fn mesh_click_result<'a>(
 fn codec_transform_matrix(transform: codec::types::Transform) -> glam::DMat4 {
     let matrix = transform.matrix.m;
     glam::DMat4::from_cols_array(&[
-        matrix[0][0], matrix[1][0], matrix[2][0], matrix[3][0],
-        matrix[0][1], matrix[1][1], matrix[2][1], matrix[3][1],
-        matrix[0][2], matrix[1][2], matrix[2][2], matrix[3][2],
-        matrix[0][3], matrix[1][3], matrix[2][3], matrix[3][3],
+        matrix[0][0],
+        matrix[1][0],
+        matrix[2][0],
+        matrix[3][0],
+        matrix[0][1],
+        matrix[1][1],
+        matrix[2][1],
+        matrix[3][1],
+        matrix[0][2],
+        matrix[1][2],
+        matrix[2][2],
+        matrix[3][2],
+        matrix[0][3],
+        matrix[1][3],
+        matrix[2][3],
+        matrix[3][3],
     ])
 }
 
@@ -1080,11 +1090,7 @@ fn ray_triangle(
 /// without the low residual the f32 high alone is ~0.5 m off at UTM scale and
 /// box / lasso / face selection lands on the wrong place.
 #[inline]
-fn mesh_vert(
-    hi: [f32; 3],
-    low: &[[f32; 3]],
-    i: usize,
-) -> glam::DVec3 {
+fn mesh_vert(hi: [f32; 3], low: &[[f32; 3]], i: usize) -> glam::DVec3 {
     let l = low.get(i).copied().unwrap_or([0.0; 3]);
     glam::DVec3::new(
         hi[0] as f64 + l[0] as f64,
@@ -1144,13 +1150,7 @@ pub fn mesh_box_hit<'a>(
     a: Point,
     b: Point,
     crossing: bool,
-    meshes: impl Iterator<
-        Item = (
-            Handle,
-            &'a MeshModel,
-            Option<codec::types::Transform>,
-        ),
-    >,
+    meshes: impl Iterator<Item = (Handle, &'a MeshModel, Option<codec::types::Transform>)>,
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
@@ -1188,13 +1188,7 @@ pub fn mesh_box_hit<'a>(
 pub fn mesh_poly_hit<'a>(
     poly: &[Point],
     crossing: bool,
-    meshes: impl Iterator<
-        Item = (
-            Handle,
-            &'a MeshModel,
-            Option<codec::types::Transform>,
-        ),
-    >,
+    meshes: impl Iterator<Item = (Handle, &'a MeshModel, Option<codec::types::Transform>)>,
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
@@ -1424,8 +1418,7 @@ fn indexed_box_crossing_hits<'a, W: WireSource + ?Sized>(
         if already(&wire_hit, glyph.wire) {
             continue;
         }
-        let Some(screen) =
-            projected_text_quad(wire, glyph.start as usize, view_rot, eye, bounds)
+        let Some(screen) = projected_text_quad(wire, glyph.start as usize, view_rot, eye, bounds)
         else {
             continue;
         };
@@ -1654,8 +1647,7 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
         if seen.contains(wire.name.as_str()) {
             continue;
         }
-        let Some(screen) =
-            projected_text_quad(wire, glyph.start as usize, view_rot, eye, bounds)
+        let Some(screen) = projected_text_quad(wire, glyph.start as usize, view_rot, eye, bounds)
         else {
             continue;
         };
@@ -1739,13 +1731,7 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
     let box_br = Point { x: max_x, y: max_y };
     let box_corners = [box_tl, box_tr, box_br, box_bl];
     if crossing && wires.segments().is_some() {
-        return indexed_box_crossing_hits(
-            wires,
-            box_corners,
-            view_rot,
-            eye,
-            bounds,
-        );
+        return indexed_box_crossing_hits(wires, box_corners, view_rot, eye, bounds);
     }
 
     if crossing {
@@ -1897,7 +1883,8 @@ pub fn box_hit<'a, W: WireSource + ?Sized>(
             let mut glyphs_inside = true;
             if all_inside && glyphs_present {
                 for start in (0..wire.text_verts.len()).step_by(6) {
-                    let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds) else {
+                    let Some(screen) = projected_text_quad(wire, start, view_rot, eye, bounds)
+                    else {
                         continue;
                     };
                     if !screen.iter().copied().all(inside) {
@@ -2711,16 +2698,43 @@ mod aabb_reject_tests {
 
         let eye = glam::DVec3::ZERO;
         assert_eq!(
-            click_hit(cursor, std::slice::from_ref(&near), vp, eye, bounds, true, 8.0, &HashMap::default()),
+            click_hit(
+                cursor,
+                std::slice::from_ref(&near),
+                vp,
+                eye,
+                bounds,
+                true,
+                8.0,
+                &HashMap::default()
+            ),
             Some("5")
         );
         assert_eq!(
-            click_hit(cursor, std::slice::from_ref(&far), vp, eye, bounds, true, 8.0, &HashMap::default()),
+            click_hit(
+                cursor,
+                std::slice::from_ref(&far),
+                vp,
+                eye,
+                bounds,
+                true,
+                8.0,
+                &HashMap::default()
+            ),
             None
         );
         // The far wire must be rejected without hiding the near one.
         assert_eq!(
-            click_hit(cursor, &[far, near], vp, eye, bounds, true, 8.0, &HashMap::default()),
+            click_hit(
+                cursor,
+                &[far, near],
+                vp,
+                eye,
+                bounds,
+                true,
+                8.0,
+                &HashMap::default()
+            ),
             Some("5")
         );
     }
@@ -2823,21 +2837,51 @@ mod aabb_reject_tests {
 
         // Crossing mode selects "4F" because wire_arc is inside:
         assert_eq!(
-            box_hit(box_a, box_b, true, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            box_hit(
+                box_a,
+                box_b,
+                true,
+                &wires,
+                Mat4::IDENTITY,
+                glam::DVec3::ZERO,
+                bounds
+            ),
             vec!["4F"]
         );
         assert_eq!(
-            poly_hit(&poly_small, true, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            poly_hit(
+                &poly_small,
+                true,
+                &wires,
+                Mat4::IDENTITY,
+                glam::DVec3::ZERO,
+                bounds
+            ),
             vec!["4F"]
         );
 
         // Window mode MUST NOT select "4F" because wire_lines has a vertex at (0.8, 0.8) -> (180.0, 20.0) outside:
         assert_eq!(
-            box_hit(box_a, box_b, false, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            box_hit(
+                box_a,
+                box_b,
+                false,
+                &wires,
+                Mat4::IDENTITY,
+                glam::DVec3::ZERO,
+                bounds
+            ),
             Vec::<&str>::new()
         );
         assert_eq!(
-            poly_hit(&poly_small, false, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            poly_hit(
+                &poly_small,
+                false,
+                &wires,
+                Mat4::IDENTITY,
+                glam::DVec3::ZERO,
+                bounds
+            ),
             Vec::<&str>::new()
         );
 
@@ -2853,11 +2897,26 @@ mod aabb_reject_tests {
 
         // Window mode now selects "4F" once (deduplicated):
         assert_eq!(
-            box_hit(big_a, big_b, false, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            box_hit(
+                big_a,
+                big_b,
+                false,
+                &wires,
+                Mat4::IDENTITY,
+                glam::DVec3::ZERO,
+                bounds
+            ),
             vec!["4F"]
         );
         assert_eq!(
-            poly_hit(&poly_big, false, &wires, Mat4::IDENTITY, glam::DVec3::ZERO, bounds),
+            poly_hit(
+                &poly_big,
+                false,
+                &wires,
+                Mat4::IDENTITY,
+                glam::DVec3::ZERO,
+                bounds
+            ),
             vec!["4F"]
         );
     }
@@ -2881,12 +2940,7 @@ mod parallel_selection_tests {
                         [x + 0.01 * f, y + 0.01 * f, 0.0]
                     })
                     .collect();
-                let mut w = WireModel::solid(
-                    (i as u64 + 1).to_string(),
-                    points,
-                    [1.0; 4],
-                    false,
-                );
+                let mut w = WireModel::solid((i as u64 + 1).to_string(), points, [1.0; 4], false);
                 w.aabb = [x, y, x + 0.01, y + 0.01];
                 w
             })

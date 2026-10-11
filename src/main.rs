@@ -5,10 +5,10 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use OpenCADStudio::app;
-#[cfg(not(target_arch = "wasm32"))]
-use OpenCADStudio::{cli, io, mcp, rest};
 #[cfg(target_arch = "wasm32")]
 use OpenCADStudio::sys;
+#[cfg(not(target_arch = "wasm32"))]
+use OpenCADStudio::{cli, io, mcp, rest};
 
 fn main() -> iced::Result {
     // Web (wasm) uses the single-window entry; native uses the multi-window
@@ -72,7 +72,9 @@ fn main() -> iced::Result {
             if synced {
                 println!("Successfully synchronized OpenCADStudio MCP schemas to ~/.gemini/antigravity/mcp/opencadstudio/");
             } else {
-                eprintln!("Antigravity MCP directory ~/.gemini/antigravity/mcp/ not found; skipped sync.");
+                eprintln!(
+                    "Antigravity MCP directory ~/.gemini/antigravity/mcp/ not found; skipped sync."
+                );
             }
             return Ok(());
         }

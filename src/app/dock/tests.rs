@@ -39,7 +39,9 @@ fn dock_app() -> OpenCADStudio {
 
 /// Where the current dock drag would land, if it has started.
 fn drag_target(app: &OpenCADStudio) -> Option<crate::ui::dock::DropTarget> {
-    app.dock_drag.and_then(|d| d.movement()).and_then(|(_, _, target)| target)
+    app.dock_drag
+        .and_then(|d| d.movement())
+        .and_then(|(_, _, target)| target)
 }
 
 /// Press `id`'s title bar at `from`, drag to `to`, and return the target
@@ -205,7 +207,10 @@ fn dock_drop_over_the_viewport_floats_the_panel() {
     );
     assert!(matches!(target, Some(DropTarget::Float { .. })));
     assert!(app.dock.right.is_empty());
-    let f = app.dock.float_rect(PanelId::BlockPalette).expect("floating");
+    let f = app
+        .dock
+        .float_rect(PanelId::BlockPalette)
+        .expect("floating");
     assert!(f.x > 600.0 && f.x < 800.0 && f.y > 350.0 && f.y < 400.0);
     // Dragging a floating panel keeps the grab point under the pointer.
     let target = drag_panel(
@@ -214,7 +219,13 @@ fn dock_drop_over_the_viewport_floats_the_panel() {
         iced::Point::new(f.x + 20.0, f.y + 10.0),
         iced::Point::new(f.x + 120.0, f.y + 60.0),
     );
-    assert_eq!(target, Some(DropTarget::Float { x: f.x + 100.0, y: f.y + 50.0 }));
+    assert_eq!(
+        target,
+        Some(DropTarget::Float {
+            x: f.x + 100.0,
+            y: f.y + 50.0
+        })
+    );
     // Opening a floating panel must not re-dock it.
     assert!(app.dock.is_placed(PanelId::BlockPalette));
 }
@@ -233,7 +244,10 @@ fn dock_dragging_an_icon_into_another_group_lands_between_its_icons() {
     let (layout, _) = app.dock_strip_layout(DockSide::Left);
     // Drag the Blocks icon (group 1) to between Properties and Browser.
     let _ = app.on_dock(DockMsg::IconPress(PanelId::BlockPalette));
-    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(20.0, layout[1].icons_top + 10.0)));
+    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(
+        20.0,
+        layout[1].icons_top + 10.0,
+    )));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(
         20.0,
         layout[0].icons_top + STRIP_CELL_H + 2.0,
@@ -267,7 +281,10 @@ fn dock_grip_drag_moves_a_whole_group() {
     app.dock.right.clear();
     let (layout, plus_top) = app.dock_strip_layout(DockSide::Left);
     let _ = app.on_dock(DockMsg::GroupGrab(DockSide::Left, 0));
-    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, layout[0].top + 2.0)));
+    let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(
+        18.0,
+        layout[0].top + 2.0,
+    )));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(18.0, plus_top + 10.0)));
     let _ = app.on_dock(DockMsg::DragRelease);
     assert_eq!(app.dock.left[0].panels, vec![PanelId::BlockPalette]);
@@ -309,7 +326,10 @@ fn dock_splitter_drag_changes_pallet_heights() {
     use crate::app::config::DockSide;
     use crate::ui::dock::{DockGroup, DockMsg, PanelId};
     let mut app = dock_app();
-    app.dock.left = vec![DockGroup::stack(vec![PanelId::BlockPalette, PanelId::Properties])];
+    app.dock.left = vec![DockGroup::stack(vec![
+        PanelId::BlockPalette,
+        PanelId::Properties,
+    ])];
     app.dock.right.clear();
     let _ = app.on_dock(DockMsg::SplitGrab(DockSide::Left, 0, 0, 1));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(100.0, 450.0)));
@@ -361,7 +381,13 @@ fn dock_hover_reveals_groups_only_on_an_auto_hiding_edge() {
 fn dock_float_resize_grows_the_panel() {
     use crate::ui::dock::{DockMsg, FloatPanel, PanelId};
     let mut app = dock_app();
-    app.dock.float(FloatPanel::new(PanelId::BlockPalette, 100.0, 100.0, 260.0, 300.0));
+    app.dock.float(FloatPanel::new(
+        PanelId::BlockPalette,
+        100.0,
+        100.0,
+        260.0,
+        300.0,
+    ));
     let _ = app.on_dock(DockMsg::FloatResizeGrab(PanelId::BlockPalette, false));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(360.0, 400.0)));
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(400.0, 450.0)));
@@ -395,16 +421,25 @@ fn dock_edge_menu_adds_and_hides_pallets() {
     // Unchecking hides it but keeps its place.
     let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
     assert!(!app.show_browser);
-    assert_eq!(app.dock.location(PanelId::Browser), Some((DockSide::Left, 1)));
+    assert_eq!(
+        app.dock.location(PanelId::Browser),
+        Some((DockSide::Left, 1))
+    );
     // Opening it again from the same edge reuses that place.
     let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
     assert_eq!(app.dock.left.len(), 2);
     // A pallet open on the other edge is not checked here: picking it
     // moves it over instead of hiding it.
-    let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::BlockPalette));
+    let _ = app.on_dock(DockMsg::EdgeMenuToggle(
+        DockSide::Left,
+        PanelId::BlockPalette,
+    ));
     assert!(app.show_block_palette);
     assert!(app.dock.right.is_empty());
-    assert_eq!(app.dock.location(PanelId::BlockPalette), Some((DockSide::Left, 2)));
+    assert_eq!(
+        app.dock.location(PanelId::BlockPalette),
+        Some((DockSide::Left, 2))
+    );
 }
 
 #[test]
@@ -435,7 +470,10 @@ fn layers_command_opens_a_floating_pallet_and_toggles_it_closed() {
     let _ = app.update(Message::ToggleLayers);
     assert!(app.show_layers);
     assert!(app.active_modal.is_none(), "no modal backdrop");
-    let f = app.dock.float_rect(PanelId::Layers).expect("floats on first use");
+    let f = app
+        .dock
+        .float_rect(PanelId::Layers)
+        .expect("floats on first use");
     assert!(f.x > 0.0 && f.y >= 0.0);
     let _ = app.update(Message::ToggleLayers);
     assert!(!app.show_layers);
@@ -467,10 +505,9 @@ fn find_in_view(app: &OpenCADStudio, label: &str) -> iced::Point {
     let mut find = Selector::find(label);
     ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
     match widget::Operation::finish(&find) {
-        widget::operation::Outcome::Some(Some(target)) => target
-            .visible_bounds()
-            .expect("visible")
-            .center(),
+        widget::operation::Outcome::Some(Some(target)) => {
+            target.visible_bounds().expect("visible").center()
+        }
         _ => panic!("{label} not found"),
     }
 }
@@ -510,11 +547,16 @@ fn docked_title_bar_double_click_floats_the_pallet_in_the_real_view() {
     use crate::ui::dock::PanelId;
     let mut app = dock_app();
     let press = iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
-    let release =
-        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left));
+    let release = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+        iced::mouse::Button::Left,
+    ));
     // The block palette's title text sits in its docked title bar.
     let title = find_in_view(&app, "Blocks");
-    drive_view(&mut app, title, &[press.clone(), release.clone(), press, release]);
+    drive_view(
+        &mut app,
+        title,
+        &[press.clone(), release.clone(), press, release],
+    );
     assert!(
         app.dock.float_rect(PanelId::BlockPalette).is_some(),
         "a double-click on a docked title bar floats the pallet"
@@ -541,7 +583,9 @@ fn hovering_a_strip_icon_reveals_an_auto_hiding_edge_in_the_real_view() {
     drive_view(
         &mut app,
         icon,
-        &[iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: icon })],
+        &[iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: icon,
+        })],
     );
     let _ = app.on_dock(DockMsg::HoverSettled(app.dock_hover_gen));
     assert!(
@@ -577,7 +621,10 @@ fn dock_double_clicks_float_and_dock_panels() {
     assert!(f.x > 0.0, "floats clear of the left edge");
     let _ = app.on_dock(DockMsg::DockTo(PanelId::Properties, DockSide::Right));
     assert!(app.dock.floating.is_empty());
-    assert_eq!(app.dock.location(PanelId::Properties), Some((DockSide::Right, 1)));
+    assert_eq!(
+        app.dock.location(PanelId::Properties),
+        Some((DockSide::Right, 1))
+    );
 }
 
 #[test]
@@ -607,11 +654,17 @@ fn floating_menu_docks_and_allow_docking_keeps_a_drag_floating() {
     let _ = app.on_dock(DockMsg::DragMove(iced::Point::new(10.0, 60.0)));
     assert!(matches!(drag_target(&app), Some(DropTarget::Float { .. })));
     let _ = app.on_dock(DockMsg::DragRelease);
-    let f = app.dock.float_rect(PanelId::BlockPalette).expect("still floating");
+    let f = app
+        .dock
+        .float_rect(PanelId::BlockPalette)
+        .expect("still floating");
     assert!(!f.docking, "moving it keeps the choice");
     // The menu's Dock left still docks it.
     let _ = app.on_dock(DockMsg::FloatMenu(Some(PanelId::BlockPalette)));
     let _ = app.on_dock(DockMsg::DockTo(PanelId::BlockPalette, DockSide::Left));
     assert_eq!(app.dock_float_menu, None);
-    assert_eq!(app.dock.location(PanelId::BlockPalette).map(|(s, _)| s), Some(DockSide::Left));
+    assert_eq!(
+        app.dock.location(PanelId::BlockPalette).map(|(s, _)| s),
+        Some(DockSide::Left)
+    );
 }

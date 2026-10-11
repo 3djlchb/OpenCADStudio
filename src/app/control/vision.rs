@@ -4,16 +4,36 @@ use serde_json::{json, Value};
 
 /// 5x7 bitmapped font glyphs for digits '0' through '9'
 const DIGITS_5X7: [[u8; 7]; 10] = [
-    [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110], // 0
-    [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110], // 1
-    [0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111], // 2
-    [0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110], // 3
-    [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010], // 4
-    [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110], // 5
-    [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110], // 6
-    [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000], // 7
-    [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110], // 8
-    [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100], // 9
+    [
+        0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+    ], // 0
+    [
+        0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+    ], // 1
+    [
+        0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111,
+    ], // 2
+    [
+        0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
+    ], // 3
+    [
+        0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+    ], // 4
+    [
+        0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+    ], // 5
+    [
+        0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+    ], // 6
+    [
+        0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+    ], // 7
+    [
+        0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+    ], // 8
+    [
+        0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+    ], // 9
 ];
 
 /// Draw a Set-of-Marks badge at `(center_x, center_y)` onto `image`.
@@ -220,7 +240,8 @@ pub(crate) fn compute_grounding(
 
     for entity in tab.scene.document.entities() {
         let handle = entity.common().handle;
-        let (b_min, b_max) = crate::scene::convert::tess::entity_bounds_in(&tab.scene.document, entity);
+        let (b_min, b_max) =
+            crate::scene::convert::tess::entity_bounds_in(&tab.scene.document, entity);
         let min_dvec = glam::DVec3::from(b_min);
         let max_dvec = glam::DVec3::from(b_max);
         if !min_dvec.is_finite() || !max_dvec.is_finite() {
@@ -277,9 +298,11 @@ pub(crate) fn compute_grounding(
 
     // Selected entities prioritized, then larger visual area first
     candidates.sort_by(|a, b| {
-        b.selected
-            .cmp(&a.selected)
-            .then_with(|| b.area.partial_cmp(&a.area).unwrap_or(std::cmp::Ordering::Equal))
+        b.selected.cmp(&a.selected).then_with(|| {
+            b.area
+                .partial_cmp(&a.area)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     });
 
     candidates.truncate(64);
@@ -373,7 +396,8 @@ pub(crate) fn compute_visual_diff(
                 diff_overlay.put_pixel(x, y, image::Rgba([0, 255, 128, 255]));
             } else {
                 // Dim unchanged background: grayscale attenuated to 35%
-                let gray = ((p2[0] as f32 * 0.299 + p2[1] as f32 * 0.587 + p2[2] as f32 * 0.114) * 0.35) as u8;
+                let gray = ((p2[0] as f32 * 0.299 + p2[1] as f32 * 0.587 + p2[2] as f32 * 0.114)
+                    * 0.35) as u8;
                 diff_overlay.put_pixel(x, y, image::Rgba([gray, gray, gray, 200]));
             }
         }

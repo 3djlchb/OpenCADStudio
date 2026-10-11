@@ -48,7 +48,11 @@ fn image_mode_from_flags(flags: i16) -> Option<i16> {
 }
 
 fn image_flags_from_mode(mode: i16) -> i16 {
-    if mode == 2 { 3 } else { mode }
+    if mode == 2 {
+        3
+    } else {
+        mode
+    }
 }
 
 fn root_entry(document: &CadDocument, name: &str) -> Option<Handle> {
@@ -71,13 +75,21 @@ fn root_entry(document: &CadDocument, name: &str) -> Option<Handle> {
 }
 
 fn raster_variables_handle(document: &CadDocument) -> Option<Handle> {
-    root_entry(document, "ACAD_IMAGE_VARS")
-        .filter(|handle| matches!(document.objects.get(handle), Some(ObjectType::RasterVariables(_))))
+    root_entry(document, "ACAD_IMAGE_VARS").filter(|handle| {
+        matches!(
+            document.objects.get(handle),
+            Some(ObjectType::RasterVariables(_))
+        )
+    })
 }
 
 fn wipeout_variables_handle(document: &CadDocument) -> Option<Handle> {
-    root_entry(document, "ACAD_WIPEOUT_VARS")
-        .filter(|handle| matches!(document.objects.get(handle), Some(ObjectType::WipeoutVariables(_))))
+    root_entry(document, "ACAD_WIPEOUT_VARS").filter(|handle| {
+        matches!(
+            document.objects.get(handle),
+            Some(ObjectType::WipeoutVariables(_))
+        )
+    })
 }
 
 fn drawing_mode(document: &CadDocument, name: &str, default: i16) -> i16 {
@@ -186,11 +198,9 @@ pub(crate) fn set_mode(document: &mut CadDocument, kind: FrameKind, value: i16) 
         FrameKind::Dgn => document.header.dgn_frame = value,
         FrameKind::Wipeout => set_wipeout_mode(document, value),
         FrameKind::Xclip => document.header.xclip_frame = value,
-        FrameKind::PointCloudClip => crate::io::set_drawing_variable(
-            document,
-            "POINTCLOUDCLIPFRAME",
-            &value.to_string(),
-        ),
+        FrameKind::PointCloudClip => {
+            crate::io::set_drawing_variable(document, "POINTCLOUDCLIPFRAME", &value.to_string())
+        }
     }
 }
 

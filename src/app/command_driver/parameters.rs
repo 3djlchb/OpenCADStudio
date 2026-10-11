@@ -129,10 +129,7 @@ impl OpenCADStudio {
             self.command_line.push_error(&error.to_string());
             return;
         }
-        if !table
-            .resolve(&target)
-            .is_ok_and(|value| value.is_finite())
-        {
+        if !table.resolve(&target).is_ok_and(|value| value.is_finite()) {
             self.command_line.push_error("Invalid expression.");
             return;
         }
@@ -171,7 +168,12 @@ impl OpenCADStudio {
 
     /// Renames a parameter everywhere: the table, the expressions that use
     /// it and the constraints it drives.
-    pub(crate) fn rename_parameter(&mut self, i: usize, old: &str, new: &str) -> Result<(), String> {
+    pub(crate) fn rename_parameter(
+        &mut self,
+        i: usize,
+        old: &str,
+        new: &str,
+    ) -> Result<(), String> {
         use crate::scene::named_parameters::{is_reserved_name, is_valid_name, DrivingValue};
         let table = self.tabs[i].scene.named_parameters().clone();
         let Some(source) = table.get(old).map(|parameter| parameter.source.clone()) else {
@@ -181,7 +183,9 @@ impl OpenCADStudio {
             return Err(format!("Invalid parameter name {new}."));
         }
         let mut renamed = table.clone();
-        renamed.set(new, &source).map_err(|error| error.to_string())?;
+        renamed
+            .set(new, &source)
+            .map_err(|error| error.to_string())?;
         for parameter in table.iter() {
             if parameter.name == old {
                 continue;
@@ -221,7 +225,8 @@ impl OpenCADStudio {
                 .record_undo_parametric_constraints_before(scope, before);
             let set = self.tabs[i].scene.parametric_constraint_set_mut(scope);
             for constraint in &mut set.constraints {
-                if matches!(&constraint.driving_param, Some(DrivingValue::Named(name)) if name == old) {
+                if matches!(&constraint.driving_param, Some(DrivingValue::Named(name)) if name == old)
+                {
                     constraint.driving_param = Some(DrivingValue::Named(new.to_string()));
                 }
             }
@@ -902,22 +907,19 @@ impl OpenCADStudio {
     }
 
     pub(super) fn apply_continuous_constraints(&mut self, i: usize, new_handles: &[codec::Handle]) {
-        let supported_creation = self.tabs[i]
-            .active_cmd
-            .as_ref()
-            .is_some_and(|command| {
-                matches!(
-                    command.name(),
-                    "LINE"
-                        | "PLINE"
-                        | "POLYLINE"
-                        | "RECTANG"
-                        | "RECTANGLE"
-                        | "POLYGON"
-                        | "CIRCLE"
-                        | "ARC"
-                )
-            });
+        let supported_creation = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
+            matches!(
+                command.name(),
+                "LINE"
+                    | "PLINE"
+                    | "POLYLINE"
+                    | "RECTANG"
+                    | "RECTANGLE"
+                    | "POLYGON"
+                    | "CIRCLE"
+                    | "ARC"
+            )
+        });
         if supported_creation {
             self.apply_inferred_constraints(i, new_handles);
         }
