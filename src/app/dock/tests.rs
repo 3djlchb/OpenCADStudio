@@ -23,6 +23,20 @@ fn blockpalette_pin_toggles_autocollapse_and_close_hides() {
 
 /// A hermetic app with a 1600×900 workspace and the default dock layout
 /// (Properties left, block palette right), both shown.
+/// Run `f` on a thread with the stack the application's own threads get:
+/// building and driving the real view is deeper than a default test thread.
+/// One at a time: two headless renderers made in parallel crash the process.
+fn with_stack(f: impl FnOnce() + Send + 'static) {
+    static REAL_VIEW: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = REAL_VIEW.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(f)
+        .expect("spawn test thread")
+        .join()
+        .unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
 fn dock_app() -> OpenCADStudio {
     let mut app = fresh();
     // Tests load the user's persisted config; reset the dock to a known
@@ -544,54 +558,60 @@ fn drive_view(app: &mut OpenCADStudio, at: iced::Point, events: &[iced::Event]) 
 
 #[test]
 fn docked_title_bar_double_click_floats_the_pallet_in_the_real_view() {
-    use crate::ui::dock::PanelId;
-    let mut app = dock_app();
-    let press = iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
-    let release = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
-        iced::mouse::Button::Left,
-    ));
-    // The block palette's title text sits in its docked title bar.
-    let title = find_in_view(&app, "Blocks");
-    drive_view(
-        &mut app,
-        title,
-        &[press.clone(), release.clone(), press, release],
-    );
-    assert!(
-        app.dock.float_rect(PanelId::BlockPalette).is_some(),
-        "a double-click on a docked title bar floats the pallet"
-    );
+    // Building the real view is deeper than a default test thread's stack.
+    with_stack(|| {
+        use crate::ui::dock::PanelId;
+        let mut app = dock_app();
+        let press = iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
+        let release = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        ));
+        // The block palette's title text sits in its docked title bar.
+        let title = find_in_view(&app, "Blocks");
+        drive_view(
+            &mut app,
+            title,
+            &[press.clone(), release.clone(), press, release],
+        );
+        assert!(
+            app.dock.float_rect(PanelId::BlockPalette).is_some(),
+            "a double-click on a docked title bar floats the pallet"
+        );
+    });
 }
 
 #[test]
 fn hovering_a_strip_icon_reveals_an_auto_hiding_edge_in_the_real_view() {
-    use crate::app::config::DockSide;
-    use crate::ui::dock::{DockMsg, PanelId, STRIP_CELL_H, STRIP_PAD};
-    let mut app = dock_app();
-    // Mirror the layout onto the left so the block palette's title marks
-    // where the workspace starts, then auto-hide the right edge.
-    let title = find_in_view(&app, "Blocks");
-    let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::BlockPalette));
-    assert!(!app.dock_edge_expanded(DockSide::Right));
-    // The title bar text sits ~13 px below the workspace top; the strip's
-    // first icon is centred STRIP_PAD + half a cell below it.
-    let workspace_top = title.y - 13.0;
-    let icon = iced::Point::new(
-        VIEW_SIZE.width - crate::ui::dock::DOCK_STRIP_W / 2.0,
-        workspace_top + STRIP_PAD + STRIP_CELL_H / 2.0,
-    );
-    drive_view(
-        &mut app,
-        icon,
-        &[iced::Event::Mouse(iced::mouse::Event::CursorMoved {
-            position: icon,
-        })],
-    );
-    let _ = app.on_dock(DockMsg::HoverSettled(app.dock_hover_gen));
-    assert!(
-        app.dock_edge_expanded(DockSide::Right),
-        "hovering the icon reveals the auto-hiding edge"
-    );
+    // Building the real view is deeper than a default test thread's stack.
+    with_stack(|| {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId, STRIP_CELL_H, STRIP_PAD};
+        let mut app = dock_app();
+        // Mirror the layout onto the left so the block palette's title marks
+        // where the workspace starts, then auto-hide the right edge.
+        let title = find_in_view(&app, "Blocks");
+        let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::BlockPalette));
+        assert!(!app.dock_edge_expanded(DockSide::Right));
+        // The title bar text sits ~13 px below the workspace top; the strip's
+        // first icon is centred STRIP_PAD + half a cell below it.
+        let workspace_top = title.y - 13.0;
+        let icon = iced::Point::new(
+            VIEW_SIZE.width - crate::ui::dock::DOCK_STRIP_W / 2.0,
+            workspace_top + STRIP_PAD + STRIP_CELL_H / 2.0,
+        );
+        drive_view(
+            &mut app,
+            icon,
+            &[iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: icon,
+            })],
+        );
+        let _ = app.on_dock(DockMsg::HoverSettled(app.dock_hover_gen));
+        assert!(
+            app.dock_edge_expanded(DockSide::Right),
+            "hovering the icon reveals the auto-hiding edge"
+        );
+    });
 }
 
 #[test]
