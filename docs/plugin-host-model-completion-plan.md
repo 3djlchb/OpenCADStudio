@@ -352,8 +352,13 @@ replaces the entries atomically (handle, owner and name stay, the record's verba
 saves emit the new content); delete returns the removed record; list reports only the keys that address
 XRecords, in dictionary order. Undo: objects-map mutations are captured by the pending history's full structure
 snapshot, so each mutating call is one undo step whose undo restores the objects map byte-exactly, the
-auto-created dictionaries included. Evidence: `xrecord_crud_round_trips_refusals_and_list`,
+auto-created dictionaries included. Undo composition follows the entity-write contract: a mutation inside a
+plugin-opened `push_undo` scope joins that scope (a multi-write operation — entities and XRecords — is a single
+undo step under the plugin's label); only a scope-less mutation opens its own step. Evidence:
+`xrecord_crud_round_trips_refusals_and_list`,
 `xrecord_mutations_are_single_undo_steps_that_restore_objects` (four steps, refusal paths record none),
+`xrecord_writes_join_a_plugin_initiated_undo_scope` (3 creates + update + delete + a refusal + an entity write
+in one scope = one step, undone and redone whole),
 `xrecords_survive_dxf_and_dwg_round_trips` (typed entries reload from both writers), the IPC round-trips
 `xrecord_request_and_response_roundtrip` and `xrecord_requests_await_their_typed_responses`. The API is
 host-level and stands on its own; a Python mapping (`doc.xrecords`-style) is future work.

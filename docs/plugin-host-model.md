@@ -95,10 +95,13 @@ dictionaries are created on create only, so the first call seeds a plugin's
 namespace. The payload is the codec's typed `XRecordEntry` pairs — the host puts
 no opinion on the content. Names and path fragments are symbol-validated, and
 dictionary addressing follows the codec's case-insensitive lookup. Create never
-overwrites and update never creates; each refusal is decided before the undo step
-is recorded, so a failure changes nothing, and each change is one undo step whose
-undo restores the objects map byte-exactly, the auto-created dictionaries
-included. `list_xrecords` reports only the keys that address XRecords, in the
+overwrites and update never creates; each refusal is decided before the undo
+scope is touched, so a failure changes nothing, and each change joins a
+plugin-opened `push_undo` scope — the entity-write contract — so an operation
+composed of several writes (entities and XRecords) is a single undo step; with
+no scope open a change is one undo step of its own, whose undo restores the
+objects map byte-exactly, the auto-created dictionaries included.
+`list_xrecords` reports only the keys that address XRecords, in the
 dictionary's own order, so audits need no prior knowledge. Not yet mapped to
 Python.
 

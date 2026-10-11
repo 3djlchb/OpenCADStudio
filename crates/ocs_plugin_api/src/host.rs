@@ -1100,7 +1100,13 @@ pub trait HostApi {
     /// case-insensitive like dictionary lookups) happens **before** any change,
     /// so a failure leaves the drawing untouched. The record is registered in
     /// its dictionary and owned by it; the returned handle stays stable across
-    /// updates. The change is one undo step.
+    /// updates.
+    ///
+    /// Undo composition — the entity-write contract: a mutation performed
+    /// inside a plugin-opened [`HostApi::push_undo`] scope joins that scope,
+    /// so an operation composed of several writes (entities and XRecords) is
+    /// a single undo step under the plugin's own label. With no scope open
+    /// the change is one undo step of its own. Refusals record no undo step.
     fn create_xrecord(
         &mut self,
         _dictionary_path: &[&str],
@@ -1131,8 +1137,11 @@ pub trait HostApi {
     /// create anything silently. Identity (handle, owning dictionary) stays;
     /// the entries and their DWG handle-reference stream are replaced and the
     /// record's verbatim raw payloads are dropped, so subsequent saves emit the
-    /// new content. A refusal leaves the drawing untouched; a successful change
-    /// is one undo step whose undo restores the previous entries byte-exactly.
+    /// new content. A refusal leaves the drawing untouched. Undo composition —
+    /// the entity-write contract: a mutation inside a plugin-opened
+    /// [`HostApi::push_undo`] scope joins that scope; with no scope open it is
+    /// one undo step of its own, whose undo restores the previous entries
+    /// byte-exactly. Refusals record no undo step.
     fn update_xrecord(
         &mut self,
         _dictionary_path: &[&str],
@@ -1144,8 +1153,10 @@ pub trait HostApi {
 
     /// Delete the XRecord named `name` and its dictionary entry (API v8,
     /// additive). Returns the removed record, so audits keep the prior
-    /// content. A refusal leaves the drawing untouched; a successful delete is
-    /// one undo step.
+    /// content. A refusal leaves the drawing untouched. Undo composition — the
+    /// entity-write contract: a mutation inside a plugin-opened
+    /// [`HostApi::push_undo`] scope joins that scope; with no scope open it is
+    /// one undo step of its own. Refusals record no undo step.
     fn delete_xrecord(
         &mut self,
         _dictionary_path: &[&str],

@@ -2915,13 +2915,37 @@ impl<'a> HostSession<'a> {
         Ok(current)
     }
 
+    /// Undo composition for XRecord writes. Plugins may open one `push_undo`
+    /// scope for a whole operation — the same contract entity writes follow
+    /// (`add_entity` and friends perform no undo bookkeeping of their own) —
+    /// and every XRecord mutation inside it joins that open scope, so the
+    /// finished scope is a single undo step under the plugin's own label that
+    /// restores (and redoes) the whole operation at once. Only a mutation with
+    /// no scope open opens its own — and then the caller finishes it again,
+    /// keeping a scope-less call one undo step (the `table_operation` /
+    /// `update_entities_transaction` behavior). Refusals never reach this:
+    /// they are decided before any change. Returns whether this call opened
+    /// its own scope.
+    fn ensure_xrecord_undo_scope(&mut self, label: &str) -> bool {
+        if self.app.tabs[self.tab].history.pending.is_none() {
+            self.push_undo(label);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Create an XRecord named `name` under `dictionary_path`, storing
     /// `entries` (API v8, additive). Missing dictionaries on the path are
     /// created, so the first call seeds a plugin's namespace; the name must be
     /// unused (dictionary lookup is case-insensitive). Every refusal happens
-    /// before the undo step is recorded, so a failure changes nothing; the
+    /// before the undo scope is touched, so a failure changes nothing. The
     /// created record is registered in — and owned by — its dictionary, and
     /// the new handle is returned.
+    ///
+    /// Undo composition: a mutation inside a plugin-opened `push_undo` scope
+    /// joins it (see [`HostSession::ensure_xrecord_undo_scope`]); a scope-less
+    /// call is one undo step of its own.
     pub fn create_xrecord(
         &mut self,
         dictionary_path: &[&str],
@@ -2943,7 +2967,7 @@ impl<'a> HostSession<'a> {
                 }
             }
         }
-        self.push_undo("Create XRecord");
+        let own_scope = self.ensure_xrecord_undo_scope("Create XRecord");
         // The pre-check ruled out every failure mode; the walk now only creates
         // the dictionary fragments that were missing.
         let dictionary = self
@@ -2965,6 +2989,9 @@ impl<'a> HostSession<'a> {
         }
         self.set_dirty();
         self.publish_document_view();
+        if own_scope {
+            self.app.finish_pending_history(self.tab);
+        }
         Ok(handle)
     }
 
@@ -2990,7 +3017,10 @@ impl<'a> HostSession<'a> {
     /// dictionary, name) stays; the entries and their DWG handle-reference
     /// stream are replaced and the record's verbatim raw payloads are dropped,
     /// so later saves emit the new content. Every refusal happens before the
-    /// undo step is recorded.
+    /// undo scope is touched. Undo composition: a mutation inside a
+    /// plugin-opened `push_undo` scope joins it (see
+    /// [`HostSession::ensure_xrecord_undo_scope`]); a scope-less call is one
+    /// undo step of its own.
     pub fn update_xrecord(
         &mut self,
         dictionary_path: &[&str],
@@ -3000,7 +3030,7 @@ impl<'a> HostSession<'a> {
         use codec::objects::ObjectType;
         validated_xrecord_entries(&entries)?;
         let (_, _, handle) = self.xrecord_lookup(dictionary_path, name)?;
-        self.push_undo("Update XRecord");
+        let own_scope = self.ensure_xrecord_undo_scope("Update XRecord");
         let record = match self.document_mut().objects.get_mut(&handle) {
             Some(ObjectType::XRecord(record)) => record,
             _ => unreachable!("validated XRecord"),
@@ -3018,13 +3048,19 @@ impl<'a> HostSession<'a> {
         record.raw_dwg_version = None;
         self.set_dirty();
         self.publish_document_view();
+        if own_scope {
+            self.app.finish_pending_history(self.tab);
+        }
         Ok(handle)
     }
 
     /// Delete the XRecord named `name` and its dictionary entry (API v8,
     /// additive). Returns the removed record with its prior content, so audits
-    /// keep what they removed. Every refusal happens before the undo step is
-    /// recorded.
+    /// keep what they removed. Every refusal happens before the undo scope is
+    /// touched. Undo composition: a mutation inside a plugin-opened
+    /// `push_undo` scope joins it (see
+    /// [`HostSession::ensure_xrecord_undo_scope`]); a scope-less call is one
+    /// undo step of its own.
     pub fn delete_xrecord(
         &mut self,
         dictionary_path: &[&str],
@@ -3032,7 +3068,7 @@ impl<'a> HostSession<'a> {
     ) -> Result<codec::objects::XRecord, String> {
         use codec::objects::ObjectType;
         let (dictionary, name, handle) = self.xrecord_lookup(dictionary_path, name)?;
-        self.push_undo("Delete XRecord");
+        let own_scope = self.ensure_xrecord_undo_scope("Delete XRecord");
         let removed = match self.document_mut().objects.remove(&handle) {
             Some(ObjectType::XRecord(record)) => record,
             _ => unreachable!("validated XRecord"),
@@ -3046,6 +3082,9 @@ impl<'a> HostSession<'a> {
         }
         self.set_dirty();
         self.publish_document_view();
+        if own_scope {
+            self.app.finish_pending_history(self.tab);
+        }
         Ok(removed)
     }
 
@@ -4203,6 +4242,97 @@ mod tests {
         let document = &app.tabs[0].scene.document;
         assert_eq!(xrecord(document, alpha).unwrap().entries, changed_entries());
         assert!(xrecord(document, beta).is_none());
+    }
+
+    /// The entity-write composition contract, for XRecords: a plugin opens one
+    /// `push_undo` scope per operation and performs every write — XRecord and
+    /// entity, plus refusals — inside it, and the finished scope is a single
+    /// undo step under the plugin's own label that restores (and re-applies)
+    /// the whole operation at once.
+    #[test]
+    fn xrecord_writes_join_a_plugin_initiated_undo_scope() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let original_entries = || vec![codec::objects::XRecordEntry::string(1, "one")];
+        let changed_entries = || {
+            vec![
+                codec::objects::XRecordEntry::string(1, "changed"),
+                codec::objects::XRecordEntry::int16(70, 9),
+            ]
+        };
+        let (alpha, nested, entity);
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.push_undo("CVI: import");
+            alpha = host
+                .create_xrecord(&["CVIFC"], "alpha", original_entries())
+                .unwrap();
+            nested = host
+                .create_xrecord(&["CVIFC", "LAYOUTS"], "nested", original_entries())
+                .unwrap();
+            // A refusal inside the scope records nothing at all.
+            assert!(host
+                .create_xrecord(&["CVIFC"], "ALPHA", original_entries())
+                .is_err());
+            assert_eq!(
+                host.update_xrecord(&["CVIFC"], "alpha", changed_entries())
+                    .unwrap(),
+                alpha
+            );
+            let beta = host
+                .create_xrecord(&["CVIFC"], "beta", original_entries())
+                .unwrap();
+            let removed = host.delete_xrecord(&["CVIFC"], "beta").unwrap();
+            assert_eq!(removed.handle, beta);
+            // Entity writes join the same scope and land in the same step.
+            entity = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+                3.0, 0.0, 0.0,
+            ))));
+        }
+        app.finish_pending_history(0);
+        // The whole plugin operation is ONE undo step under the plugin's label.
+        assert_eq!(app.tabs[0].history.undo_stack.len(), 1);
+        assert_eq!(app.tabs[0].history.undo_stack[0].label(), "CVI: import");
+
+        let xrecord = |doc: &CadDocument, handle: Handle| -> Option<codec::objects::XRecord> {
+            match doc.objects.get(&handle) {
+                Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
+                _ => None,
+            }
+        };
+        let has_dictionary_entry = |doc: &CadDocument, name: &str| -> bool {
+            let root = doc.header.named_objects_dict_handle;
+            match doc.objects.get(&root) {
+                Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
+                    .entries
+                    .iter()
+                    .any(|(key, _)| key.eq_ignore_ascii_case(name)),
+                _ => false,
+            }
+        };
+
+        app.undo_steps(1);
+        let document = &app.tabs[0].scene.document;
+        assert!(document.get_entity(entity).is_none());
+        assert!(xrecord(document, alpha).is_none());
+        assert!(xrecord(document, nested).is_none());
+        assert!(
+            !has_dictionary_entry(document, "CVIFC"),
+            "undoing the operation removed its auto-created dictionary namespace"
+        );
+        app.redo_steps(1);
+        let document = &app.tabs[0].scene.document;
+        assert!(matches!(
+            document.get_entity(entity),
+            Some(EntityType::Point(_))
+        ));
+        let alpha_record = xrecord(document, alpha).unwrap();
+        assert_eq!(alpha_record.entries, changed_entries());
+        assert!(xrecord(document, nested).is_some());
+        assert!(
+            has_dictionary_entry(document, "CVIFC"),
+            "redoing the operation re-seeded its namespace"
+        );
     }
 
     #[test]
