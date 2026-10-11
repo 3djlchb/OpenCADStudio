@@ -63,7 +63,15 @@ pub fn view_window<'a>(
             ))
             .size(11)
             .style(muted_style),
-            container(scrollable(column(listed).spacing(2)).height(content_height))
+            // The right padding keeps the names clear of the scrollbar, which
+            // a list as wide as its longest name would otherwise draw over.
+            container(
+                scrollable(column(listed).spacing(2).padding(iced::Padding {
+                    right: 14.0,
+                    ..iced::Padding::ZERO
+                }))
+                .height(content_height),
+            )
                 .padding([10, 12])
                 .width(content_width)
                 .height(content_height)
