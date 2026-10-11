@@ -967,7 +967,11 @@ impl OpenCADStudio {
                     self.command_line.push_output(&line);
                 }
             }
-            "EXPORT" | "EXPORTPDF" => {
+            "EXPORT" => {
+                return Some(Task::done(Message::PlotExport));
+            }
+            "EXPORTPDF" => {
+                self.plot_dialog.file_svg = false;
                 return Some(Task::done(Message::PlotExport));
             }
             // EXPORTSVG — the same direct export, but the save dialog
