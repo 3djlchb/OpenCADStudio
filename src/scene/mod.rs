@@ -44,6 +44,7 @@ mod hatch_boundary;
 mod layout;
 mod limits;
 mod modify;
+pub(crate) use modify::remap_copied_reactors;
 mod mspace;
 pub mod named_parameters;
 mod page_setup;
@@ -2385,6 +2386,8 @@ pub struct Scene {
     /// Conservative association hint: unknown until scanned, then updated from
     /// changed entities. Retaining `true` after deletion only costs an extra scan.
     has_associative_centers: std::cell::Cell<Option<bool>>,
+    /// Conservative hint for whether any Underlay entities exist in the document.
+    pub(crate) has_underlays: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any Face3D entities exist in the document.
     pub(crate) has_face3d: std::cell::Cell<Option<bool>>,
     /// Cached resolved document render environment (fog and background image), keyed by (geometry_epoch, document.objects.len()).
@@ -2788,6 +2791,7 @@ impl Scene {
             glyph_cache: RefCell::new(None),
             named_parameters: named_parameters::ParameterTable::new(),
             has_associative_centers: std::cell::Cell::new(None),
+            has_underlays: std::cell::Cell::new(None),
             has_face3d: std::cell::Cell::new(None),
             document_render_env_cache: RefCell::new(None),
             background_image_cache: RefCell::new(HashMap::default()),
@@ -2874,6 +2878,9 @@ impl Scene {
     /// The view has moved to another scale step than the underlay rasters
     /// were made for (frames are requested until they are made again).
     pub fn underlay_resolution_stale(&self) -> bool {
+        if !self.has_underlays() {
+            return false;
+        }
         let Some(wpp) = self.world_per_pixel() else {
             return false;
         };
@@ -3417,6 +3424,19 @@ impl Scene {
         any
     }
 
+    /// Fast check for whether any Underlay entities exist in the document.
+    pub(crate) fn has_underlays(&self) -> bool {
+        if let Some(known) = self.has_underlays.get() {
+            return known;
+        }
+        let any = self
+            .document
+            .entities()
+            .any(|e| matches!(e, EntityType::Underlay(_)));
+        self.has_underlays.set(Some(any));
+        any
+    }
+
     /// Fast check for whether any Face3D entities exist in the document.
     pub(crate) fn has_face3d(&self) -> bool {
         if let Some(known) = self.has_face3d.get() {
@@ -3707,6 +3727,11 @@ impl Scene {
                     changes.push(change);
                 }
             }
+            for change in self.refresh_associative_sweeps(&changes) {
+                if !changes.iter().any(|(handle, _)| *handle == change.0) {
+                    changes.push(change);
+                }
+            }
             if solve_parametric && !self.parametric_constraints.is_empty() {
                 for change in self.refresh_parametric_constraints_with_initial_policy(
                     &changes,
@@ -3856,6 +3881,7 @@ impl Scene {
         self.lighting_cache.borrow_mut().clear();
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
+        self.has_underlays.set(None);
         self.has_face3d.set(None);
         // Default: also invalidate block definitions. Safe for every caller;
         // operations that know blocks are untouched use `bump_geometry_no_blocks`.
@@ -6405,7 +6431,13 @@ impl Scene {
         if self.current_layout == "Model" {
             return self.document.header.current_annotation_scale.clone();
         }
-        self.explicit_viewport_handle()
+        // Same viewport the pill number comes from (active → selected →
+        // first-content fallback), so label, number and badge always describe
+        // one viewport (#48). Degenerate case: with zero Scale objects the
+        // name falls back to paper/"1:1" while the number stays factual.
+        // The render paths use displayed_annotation_scale_HANDLE, which stays
+        // explicit-only — untouched by this fix.
+        self.target_viewport_handle()
             .and_then(|viewport| self.viewport_scale_handle(viewport))
             .and_then(|handle| match self.document.objects.get(&handle) {
                 Some(ObjectType::Scale(scale)) => Some(scale.name.clone()),
@@ -6504,7 +6536,8 @@ impl Scene {
     }
 
     pub fn viewport_annotation_scale_synced(&self) -> Option<bool> {
-        let viewport = self.explicit_viewport_handle()?;
+        // Same viewport as the pill number and label (#48).
+        let viewport = self.target_viewport_handle()?;
         let EntityType::Viewport(vp) = self.document.get_entity(viewport)? else {
             return None;
         };
@@ -7528,7 +7561,7 @@ impl Scene {
             let Some(EntityType::Viewport(viewport)) = self.document.get_entity(handle) else {
                 continue;
             };
-            if viewport.common.owner_handle != paper_block || !viewport.status.is_on {
+            if viewport.common.owner_handle != paper_block || !viewport.is_on() {
                 continue;
             }
             let mode = render_mode_override.unwrap_or(viewport.render_mode);
@@ -9745,12 +9778,28 @@ impl Scene {
                 }
             }
         }
+        let block = self.interaction_block_handle();
+        let frozen: Option<HashSet<Handle>> = self
+            .interaction_viewport_frozen_layers()
+            .map(|layers| layers.iter().copied().collect());
+        let annotation_scale_handle = self.displayed_annotation_scale_handle();
+        let all_visible = self.annotation_all_visible();
+
         let changed_live: Vec<Handle> = changes
             .iter()
             .filter_map(|(handle, kind)| {
-                (!matches!(kind, ChangeKind::Removed)
-                    && !self.entity_temporarily_hidden(*handle)
-                    && self.document.get_entity(*handle).is_some())
+                if matches!(kind, ChangeKind::Removed) {
+                    return None;
+                }
+
+                let entity = self.document.get_entity(*handle)?;
+                self.resident_entity_visible(
+                    entity,
+                    block,
+                    frozen.as_ref(),
+                    annotation_scale_handle,
+                    all_visible,
+                )
                 .then_some(*handle)
             })
             .collect();
@@ -9999,8 +10048,25 @@ impl Scene {
 
     /// Prepare hover indexes after derived geometry is installed during open.
     pub(crate) fn warm_interaction_caches(&self) {
+        let perf = crate::perf::enabled();
+        let t_start = perf.then(iced::time::Instant::now);
+        let t_ei = perf.then(iced::time::Instant::now);
         let _ = self.entity_index();
+        let ei_ms = crate::perf::elapsed_ms(t_ei);
+
+        let t_ihi = perf.then(iced::time::Instant::now);
         let _ = self.interaction_handle_index();
+        let ihi_ms = crate::perf::elapsed_ms(t_ihi);
+        let total_ms = crate::perf::elapsed_ms(t_start);
+
+        if perf {
+            crate::perf_record!(
+                "[perf] warm_interaction_caches total={:.1}ms entity_index={:.1}ms interaction_handle_index={:.1}ms",
+                total_ms,
+                ei_ms,
+                ihi_ms,
+            );
+        }
     }
 
     fn interaction_handle_index(
@@ -12055,6 +12121,34 @@ vis_index={:.1} visible_probe={:.1}",
     /// block users re-expand, since their definitions bake the children's
     /// visibility. Nothing is recoloured.
     pub fn invalidate_layer_visibility(&mut self, names: &[String]) {
+        // Turning a layer off or freezing it removes its entities from the
+        // interactive scene as well as from rendering. Drop any entities that
+        // were already selected before the visibility change, otherwise a
+        // subsequent MOVE/ERASE/etc. could still modify invisible geometry.
+        let block = self.interaction_block_handle();
+        let frozen: Option<HashSet<Handle>> = self
+            .interaction_viewport_frozen_layers()
+            .map(|layers| layers.iter().copied().collect());
+        let annotation_scale_handle = self.displayed_annotation_scale_handle();
+        let all_visible = self.annotation_all_visible();
+
+        let visible_selection: Vec<Handle> = self
+            .selected_handles_in_order()
+            .into_iter()
+            .filter(|handle| {
+                self.document.get_entity(*handle).is_some_and(|entity| {
+                    self.resident_entity_visible(
+                        entity,
+                        block,
+                        frozen.as_ref(),
+                        annotation_scale_handle,
+                        all_visible,
+                    )
+                })
+            })
+            .collect();
+        self.replace_selection_exact(&visible_selection);
+
         let targets = self.dependency_targets(DependencyKind::Layer, names);
         if targets.render_handles.is_empty() {
             return;
@@ -12249,6 +12343,8 @@ vis_index={:.1} visible_probe={:.1}",
             }
         }
 
+        let perf = crate::perf::enabled();
+        let t_aabbs_start = perf.then(iced::time::Instant::now);
         let mut items: Vec<(Handle, [f64; 4])> = Vec::new();
         let mut unbounded: Vec<Handle> = Vec::new();
         let mut union: Option<[f64; 4]> = None;
@@ -12272,6 +12368,7 @@ vis_index={:.1} visible_probe={:.1}",
                 None => unbounded.push(e.common().handle),
             }
         }
+        let aabbs_ms = crate::perf::elapsed_ms(t_aabbs_start);
         let root = match union {
             Some(u) => {
                 let w = (u[2] - u[0]).max(1.0);
@@ -12282,9 +12379,21 @@ vis_index={:.1} visible_probe={:.1}",
             }
             None => [-1.0, -1.0, 1.0, 1.0],
         };
+        let t_tree_start = perf.then(iced::time::Instant::now);
         let mut tree = pick::quadtree::QuadTree::new(root);
         for (h, ab) in items {
             tree.insert(h, ab);
+        }
+        let tree_ms = crate::perf::elapsed_ms(t_tree_start);
+
+        if perf {
+            crate::perf_record!(
+                "[perf] entity_index-rebuild aabbs={:.1}ms tree={:.1}ms entities={} root={:?}",
+                aabbs_ms,
+                tree_ms,
+                tree.len(),
+                root,
+            );
         }
 
         *self.entity_index_cache.borrow_mut() = Some((
@@ -14457,6 +14566,48 @@ mod layout_cache_tests {
             "ucs mutation + bump must replace the cached Arc"
         );
         assert!(after.iter().any(|n| n == "TEST_CACHED_UCS"));
+    }
+
+    // #48: with no active/selected viewport, the pill number, label and sync
+    // badge must all describe the SAME viewport (the first-content fallback
+    // the number already used) — not a mix of viewport number, paper label
+    // and hidden badge.
+    #[test]
+    fn scale_pill_sources_agree_without_targeted_viewport() {
+        let mut scene = Scene::new();
+        scene.add_layout("P1").unwrap();
+        scene.current_layout = "P1".to_string();
+        assert!(scene.add_scale("1:50", 1.0, 50.0));
+        let mut vp = codec::entities::Viewport::new();
+        vp.width = 100.0;
+        vp.height = 100.0;
+        let handle = scene
+            .document
+            .add_entity_to_layout(codec::EntityType::Viewport(vp), "P1")
+            .unwrap();
+        assert!(scene.set_viewport_scale_named_for(handle, "1:50").is_some());
+        assert!(scene.active_viewport.is_none());
+        let number = scene.first_viewport_scale();
+        let name = scene.displayed_annotation_scale_name();
+        let synced = scene.viewport_annotation_scale_synced();
+        eprintln!("number={number:?} name={name:?} synced={synced:?}");
+        assert!(
+            number.is_some() && name == "1:50" && synced == Some(true),
+            "pill trio must agree"
+        );
+    }
+
+    #[test]
+    fn scale_pill_model_layout_unchanged() {
+        // Model layout has no viewports: number None, header label, no badge.
+        let scene = Scene::new();
+        assert!(scene.current_layout == "Model");
+        assert!(scene.first_viewport_scale().is_none());
+        assert_eq!(
+            scene.displayed_annotation_scale_name(),
+            scene.document.header.current_annotation_scale
+        );
+        assert!(scene.viewport_annotation_scale_synced().is_none());
     }
 }
 

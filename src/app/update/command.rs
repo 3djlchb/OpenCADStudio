@@ -304,16 +304,21 @@ impl OpenCADStudio {
                 // Live incremental search for INSERT/MINSERT (see CommandInput)
                 let live = self.command_line.input.clone();
                 let i = self.active_tab;
-                let (should_update, opts, prompt) =
+                let (should_update, opts, prompt, suggestions) =
                     if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
-                        if cmd.on_live_input(&live) {
-                            (true, cmd.options(), cmd.prompt())
+                        let changed = cmd.on_live_input(&live);
+                        let suggestions = cmd.text_suggestions(&live);
+                        if changed {
+                            (true, cmd.options(), cmd.prompt(), suggestions)
                         } else {
-                            (false, Vec::new(), String::new())
+                            (false, Vec::new(), String::new(), suggestions)
                         }
                     } else {
-                        (false, Vec::new(), String::new())
+                        (false, Vec::new(), String::new(), Vec::new())
                     };
+
+                self.command_line.set_contextual_suggestions(suggestions);
+
                 if should_update {
                     self.command_line.set_step_options(opts);
                     if let Some(last) = self.command_line.history.last_mut() {
@@ -750,6 +755,12 @@ impl OpenCADStudio {
                 self.command_line.autocomplete_cursor = None;
                 return self.dispatch_command(&command);
             }
+        } else if self.command_line.has_contextual_suggestions() {
+            // During an active command Enter accepts the highlighted
+            // contextual value instead of the user's partial search.
+            if let Some(value) = self.command_line.selected_suggestion() {
+                self.command_line.input = value;
+            }
         }
         let i = self.active_tab;
         // A whole multi-token command line (`UCS Z 90`, `LINE 0,0
@@ -1003,7 +1014,8 @@ impl OpenCADStudio {
         // A tracking ray carries its own base, so it needs no anchor: that is
         // how OTRACK and Extension accepted a bare distance for the *first*
         // point of a command, before any anchor exists.
-        let pt = if let Some((base, dir)) = self.active_distance_ray(i) {
+        let distance_ray = self.active_distance_ray(i);
+        let pt = if let Some((base, dir)) = distance_ray {
             base + dir * dist
         } else {
             let anchor = self.tabs[i]
@@ -1036,6 +1048,9 @@ impl OpenCADStudio {
         self.dyn_coord_absolute = false;
         self.sync_dyn_fields();
         self.reset_tracking_after_point();
+        if let Some((_, dir)) = distance_ray {
+            self.snapper.remember_distance_reference(dir);
+        }
         self.push_ucs_to_cmd(i);
 
         let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt))?;
@@ -1383,7 +1398,7 @@ impl OpenCADStudio {
         if let Some(idx) = new_idx {
             self.tabs[i].layers.selected = Some(idx);
             self.tabs[i].layers.selected_multi = vec![idx];
-            self.tabs[i].layers.editing = Some(idx);
+            self.tabs[i].layers.editing = Some(new_name.clone());
             self.tabs[i].layers.edit_buf = new_name.clone();
         }
         self.sync_ribbon_layers();
@@ -1569,16 +1584,18 @@ impl OpenCADStudio {
 
     pub(super) fn on_layer_rename_commit(&mut self) -> Task<Message> {
         let i = self.active_tab;
-        let editing_idx = self.tabs[i].layers.editing.take();
-        if let Some(idx) = editing_idx {
+        let editing_name = self.tabs[i].layers.editing.take();
+        if let Some(old_name) = editing_name {
             let new_name = self.tabs[i].layers.edit_buf.trim().to_string();
-            let old_name = self.tabs[i]
+            // The name was captured at RenameStart; look it up fresh so
+            // a sort/sync/filter in between cannot retarget the rename.
+            // Deleted meanwhile → clear and no-op.
+            let still_there = self.tabs[i]
                 .layers
                 .layers
-                .get(idx)
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
-            if !new_name.is_empty() && new_name != old_name {
+                .iter()
+                .any(|l| l.name == old_name);
+            if !new_name.is_empty() && new_name != old_name && still_there {
                 self.push_undo_snapshot(i, "LAYER RENAME");
                 if !self.tabs[i].rename_layer(&old_name, &new_name) {
                     self.discard_last_undo_entry(i);
@@ -2305,7 +2322,15 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
             }
             StyleKey::TableStyle => {
-                self.ribbon.active_table_style = name;
+                self.ribbon.active_table_style = name.clone();
+                let i = self.active_tab;
+                let found = self.tabs[i].scene.document.objects.values().any(
+                    |o| matches!(o, codec::objects::ObjectType::TableStyle(ts) if ts.name == name),
+                );
+                if found {
+                    self.tabs[i].scene.document.header.current_table_style_name = name;
+                    self.tabs[i].dirty = true;
+                }
             }
         }
         Task::none()
@@ -4356,13 +4381,15 @@ mod layer_rename_tests {
 
     fn rename_layer(app: &mut OpenCADStudio, old_name: &str, new_name: &str) {
         let i = app.active_tab;
-        let idx = app.tabs[i]
-            .layers
-            .layers
-            .iter()
-            .position(|layer| layer.name == old_name)
-            .expect("layer exists in panel");
-        app.tabs[i].layers.editing = Some(idx);
+        assert!(
+            app.tabs[i]
+                .layers
+                .layers
+                .iter()
+                .any(|layer| layer.name == old_name),
+            "layer exists in panel"
+        );
+        app.tabs[i].layers.editing = Some(old_name.to_string());
         app.tabs[i].layers.edit_buf = new_name.to_string();
         let _ = app.on_layer_rename_commit();
     }
@@ -4407,11 +4434,17 @@ mod layer_rename_tests {
     fn current_layer_rename_updates_name_and_allocated_handle() {
         let mut app = app_with_editing_layer();
         let i = app.active_tab;
-        let idx = app.tabs[i]
+        let old_name = app.tabs[i]
             .layers
             .editing
+            .clone()
             .expect("new layer is being edited");
-        let old_name = app.tabs[i].layers.layers[idx].name.clone();
+        let idx = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|l| l.name == old_name)
+            .expect("editing layer in panel");
         app.tabs[i]
             .scene
             .document
@@ -4443,11 +4476,17 @@ mod layer_rename_tests {
     fn layer_rename_undo_redo_restores_active_layer() {
         let mut app = app_with_editing_layer();
         let i = app.active_tab;
-        let idx = app.tabs[i]
+        let old_name = app.tabs[i]
             .layers
             .editing
+            .clone()
             .expect("new layer is being edited");
-        let old_name = app.tabs[i].layers.layers[idx].name.clone();
+        let idx = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|l| l.name == old_name)
+            .expect("editing layer in panel");
         app.tabs[i].layers.selected = Some(idx);
         let _ = app.on_layer_set_current();
 
@@ -4472,10 +4511,17 @@ mod layer_rename_tests {
         let old_name = app.tabs[i].layers.edit_buf.clone();
         rename_layer(&mut app, &old_name, "A");
         let _ = app.on_layer_new();
-        let b_idx = app.tabs[i]
+        let b_name = app.tabs[i]
             .layers
             .editing
+            .clone()
             .expect("new layer is being edited");
+        let b_idx = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .position(|l| l.name == b_name)
+            .expect("editing layer in panel");
         app.tabs[i].layers.selected = Some(b_idx);
         let _ = app.on_layer_set_current();
         let header_name = app.tabs[i].scene.document.header.current_layer_name.clone();
@@ -4538,13 +4584,15 @@ mod layer_name_target_tests {
 
     fn rename_layer(app: &mut OpenCADStudio, old_name: &str, new_name: &str) {
         let i = app.active_tab;
-        let idx = app.tabs[i]
-            .layers
-            .layers
-            .iter()
-            .position(|layer| layer.name == old_name)
-            .expect("layer exists in panel");
-        app.tabs[i].layers.editing = Some(idx);
+        assert!(
+            app.tabs[i]
+                .layers
+                .layers
+                .iter()
+                .any(|layer| layer.name == old_name),
+            "layer exists in panel"
+        );
+        app.tabs[i].layers.editing = Some(old_name.to_string());
         app.tabs[i].layers.edit_buf = new_name.to_string();
         let _ = app.on_layer_rename_commit();
     }
@@ -4597,6 +4645,135 @@ mod layer_name_target_tests {
     }
 
     #[test]
+    fn layer_rename_commit_follows_name_across_resort() {
+        // #44: rename state keyed by name survives a panel re-sort; a stale
+        // row index would rename the wrong layer.
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.tabs[i].layers.editing = Some("ZULU".to_string());
+        app.tabs[i].layers.edit_buf = "ZULU_NEW".to_string();
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        let _ = app.update(Message::LayerRenameCommit);
+        let names: Vec<String> = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .map(|l| l.name.clone())
+            .collect();
+        assert!(
+            names.contains(&"ZULU_NEW".to_string()),
+            "ZULU must be renamed, got {names:?}"
+        );
+        assert!(
+            !names.contains(&"ZULU".to_string()),
+            "old name must be gone, got {names:?}"
+        );
+        assert!(
+            app.tabs[i].scene.document.layers.contains("ZULU_NEW"),
+            "document must follow the rename"
+        );
+    }
+
+    #[test]
+    fn layer_rename_commit_deleted_layer_is_noop() {
+        // Renaming a layer deleted mid-edit must clear state without
+        // renaming anything or pushing undo.
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        app.tabs[i].layers.editing = Some("GONE".to_string());
+        app.tabs[i].layers.edit_buf = "NEW".to_string();
+        let _ = app.update(Message::LayerRenameCommit);
+        assert!(
+            app.tabs[i].layers.editing.is_none(),
+            "stale edit must clear"
+        );
+        assert!(
+            app.tabs[i].layers.edit_buf.is_empty(),
+            "stale edit buffer must clear"
+        );
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            undo_before,
+            "no-op commit must not push undo"
+        );
+        assert!(
+            !app.tabs[i].scene.document.layers.contains("NEW"),
+            "nothing must be renamed"
+        );
+    }
+
+    #[test]
+    fn layer_rename_commit_empty_name_is_noop() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        app.tabs[i].layers.editing = Some("ZULU".to_string());
+        app.tabs[i].layers.edit_buf = "   ".to_string();
+        let _ = app.update(Message::LayerRenameCommit);
+        assert!(app.tabs[i].layers.editing.is_none(), "edit must clear");
+        assert!(
+            app.tabs[i].scene.document.layers.contains("ZULU"),
+            "blank commit must not rename"
+        );
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            undo_before,
+            "blank commit must not push undo"
+        );
+    }
+
+    #[test]
+    fn layer_color_picker_toggle_follows_name_across_resort() {
+        // Same name-keying guarantee as rename, for the swatch row.
+        let mut app = app_with_zulu_alpha();
+        let _ = app.update(Message::LayerColorPickerToggle("ZULU".to_string()));
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        let i = app.active_tab;
+        assert_eq!(
+            app.tabs[i].layers.color_picker_row,
+            Some("ZULU".to_string()),
+            "picker must stay on ZULU across a resort"
+        );
+        let _ = app.update(Message::LayerColorPickerToggle("ZULU".to_string()));
+        assert!(
+            app.tabs[i].layers.color_picker_row.is_none(),
+            "second toggle must close the picker"
+        );
+    }
+
+    #[test]
+    fn shift_select_skips_filtered_out_rows() {
+        // #50: rows hidden by the live filter must not join a shift-range.
+        // Sorted panel: A1(0), B9(1), C1(2); filter "1" hides B9.
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        for new in ["C1", "B9", "A1"] {
+            let _ = app.on_layer_new();
+            let fresh = app.tabs[app.active_tab].layers.edit_buf.clone();
+            rename_layer(&mut app, &fresh, new);
+        }
+        let i = app.active_tab;
+        app.tabs[i].layers.filter = "1".to_string();
+        let _ = app.update(Message::LayerSelect("A1".to_string()));
+        app.shift_down = true;
+        let _ = app.update(Message::LayerSelect("C1".to_string()));
+        app.shift_down = false;
+        let multi = app.tabs[i].layers.selected_multi.clone();
+        let names: Vec<String> = multi
+            .iter()
+            .filter_map(|&x| app.tabs[i].layers.layers.get(x).map(|l| l.name.clone()))
+            .collect();
+        assert!(
+            !names.contains(&"B9".to_string()),
+            "hidden row must not join the range, got {names:?}"
+        );
+        assert!(names.contains(&"A1".to_string()) && names.contains(&"C1".to_string()));
+    }
+
+    #[test]
     fn layer_toggle_visible_unknown_name_is_noop() {
         let mut app = app_with_zulu_alpha();
         let i = app.active_tab;
@@ -4614,6 +4791,156 @@ mod layer_name_target_tests {
             .map(|l| (l.name.clone(), l.visible))
             .collect();
         assert_eq!(before, after, "unknown name must change nothing");
+    }
+
+    #[test]
+    fn layer_transparency_edit_pushes_undo() {
+        // #43: every sibling layer arm pushes an undo entry; transparency must too.
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        let _ = app.update(Message::LayerTransparencyEdit(
+            "0".to_string(),
+            "50".to_string(),
+        ));
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            before + 1,
+            "transparency edit must push an undo entry like its siblings"
+        );
+        let panel = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == "0")
+            .expect("layer 0 in panel");
+        assert_eq!(panel.transparency, 50);
+        app.undo_active_tab();
+        let panel = app.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == "0")
+            .expect("layer 0 in panel");
+        assert_eq!(panel.transparency, 0, "undo must restore transparency");
+    }
+}
+
+#[cfg(test)]
+mod tablestyle_ribbon_tests {
+    // #45: picking a table style in the ribbon must write the document header
+    // (like Text/Dim/MLeader), not just the ribbon mirror.
+    use crate::app::OpenCADStudio;
+    use crate::modules::StyleKey;
+
+    #[test]
+    fn tablestyle_ribbon_pick_writes_header_and_dirties() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut extra = codec::objects::TableStyle::standard();
+        extra.name = "EXTRA".to_string();
+        extra.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i]
+            .scene
+            .document
+            .objects
+            .insert(extra.handle, codec::objects::ObjectType::TableStyle(extra));
+        app.tabs[i].dirty = false;
+        let _ = app.on_ribbon_style_changed(StyleKey::TableStyle, "EXTRA".to_string());
+        assert_eq!(
+            app.tabs[i].scene.document.header.current_table_style_name, "EXTRA",
+            "ribbon pick must reach the document header"
+        );
+        assert!(
+            app.tabs[i].dirty,
+            "ribbon pick must dirty the tab like its siblings"
+        );
+    }
+
+    #[test]
+    fn tablestyle_pick_flows_into_table_insert() {
+        // End-to-end: ribbon pick → header → insert dialog defaults to the pick.
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut extra = codec::objects::TableStyle::standard();
+        extra.name = "EXTRA".to_string();
+        extra.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i]
+            .scene
+            .document
+            .objects
+            .insert(extra.handle, codec::objects::ObjectType::TableStyle(extra));
+        let _ = app.on_ribbon_style_changed(StyleKey::TableStyle, "EXTRA".to_string());
+        app.open_table_insert();
+        assert_eq!(
+            app.table_insert.style, "EXTRA",
+            "insert dialog must default to the ribbon-picked style"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tablestyle_buffer_tests {
+    // #53: New/Copy/Delete must reload Table/MLine buffers (no stale edits
+    // into the fresh style), and cell text-style typos must not persist.
+    use crate::app::{OpenCADStudio, StyleKind};
+
+    #[test]
+    fn table_new_reloads_cell_buffers() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.ts_cell_textstyle[0] = "STALE_SENTINEL".to_string();
+        app.style_new(StyleKind::Table);
+        assert_ne!(
+            app.ts_cell_textstyle[0], "STALE_SENTINEL",
+            "buffers must reload from the fresh style"
+        );
+    }
+
+    #[test]
+    fn table_cell_unknown_text_style_is_rejected() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let style_name = app.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|o| match o {
+                codec::objects::ObjectType::TableStyle(s) => Some(s.name.clone()),
+                _ => None,
+            })
+            .expect("fresh doc ships a table style");
+        app.tablestyle_selected = style_name.clone();
+        app.ts_cell_textstyle[0] = "NOPE".to_string();
+        let before = app.command_line.history.len();
+        let _ = app.on_table_style_cell_apply(0);
+        let cell_name = app.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|o| match o {
+                codec::objects::ObjectType::TableStyle(s) if s.name == style_name => {
+                    Some(s.data_row_style.text_style_name.clone())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_ne!(cell_name, "NOPE", "dangling name must not persist");
+        assert_eq!(
+            app.ts_cell_textstyle[0], "NOPE",
+            "rejected text stays in the buffer for correction"
+        );
+        assert!(
+            app.command_line.history.len() > before,
+            "rejection must say something"
+        );
     }
 }
 

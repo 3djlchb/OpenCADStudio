@@ -706,6 +706,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFOSNAP",
         "UOSNAP",
         "FIELDDISPLAY",
+        "SURFACEASSOCIATIVITY",
         "FIELDEVAL",
         "PDFIMPORTMODE",
         "PDFIMPORTFILTER",

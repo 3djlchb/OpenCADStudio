@@ -202,6 +202,7 @@ impl OpenCADStudio {
                 crate::perf_record!("[perf] view {:>7.1}ms", elapsed_ms);
             }
         }
+        crate::perf::note_view_finish();
         element
     }
 
@@ -929,11 +930,14 @@ bg={bg_ms:.1}ms n={view_count}"
                     snap_angle_deg: self.snap_angle_deg,
                     pick_pending: self.pending_pick_label().is_some(),
                     // An infinite-line preview runs along the arms; drop them
-                    // so the preview stays visible (#1437).
-                    hide_arms: tab
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|c| matches!(c.name(), "XLINE" | "RAY")),
+                    // so the preview stays visible (#1437). A command asking
+                    // for objects shows the pickbox alone, so picking reads
+                    // apart from both idle and point input (#1661).
+                    hide_arms: tab.active_cmd.as_ref().is_some_and(|c| {
+                        matches!(c.name(), "XLINE" | "RAY")
+                            || c.needs_entity_pick()
+                            || c.is_selection_gathering()
+                    }),
                     snap_color: self.snap_marker_color,
                 },
                 crate::ui::overlay::SelectionVisualOptions {
@@ -1898,7 +1902,8 @@ bg={bg_ms:.1}ms n={view_count}"
         // collecting its own input. A pending Lengthen / Radius / Arc Length
         // value is numeric input, not the prefix of a new command (for example,
         // `3` must not open the 3DALIGN / 3DARRAY suggestions).
-        let allow_autocomplete = tab.active_cmd.is_none() && self.grip_pending.is_none();
+        let allow_autocomplete = self.grip_pending.is_none()
+            && (tab.active_cmd.is_none() || self.command_line.has_contextual_suggestions());
         // Dynamic input captures keystrokes when its fields are showing,
         // so the command-line field must release focus / its on_input.
         // The MText preview also captures keystrokes (typing edits it), so the

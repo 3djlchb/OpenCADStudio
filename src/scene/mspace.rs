@@ -807,7 +807,7 @@ impl Scene {
                 let Some(EntityType::Viewport(vp)) = self.document.get_entity(*handle) else {
                     return None;
                 };
-                if !vp.status.is_on {
+                if !vp.is_on() {
                     return None;
                 }
                 let rect = self.viewport_screen_rect(vp.common.handle, canvas)?;
@@ -844,7 +844,7 @@ impl Scene {
     pub fn viewport_displays_content(&self, vp_handle: Handle) -> bool {
         matches!(
             self.document.get_entity(vp_handle),
-            Some(EntityType::Viewport(vp)) if vp.status.is_on
+            Some(EntityType::Viewport(vp)) if vp.is_on()
         )
     }
 
@@ -856,7 +856,7 @@ impl Scene {
             let Some(EntityType::Viewport(vp)) = self.document.get_entity(*handle) else {
                 return None;
             };
-            if vp.status.is_on {
+            if vp.is_on() {
                 Some(vp.common.handle)
             } else {
                 None

@@ -293,6 +293,8 @@ impl OpenCADStudio {
                             cliprompt_lines: self.cliprompt_lines,
                             commandline_fade_ms: self.commandline_fade_ms,
                             zoom_wheel_reversed: self.zoom_wheel_reversed,
+                            touchpad_pan: self.touchpad_pan,
+                            ui_scale_percent: self.ui_scale_percent,
                             zoom_factor: self.zoom_factor,
                             texteditmode: self.texteditmode,
                             dimension_continue_mode: self.dimension_continue_mode,
@@ -619,14 +621,22 @@ impl OpenCADStudio {
                         }
                     }
                     linetypes.sort_by_key(|name| name.to_lowercase());
-                    sized_flow(ex, 1180, 560, |flow| {
-                        crate::ui::window::layer_state_manager::view_editor(
-                            state,
-                            &self.layer_state_edit_filter,
-                            self.layer_state_edit_color_open,
-                            linetypes.clone(),
-                            flow,
-                        )
+                    // Shared ownership: the build closure runs twice per frame
+                    // (INTRINSIC + FILL) and each row keeps its own copy, so a
+                    // borrow cannot work here — an Arc clone per row is a
+                    // refcount bump instead of N string clones (#21, cf. #34).
+                    let linetypes = std::sync::Arc::<[String]>::from(linetypes);
+                    sized_flow(ex, 1180, 560, {
+                        let linetypes = std::sync::Arc::clone(&linetypes);
+                        move |flow| {
+                            crate::ui::window::layer_state_manager::view_editor(
+                                state,
+                                &self.layer_state_edit_filter,
+                                self.layer_state_edit_color_open,
+                                std::sync::Arc::clone(&linetypes),
+                                flow,
+                            )
+                        }
                     })
                 } else {
                     automatic_flow(ex, |flow| {

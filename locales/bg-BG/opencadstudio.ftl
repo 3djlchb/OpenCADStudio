@@ -13,6 +13,7 @@ language =
     .arabic = العربية
     .japanese = 日本語
     .korean = 한국어
+    .lao = ລາວ
     .czech = Čeština
     .italian = Italiano
     .finnish = Suomi
@@ -1436,6 +1437,8 @@ common =
     .user-preferences = Потребителски предпочитания
     .zoom = Мащабиране
     .reverse-mouse-wheel-zoom-zoomwheel = Обръщане на мащабирането с колелцето (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Тъчпад: превъртането мести изгледа, Ctrl+превъртане или щипване мащабира
+    .interface-scale = Мащаб на интерфейса
     .zoom-factor = Коефициент на мащабиране
     .how-far-one-wheel-notch-zooms-zoomfactor = Колко мащабира едно щракване на колелцето (ZOOMFACTOR).
     .text-and-dimensions = Текст и размери
@@ -2505,6 +2508,12 @@ inquiry =
     .id-specify-point = ID  Посочи точка:
     .list-no-entities-selected-select-entities-firs = LIST: не са избрани обекти. Първо избери обекти.
     .massprop-no-entities-selected-select-entities = MASSPROP: не са избрани обекти. Първо избери обекти.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ няма затворено тяло за измерване.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Обем=__ocs_fmt_1__  Център на тежестта=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Инерционни моменти  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Центробежни моменти  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Радиуси на инерция  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Главни моменти спрямо центъра на тежестта  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE  Избери обект за измерване:
     .measure-specify-segment-length = MEASURE  Посочи дължина на сегмент:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM  Въведи опция [Разстояние/Радиус/Ъгъл/Площ]:

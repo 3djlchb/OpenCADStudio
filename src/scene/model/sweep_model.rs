@@ -12,9 +12,11 @@ use kernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use kernel::space::{PlanarCurve, Plane, Vec3};
 
 pub use super::sweep_command_model::{
-    is_sweep_path, is_sweep_profile, link_sweep_expressions, scaled_sweep_path_refusal,
-    spatial_profile, spatial_sweep_record, surface_sweep_record, sweep_expressions, sweep_record,
-    sweep_refusal_code, sweep_selection_options, swept_surface_entity, swept_with_options,
+    assoc_edge_curve, is_sweep_path, is_sweep_profile, link_sweep_expressions, link_sweep_sources,
+    resweep_from_sources, scaled_sweep_path_refusal, set_surface_associativity, spatial_profile,
+    spatial_sweep_record, surface_associativity, surface_sweep_record, sweep_expressions,
+    sweep_record, sweep_refusal_code, sweep_selection_options, sweep_sources, swept_surface_entity,
+    swept_with_options, SWEEP_SOURCES_APP,
 };
 use crate::entities::curve::entity_curve;
 

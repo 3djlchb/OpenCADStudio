@@ -695,12 +695,23 @@ impl OpenCADStudio {
                 self.ts_border_spacing[r][b].trim().parse().ok(),
             )
         });
+        // Reject dangling references: a typo must not persist as a text
+        // style that does not exist (#53). Decided up front so the
+        // cell borrow below does not conflict with command-line I/O.
+        let ts_known = ts.is_empty()
+            || self.tabs[i]
+                .scene
+                .document
+                .text_styles
+                .iter()
+                .any(|s| s.name.eq_ignore_ascii_case(&ts));
+        let ts_rejected = !ts.is_empty() && !ts_known;
         if let Some(c) = self
             .tablestyle_mut(i)
             .and_then(|s| Self::ts_cell_of(s, row))
         {
-            if !ts.is_empty() {
-                c.text_style_name = ts;
+            if !ts.is_empty() && ts_known {
+                c.text_style_name = ts.clone();
             }
             if let Some(h) = height {
                 c.text_height = h;
@@ -731,6 +742,10 @@ impl OpenCADStudio {
                     }
                 }
             }
+        }
+        if ts_rejected {
+            self.command_line
+                .push_error(crate::tf!("Unknown text style '{ts}'.").as_ref());
         }
         Task::none()
     }

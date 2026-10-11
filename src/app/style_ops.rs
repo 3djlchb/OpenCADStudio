@@ -291,7 +291,8 @@ impl OpenCADStudio {
             StyleKind::Text => self.load_textstyle_bufs(i),
             StyleKind::Dim => self.load_dimstyle_bufs(i),
             StyleKind::MLeader => self.load_mleaderstyle_bufs(i),
-            StyleKind::Table | StyleKind::MLine => {}
+            StyleKind::Table => self.load_tablestyle_bufs(i),
+            StyleKind::MLine => self.load_mlstyle_bufs(i),
         }
     }
 
@@ -595,6 +596,13 @@ impl OpenCADStudio {
                         if row.text_style_name.eq_ignore_ascii_case(old) {
                             row.text_style_name = new.to_string();
                         }
+                    }
+                }
+                // Dimension styles name their text style; follow the rename so
+                // Apply keeps resolving the handle instead of collapsing to NULL.
+                for ds in doc.dim_styles.iter_mut() {
+                    if ds.dimtxsty.eq_ignore_ascii_case(old) {
+                        ds.dimtxsty = new.to_string();
                     }
                 }
             }
@@ -1242,5 +1250,33 @@ impl OpenCADStudio {
             self.restore_scale_state(&stage.baseline);
             self.tabs[self.active_tab].dirty = stage.dirty_at_open;
         }
+    }
+}
+
+#[cfg(test)]
+mod rename_follow_tests {
+    // #42: renaming a text style must follow into dimstyle dimtxsty.
+    use super::{OpenCADStudio, StyleKind};
+    use codec::tables::{DimStyle, TextStyle};
+
+    #[test]
+    fn text_rename_follows_dimtxsty() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut ts = TextStyle::new("OLD");
+        ts.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.text_styles.add(ts).unwrap();
+        let mut ds = DimStyle::new("D");
+        ds.dimtxsty = "OLD".to_string();
+        app.tabs[i].scene.document.dim_styles.add(ds).unwrap();
+        app.style_rename = Some("OLD".to_string());
+        app.style_rename_buf = "NEW".to_string();
+        app.style_rename_commit(StyleKind::Text);
+        let dim = app.tabs[i].scene.document.dim_styles.get("D").unwrap();
+        assert_eq!(
+            dim.dimtxsty, "NEW",
+            "dimstyle must follow the text-style rename"
+        );
     }
 }

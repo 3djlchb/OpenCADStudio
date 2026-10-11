@@ -95,7 +95,7 @@ mod utilities;
 mod viewport;
 
 pub(crate) use clipboard::{
-    copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference,
+    copy_to_clipboard_kernel, paste_entities_kernel, remap_ext_subtree_reference, PasteSpace,
 };
 
 impl OpenCADStudio {
@@ -204,6 +204,7 @@ impl OpenCADStudio {
         if was_active && self.tabs[i].active_cmd.is_none() {
             self.tabs[i].scene.set_hover_highlight(None);
             self.command_line.set_step_options(Vec::new());
+            self.command_line.clear_contextual_suggestions();
             self.restore_add_selected_defaults();
             self.tabs[i].pending_pause_tokens = None;
         }

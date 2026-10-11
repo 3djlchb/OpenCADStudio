@@ -9,7 +9,7 @@ pub(crate) mod config;
 pub use automation::{export_headless, serve};
 mod annotation_data;
 mod command_driver;
-pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel};
+pub(crate) use command_driver::{copy_to_clipboard_kernel, paste_entities_kernel, PasteSpace};
 pub(crate) mod commands;
 pub(crate) mod dim_viewport;
 #[cfg(test)]
@@ -420,10 +420,6 @@ pub(super) struct OpenCADStudio {
     discussions: Vec<crate::discussions::DiscussionEntry>,
     /// True while the boot-time Discussions refresh is still in flight.
     discussions_loading: bool,
-    /// Block references whose properties panel shows per-axis Scale X/Y/Z even
-    /// though the three factors are currently equal — the user unchecked the
-    /// "Uniform scale" box for them (#427). Keyed by entity handle.
-    props_asym_scale: std::collections::HashSet<u64>,
     /// Collapsed Properties-panel section titles. This belongs to the app,
     /// rather than an individual document tab, so the same view preference is
     /// used by every currently open drawing/project.
@@ -560,6 +556,10 @@ pub(super) struct OpenCADStudio {
     polar_increment_deg: f32,
     /// Reverse the mouse-wheel zoom direction when true (ZOOMWHEEL = 1).
     zoom_wheel_reversed: bool,
+    /// Scroll pans and Ctrl+scroll zooms (touchpads); see `scroll_intent`.
+    touchpad_pan: bool,
+    /// Interface scale in percent, applied through the window scale factor.
+    ui_scale_percent: u16,
     /// Mouse-wheel zoom sensitivity (ZOOMFACTOR), held inside
     /// `settings::ZOOM_FACTOR_MIN..=settings::ZOOM_FACTOR_MAX`. `SETVAR`
     /// only sets the range the system variable itself has; the Options
@@ -1121,6 +1121,14 @@ pub(super) struct OpenCADStudio {
     /// Snapshot of the dialog's settings taken when it opened, restored by the
     /// `<previous>` list entry.
     plot_prev: Option<crate::ui::window::plot::PlotDialogState>,
+    /// Tab/layout that last owned the Plot dialog. Reopening Plot in the same
+    /// context keeps the user's last paper, scale, CTB and output choices
+    /// instead of reapplying the layout page setup over them.
+    plot_prev_context: Option<(usize, String)>,
+    /// Printer whose capability reply is allowed to reconcile the current
+    /// sheet. Set only after an explicit printer/page-setup choice; merely
+    /// opening Plot must never replace the drawing's stored paper size.
+    plot_reconcile_printer_media: Option<String>,
     /// Full source settings behind the fields currently shown in Plot.
     plot_setup_template: Option<codec::objects::PlotSettings>,
     /// Paper layouts shown by Print All, in tab order with their selection.
@@ -2386,6 +2394,9 @@ pub enum Message {
     CommandLineFadeChanged(i32),
     /// Toggle reversing the mouse-wheel zoom direction (ZOOMWHEEL).
     ZoomWheelReversedChanged(bool),
+    TouchpadPanChanged(bool),
+    /// Interface scale in percent (Options > Display).
+    UiScaleChanged(u16),
     /// Change how far one wheel notch zooms, from the Options slider
     /// (ZOOMFACTOR).
     ZoomFactorChanged(i32),
@@ -2596,8 +2607,11 @@ pub enum Message {
     /// Pop the trailing character off the command-line input — backspace
     /// counterpart to `CommandAppendChar`.
     CommandBackspace,
-    /// TAB pressed: move focus to the next dynamic-input field (wraps).
+    /// TAB pressed: move focus to the next dynamic-input field or
+    /// autocomplete suggestion.
     DynTabNext,
+    /// Shift+TAB: move to the previous contextual autocomplete suggestion.
+    DynTabPrev,
     /// Split the active Model viewport in two. `true` → horizontal divider
     /// (top / bottom); `false` → vertical divider (left / right).
     SplitModelViewport(bool),
@@ -2668,11 +2682,11 @@ pub enum Message {
     ToggleXrefManager,
     /// Rescan the active drawing's references into the palette.
     XrefManagerRefresh,
-    /// Toggle one palette row (entry index) in the multi-selection set.
-    XrefManagerSelect(usize),
+    /// Toggle one palette row (stable row id) in the multi-selection set.
+    XrefManagerSelect(crate::ui::window::xref_manager::XrefRowId),
     /// Right-click on a palette row: single-select it when outside the
     /// selection (the context menu then acts on the selection).
-    XrefRowRightClick(usize),
+    XrefRowRightClick(crate::ui::window::xref_manager::XrefRowId),
     /// Flip the palette's list/tree presentation.
     XrefManagerToggleTree,
     /// Start a reference-table column divider drag (column index).
@@ -2709,16 +2723,19 @@ pub enum Message {
     XrefManagerToggleExpand(u64),
     /// Selection-scoped palette operation (detach/unload/reload/overlay/pathtype).
     XrefManagerOp(crate::ui::window::xref_manager::XrefPaletteOp),
-    /// Row-scoped palette operation: selects row `index`, then applies the
-    /// operation to it.
-    XrefRowOp(usize, crate::ui::window::xref_manager::XrefPaletteOp),
+    /// Row-scoped palette operation: selects the row by stable id, then
+    /// applies the operation to it.
+    XrefRowOp(
+        crate::ui::window::xref_manager::XrefRowId,
+        crate::ui::window::xref_manager::XrefPaletteOp,
+    ),
     /// Prefill the command line for Find & Replace across references
     /// (`XREF Path Find <old> <new>`); the CLI parses and runs it.
     XrefFindReplacePrompt,
-    /// Pick a new path for a specific row index.
-    XrefRowPathPick(usize),
-    /// Prefill the command line for Find & Replace for a specific row index.
-    XrefRowFindReplacePrompt(usize),
+    /// Pick a new path for a specific row (stable id).
+    XrefRowPathPick(crate::ui::window::xref_manager::XrefRowId),
+    /// Prefill the command line for Find & Replace for a specific row id.
+    XrefRowFindReplacePrompt(crate::ui::window::xref_manager::XrefRowId),
     XrefRowChangePathEnter,
     XrefRowChangePathLeave,
     LayerToggleVisible(String),
@@ -4103,7 +4120,6 @@ impl OpenCADStudio {
             videos_loading: false,
             discussions: Vec::new(),
             discussions_loading: false,
-            props_asym_scale: std::collections::HashSet::new(),
             collapsed_property_sections: rustc_hash::FxHashSet::default(),
             start_section: StartSection::default(),
             start_action_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -4168,6 +4184,8 @@ impl OpenCADStudio {
             polar_mode: false,
             polar_increment_deg: 45.0,
             zoom_wheel_reversed: false,
+            touchpad_pan: false,
+            ui_scale_percent: 100,
             zoom_factor: 60,
             zoom_factor_input: 60.to_string(),
             cursor_size: 5,
@@ -4409,6 +4427,8 @@ impl OpenCADStudio {
             plot_orientation: crate::io::paper_catalog::Orientation::Landscape,
             plot_dialog: crate::ui::window::plot::PlotDialogState::default(),
             plot_prev: None,
+            plot_prev_context: None,
+            plot_reconcile_printer_media: None,
             plot_setup_template: None,
             print_all_layouts: Vec::new(),
             print_all_options: false,
@@ -4918,6 +4938,7 @@ pub fn run() -> iced::Result {
         ..iced::Settings::default()
     })
     .subscription(OpenCADStudio::subscription)
+    .scale_factor(|state: &OpenCADStudio, _| f32::from(state.ui_scale_percent) / 100.0)
     .title(|state: &OpenCADStudio, window_id: window::Id| {
         let _ = window_id; // all dialogs are in-canvas modals now
         if let Some(tab) = state.tabs.get(state.active_tab) {

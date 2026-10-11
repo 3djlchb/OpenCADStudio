@@ -192,7 +192,7 @@ impl Scene {
             let Some(EntityType::Viewport(vp)) = self.document.get_entity(handle) else {
                 continue;
             };
-            if !vp.status.is_on || self.entity_temporarily_hidden(handle) {
+            if !vp.is_on() || self.entity_temporarily_hidden(handle) {
                 continue;
             }
             let h = vp.common.handle;
