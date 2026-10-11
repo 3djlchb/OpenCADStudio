@@ -212,14 +212,27 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
             }
             let degree = match spec.get("degree") {
                 None | Some(Value::Null) => 3,
-                Some(value) => value.as_i64().unwrap_or(3),
+                Some(value) => value
+                    .as_i64()
+                    .filter(|degree| (1..=10).contains(degree))
+                    .ok_or_else(|| {
+                        failure("invalid_spline_values", "degree must be an integer 1..10")
+                    })? as i32,
             };
+            let count = control_points.len();
+            if count > 0 && count <= degree as usize {
+                return Err(failure(
+                    "invalid_spline_values",
+                    format!("a degree {degree} spline needs more than {degree} control_points"),
+                ));
+            }
             let mut spline = if control_points.is_empty() {
-                Spline::from_fit_points(fit_points.clone())
+                let mut spline = Spline::from_fit_points(fit_points.clone());
+                spline.degree = degree;
+                spline
             } else {
-                Spline::from_control_points(degree as i32, control_points)
+                Spline::from_control_points(degree, control_points)
             };
-            spline.degree = degree as i32;
             if !fit_points.is_empty() {
                 spline.fit_points = fit_points;
             }
@@ -230,7 +243,19 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
                         "spline knots require control_points",
                     ));
                 }
-                spline.knots = finite_number_list_field(spec, "knots")?;
+                let knots = finite_number_list_field(spec, "knots")?;
+                if knots.len() != count + degree as usize + 1
+                    || knots.windows(2).any(|pair| pair[1] < pair[0])
+                {
+                    return Err(failure(
+                        "invalid_spline_values",
+                        format!(
+                            "knots must be {} non-decreasing values (control_points + degree + 1)",
+                            count + degree as usize + 1
+                        ),
+                    ));
+                }
+                spline.knots = knots;
             }
             if spec.get("weights").is_some() {
                 if spline.control_points.is_empty() {
@@ -239,7 +264,14 @@ fn build_entity(spec: &Value) -> Parsed<codec::EntityType> {
                         "spline weights require control_points",
                     ));
                 }
-                spline.weights = finite_number_list_field(spec, "weights")?;
+                let weights = finite_number_list_field(spec, "weights")?;
+                if weights.len() != count || weights.iter().any(|weight| *weight <= 0.0) {
+                    return Err(failure(
+                        "invalid_spline_values",
+                        format!("weights must be {count} positive values, one per control point"),
+                    ));
+                }
+                spline.weights = weights;
                 spline.flags.rational = true;
             }
             if let Some(value) = spec["closed"].as_bool() {
