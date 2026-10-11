@@ -4,6 +4,28 @@ use super::{Message, OpenCADStudio};
 use iced::Task;
 use rustc_hash::FxHashMap;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// True when the live `SPACE` binding resolves to something other than
+/// `COMMANDSPACE`. The view's key-dispatch closure must stay a non-capturing fn
+/// pointer, so instead of reading the binding map it reads this flag when a
+/// text field reports a Captured space. When SPACE is default-bound to
+/// COMMANDSPACE the flag is false and the text field keeps the space for
+/// typing; when SPACE is rebound (e.g. to FINALIZE) the flag is true so the
+/// Captured space still fires its shortcut. (#1710)
+pub(crate) static SPACE_REBOUND_OFF_COMMANDSPACE: AtomicBool = AtomicBool::new(false);
+
+/// Recompute the SPACE-dispatch flag from the current binding map. Call after
+/// every change to `shortcut_bindings`. (#1710)
+pub(super) fn sync_space_dispatch_flag(bindings: &FxHashMap<String, String>) {
+    SPACE_REBOUND_OFF_COMMANDSPACE
+        .store(space_rebound_off_commandspace(bindings), Ordering::Relaxed);
+}
+
+/// Whether `SPACE` is bound to something other than `COMMANDSPACE`. (#1710)
+pub(crate) fn space_rebound_off_commandspace(bindings: &FxHashMap<String, String>) -> bool {
+    matches!(bindings.get("SPACE"), Some(cmd) if cmd != "COMMANDSPACE")
+}
 
 #[cfg(target_os = "macos")]
 const ACCEL: &str = "CMD";
@@ -263,6 +285,7 @@ impl OpenCADStudio {
             })
             .collect();
         self.shortcut_bindings = bindings;
+        sync_space_dispatch_flag(&self.shortcut_bindings);
         self.persist_settings_if_changed();
     }
 

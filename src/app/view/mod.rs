@@ -171,6 +171,29 @@ fn shortcut_key_name(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Opt
     Some(parts.join("+"))
 }
 
+/// Whether a key that resolved to the shortcut name `shortcut` should fire as
+/// a shortcut for the given keyboard dispatch `status`. A focused command line
+/// (Status::Captured) normally swallows a key so the text field can type it,
+/// but SPACE must still dispatch so its binding runs (COMMANDSPACE by default,
+/// FINALIZE if rebound) even while a free-text edit is in progress. To avoid
+/// firing the default COMMANDSPACE every time a text field captures a space, a
+/// Captured-space only dispatches when SPACE is rebound away from COMMANDSPACE
+/// (tracked in a static, since this closure is a non-capturing fn pointer). (#1710)
+fn should_dispatch_shortcut(status: iced::event::Status, shortcut: &str) -> bool {
+    dispatch_shortcut(
+        status,
+        shortcut,
+        crate::app::shortcuts::SPACE_REBOUND_OFF_COMMANDSPACE
+            .load(std::sync::atomic::Ordering::Relaxed),
+    )
+}
+
+fn dispatch_shortcut(status: iced::event::Status, shortcut: &str, space_rebound: bool) -> bool {
+    status == iced::event::Status::Ignored
+        || crate::app::shortcuts::is_global_key(shortcut)
+        || (status == iced::event::Status::Captured && shortcut == "SPACE" && space_rebound)
+}
+
 /// `ViewportRenderMode` enum carries the raw DXF integers, not a label,
 /// so wrap it locally with a friendly name renderer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2825,9 +2848,14 @@ impl OpenCADStudio {
                             }
                         }
                         let shortcut = shortcut_key_name(&key, modifiers)?;
-                        (status == Status::Ignored
-                            || crate::app::shortcuts::is_global_key(&shortcut))
-                        .then_some(Message::ShortcutPressed(shortcut))
+                        // When the command line has focus, a key that is bound
+                        // to a shortcut still fires that shortcut unless it is
+                        // the space key bound to COMMANDSPACE (the default),
+                        // which the command line needs for typing. The binding
+                        // check happens in the update handler so this closure
+                        // stays a non-capturing fn pointer. (#1710)
+                        should_dispatch_shortcut(status, &shortcut)
+                            .then_some(Message::ShortcutPressed(shortcut))
                     }
                     _ => None,
                 }
@@ -4415,5 +4443,41 @@ mod tests {
             std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             super::super::StartSection::default(),
         );
+    }
+
+    #[test]
+    fn captured_space_dispatches_only_when_rebound_off_commandspace() {
+        // #1710: when the command line holds focus it reports Status::Captured
+        // and swallows a key so the text field can type it. A Captured-space
+        // must only fire as a shortcut when SPACE is rebound away from the
+        // default COMMANDSPACE (e.g. to FINALIZE); otherwise the default
+        // COMMANDSPACE would fire on every space typed into a text field.
+        // The pure helpers are tested here so no test touches the shared flag.
+        use crate::app::shortcuts::space_rebound_off_commandspace;
+        use iced::event::Status;
+        use rustc_hash::FxHashMap;
+
+        let mut bindings: FxHashMap<String, String> = FxHashMap::default();
+        bindings.insert("SPACE".to_string(), "COMMANDSPACE".to_string());
+        let rebound = space_rebound_off_commandspace(&bindings);
+        assert!(!rebound);
+        assert!(
+            !dispatch_shortcut(Status::Captured, "SPACE", rebound),
+            "a Captured-space bound to COMMANDSPACE must be typed, not dispatched"
+        );
+
+        bindings.insert("SPACE".to_string(), "FINALIZE".to_string());
+        let rebound = space_rebound_off_commandspace(&bindings);
+        assert!(rebound);
+        assert!(
+            dispatch_shortcut(Status::Captured, "SPACE", rebound),
+            "a Captured-space rebound away from COMMANDSPACE must dispatch"
+        );
+
+        // A non-space captured key is typed, not dispatched as a shortcut.
+        assert!(!dispatch_shortcut(Status::Captured, "A", true));
+        // Ignored keys always dispatch, regardless of the SPACE binding.
+        assert!(dispatch_shortcut(Status::Ignored, "SPACE", false));
+        assert!(dispatch_shortcut(Status::Ignored, "F5", false));
     }
 }
