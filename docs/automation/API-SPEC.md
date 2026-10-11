@@ -251,17 +251,18 @@ REST: `POST /documents` (`{}` → fresh document, `{"template":…}`, `{"path":�
 `{"entities":[{…},…]}` — a batch of typed definitions, validated in full
 before anything commits; one undo step; missing layers are auto-created and
 reported in `result.layers_created`. Every definition also accepts `layer`
-and `color` (index).
+and `color` (index); any other field is refused (`unknown_entity_field`).
 
 | Type | Fields |
 |---|---|
 | `Line` | `start`, `end`, optional `thickness` |
 | `Circle` | `center`, `radius` (≥ 0) |
 | `Arc` | `center`, `radius` (> 0), `start_angle_deg`, `end_angle_deg` |
+| `Spline` | `control_points` (more than `degree`) or `fit_points` (≥ 2), optional `degree` (1–10, default 3), `knots` (control points + degree + 1, non-decreasing), `weights` (one positive value per control point), `closed`, `periodic`, `rational`, `planar`, `linear` |
 | `LwPolyline` | `vertices` (≥ 2), `closed`, optional `constant_width` |
 | `Point` | `location` |
 | `Text` | `value`, `position`, optional `height` (default 2.5), `rotation_deg`, `style` |
-| `MText` | `value`, `position`, optional `height`, `width`, `rotation_deg` |
+| `MText` | `value`, `position`, optional `height`, `width`, `rotation_deg`, `style` |
 | `Insert` | `block` (must exist), `position`, optional `scale` (number or `[x,y,z]`, nonzero), `rotation_deg` |
 | `Solid` | `corners` (3 or 4 `[x,y,z]`) |
 | `Hatch` | `boundary` (≥ 3 points, closed), `solid`, or `pattern` (catalog name, default `ANSI31`), `pattern_scale`, `pattern_angle_deg` |

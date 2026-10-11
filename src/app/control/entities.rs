@@ -108,8 +108,6 @@ fn validate_entity_fields(spec: &Value, kind: &str) -> Parsed<()> {
                 field.as_str(),
                 "type" | "center" | "radius" | "start_angle_deg" | "end_angle_deg" | "layer" | "color"
             ),
-            // Kept here so the schema remains forward-compatible with the
-            // Spline entity API when that builder lands separately.
             "SPLINE" => matches!(
                 field.as_str(),
                 "type" | "degree" | "knots" | "control_points" | "fit_points" | "weights"
