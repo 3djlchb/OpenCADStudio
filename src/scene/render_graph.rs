@@ -621,6 +621,72 @@ pub fn block_base_point(document: &CadDocument, block_name: &str) -> Vector3 {
         .unwrap_or(Vector3::ZERO)
 }
 
+/// The block reference that places a dimension's picture block: at the
+/// dimension's insertion point, with its insertion rotation and scale. The
+/// point is stored in the dimension's OCS; the picture's sub-entities are in
+/// world coordinates, so only the point goes through the OCS. A zero scale
+/// component (an unread field) counts as 1 rather than collapsing the picture.
+pub(crate) fn dimension_picture_insert(
+    base: &codec::entities::dimension::DimensionBase,
+    block_name: String,
+) -> Insert {
+    let scale = |s: f64| if s.abs() < 1e-12 { 1.0 } else { s };
+    let point = Matrix3::arbitrary_axis(base.normal) * base.insertion_point;
+    Insert::new(block_name, point)
+        .with_scale(
+            scale(base.insertion_scale.x),
+            scale(base.insertion_scale.y),
+            scale(base.insertion_scale.z),
+        )
+        .with_rotation(base.insertion_rotation)
+}
+
+/// World transform of a dimension's picture placement, or None when it is
+/// the identity (the usual case: OCS bakes its pictures in place).
+pub(crate) fn dimension_picture_placement(
+    base: &codec::entities::dimension::DimensionBase,
+) -> Option<Transform> {
+    let insert = dimension_picture_insert(base, String::new());
+    let p = insert.insert_point;
+    let identity = p.x.abs() < 1e-9
+        && p.y.abs() < 1e-9
+        && p.z.abs() < 1e-9
+        && insert.rotation.abs() < 1e-12
+        && (insert.x_scale() - 1.0).abs() < 1e-12
+        && (insert.y_scale() - 1.0).abs() < 1e-12
+        && (insert.z_scale() - 1.0).abs() < 1e-12;
+    (!identity).then(|| insert.get_transform())
+}
+
+/// A dimension's picture placement as a world-space edit, or None when it is
+/// the identity. Edits move the picture's sub-entities in world space, so a
+/// placed picture has its placement folded into the subs and the dimension's
+/// own placement cleared (`clear_dim_picture_placement`); a placement left on
+/// the dimension would be applied again on top of the moved subs.
+pub(crate) fn dim_picture_placement(entity: &EntityType) -> Option<crate::command::EntityTransform> {
+    let EntityType::Dimension(d) = entity else {
+        return None;
+    };
+    if d.base().block_name.trim().is_empty() {
+        return None;
+    }
+    dimension_picture_placement(d.base()).map(crate::command::EntityTransform::Affine)
+}
+
+/// Reset a dimension's picture placement to the identity once its subs carry
+/// it. Also undoes the transform moving the placement point along with the
+/// dimension, which would offset a picture baked in place.
+pub(crate) fn clear_dim_picture_placement(entity: &mut EntityType) {
+    if let EntityType::Dimension(d) = entity {
+        let base = d.base_mut();
+        if !base.block_name.trim().is_empty() {
+            base.insertion_point = Vector3::ZERO;
+            base.insertion_rotation = 0.0;
+            base.insertion_scale = Vector3::new(1.0, 1.0, 1.0);
+        }
+    }
+}
+
 pub fn insert_transform(document: &CadDocument, insert: &Insert) -> Transform {
     let base = block_base_point(document, &insert.block_name);
     Transform::from_translation(Vector3::new(-base.x, -base.y, -base.z))
@@ -790,23 +856,7 @@ fn entity_owned_block_uses(
                 .filter(|record| !record.entity_handles.is_empty())
             {
                 let base = dimension.base();
-                // The picture block draws the dimension in its own frame, and
-                // the dimension says where that frame sits. Placing it at the
-                // origin instead draws the whole dimension offset by the
-                // insertion point — far off the geometry it measures whenever
-                // the file carries a non-zero one, which is what a dimension
-                // saved inside a block definition usually has.
-                let mut insert = Insert::new(record.name.clone(), base.insertion_point)
-                    .with_scale(
-                        base.insertion_scale.x,
-                        base.insertion_scale.y,
-                        base.insertion_scale.z,
-                    )
-                    .with_rotation(base.insertion_rotation);
-                // The insertion point is in the dimension's own object
-                // coordinates, so the picture follows its extrusion the way
-                // any block reference does.
-                insert.normal = base.normal;
+                let mut insert = dimension_picture_insert(base, record.name.clone());
                 insert.common = base.common.clone();
                 let picture = !crate::scene::annotative::is_annotative(document, entity);
                 vec![block_use(

@@ -263,25 +263,30 @@ impl Scene {
         // block, and the render draws those sub-entities directly (not the
         // definition points). Transform them with the dimension, or it would
         // stay drawn in place while only its def points move.
-        let dim_block_subs: Vec<Handle> = handles
+        let dim_block_subs: Vec<(Handle, Option<EntityTransform>)> = handles
             .iter()
             .filter_map(|&h| match self.document.get_entity(h) {
-                Some(EntityType::Dimension(d)) => {
+                Some(entity @ EntityType::Dimension(d)) => {
                     let bn = d.base().block_name.clone();
                     if bn.trim().is_empty() {
                         None
                     } else {
-                        Some(bn)
+                        Some((bn, render_graph::dim_picture_placement(entity)))
                     }
                 }
                 _ => None,
             })
-            .filter_map(|bn| {
+            .filter_map(|(bn, placement)| {
                 self.document
                     .block_records
                     .iter()
                     .find(|br| br.name.eq_ignore_ascii_case(&bn))
-                    .map(|br| br.entity_handles.clone())
+                    .map(|br| {
+                        br.entity_handles
+                            .iter()
+                            .map(|&sh| (sh, placement.clone()))
+                            .collect::<Vec<_>>()
+                    })
             })
             .flatten()
             .collect();
@@ -294,6 +299,7 @@ impl Scene {
             }
             if let Some(entity) = self.document.get_entity_mut(h) {
                 view::dispatch::apply_transform(entity, t);
+                render_graph::clear_dim_picture_placement(entity);
                 if mirror_true {
                     mirror_true_text_flags(entity);
                 }
@@ -359,12 +365,15 @@ impl Scene {
         // Move the baked dimension-block sub-entities too (collected above).
         // These are entities not named in the reported change set, so a delta
         // must capture their before-images here or a dimension move won't undo.
-        for h in &dim_block_subs {
+        for (h, placement) in &dim_block_subs {
             if self.is_recording_undo() {
                 let before = self.document.get_entity_arc(*h);
                 self.record_undo_before(*h, before);
             }
             if let Some(entity) = self.document.get_entity_mut(*h) {
+                if let Some(placement) = placement {
+                    view::dispatch::apply_transform(entity, placement);
+                }
                 transform_dimension_part(entity, t);
             }
         }
@@ -588,7 +597,12 @@ impl Scene {
     /// transformed block — otherwise it still references the source block and
     /// renders on top of the original instead of at the copy. Returns None when
     /// the source block is missing or empty. (#161)
-    fn clone_transformed_block(&mut self, src_name: &str, t: &EntityTransform) -> Option<String> {
+    fn clone_transformed_block(
+        &mut self,
+        src_name: &str,
+        placement: Option<&EntityTransform>,
+        t: &EntityTransform,
+    ) -> Option<String> {
         let sub_handles = self
             .document
             .block_records
@@ -598,6 +612,12 @@ impl Scene {
         let subs: Vec<EntityType> = sub_handles
             .iter()
             .filter_map(|&sh| self.document.get_entity(sh).cloned())
+            .map(|mut sub| {
+                if let Some(placement) = placement {
+                    view::dispatch::apply_transform(&mut sub, placement);
+                }
+                sub
+            })
             .collect();
         self.define_transformed_block(&subs, t)
     }
@@ -694,7 +714,9 @@ impl Scene {
             } else {
                 None
             };
+            let picture_placement = render_graph::dim_picture_placement(&entity);
             view::dispatch::apply_transform(&mut entity, t);
+            render_graph::clear_dim_picture_placement(&mut entity);
             if let Some(o) = &text_orient {
                 restore_text_orient(&mut entity, o);
             }
@@ -707,7 +729,8 @@ impl Scene {
             if let EntityType::Dimension(d) = &entity {
                 let bn = d.base().block_name.clone();
                 if !bn.trim().is_empty() {
-                    if let Some(new_bn) = self.clone_transformed_block(&bn, t) {
+                    let placement = picture_placement.as_ref();
+                    if let Some(new_bn) = self.clone_transformed_block(&bn, placement, t) {
                         // Delta-undo: a copied dimension adds a fresh anonymous
                         // *D block record — non-entity state a pure-entity delta
                         // can't restore. Poison so the app keeps a full snapshot.

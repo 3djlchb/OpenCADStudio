@@ -512,9 +512,11 @@ pub(crate) fn paste_entities_kernel(
         .iter()
         .cloned()
         .map(|mut entity| {
+            let picture_placement = crate::scene::render_graph::dim_picture_placement(&entity);
             if let Some(t) = translate {
                 crate::scene::view::dispatch::apply_transform(&mut entity, t);
             }
+            crate::scene::render_graph::clear_dim_picture_placement(&mut entity);
             // Same `*D`-block re-point as `finalize_paste` (#290, #161): the
             // baked dimension geometry lives in WCS, so the paste gets its own
             // transformed copy of the snapshotted block.
@@ -527,6 +529,12 @@ pub(crate) fn paste_entities_kernel(
                         .find(|b| b.name.eq_ignore_ascii_case(&bn))
                         .map(|def| def.entities.clone())
                     {
+                        let mut subs = subs;
+                        if let Some(placement) = &picture_placement {
+                            for sub in &mut subs {
+                                crate::scene::view::dispatch::apply_transform(sub, placement);
+                            }
+                        }
                         let bt = translate.cloned().unwrap_or(
                             crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
                         );
