@@ -3,9 +3,8 @@
 use codec::objects::{
     Assoc2dConstraintGroup, AssocAction, AssocActionDependency, AssocConstraintNode,
     AssocConstraintNodeData, AssocDependency, AssocDimDependencyBody, AssocEvalValue,
-    AssocEvalVariant,
-    AssocGeomDependency, AssocNetwork, AssocPersistentSubentId, AssocValueDependency,
-    AssocVariable, AssociativeData, AssociativeObject, ObjectType,
+    AssocEvalVariant, AssocGeomDependency, AssocNetwork, AssocPersistentSubentId,
+    AssocValueDependency, AssocVariable, AssociativeData, AssociativeObject, ObjectType,
 };
 use codec::types::{Handle, Vector3};
 use codec::{CadDocument, EntityType};
@@ -625,11 +624,8 @@ impl<'a> GroupBuilder<'a> {
                 },
             );
         } else {
-            let arc = kernel::geom2d::BulgeArc::from_bulge(
-                [start.x, start.y],
-                [end.x, end.y],
-                bulge,
-            )?;
+            let arc =
+                kernel::geom2d::BulgeArc::from_bulge([start.x, start.y], [end.x, end.y], bulge)?;
             self.push_node(
                 node_id,
                 "AcConstrainedArc",
@@ -1451,7 +1447,11 @@ const ASSOC_CLASSES: &[(&str, &str, i32)] = &[
     ("ACDBASSOCGEOMDEPENDENCY", "AcDbAssocGeomDependency", 29),
     ("ACDBASSOCVALUEDEPENDENCY", "AcDbAssocValueDependency", 29),
     ("ACDBASSOCDEPENDENCY", "AcDbAssocDependency", 29),
-    ("ACDBASSOCDIMDEPENDENCYBODY", "AcDbAssocDimDependencyBody", 45),
+    (
+        "ACDBASSOCDIMDEPENDENCYBODY",
+        "AcDbAssocDimDependencyBody",
+        45,
+    ),
 ];
 
 fn ensure_associative_classes_registered(document: &mut CadDocument) {
@@ -1816,9 +1816,7 @@ fn directional_axis_reference(
         return None;
     };
     match document.get_entity(entity)? {
-        EntityType::Text(_) | EntityType::MText(_) => {
-            Some(ParametricRef::text_baseline(entity))
-        }
+        EntityType::Text(_) | EntityType::MText(_) => Some(ParametricRef::text_baseline(entity)),
         EntityType::Ellipse(ellipse) => {
             let [origin, axis_x, axis_y] = *work_plane;
             let normal = Vector3::new(
@@ -1826,9 +1824,8 @@ fn directional_axis_reference(
                 axis_x.z * axis_y.x - axis_x.x * axis_y.z,
                 axis_x.x * axis_y.y - axis_x.y * axis_y.x,
             );
-            let to_world = |point: Vector3| {
-                origin + axis_x * point.x + axis_y * point.y + normal * point.z
-            };
+            let to_world =
+                |point: Vector3| origin + axis_x * point.x + axis_y * point.y + normal * point.z;
             let direction = (to_world(*end_point) - to_world(*start_point)).normalize();
             let major = ellipse.major_axis.normalize();
             let ellipse_normal = ellipse.normal.normalize();
@@ -2381,18 +2378,18 @@ pub(super) fn native_constraint_set(
                     };
                     let local_direction = datum_id.and_then(|datum_id| {
                         group.nodes.iter().find_map(|datum| {
-                            (datum.node_id == datum_id).then_some(&datum.data).and_then(|data| {
-                                match data {
+                            (datum.node_id == datum_id)
+                                .then_some(&datum.data)
+                                .and_then(|data| match data {
                                     AssocConstraintNodeData::Line { direction, .. } => {
                                         Some(*direction)
                                     }
                                     _ => None,
-                                }
-                            })
+                                })
                         })
                     });
-                    if let Some(world) =
-                        local_direction.and_then(|local| work_plane_vector(&group.work_plane, local))
+                    if let Some(world) = local_direction
+                        .and_then(|local| work_plane_vector(&group.work_plane, local))
                     {
                         constraint.axis_direction = Some(world);
                     }
@@ -2502,7 +2499,12 @@ fn detach_preserved_scope(
             })) => Some(action),
             _ => None,
         })
-        .flat_map(|action| action.values.iter().flat_map(|value| value.variables.iter().map(|variable| variable.handle)))
+        .flat_map(|action| {
+            action
+                .values
+                .iter()
+                .flat_map(|value| value.variables.iter().map(|variable| variable.handle))
+        })
         .filter_map(|handle| match document.objects.get(&handle) {
             Some(ObjectType::Associative(AssociativeObject {
                 data: AssociativeData::ValueDependency(value),
@@ -2642,15 +2644,21 @@ fn pending_swept_surfaces(document: &CadDocument) -> Vec<(Handle, Handle, Handle
         .collect();
     let mut pending = document
         .entities()
-        .filter(|entity| matches!(entity, codec::EntityType::Surface(surface)
-            if matches!(surface.surface_data, codec::entities::SurfaceData::Swept { .. })))
+        .filter(|entity| {
+            matches!(entity, codec::EntityType::Surface(surface)
+            if matches!(surface.surface_data, codec::entities::SurfaceData::Swept { .. }))
+        })
         .filter_map(|entity| {
             let (profile, path) = sweep_model::sweep_sources(entity)?;
             let surface = entity.common().handle;
             (!carried.contains(&surface)
-                && document.get_entity(profile).is_some_and(|e| sweep_model::assoc_edge_curve(e).is_some())
-                && document.get_entity(path).is_some_and(|e| sweep_model::assoc_edge_curve(e).is_some()))
-                .then_some((surface, profile, path))
+                && document
+                    .get_entity(profile)
+                    .is_some_and(|e| sweep_model::assoc_edge_curve(e).is_some())
+                && document
+                    .get_entity(path)
+                    .is_some_and(|e| sweep_model::assoc_edge_curve(e).is_some()))
+            .then_some((surface, profile, path))
         })
         .collect::<Vec<_>>();
     pending.sort_by_key(|(surface, _, _)| surface.value());
@@ -2665,7 +2673,9 @@ fn expression_names(expression: &str) -> Vec<String> {
         if character.is_alphanumeric() || character == '_' {
             current.push(character);
         } else if !current.is_empty() {
-            if current.chars().next().is_some_and(|c| c.is_alphabetic()) && !names.contains(&current) {
+            if current.chars().next().is_some_and(|c| c.is_alphabetic())
+                && !names.contains(&current)
+            {
                 names.push(current.clone());
             }
             current.clear();
@@ -2691,24 +2701,63 @@ fn materialize_swept_surface_actions(
     let mut added = Vec::new();
     for (surface, profile, path) in pending.iter().copied() {
         let document = &*allocator.document;
-        let Some(surface_entity) = document.get_entity(surface) else { continue };
-        let codec::EntityType::Surface(surface_value) = surface_entity else { continue };
-        let codec::entities::SurfaceData::Swept { options, .. } = &surface_value.surface_data else { continue };
-        let (rotation, scale, twist) = (options.align_angle, options.scale_factor, options.twist_angle);
+        let Some(surface_entity) = document.get_entity(surface) else {
+            continue;
+        };
+        let codec::EntityType::Surface(surface_value) = surface_entity else {
+            continue;
+        };
+        let codec::entities::SurfaceData::Swept { options, .. } = &surface_value.surface_data
+        else {
+            continue;
+        };
+        let (rotation, scale, twist) = (
+            options.align_angle,
+            options.scale_factor,
+            options.twist_angle,
+        );
         let expressions = sweep_model::sweep_expressions(surface_entity).unwrap_or([None, None]);
         let (Some(profile_curve), Some(path_curve)) = (
-            document.get_entity(profile).and_then(sweep_model::assoc_edge_curve),
-            document.get_entity(path).and_then(sweep_model::assoc_edge_curve),
-        ) else { continue };
+            document
+                .get_entity(profile)
+                .and_then(sweep_model::assoc_edge_curve),
+            document
+                .get_entity(path)
+                .and_then(sweep_model::assoc_edge_curve),
+        ) else {
+            continue;
+        };
         let evaluate = |expression: &str| {
             let mut table = parameters.clone();
             table.set("sweepExpression", expression).ok()?;
-            table.resolve("sweepExpression").ok().filter(|value| value.is_finite())
+            table
+                .resolve("sweepExpression")
+                .ok()
+                .filter(|value| value.is_finite())
         };
         let document = &mut *allocator.document;
         let mut next = || document.allocate_handle();
-        let (action, body, written, profile_param, profile_edge, profile_read, path_param, path_edge, path_read) =
-            (next(), next(), next(), next(), next(), next(), next(), next(), next());
+        let (
+            action,
+            body,
+            written,
+            profile_param,
+            profile_edge,
+            profile_read,
+            path_param,
+            path_edge,
+            path_read,
+        ) = (
+            next(),
+            next(),
+            next(),
+            next(),
+            next(),
+            next(),
+            next(),
+            next(),
+            next(),
+        );
         let dependency = |dependent_on: Handle, read: bool, id: i32, order: i32| AssocDependency {
             class_version: 2,
             status: 0,
@@ -2725,120 +2774,236 @@ fn materialize_swept_surface_actions(
             dependency_body_id: id,
         };
         let mut objects: Vec<(Handle, Handle, &str, &str, AssociativeData)> = Vec::new();
-        let mut reactors: Vec<(Handle, Handle)> = vec![(surface, written), (profile, profile_read), (path, path_read)];
+        let mut reactors: Vec<(Handle, Handle)> = vec![
+            (surface, written),
+            (profile, profile_read),
+            (path, path_read),
+        ];
         let mut dependencies = vec![written, profile_read, path_read];
         let mut value_handles = [Handle::NULL, Handle::NULL];
         let mut network_actions = vec![action];
         // Scale (slot 0) and twist (slot 1) expressions.
         for (slot, expression) in expressions.iter().enumerate() {
-            let Some(expression) = expression else { continue };
-            let Some(value) = evaluate(expression) else { continue };
-            let (variable, read_by_action) = (document.allocate_handle(), document.allocate_handle());
+            let Some(expression) = expression else {
+                continue;
+            };
+            let Some(value) = evaluate(expression) else {
+                continue;
+            };
+            let (variable, read_by_action) =
+                (document.allocate_handle(), document.allocate_handle());
             let mut variable_dependencies = Vec::new();
             for (index, name) in expression_names(expression).iter().enumerate() {
-                let Some(named) = allocator.variables.get(name).copied() else { continue };
+                let Some(named) = allocator.variables.get(name).copied() else {
+                    continue;
+                };
                 let reads = document.allocate_handle();
                 let named_value = parameters.resolve(name).unwrap_or(0.0);
-                objects.push((reads, variable, "ACDBASSOCVALUEDEPENDENCY", "AcDbAssocValueDependency",
+                objects.push((
+                    reads,
+                    variable,
+                    "ACDBASSOCVALUEDEPENDENCY",
+                    "AcDbAssocValueDependency",
                     AssociativeData::ValueDependency(AssocValueDependency {
                         dependency: dependency(named, true, index as i32 + 1, 0),
                         class_version: 0,
                         name: String::new(),
                         value: Allocator::numeric_eval(named_value),
-                    })));
+                    }),
+                ));
                 reactors.push((named, reads));
-                variable_dependencies.push(AssocVariableDependency { dependency: reads, flags: 0 });
+                variable_dependencies.push(AssocVariableDependency {
+                    dependency: reads,
+                    flags: 0,
+                });
             }
-            objects.push((variable, network, "ACDBASSOCVARIABLE", "AcDbAssocVariable", AssociativeData::Variable(AssocVariable {
-                action: AssocAction {
+            objects.push((
+                variable,
+                network,
+                "ACDBASSOCVARIABLE",
+                "AcDbAssocVariable",
+                AssociativeData::Variable(AssocVariable {
+                    action: AssocAction {
+                        class_version: 2,
+                        owning_network: network,
+                        max_dependency_index: variable_dependencies.len() as i32,
+                        ..Default::default()
+                    },
                     class_version: 2,
-                    owning_network: network,
-                    max_dependency_index: variable_dependencies.len() as i32,
-                    ..Default::default()
-                },
-                class_version: 2,
-                name: String::new(),
-                expression: expression.clone(),
-                evaluator: "AcDbCalc:1.0".to_string(),
-                description: String::new(),
-                value: Allocator::numeric_eval(value),
-                has_cached_value: false,
-                cached_value: String::new(),
-                flag: false,
-                dependencies: variable_dependencies,
-            })));
-            objects.push((read_by_action, action, "ACDBASSOCVALUEDEPENDENCY", "AcDbAssocValueDependency",
+                    name: String::new(),
+                    expression: expression.clone(),
+                    evaluator: "AcDbCalc:1.0".to_string(),
+                    description: String::new(),
+                    value: Allocator::numeric_eval(value),
+                    has_cached_value: false,
+                    cached_value: String::new(),
+                    flag: false,
+                    dependencies: variable_dependencies,
+                }),
+            ));
+            objects.push((
+                read_by_action,
+                action,
+                "ACDBASSOCVALUEDEPENDENCY",
+                "AcDbAssocValueDependency",
                 AssociativeData::ValueDependency(AssocValueDependency {
                     dependency: dependency(variable, true, dependencies.len() as i32 + 1, 0),
                     class_version: 0,
                     name: String::new(),
                     value: Allocator::numeric_eval(value),
-                })));
+                }),
+            ));
             reactors.push((variable, read_by_action));
             dependencies.push(read_by_action);
             value_handles[slot] = read_by_action;
             network_actions.push(variable);
         }
-        let real = |value: f64| AssocEvalVariant { code: 40, value: AssocEvalValue::Real(value) };
+        let real = |value: f64| AssocEvalVariant {
+            code: 40,
+            value: AssocEvalValue::Real(value),
+        };
         let value = |name: &str, unit_type: i32, amount: f64, handle: Handle| AssocValueParam {
             class_version: 0,
             name: name.to_string(),
             unit_type,
-            variables: vec![AssocValueParamVariable { value: real(amount), handle }],
+            variables: vec![AssocValueParamVariable {
+                value: real(amount),
+                handle,
+            }],
             controlled_object_dependency: written,
         };
-        objects.push((action, network, "ACDBASSOCACTION", "AcDbAssocAction", AssociativeData::Action(AssocAction {
-            class_version: 2,
-            geometry_status: 0,
-            owning_network: network,
-            action_body: body,
-            action_index: 0,
-            max_dependency_index: dependencies.len() as i32,
-            dependencies: dependencies.iter().map(|handle| AssocActionDependency { is_owned: true, dependency: *handle }).collect(),
-            owned_parameters: vec![profile_param, path_param],
-            values: vec![
-                value("RotationAngle", 2, rotation, Handle::NULL),
-                value("ScaleFactor", 0, scale, value_handles[0]),
-                value("TwistAngle", 2, twist, value_handles[1]),
-            ],
-        })));
-        objects.push((body, action, "ACDBASSOCSWEPTSURFACEACTIONBODY", "AcDbAssocSweptSurfaceActionBody",
+        objects.push((
+            action,
+            network,
+            "ACDBASSOCACTION",
+            "AcDbAssocAction",
+            AssociativeData::Action(AssocAction {
+                class_version: 2,
+                geometry_status: 0,
+                owning_network: network,
+                action_body: body,
+                action_index: 0,
+                max_dependency_index: dependencies.len() as i32,
+                dependencies: dependencies
+                    .iter()
+                    .map(|handle| AssocActionDependency {
+                        is_owned: true,
+                        dependency: *handle,
+                    })
+                    .collect(),
+                owned_parameters: vec![profile_param, path_param],
+                values: vec![
+                    value("RotationAngle", 2, rotation, Handle::NULL),
+                    value("ScaleFactor", 0, scale, value_handles[0]),
+                    value("TwistAngle", 2, twist, value_handles[1]),
+                ],
+            }),
+        ));
+        objects.push((
+            body,
+            action,
+            "ACDBASSOCSWEPTSURFACEACTIONBODY",
+            "AcDbAssocSweptSurfaceActionBody",
             AssociativeData::SurfaceActionBody(AssocSurfaceActionBody {
                 kind: AssocSurfaceActionKind::Swept,
                 action_body: AssocActionBody { version: 2 },
-                surface_body: AssocSurfaceBody { version: 0, dependency: written, is_semi_associative: false, marker: 1, is_semi_override: false, grip_status: 0 },
+                surface_body: AssocSurfaceBody {
+                    version: 0,
+                    dependency: written,
+                    is_semi_associative: false,
+                    marker: 1,
+                    is_semi_override: false,
+                    grip_status: 0,
+                },
                 ..Default::default()
-            })));
-        objects.push((written, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(dependency(surface, false, 1, i32::MIN))));
-        let edge_param = |read: Handle, (kind, subcurve, curve): (i32, AssocSubcurveKind, Vec<AssocCurveValue>)| AssociativeData::EdgeActionParam(AssocEdgeActionParam {
-            single_dependency: AssocSingleDependencyActionParam {
-                action_param: AssocActionParam { is_r2013: 1, version: 0, name: String::new() },
-                dependency_class_version: 0,
-                dependency: read,
-                class_version: 0,
-            },
-            parameter: Handle::NULL,
-            has_action: true,
-            action_type: kind,
-            subcurve_kind: subcurve,
-            curve,
-        });
-        let path_parameter = |name: &str, child: Handle| AssociativeData::PathActionParam(AssocPathActionParam {
-            compound: AssocCompoundActionParam {
-                action_param: AssocActionParam { is_r2013: 1, version: 0, name: name.to_string() },
-                class_version: 0,
-                status: 0,
-                parameters: vec![child],
-                child_parameter: None,
-            },
-            version: 0,
-        });
-        objects.push((profile_param, action, "ACDBASSOCPATHACTIONPARAM", "AcDbAssocPathActionParam", path_parameter("SweepProfile", profile_edge)));
-        objects.push((profile_edge, profile_param, "ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam", edge_param(profile_read, profile_curve)));
-        objects.push((profile_read, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(dependency(profile, true, 2, 0))));
-        objects.push((path_param, action, "ACDBASSOCPATHACTIONPARAM", "AcDbAssocPathActionParam", path_parameter("SweepPath", path_edge)));
-        objects.push((path_edge, path_param, "ACDBASSOCEDGEACTIONPARAM", "AcDbAssocEdgeActionParam", edge_param(path_read, path_curve)));
-        objects.push((path_read, action, "ACDBASSOCDEPENDENCY", "AcDbAssocDependency", AssociativeData::Dependency(dependency(path, true, 3, 0))));
+            }),
+        ));
+        objects.push((
+            written,
+            action,
+            "ACDBASSOCDEPENDENCY",
+            "AcDbAssocDependency",
+            AssociativeData::Dependency(dependency(surface, false, 1, i32::MIN)),
+        ));
+        let edge_param =
+            |read: Handle,
+             (kind, subcurve, curve): (i32, AssocSubcurveKind, Vec<AssocCurveValue>)| {
+                AssociativeData::EdgeActionParam(AssocEdgeActionParam {
+                    single_dependency: AssocSingleDependencyActionParam {
+                        action_param: AssocActionParam {
+                            is_r2013: 1,
+                            version: 0,
+                            name: String::new(),
+                        },
+                        dependency_class_version: 0,
+                        dependency: read,
+                        class_version: 0,
+                    },
+                    parameter: Handle::NULL,
+                    has_action: true,
+                    action_type: kind,
+                    subcurve_kind: subcurve,
+                    curve,
+                })
+            };
+        let path_parameter = |name: &str, child: Handle| {
+            AssociativeData::PathActionParam(AssocPathActionParam {
+                compound: AssocCompoundActionParam {
+                    action_param: AssocActionParam {
+                        is_r2013: 1,
+                        version: 0,
+                        name: name.to_string(),
+                    },
+                    class_version: 0,
+                    status: 0,
+                    parameters: vec![child],
+                    child_parameter: None,
+                },
+                version: 0,
+            })
+        };
+        objects.push((
+            profile_param,
+            action,
+            "ACDBASSOCPATHACTIONPARAM",
+            "AcDbAssocPathActionParam",
+            path_parameter("SweepProfile", profile_edge),
+        ));
+        objects.push((
+            profile_edge,
+            profile_param,
+            "ACDBASSOCEDGEACTIONPARAM",
+            "AcDbAssocEdgeActionParam",
+            edge_param(profile_read, profile_curve),
+        ));
+        objects.push((
+            profile_read,
+            action,
+            "ACDBASSOCDEPENDENCY",
+            "AcDbAssocDependency",
+            AssociativeData::Dependency(dependency(profile, true, 2, 0)),
+        ));
+        objects.push((
+            path_param,
+            action,
+            "ACDBASSOCPATHACTIONPARAM",
+            "AcDbAssocPathActionParam",
+            path_parameter("SweepPath", path_edge),
+        ));
+        objects.push((
+            path_edge,
+            path_param,
+            "ACDBASSOCEDGEACTIONPARAM",
+            "AcDbAssocEdgeActionParam",
+            edge_param(path_read, path_curve),
+        ));
+        objects.push((
+            path_read,
+            action,
+            "ACDBASSOCDEPENDENCY",
+            "AcDbAssocDependency",
+            AssociativeData::Dependency(dependency(path, true, 3, 0)),
+        ));
         for (handle, owner, dxf, class, data) in objects {
             allocator.insert_associative_at(handle, owner, dxf, class, data);
         }
@@ -2846,7 +3011,8 @@ fn materialize_swept_surface_actions(
             let document = &mut *allocator.document;
             if let Some(entity) = document.get_entity_mut(target) {
                 entity.common_mut().reactors.push(reactor);
-            } else if let Some(ObjectType::Associative(object)) = document.objects.get_mut(&target) {
+            } else if let Some(ObjectType::Associative(object)) = document.objects.get_mut(&target)
+            {
                 object.reactors.push(reactor);
             }
         }
@@ -2880,7 +3046,10 @@ fn refresh_foreign_values(
         })) => {
             let mut table = parameters.clone();
             table.set("foreignExpression", &variable.expression).ok()?;
-            table.resolve("foreignExpression").ok().filter(|value| value.is_finite())
+            table
+                .resolve("foreignExpression")
+                .ok()
+                .filter(|value| value.is_finite())
         }
         _ => None,
     };
@@ -2908,7 +3077,9 @@ fn refresh_foreign_values(
         }
     }
     for (dependency, source) in dependencies {
-        let Some(value) = value_of(document, source) else { continue };
+        let Some(value) = value_of(document, source) else {
+            continue;
+        };
         if let Some(ObjectType::Associative(AssociativeObject {
             data: AssociativeData::ValueDependency(dependency),
             ..
@@ -2939,7 +3110,11 @@ fn refresh_foreign_values(
                     continue;
                 };
                 // Angle parameters are cached in radians.
-                let value = if param.unit_type == 2 { value.to_radians() } else { value };
+                let value = if param.unit_type == 2 {
+                    value.to_radians()
+                } else {
+                    value
+                };
                 updates.push((index, slot, value));
             }
         }
@@ -3190,9 +3365,18 @@ fn materialize_scope(
         }
     }
     refresh_foreign_values(allocator.document, &foreign_actions, parameters);
-    let pending = if materialize_all_parameters { pending_swept_surfaces(allocator.document) } else { Vec::new() };
+    let pending = if materialize_all_parameters {
+        pending_swept_surfaces(allocator.document)
+    } else {
+        Vec::new()
+    };
     let surface_actions = materialize_swept_surface_actions(
-        &mut allocator, network_handle, parameters, &pending, first_foreign + foreign_actions.len() as i32);
+        &mut allocator,
+        network_handle,
+        parameters,
+        &pending,
+        first_foreign + foreign_actions.len() as i32,
+    );
 
     let network = AssocNetwork {
         action: AssocAction {
@@ -3202,7 +3386,8 @@ fn materialize_scope(
             ..Default::default()
         },
         network_version: 0,
-        network_action_index: first_foreign + (foreign_actions.len() + surface_actions.len()) as i32,
+        network_action_index: first_foreign
+            + (foreign_actions.len() + surface_actions.len()) as i32,
         actions: allocator
             .variable_actions
             .iter()
@@ -3352,7 +3537,8 @@ impl Scene {
             if set.is_none()
                 && !existing
                 && (owner != model_owner
-                    || (self.named_parameters.is_empty() && pending_swept_surfaces(&self.document).is_empty()))
+                    || (self.named_parameters.is_empty()
+                        && pending_swept_surfaces(&self.document).is_empty()))
             {
                 continue;
             }
@@ -3616,9 +3802,7 @@ mod tests {
                 .iter()
                 .find(|constraint| constraint.kind == ConstraintKind::Horizontal)
                 .unwrap();
-            assert!(
-                (horizontal.axis_direction.unwrap() - horizontal_direction).length() < 1.0e-12
-            );
+            assert!((horizontal.axis_direction.unwrap() - horizontal_direction).length() < 1.0e-12);
         }
     }
 
@@ -4052,9 +4236,9 @@ mod tests {
         let mut block = BlockRecord::new("fixture");
         block.handle = scene.document.allocate_handle();
         scene.document.block_records.add(block).unwrap();
-        let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(
-            Vector3::new(1.0, 2.0, 0.0),
-        )));
+        let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(Vector3::new(
+            1.0, 2.0, 0.0,
+        ))));
         let insert = scene.add_entity(EntityType::Insert(Insert::new(
             "fixture",
             Vector3::new(3.0, 4.0, 0.0),
@@ -4996,5 +5180,4 @@ mod tests {
             assert_eq!(restored_sectors, sectors);
         }
     }
-
 }

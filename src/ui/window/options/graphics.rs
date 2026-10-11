@@ -75,9 +75,12 @@ pub(crate) fn view(prefs: GraphicsPrefs, active: ActiveGpu) -> Element<'static, 
         Space::new().height(20),
         text(crate::t!("Next launch")).size(13),
         Space::new().height(8),
-        row![text(crate::t!("Graphics backend")).size(12).width(150), backend]
-            .spacing(10)
-            .align_y(iced::Center),
+        row![
+            text(crate::t!("Graphics backend")).size(12).width(150),
+            backend
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
         Space::new().height(12),
         row![
             checkbox(prefs.compat_renderer)

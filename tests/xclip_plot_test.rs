@@ -3,9 +3,7 @@ use codec::objects::{Dictionary, DictionaryWithDefault, ObjectType, SpatialFilte
 use codec::tables::BlockRecord;
 use codec::types::{Matrix4, Vector2, Vector3};
 use codec::EntityType;
-use OpenCADStudio::scene::pick::xclip::{
-    insert_spatial_filter, world_clip_polygon_for_transform,
-};
+use OpenCADStudio::scene::pick::xclip::{insert_spatial_filter, world_clip_polygon_for_transform};
 use OpenCADStudio::scene::Scene;
 
 #[test]
@@ -38,18 +36,27 @@ fn xclip_in_paper_and_viewport() {
     let mut xdict1 = Dictionary::new();
     xdict1.handle = h_xdict1;
     xdict1.add_entry("ACAD_FILTER", h_filter1);
-    scene.document.objects.insert(h_xdict1, ObjectType::Dictionary(xdict1));
+    scene
+        .document
+        .objects
+        .insert(h_xdict1, ObjectType::Dictionary(xdict1));
 
     let mut filter_dict1 = Dictionary::new();
     filter_dict1.handle = h_filter1;
     filter_dict1.add_entry("SPATIAL", h_spatial1);
-    scene.document.objects.insert(h_filter1, ObjectType::Dictionary(filter_dict1));
+    scene
+        .document
+        .objects
+        .insert(h_filter1, ObjectType::Dictionary(filter_dict1));
 
     let mut sf1 = SpatialFilter::new();
     sf1.handle = h_spatial1;
     sf1.display_enabled = true;
     sf1.boundary_points = vec![Vector2::new(0.0, 0.0), Vector2::new(50.0, 50.0)];
-    scene.document.objects.insert(h_spatial1, ObjectType::SpatialFilter(sf1));
+    scene
+        .document
+        .objects
+        .insert(h_spatial1, ObjectType::SpatialFilter(sf1));
 
     scene.set_current_layout("Layout1".into());
 
@@ -67,8 +74,16 @@ fn xclip_in_paper_and_viewport() {
     // Verify point coordinates do not exceed clip boundary (250.0)
     for p in &house_wire.points {
         if p[0].is_finite() {
-            assert!(p[0] <= 250.001, "point X {} exceeds clip boundary 250.0", p[0]);
-            assert!(p[1] <= 50.001, "point Y {} exceeds clip boundary 50.0", p[1]);
+            assert!(
+                p[0] <= 250.001,
+                "point X {} exceeds clip boundary 250.0",
+                p[0]
+            );
+            assert!(
+                p[1] <= 50.001,
+                "point Y {} exceeds clip boundary 50.0",
+                p[1]
+            );
         }
     }
 }
@@ -95,8 +110,13 @@ fn test_xclip_extension_dictionary_resolution() {
 
     let h_filter = scene.document.allocate_handle();
     // Mixed case and whitespace in key:
-    xdict.entries.push(("  acad_filter  ".to_string(), h_filter));
-    scene.document.objects.insert(h_xdict, ObjectType::DictionaryWithDefault(xdict));
+    xdict
+        .entries
+        .push(("  acad_filter  ".to_string(), h_filter));
+    scene
+        .document
+        .objects
+        .insert(h_xdict, ObjectType::DictionaryWithDefault(xdict));
 
     // Sub-dictionary (ACAD_FILTER) also as DictionaryWithDefault:
     let mut filter_dict = DictionaryWithDefault::new();
@@ -104,13 +124,19 @@ fn test_xclip_extension_dictionary_resolution() {
     filter_dict.owner = h_xdict;
     let h_spatial = scene.document.allocate_handle();
     filter_dict.entries.push(("spatial".to_string(), h_spatial));
-    scene.document.objects.insert(h_filter, ObjectType::DictionaryWithDefault(filter_dict));
+    scene
+        .document
+        .objects
+        .insert(h_filter, ObjectType::DictionaryWithDefault(filter_dict));
 
     let mut sf = SpatialFilter::new();
     sf.handle = h_spatial;
     sf.display_enabled = true;
     sf.boundary_points = vec![Vector2::new(10.0, 10.0), Vector2::new(40.0, 40.0)];
-    scene.document.objects.insert(h_spatial, ObjectType::SpatialFilter(sf));
+    scene
+        .document
+        .objects
+        .insert(h_spatial, ObjectType::SpatialFilter(sf));
 
     let resolved = insert_spatial_filter(&scene.document, &ins);
     assert!(resolved.is_some(), "SpatialFilter should be resolved through a DictionaryWithDefault with loosely written keys");
@@ -173,16 +199,25 @@ fn test_xclip_multiple_inserts_same_block_different_clips() {
     let mut xdict1 = Dictionary::new();
     xdict1.handle = h_xdict1;
     xdict1.add_entry("ACAD_FILTER", h_filter1);
-    scene.document.objects.insert(h_xdict1, ObjectType::Dictionary(xdict1));
+    scene
+        .document
+        .objects
+        .insert(h_xdict1, ObjectType::Dictionary(xdict1));
     let mut fdict1 = Dictionary::new();
     fdict1.handle = h_filter1;
     fdict1.add_entry("SPATIAL", h_spatial1);
-    scene.document.objects.insert(h_filter1, ObjectType::Dictionary(fdict1));
+    scene
+        .document
+        .objects
+        .insert(h_filter1, ObjectType::Dictionary(fdict1));
     let mut sf1 = SpatialFilter::new();
     sf1.handle = h_spatial1;
     sf1.display_enabled = true;
     sf1.boundary_points = vec![Vector2::new(10.0, 10.0), Vector2::new(30.0, 30.0)];
-    scene.document.objects.insert(h_spatial1, ObjectType::SpatialFilter(sf1));
+    scene
+        .document
+        .objects
+        .insert(h_spatial1, ObjectType::SpatialFilter(sf1));
 
     let mut ins1 = Insert::new(block_name, Vector3::new(0.0, 0.0, 0.0));
     ins1.common.xdictionary_handle = Some(h_xdict1);
@@ -197,11 +232,17 @@ fn test_xclip_multiple_inserts_same_block_different_clips() {
     let mut xdict2 = Dictionary::new();
     xdict2.handle = h_xdict2;
     xdict2.add_entry("ACAD_FILTER", h_filter2);
-    scene.document.objects.insert(h_xdict2, ObjectType::Dictionary(xdict2));
+    scene
+        .document
+        .objects
+        .insert(h_xdict2, ObjectType::Dictionary(xdict2));
     let mut fdict2 = Dictionary::new();
     fdict2.handle = h_filter2;
     fdict2.add_entry("SPATIAL", h_spatial2);
-    scene.document.objects.insert(h_filter2, ObjectType::Dictionary(fdict2));
+    scene
+        .document
+        .objects
+        .insert(h_filter2, ObjectType::Dictionary(fdict2));
     let mut sf2 = SpatialFilter::new();
     sf2.handle = h_spatial2;
     sf2.display_enabled = true;
@@ -214,7 +255,10 @@ fn test_xclip_multiple_inserts_same_block_different_clips() {
         ],
     };
     sf2.boundary_points = vec![Vector2::new(560.0, 60.0), Vector2::new(580.0, 80.0)];
-    scene.document.objects.insert(h_spatial2, ObjectType::SpatialFilter(sf2));
+    scene
+        .document
+        .objects
+        .insert(h_spatial2, ObjectType::SpatialFilter(sf2));
 
     let mut ins2 = Insert::new(block_name, Vector3::new(500.0, 0.0, 0.0));
     ins2.common.xdictionary_handle = Some(h_xdict2);
@@ -241,13 +285,29 @@ fn test_xclip_multiple_inserts_same_block_different_clips() {
 
     // All points for Insert 1 must be within [10, 10]..[30, 30]
     for p in &ins1_points {
-        assert!(p[0] >= 9.99 && p[0] <= 30.01, "Insert 1 point X {} outside [10, 30]", p[0]);
-        assert!(p[1] >= 9.99 && p[1] <= 30.01, "Insert 1 point Y {} outside [10, 30]", p[1]);
+        assert!(
+            p[0] >= 9.99 && p[0] <= 30.01,
+            "Insert 1 point X {} outside [10, 30]",
+            p[0]
+        );
+        assert!(
+            p[1] >= 9.99 && p[1] <= 30.01,
+            "Insert 1 point Y {} outside [10, 30]",
+            p[1]
+        );
     }
 
     // All points for Insert 2 must be within [560, 60]..[580, 80]
     for p in &ins2_points {
-        assert!(p[0] >= 559.99 && p[0] <= 580.01, "Insert 2 point X {} outside [560, 580]", p[0]);
-        assert!(p[1] >= 59.99 && p[1] <= 80.01, "Insert 2 point Y {} outside [60, 80]", p[1]);
+        assert!(
+            p[0] >= 559.99 && p[0] <= 580.01,
+            "Insert 2 point X {} outside [560, 580]",
+            p[0]
+        );
+        assert!(
+            p[1] >= 59.99 && p[1] <= 80.01,
+            "Insert 2 point Y {} outside [60, 80]",
+            p[1]
+        );
     }
 }

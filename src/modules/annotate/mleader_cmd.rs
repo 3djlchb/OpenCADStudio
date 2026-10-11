@@ -96,10 +96,7 @@ impl MLeaderCommand {
         }
     }
 
-    pub fn with_style(
-        style: codec::objects::MultiLeaderStyle,
-        annotation_multiplier: f64,
-    ) -> Self {
+    pub fn with_style(style: codec::objects::MultiLeaderStyle, annotation_multiplier: f64) -> Self {
         let display_scale = if style.is_annotative {
             annotation_multiplier
         } else {
@@ -212,9 +209,9 @@ impl MLeaderCommand {
             ml.context.text_height = source.height;
             ml.context.text_width = source.rectangle_width;
             ml.context.text_rotation = source.rotation;
-            ml.context.text_direction = source.dwg_x_direction.unwrap_or_else(|| {
-                Vector3::new(source.rotation.cos(), source.rotation.sin(), 0.0)
-            });
+            ml.context.text_direction = source
+                .dwg_x_direction
+                .unwrap_or_else(|| Vector3::new(source.rotation.cos(), source.rotation.sin(), 0.0));
             ml.context.line_spacing_factor = source.line_spacing_factor;
             ml.context.line_spacing_style = source.line_spacing_style;
             ml.text_color = source.common.color;
@@ -239,20 +236,16 @@ impl MLeaderCommand {
             let (attachment, alignment) = match source.attachment_point {
                 codec::entities::mtext::AttachmentPoint::TopCenter
                 | codec::entities::mtext::AttachmentPoint::MiddleCenter
-                | codec::entities::mtext::AttachmentPoint::BottomCenter => {
-                    (
-                        codec::entities::multileader::TextAttachmentPointType::Center,
-                        codec::entities::TextAlignmentType::Center,
-                    )
-                }
+                | codec::entities::mtext::AttachmentPoint::BottomCenter => (
+                    codec::entities::multileader::TextAttachmentPointType::Center,
+                    codec::entities::TextAlignmentType::Center,
+                ),
                 codec::entities::mtext::AttachmentPoint::TopRight
                 | codec::entities::mtext::AttachmentPoint::MiddleRight
-                | codec::entities::mtext::AttachmentPoint::BottomRight => {
-                    (
-                        codec::entities::multileader::TextAttachmentPointType::Right,
-                        codec::entities::TextAlignmentType::Right,
-                    )
-                }
+                | codec::entities::mtext::AttachmentPoint::BottomRight => (
+                    codec::entities::multileader::TextAttachmentPointType::Right,
+                    codec::entities::TextAlignmentType::Right,
+                ),
                 _ => (
                     codec::entities::multileader::TextAttachmentPointType::Left,
                     codec::entities::TextAlignmentType::Left,
@@ -269,7 +262,9 @@ impl MLeaderCommand {
             ml.text_style_handle = style_handle;
             ml.context.text_style_handle = style_handle;
         }
-        let entity = self.plane.place_entity(EntityType::MultiLeader(Box::new(ml)));
+        let entity = self
+            .plane
+            .place_entity(EntityType::MultiLeader(Box::new(ml)));
         if self.content_type == LeaderContentType::MText && self.text.is_empty() {
             CmdResult::CommitAndEditText(entity)
         } else {
@@ -299,7 +294,12 @@ impl MLeaderCommand {
         if length <= 1.0e-12 {
             return point;
         }
-        let candidates = [angle, -angle, std::f64::consts::PI - angle, angle - std::f64::consts::PI];
+        let candidates = [
+            angle,
+            -angle,
+            std::f64::consts::PI - angle,
+            angle - std::f64::consts::PI,
+        ];
         let current = delta.y.atan2(delta.x);
         let chosen = candidates
             .into_iter()
@@ -373,9 +373,18 @@ impl CadCommand for MLeaderCommand {
                 CmdOption::new("Layer", "LA"),
                 CmdOption::new("Exit", "X"),
             ],
-            Step::LeaderType => ["Straight", "Spline", "None"].into_iter().map(|v| CmdOption::new(v, v)).collect(),
-            Step::Landing => ["Yes", "No"].into_iter().map(|v| CmdOption::new(v, v)).collect(),
-            Step::ContentType => ["MText", "Block", "None"].into_iter().map(|v| CmdOption::new(v, v)).collect(),
+            Step::LeaderType => ["Straight", "Spline", "None"]
+                .into_iter()
+                .map(|v| CmdOption::new(v, v))
+                .collect(),
+            Step::Landing => ["Yes", "No"]
+                .into_iter()
+                .map(|v| CmdOption::new(v, v))
+                .collect(),
+            Step::ContentType => ["MText", "Block", "None"]
+                .into_iter()
+                .map(|v| CmdOption::new(v, v))
+                .collect(),
             Step::BlockSource => self
                 .block_sources
                 .iter()
@@ -386,7 +395,10 @@ impl CadCommand for MLeaderCommand {
                 .iter()
                 .map(|name| CmdOption::new(name, name))
                 .collect(),
-            Step::FirstAngle | Step::SecondAngle => ["Any", "15", "30", "45", "60", "90"].into_iter().map(|v| CmdOption::new(v, v)).collect(),
+            Step::FirstAngle | Step::SecondAngle => ["Any", "15", "30", "45", "60", "90"]
+                .into_iter()
+                .map(|v| CmdOption::new(v, v))
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -699,8 +711,7 @@ fn build_mleader(
     ml.context.text_direction = Vector3::new(ux.x as f64, ux.y as f64, 0.0);
 
     if let Some(root) = ml.context.leader_roots.first_mut() {
-        root.direction =
-            Vector3::new(landing.x as f64, landing.y as f64, 0.0);
+        root.direction = Vector3::new(landing.x as f64, landing.y as f64, 0.0);
 
         root.connection_point = elbow_v3;
         root.landing_distance = landing_distance;
@@ -775,9 +786,9 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            dash_align_end: None,
-            text_verts: Vec::new(),
+        dash_from_start: false,
+        dash_align_end: None,
+        text_verts: Vec::new(),
         name: "mleader_preview".into(),
         points,
         points_low: Vec::new(),
@@ -794,9 +805,9 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    
-            ..Default::default()
-}
+
+        ..Default::default()
+    }
 }
 
 fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {
@@ -819,6 +830,7 @@ fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {
     ]
 }
 
-
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["MLEADER"] });  // MLeaderCommand
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["MLEADER"]
+}); // MLeaderCommand

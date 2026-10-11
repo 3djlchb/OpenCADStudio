@@ -18,16 +18,26 @@ pub struct TransparencyCommand {
 
 impl TransparencyCommand {
     pub fn new() -> Self {
-        Self { handles: Vec::new(), default_on: None }
+        Self {
+            handles: Vec::new(),
+            default_on: None,
+        }
     }
 
     /// The mode prompt for images already chosen.
     pub fn mode(handles: Vec<Handle>, default_on: bool) -> Self {
-        Self { handles, default_on: Some(default_on) }
+        Self {
+            handles,
+            default_on: Some(default_on),
+        }
     }
 
     fn apply(&mut self, on: bool) -> CmdResult {
-        let command = if on { "TRANSPARENCY ON" } else { "TRANSPARENCY OFF" };
+        let command = if on {
+            "TRANSPARENCY ON"
+        } else {
+            "TRANSPARENCY OFF"
+        };
         CmdResult::Relaunch(command.to_string(), std::mem::take(&mut self.handles))
     }
 }

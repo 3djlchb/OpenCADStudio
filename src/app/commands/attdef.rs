@@ -28,9 +28,16 @@ impl OpenCADStudio {
                 Some(Task::none())
             }
             "-ATTDEF" => {
-                let defaults =
-                    crate::scene::creation_style::current_text_defaults(&self.tabs[i].scene.document);
-                let styles: Vec<_> = self.tabs[i].scene.document.text_styles.iter().cloned().collect();
+                let defaults = crate::scene::creation_style::current_text_defaults(
+                    &self.tabs[i].scene.document,
+                );
+                let styles: Vec<_> = self.tabs[i]
+                    .scene
+                    .document
+                    .text_styles
+                    .iter()
+                    .cloned()
+                    .collect();
                 let command = AttdefCommand::new(
                     "-ATTDEF",
                     defaults.style_name,
@@ -97,7 +104,8 @@ impl OpenCADStudio {
             Some(v) => match v.parse::<u8>().ok().filter(|v| *v <= 63) {
                 Some(v) => attdef::session().aflags = v,
                 None => {
-                    self.command_line.push_error("Requires an integer between 0 and 63.");
+                    self.command_line
+                        .push_error("Requires an integer between 0 and 63.");
                     self.command_line
                         .push_output(&format!("Enter new value for AFLAGS <{current}>:"));
                     self.pending_setvar = Some("AFLAGS".to_string());
@@ -145,7 +153,8 @@ impl OpenCADStudio {
     /// The Edit Attribute Definition dialog for `handle`.
     pub(in crate::app) fn open_attdef_edit(&mut self, handle: codec::Handle) {
         let i = self.active_tab;
-        let Some(codec::EntityType::AttributeDefinition(a)) = self.tabs[i].scene.document.get_entity(handle)
+        let Some(codec::EntityType::AttributeDefinition(a)) =
+            self.tabs[i].scene.document.get_entity(handle)
         else {
             return;
         };
@@ -175,11 +184,15 @@ impl OpenCADStudio {
                 }
                 AttdefDialogMsg::EditInsertField => {
                     self.active_modal = None;
-                    self.open_field_dialog(crate::ui::window::field_dialog::FieldTarget::AttdefEdit);
+                    self.open_field_dialog(
+                        crate::ui::window::field_dialog::FieldTarget::AttdefEdit,
+                    );
                 }
                 AttdefDialogMsg::Help => self.command_line.push_info(
-                    crate::t!("Changes the tag, prompt and default value of an attribute definition.")
-                        .as_ref(),
+                    crate::t!(
+                        "Changes the tag, prompt and default value of an attribute definition."
+                    )
+                    .as_ref(),
                 ),
                 AttdefDialogMsg::EditOk => return self.attdef_edit_ok(i),
                 AttdefDialogMsg::DismissError => edit.error = None,

@@ -59,8 +59,8 @@ use OpenCADStudio::scene::{ChangeKind, Scene};
 use OpenCADStudio::snap::Snapper;
 use OpenCADStudio::ui::icons::{self, CHECK};
 use OpenCADStudio::ui::overlay::{
-    grid_segments, selection_overlay, should_reuse, CrosshairOptions, GridCanvasState,
-    GridKey, GridParams, GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions,
+    grid_segments, selection_overlay, should_reuse, CrosshairOptions, GridCanvasState, GridKey,
+    GridParams, GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions,
     UcsIconParams,
 };
 use OpenCADStudio::ui::properties::LinetypeItem;
@@ -914,10 +914,26 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
     if runner.should_run("ui_grid_geometry_uncached") {
         for _ in 0..10 {
             let _ = black_box(grid_segments(
-                view_rot1, eye1, bounds1, step1, step1, major_every, origin1, axes1, limits1,
+                view_rot1,
+                eye1,
+                bounds1,
+                step1,
+                step1,
+                major_every,
+                origin1,
+                axes1,
+                limits1,
             ));
             let _ = black_box(grid_segments(
-                view_rot2, eye2, bounds2, step2, step2, major_every, origin2, axes2, limits2,
+                view_rot2,
+                eye2,
+                bounds2,
+                step2,
+                step2,
+                major_every,
+                origin2,
+                axes2,
+                limits2,
             ));
         }
 
@@ -928,8 +944,28 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
         for _ in 0..runs {
             let t0 = Instant::now();
             for _ in 0..n {
-                let g1 = grid_segments(view_rot1, eye1, bounds1, step1, step1, major_every, origin1, axes1, limits1);
-                let g2 = grid_segments(view_rot2, eye2, bounds2, step2, step2, major_every, origin2, axes2, limits2);
+                let g1 = grid_segments(
+                    view_rot1,
+                    eye1,
+                    bounds1,
+                    step1,
+                    step1,
+                    major_every,
+                    origin1,
+                    axes1,
+                    limits1,
+                );
+                let g2 = grid_segments(
+                    view_rot2,
+                    eye2,
+                    bounds2,
+                    step2,
+                    step2,
+                    major_every,
+                    origin2,
+                    axes2,
+                    limits2,
+                );
                 black_box(g1);
                 black_box(g2);
             }
@@ -1302,7 +1338,10 @@ fn bench_ui_grip_budget(runner: &mut BenchmarkRunner) {
         ),
         "µs",
         samples,
-        Some(((capped_grips.len() as f64) / (median_us / 1_000_000.0), "grips/s")),
+        Some((
+            (capped_grips.len() as f64) / (median_us / 1_000_000.0),
+            "grips/s",
+        )),
         Some(500.0), // Target threshold < 500 µs (measured ~132 µs quick / ~147 µs full)
     );
 
@@ -1337,7 +1376,10 @@ fn bench_ui_grip_budget(runner: &mut BenchmarkRunner) {
         ),
         "µs",
         build_samples,
-        Some(((n_fixture_grips as f64) / (build_median_us / 1_000_000.0), "grips/s")),
+        Some((
+            (n_fixture_grips as f64) / (build_median_us / 1_000_000.0),
+            "grips/s",
+        )),
         Some(7_000.0), // Target < 7 ms (selection-change hitch budget; measured ~2.36 ms full / ~0.30 ms quick, ~3x headroom)
     );
 }
@@ -1386,18 +1428,13 @@ fn bench_ui_constraint_glyphs(runner: &mut BenchmarkRunner) {
     let vp = (1920.0_f32, 1080.0_f32);
 
     // Prime the cache so every timed call below is a hit (same key, same Arc).
-    let primed =
-        scene.cached_glyph_placements(ParametricScope::ModelSpace, vp, true, 3, 4095);
-    assert!(
-        !primed.is_empty(),
-        "glyph fixture must yield placements"
-    );
+    let primed = scene.cached_glyph_placements(ParametricScope::ModelSpace, vp, true, 3, 4095);
+    assert!(!primed.is_empty(), "glyph fixture must yield placements");
     let n_glyphs = primed.len();
 
     // Warm-up for allocator settling.
     for _ in 0..10 {
-        let hit =
-            scene.cached_glyph_placements(ParametricScope::ModelSpace, vp, true, 3, 4095);
+        let hit = scene.cached_glyph_placements(ParametricScope::ModelSpace, vp, true, 3, 4095);
         black_box(hit);
     }
 
@@ -1499,7 +1536,12 @@ fn build_selection_overlay_element(
         .collect();
     let ucs_icons = vec![UcsIconParams {
         view_proj: Mat4::IDENTITY,
-        bounds: Rectangle { x: 0.0, y: 0.0, width: 1920.0, height: 1080.0 },
+        bounds: Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        },
         axes: (Vec3::X, Vec3::Y, Vec3::Z),
         origin_screen: None,
         hover: false,
@@ -1516,7 +1558,9 @@ fn build_selection_overlay_element(
         None,
         None,
         ucs_icons,
-        vec![OstTrackPoint { screen: Point::new(500.0, 500.0) }],
+        vec![OstTrackPoint {
+            screen: Point::new(500.0, 500.0),
+        }],
         vec![(Point::new(0.0, 0.0), Point::new(100.0, 100.0))],
         None,
         true,
@@ -2237,4 +2281,3 @@ fn main() {
 
     runner.finish();
 }
-

@@ -30,7 +30,11 @@ impl OpenCADStudio {
             let common = entity.common();
             // The colour the renderer places with, so its cached points are reused.
             let color = if matches!(common.color, codec::types::Color::ByLayer) {
-                document.layers.get(&common.layer).map(|layer| layer.color.clone()).unwrap_or(common.color.clone())
+                document
+                    .layers
+                    .get(&common.layer)
+                    .map(|layer| layer.color.clone())
+                    .unwrap_or(common.color.clone())
             } else {
                 common.color.clone()
             };
@@ -65,7 +69,12 @@ impl OpenCADStudio {
                 let vertical = dvec(data.vertical_direction).normalize_or(DVec3::Z);
                 let viewing = vertical.cross(tangent).normalize_or(-DVec3::Z)
                     * if data.flags & 4 != 0 { 1.0 } else { -1.0 };
-                Some(Section { origin: first, viewing, tangent, live: data.flags & 1 != 0 })
+                Some(Section {
+                    origin: first,
+                    viewing,
+                    tangent,
+                    live: data.flags & 1 != 0,
+                })
             })
             .collect()
     }
@@ -104,7 +113,13 @@ impl OpenCADStudio {
         let s = settings();
         let current = crate::t!("Use Current").into_owned();
         let mut layers = vec![current.clone()];
-        let mut names: Vec<String> = self.tabs[i].scene.document.layers.iter().map(|l| l.name.clone()).collect();
+        let mut names: Vec<String> = self.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .map(|l| l.name.clone())
+            .collect();
         names.sort_by_key(|n| n.to_lowercase());
         layers.extend(names);
         let short = |v: f64| {
@@ -128,8 +143,10 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn update_pc_section(&mut self, message: PdfDialogMsg) -> Task<Message> {
-        use crate::modules::insert::pc_extract::{set_settings, settings, SectionCommand, SectionDistanceCommand};
         use crate::command::CadCommand;
+        use crate::modules::insert::pc_extract::{
+            set_settings, settings, SectionCommand, SectionDistanceCommand,
+        };
         let i = self.active_tab;
         let Some(state) = self.pc_section.as_mut() else {
             return Task::none();
@@ -155,18 +172,39 @@ impl OpenCADStudio {
             }
             PdfDialogMsg::SecCreate => {
                 let number = |t: &str| crate::entities::common::parse_f64(t.trim());
-                let (min_length, connect, width) = (number(&state.min_length), number(&state.connect), number(&state.width));
-                let (Some(min_length), Some(connect)) = (min_length.filter(|v| *v > 0.0), connect.filter(|v| *v > 0.0)) else {
-                    self.command_line.push_error(crate::t!("Requires a positive number.").as_ref());
+                let (min_length, connect, width) = (
+                    number(&state.min_length),
+                    number(&state.connect),
+                    number(&state.width),
+                );
+                let (Some(min_length), Some(connect)) = (
+                    min_length.filter(|v| *v > 0.0),
+                    connect.filter(|v| *v > 0.0),
+                ) else {
+                    self.command_line
+                        .push_error(crate::t!("Requires a positive number.").as_ref());
                     return Task::none();
                 };
-                let Some(angle) = state.angle.trim().parse::<i64>().ok().filter(|v| (0..=10).contains(v)) else {
+                let Some(angle) = state
+                    .angle
+                    .trim()
+                    .parse::<i64>()
+                    .ok()
+                    .filter(|v| (0..=10).contains(v))
+                else {
                     self.command_line
                         .push_error("Colinear angle tolerance only accepts integer from 0 to 10.");
                     return Task::none();
                 };
-                let Some(max_points) = state.max_points.trim().parse::<usize>().ok().filter(|v| *v > 0) else {
-                    self.command_line.push_error(crate::t!("Requires a positive integer.").as_ref());
+                let Some(max_points) = state
+                    .max_points
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|v| *v > 0)
+                else {
+                    self.command_line
+                        .push_error(crate::t!("Requires a positive integer.").as_ref());
                     return Task::none();
                 };
                 let current = crate::t!("Use Current").into_owned();

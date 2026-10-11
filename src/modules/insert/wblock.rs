@@ -4,8 +4,8 @@
 //   block name  → copies the named block definition to a new document
 //   *           → copies currently selected model-space entities
 
-use codec::{CadDocument, EntityType};
 use crate::t;
+use codec::{CadDocument, EntityType};
 
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
@@ -43,11 +43,7 @@ pub fn extract_block_into(
 
     let handles = br.entity_handles.clone();
     if handles.is_empty() {
-        return Err(t!(
-            "Block \"%{name}\" has no entities.",
-            name = block_name
-        )
-        .into_owned());
+        return Err(t!("Block \"%{name}\" has no entities.", name = block_name).into_owned());
     }
 
     copy_with_dependencies(src, &handles, out, None);
@@ -162,7 +158,10 @@ impl crate::command::CadCommand for WblockPickBasePointCommand {
     }
 
     fn on_point(&mut self, pt: glam::DVec3) -> crate::command::CmdResult {
-        crate::command::CmdResult::Dispatch(format!("WBLOCK_POINT_PICKED {} {} {}", pt.x, pt.y, pt.z))
+        crate::command::CmdResult::Dispatch(format!(
+            "WBLOCK_POINT_PICKED {} {} {}",
+            pt.x, pt.y, pt.z
+        ))
     }
 
     fn on_enter(&mut self) -> crate::command::CmdResult {
@@ -248,4 +247,3 @@ mod tests {
         assert!(extract_block_to_doc(&doc, "NON_EXISTENT").is_err());
     }
 }
-

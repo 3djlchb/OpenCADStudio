@@ -64,7 +64,12 @@ impl Clouds {
     }
 
     fn of(&self, handle: Handle) -> Option<Clouds> {
-        let found: Vec<_> = self.0.iter().filter(|(h, _)| *h == handle).cloned().collect();
+        let found: Vec<_> = self
+            .0
+            .iter()
+            .filter(|(h, _)| *h == handle)
+            .cloned()
+            .collect();
         (!found.is_empty()).then_some(Clouds(found))
     }
 }
@@ -87,7 +92,8 @@ fn eigen(m: DMat3) -> ([f64; 3], [DVec3; 3]) {
             break;
         }
         let theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
-        let t = (if theta >= 0.0 { 1.0 } else { -1.0 }) / (theta.abs() + (theta * theta + 1.0).sqrt());
+        let t =
+            (if theta >= 0.0 { 1.0 } else { -1.0 }) / (theta.abs() + (theta * theta + 1.0).sqrt());
         let (c, s) = (1.0 / (t * t + 1.0).sqrt(), t / (t * t + 1.0).sqrt());
         for k in 0..3 {
             let (akp, akq) = (a[k][p], a[k][q]);
@@ -109,7 +115,10 @@ fn eigen(m: DMat3) -> ([f64; 3], [DVec3; 3]) {
     let vm = DMat3::from_cols_array_2d(&v);
     let mut order = [0, 1, 2];
     order.sort_by(|&x, &y| a[x][x].total_cmp(&a[y][y]));
-    (order.map(|k| a[k][k]), order.map(|k| vm.row(k).normalize_or_zero()))
+    (
+        order.map(|k| a[k][k]),
+        order.map(|k| vm.row(k).normalize_or_zero()),
+    )
 }
 
 /// Centroid and covariance of `points`.
@@ -144,14 +153,17 @@ struct Plane {
 impl Plane {
     fn same_as(&self, other: &Plane) -> bool {
         self.normal.dot(other.normal).abs() > 5f64.to_radians().cos()
-            && self.normal.dot(other.center - self.center).abs() < 2.0 * self.tolerance.max(other.tolerance)
+            && self.normal.dot(other.center - self.center).abs()
+                < 2.0 * self.tolerance.max(other.tolerance)
     }
 }
 
 /// Where a pick lands on the cloud: the front-most point in the aperture,
 /// and the drawing size of one pixel there.
 fn surface_hit(clouds: &Clouds, context: &PointPickContext, pt: DVec3) -> Option<(DVec3, f64)> {
-    let screen = |p: DVec3| crate::scene::pick::hit_test::world_to_screen(p, context.view, context.eye, context.bounds);
+    let screen = |p: DVec3| {
+        crate::scene::pick::hit_test::world_to_screen(p, context.view, context.eye, context.bounds)
+    };
     let cursor = screen(pt);
     let radius = context.aperture_px.max(4.0);
     let hit = clouds
@@ -160,8 +172,16 @@ fn surface_hit(clouds: &Clouds, context: &PointPickContext, pt: DVec3) -> Option
             let s = screen(*p);
             (s.x - cursor.x).hypot(s.y - cursor.y) <= radius
         })
-        .min_by(|a, b| a.distance_squared(context.eye).total_cmp(&b.distance_squared(context.eye)))?;
-    let right = context.view.row(0).truncate().as_dvec3().normalize_or(DVec3::X);
+        .min_by(|a, b| {
+            a.distance_squared(context.eye)
+                .total_cmp(&b.distance_squared(context.eye))
+        })?;
+    let right = context
+        .view
+        .row(0)
+        .truncate()
+        .as_dvec3()
+        .normalize_or(DVec3::X);
     let (a, b) = (screen(hit), screen(hit + right));
     let px_per_unit = (b.x - a.x).hypot(b.y - a.y) as f64;
     (px_per_unit > 0.0).then(|| (hit, 1.0 / px_per_unit))
@@ -169,7 +189,10 @@ fn surface_hit(clouds: &Clouds, context: &PointPickContext, pt: DVec3) -> Option
 
 /// The points within `radius` of `at`.
 fn around(clouds: &Clouds, at: DVec3, radius: f64) -> Vec<DVec3> {
-    clouds.points().filter(|p| p.distance_squared(at) <= radius * radius).collect()
+    clouds
+        .points()
+        .filter(|p| p.distance_squared(at) <= radius * radius)
+        .collect()
 }
 
 /// The planar region under a pick, or `None` where the points there do
@@ -206,7 +229,9 @@ fn detect_plane(clouds: &Clouds, hit: DVec3, pixel: f64) -> Option<Plane> {
         let (values, vectors) = eigen(m);
         plane.center = c;
         plane.normal = vectors[0];
-        plane.tolerance = (3.0 * values[0].max(0.0).sqrt()).max(0.5 * pixel).min(plane.tolerance * 2.0);
+        plane.tolerance = (3.0 * values[0].max(0.0).sqrt())
+            .max(0.5 * pixel)
+            .min(plane.tolerance * 2.0);
     }
     Some(plane)
 }
@@ -214,7 +239,11 @@ fn detect_plane(clouds: &Clouds, hit: DVec3, pixel: f64) -> Option<Plane> {
 type Cell = (i64, i64, i64);
 
 fn cell_of(p: DVec3, size: f64) -> Cell {
-    ((p.x / size).floor() as i64, (p.y / size).floor() as i64, (p.z / size).floor() as i64)
+    (
+        (p.x / size).floor() as i64,
+        (p.y / size).floor() as i64,
+        (p.z / size).floor() as i64,
+    )
 }
 
 /// Grid cells reached from `start` through occupied neighbours (26-way).
@@ -239,9 +268,16 @@ fn flood(occupied: &FxHashSet<Cell>, start: Cell) -> FxHashSet<Cell> {
 /// The cloud points on `plane` connected to `seed` (thinned).
 fn connected_region(clouds: &Clouds, plane: &Plane, seed: DVec3, cell: f64) -> Vec<DVec3> {
     let on = |p: &DVec3| plane.normal.dot(*p - plane.center).abs() <= plane.tolerance;
-    let occupied: FxHashSet<Cell> = clouds.points().filter(on).map(|p| cell_of(p, cell)).collect();
+    let occupied: FxHashSet<Cell> = clouds
+        .points()
+        .filter(on)
+        .map(|p| cell_of(p, cell))
+        .collect();
     let reached = flood(&occupied, cell_of(seed, cell));
-    let region: Vec<DVec3> = clouds.points().filter(|p| on(p) && reached.contains(&cell_of(*p, cell))).collect();
+    let region: Vec<DVec3> = clouds
+        .points()
+        .filter(|p| on(p) && reached.contains(&cell_of(*p, cell)))
+        .collect();
     thin(region, 50_000)
 }
 
@@ -275,7 +311,10 @@ fn detect_cylinder(clouds: &Clouds, hit: DVec3, pixel: f64) -> Option<(DVec3, DV
     }
     let axis = vectors[0];
     let (e1, e2) = (vectors[1], vectors[2]);
-    let flat: Vec<DVec2> = near.iter().map(|p| DVec2::new(e1.dot(*p - hit), e2.dot(*p - hit))).collect();
+    let flat: Vec<DVec2> = near
+        .iter()
+        .map(|p| DVec2::new(e1.dot(*p - hit), e2.dot(*p - hit)))
+        .collect();
     let (centre, r, rms) = fit_circle(&flat)?;
     if rms > 0.25 * r || r > 10.0 * radius {
         return None;
@@ -296,12 +335,18 @@ fn detect_cylinder(clouds: &Clouds, hit: DVec3, pixel: f64) -> Option<(DVec3, DV
         let mut k = start;
         // Gaps up to two slices are bridged.
         while (1..=3).any(|g| slices.contains(&(k + step * g))) {
-            k += step * (1..=3).find(|g| slices.contains(&(k + step * g))).unwrap_or(1);
+            k += step
+                * (1..=3)
+                    .find(|g| slices.contains(&(k + step * g)))
+                    .unwrap_or(1);
         }
         k
     };
     let (low, high) = (reach(-1), reach(1));
-    Some((origin + axis * (low as f64 * cell), origin + axis * ((high + 1) as f64 * cell)))
+    Some((
+        origin + axis * (low as f64 * cell),
+        origin + axis * ((high + 1) as f64 * cell),
+    ))
 }
 
 /// Algebraic circle fit: centre, radius and RMS residual.
@@ -324,7 +369,12 @@ fn fit_circle(points: &[DVec2]) -> Option<(DVec2, f64, f64)> {
         return None;
     }
     let r = r2.sqrt();
-    let rms = (points.iter().map(|p| (p.distance(centre) - r).powi(2)).sum::<f64>() / points.len() as f64).sqrt();
+    let rms = (points
+        .iter()
+        .map(|p| (p.distance(centre) - r).powi(2))
+        .sum::<f64>()
+        / points.len() as f64)
+        .sqrt();
     Some((centre, r, rms))
 }
 
@@ -343,7 +393,12 @@ pub struct PlanesCommand {
 
 impl PlanesCommand {
     pub fn new(corner: bool, clouds: Clouds) -> Self {
-        Self { corner, clouds, context: None, planes: Vec::new() }
+        Self {
+            corner,
+            clouds,
+            context: None,
+            planes: Vec::new(),
+        }
     }
 
     fn edge(&self) -> CmdResult {
@@ -351,7 +406,11 @@ impl PlanesCommand {
         let direction = a.normal.cross(b.normal).normalize();
         let rows = DMat3::from_cols(a.normal, b.normal, direction).transpose();
         let origin = rows.inverse()
-            * DVec3::new(a.normal.dot(a.center), b.normal.dot(b.center), direction.dot((a.center + b.center) * 0.5));
+            * DVec3::new(
+                a.normal.dot(a.center),
+                b.normal.dot(b.center),
+                direction.dot((a.center + b.center) * 0.5),
+            );
         // Over the points of either plane next to the line; else where
         // both planes' points overlap along it.
         let width = 3.0 * a.tolerance.max(b.tolerance);
@@ -367,15 +426,26 @@ impl PlanesCommand {
             .map(along)
             .collect();
         let span = |points: &[DVec3]| {
-            points.iter().map(along).fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(t), hi.max(t)))
+            points
+                .iter()
+                .map(along)
+                .fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(t), hi.max(t)))
         };
         let (low, high) = if near.len() >= 2 {
-            near.iter().fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(*t), hi.max(*t)))
+            near.iter()
+                .fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(*t), hi.max(*t)))
         } else {
             let ((a0, a1), (b0, b1)) = (span(&a.region), span(&b.region));
-            if a0.max(b0) < a1.min(b1) { (a0.max(b0), a1.min(b1)) } else { (a0.min(b0), a1.max(b1)) }
+            if a0.max(b0) < a1.min(b1) {
+                (a0.max(b0), a1.min(b1))
+            } else {
+                (a0.min(b0), a1.max(b1))
+            }
         };
-        let line = Line::from_points(vector(origin + direction * low), vector(origin + direction * high));
+        let line = Line::from_points(
+            vector(origin + direction * low),
+            vector(origin + direction * high),
+        );
         CmdResult::CommitAndExit(EntityType::Line(line))
     }
 
@@ -385,14 +455,26 @@ impl PlanesCommand {
         if rows.determinant().abs() < 5f64.to_radians().sin() {
             return CmdResult::CancelWithMessage(NEAR_PARALLEL.to_string());
         }
-        let at = rows.inverse() * DVec3::new(a.normal.dot(a.center), b.normal.dot(b.center), c.normal.dot(c.center));
-        CmdResult::CommitAndExit(EntityType::Point(CadPoint { location: vector(at), ..Default::default() }))
+        let at = rows.inverse()
+            * DVec3::new(
+                a.normal.dot(a.center),
+                b.normal.dot(b.center),
+                c.normal.dot(c.center),
+            );
+        CmdResult::CommitAndExit(EntityType::Point(CadPoint {
+            location: vector(at),
+            ..Default::default()
+        }))
     }
 }
 
 impl CadCommand for PlanesCommand {
     fn name(&self) -> &'static str {
-        if self.corner { "PCEXTRACTCORNER" } else { "PCEXTRACTEDGE" }
+        if self.corner {
+            "PCEXTRACTCORNER"
+        } else {
+            "PCEXTRACTEDGE"
+        }
     }
 
     fn prompt(&self) -> String {
@@ -429,10 +511,18 @@ impl CadCommand for PlanesCommand {
             if plane.same_as(first) {
                 return CmdResult::ReportError(SAME_AS_FIRST.to_string());
             }
-            if self.planes.get(1).is_some_and(|second| plane.same_as(second)) {
+            if self
+                .planes
+                .get(1)
+                .is_some_and(|second| plane.same_as(second))
+            {
                 return CmdResult::ReportError(SAME_AS_SECOND.to_string());
             }
-            if self.planes.iter().any(|p| p.normal.dot(plane.normal).abs() > 5f64.to_radians().cos()) {
+            if self
+                .planes
+                .iter()
+                .any(|p| p.normal.dot(plane.normal).abs() > 5f64.to_radians().cos())
+            {
                 return CmdResult::CancelWithMessage(NEAR_PARALLEL.to_string());
             }
         }
@@ -458,7 +548,10 @@ pub struct CenterlineCommand {
 
 impl CenterlineCommand {
     pub fn new(clouds: Clouds) -> Self {
-        Self { clouds, context: None }
+        Self {
+            clouds,
+            context: None,
+        }
     }
 }
 
@@ -486,8 +579,13 @@ impl CadCommand for CenterlineCommand {
         if !self.clouds.segmented() {
             return CmdResult::NeedPoint;
         }
-        match surface_hit(&self.clouds, &context, pt).and_then(|(hit, pixel)| detect_cylinder(&self.clouds, hit, pixel)) {
-            Some((start, end)) => CmdResult::CommitAndExit(EntityType::Line(Line::from_points(vector(start), vector(end)))),
+        match surface_hit(&self.clouds, &context, pt)
+            .and_then(|(hit, pixel)| detect_cylinder(&self.clouds, hit, pixel))
+        {
+            Some((start, end)) => CmdResult::CommitAndExit(EntityType::Line(Line::from_points(
+                vector(start),
+                vector(end),
+            ))),
             None => CmdResult::NeedPoint,
         }
     }
@@ -570,11 +668,14 @@ pub fn drop_job() {
 }
 
 const TOO_FEW: &str = "Too few points to process. No geometry extracted from point cloud.";
-const ACCEPT: &str = "Do you want to accept the results or change settings ? [Accept/Settings/Undo] <Settings>:";
+const ACCEPT: &str =
+    "Do you want to accept the results or change settings ? [Accept/Settings/Undo] <Settings>:";
 
 /// Chains (plane coordinates) tracing the points seen on the section.
 fn trace(points: &[DVec2], s: &Settings) -> Vec<Vec<DVec2>> {
-    let (lo, hi) = points.iter().fold((DVec2::MAX, DVec2::MIN), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    let (lo, hi) = points.iter().fold((DVec2::MAX, DVec2::MIN), |(lo, hi), p| {
+        (lo.min(*p), hi.max(*p))
+    });
     // ponytail: grid resolution tied to the minimum length, capped at 1000
     // cells a side; a finer trace needs a proper curve fit.
     let cell = s.min_length.max((hi - lo).max_element() / 1000.0).max(1e-9);
@@ -589,25 +690,52 @@ fn trace(points: &[DVec2], s: &Settings) -> Vec<Vec<DVec2>> {
     // by them. Only its edges are traced — every edge, or for Perimeter
     // only the outer one.
     let ring = |(x, y): (i64, i64)| {
-        [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].map(|(dx, dy)| (x + dx, y + dy))
+        [
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+            (-1, 0),
+            (1, 0),
+            (-1, 1),
+            (0, 1),
+            (1, 1),
+        ]
+        .map(|(dx, dy)| (x + dx, y + dy))
     };
     let mut filled: FxHashSet<(i64, i64)> = cells.keys().copied().collect();
     let gaps: Vec<(i64, i64)> = cells
         .keys()
         .flat_map(|k| ring(*k))
-        .filter(|c| !cells.contains_key(c) && ring(*c).iter().filter(|n| cells.contains_key(n)).count() >= 5)
+        .filter(|c| {
+            !cells.contains_key(c) && ring(*c).iter().filter(|n| cells.contains_key(n)).count() >= 5
+        })
         .collect();
     filled.extend(gaps);
     let outside = s.perimeter.then(|| {
-        let (x0, x1) = cells.keys().fold((i64::MAX, i64::MIN), |(a, b), k| (a.min(k.0 - 1), b.max(k.0 + 1)));
-        let (y0, y1) = cells.keys().fold((i64::MAX, i64::MIN), |(a, b), k| (a.min(k.1 - 1), b.max(k.1 + 1)));
+        let (x0, x1) = cells.keys().fold((i64::MAX, i64::MIN), |(a, b), k| {
+            (a.min(k.0 - 1), b.max(k.0 + 1))
+        });
+        let (y0, y1) = cells.keys().fold((i64::MAX, i64::MIN), |(a, b), k| {
+            (a.min(k.1 - 1), b.max(k.1 + 1))
+        });
         let mut reached = FxHashSet::default();
         let mut stack = vec![(x0, y0)];
         while let Some(c) = stack.pop() {
-            if c.0 < x0 || c.0 > x1 || c.1 < y0 || c.1 > y1 || filled.contains(&c) || !reached.insert(c) {
+            if c.0 < x0
+                || c.0 > x1
+                || c.1 < y0
+                || c.1 > y1
+                || filled.contains(&c)
+                || !reached.insert(c)
+            {
                 continue;
             }
-            stack.extend([(c.0 + 1, c.1), (c.0 - 1, c.1), (c.0, c.1 + 1), (c.0, c.1 - 1)]);
+            stack.extend([
+                (c.0 + 1, c.1),
+                (c.0 - 1, c.1),
+                (c.0, c.1 + 1),
+                (c.0, c.1 - 1),
+            ]);
         }
         reached
     });
@@ -621,8 +749,12 @@ fn trace(points: &[DVec2], s: &Settings) -> Vec<Vec<DVec2>> {
         })
         .collect();
     keys.sort_unstable();
-    let index: FxHashMap<(i64, i64), usize> = keys.iter().enumerate().map(|(i, k)| (*k, i)).collect();
-    let nodes: Vec<DVec2> = keys.iter().map(|k| cells[k].0 / cells[k].1 as f64).collect();
+    let index: FxHashMap<(i64, i64), usize> =
+        keys.iter().enumerate().map(|(i, k)| (*k, i)).collect();
+    let nodes: Vec<DVec2> = keys
+        .iter()
+        .map(|k| cells[k].0 / cells[k].1 as f64)
+        .collect();
     // Links within the connect tolerance, shortest first, each node joining
     // at most two and none closing a loop: chains.
     // ponytail: links reach ten cells at most, whatever the tolerance.
@@ -716,7 +848,11 @@ fn simplify(chain: Vec<DVec2>, s: &Settings) -> Vec<DVec2> {
         }
     }
     let length: f64 = out.windows(2).map(|w| w[0].distance(w[1])).sum();
-    if length < s.min_length { Vec::new() } else { out }
+    if length < s.min_length {
+        Vec::new()
+    } else {
+        out
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -779,7 +915,11 @@ impl SectionCommand {
         }
         let plane = WorkingPlane::new(section.origin, section.tangent, n.cross(section.tangent));
         // The plane's own frame has the section's normal as Z.
-        let plane = if plane.z.dot(n) < 0.0 { WorkingPlane::new(section.origin, -section.tangent, n.cross(-section.tangent)) } else { plane };
+        let plane = if plane.z.dot(n) < 0.0 {
+            WorkingPlane::new(section.origin, -section.tangent, n.cross(-section.tangent))
+        } else {
+            plane
+        };
         let flat: Vec<DVec2> = thin(kept, s.max_points)
             .into_iter()
             .map(|p| plane.to_local(p).truncate())
@@ -793,7 +933,10 @@ impl SectionCommand {
         for chain in trace(&flat, &s) {
             if s.polylines {
                 let mut pline = LwPolyline {
-                    vertices: chain.iter().map(|p| LwVertex::new(Vector2::new(p.x, p.y))).collect(),
+                    vertices: chain
+                        .iter()
+                        .map(|p| LwVertex::new(Vector2::new(p.x, p.y)))
+                        .collect(),
                     constant_width: s.width,
                     ..Default::default()
                 };
@@ -835,7 +978,11 @@ impl SectionCommand {
         match self.extract() {
             Err(message) => CmdResult::CancelWithMessage(message.to_string()),
             Ok(entities) if !self.ask || !settings().preview => {
-                if entities.is_empty() { CmdResult::Cancel } else { CmdResult::CommitEntitiesAndExit(entities) }
+                if entities.is_empty() {
+                    CmdResult::Cancel
+                } else {
+                    CmdResult::CommitEntitiesAndExit(entities)
+                }
             }
             Ok(entities) => {
                 self.result = entities;
@@ -860,7 +1007,12 @@ impl SectionCommand {
             }
             points.push([f64::NAN; 3]);
         }
-        WireModel::solid_f64("pc_extract_section".into(), points, [0.0, 1.0, 0.0, 1.0], false)
+        WireModel::solid_f64(
+            "pc_extract_section".into(),
+            points,
+            [0.0, 1.0, 0.0, 1.0],
+            false,
+        )
     }
 
     fn setting_prompt(&self) -> String {
@@ -868,7 +1020,11 @@ impl SectionCommand {
         match self.step {
             SectionStep::Extract => format!(
                 "Extract [Entire cross section/Perimeter only] <{}>:",
-                if s.perimeter { "Perimeter only" } else { "Entire cross section" }
+                if s.perimeter {
+                    "Perimeter only"
+                } else {
+                    "Entire cross section"
+                }
             ),
             SectionStep::MinLength => format!("Minimum line length <{}>:", s.min_length),
             SectionStep::Connect => format!("Connect lines tolerance <{}>:", s.connect),
@@ -897,7 +1053,9 @@ impl SectionCommand {
                 }
                 SectionStep::MinLength
             }
-            SectionStep::MinLength | SectionStep::Connect if !text.is_empty() => match number.filter(|v| *v > 0.0) {
+            SectionStep::MinLength | SectionStep::Connect if !text.is_empty() => match number
+                .filter(|v| *v > 0.0)
+            {
                 Some(v) if self.step == SectionStep::MinLength => {
                     s.min_length = v;
                     SectionStep::Connect
@@ -915,7 +1073,11 @@ impl SectionCommand {
                     s.angle = v as f64;
                     SectionStep::MaxPoints
                 }
-                _ => return CmdResult::ReportError("Colinear angle tolerance only accepts integer from 0 to 10.".to_string()),
+                _ => {
+                    return CmdResult::ReportError(
+                        "Colinear angle tolerance only accepts integer from 0 to 10.".to_string(),
+                    )
+                }
             },
             SectionStep::Angle => SectionStep::MaxPoints,
             SectionStep::MaxPoints if !text.is_empty() => match text.parse::<usize>() {
@@ -954,7 +1116,10 @@ pub struct SectionDistanceCommand {
 
 impl SectionDistanceCommand {
     pub fn new(connect: bool) -> Self {
-        Self { connect, first: None }
+        Self {
+            connect,
+            first: None,
+        }
     }
 }
 
@@ -964,7 +1129,12 @@ impl CadCommand for SectionDistanceCommand {
     }
 
     fn prompt(&self) -> String {
-        if self.first.is_none() { "Specify first point:" } else { "Specify second point:" }.to_string()
+        if self.first.is_none() {
+            "Specify first point:"
+        } else {
+            "Specify second point:"
+        }
+        .to_string()
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
@@ -991,20 +1161,34 @@ impl CadCommand for SectionDistanceCommand {
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         let first = self.first?;
-        Some(WireModel::solid_f64("pc_section_distance".into(), vec![first.to_array(), pt.to_array()], [1.0, 1.0, 1.0, 1.0], false))
+        Some(WireModel::solid_f64(
+            "pc_section_distance".into(),
+            vec![first.to_array(), pt.to_array()],
+            [1.0, 1.0, 1.0, 1.0],
+            false,
+        ))
     }
 }
 
 /// The OCS axes of an entity normal (arbitrary axis algorithm) as columns.
 fn ocs(normal: Vector3) -> DMat3 {
     let n = DVec3::new(normal.x, normal.y, normal.z).normalize_or(DVec3::Z);
-    let ax = if n.x.abs() < 1.0 / 64.0 && n.y.abs() < 1.0 / 64.0 { DVec3::Y.cross(n) } else { DVec3::Z.cross(n) }.normalize();
+    let ax = if n.x.abs() < 1.0 / 64.0 && n.y.abs() < 1.0 / 64.0 {
+        DVec3::Y.cross(n)
+    } else {
+        DVec3::Z.cross(n)
+    }
+    .normalize();
     DMat3::from_cols(ax, n.cross(ax), n)
 }
 
 impl CadCommand for SectionCommand {
     fn name(&self) -> &'static str {
-        if self.ask { "PCEXTRACTSECTION" } else { "-PCEXTRACTSECTION" }
+        if self.ask {
+            "PCEXTRACTSECTION"
+        } else {
+            "-PCEXTRACTSECTION"
+        }
     }
 
     fn prompt(&self) -> String {
@@ -1022,8 +1206,14 @@ impl CadCommand for SectionCommand {
                 CmdOption::new("Settings", "S"),
                 CmdOption::new("Undo", "U"),
             ],
-            SectionStep::Extract => vec![CmdOption::new("Entire cross section", "E"), CmdOption::new("Perimeter only", "P")],
-            SectionStep::Output => vec![CmdOption::new("Lines", "L"), CmdOption::new("2D Polylines", "2D")],
+            SectionStep::Extract => vec![
+                CmdOption::new("Entire cross section", "E"),
+                CmdOption::new("Perimeter only", "P"),
+            ],
+            SectionStep::Output => vec![
+                CmdOption::new("Lines", "L"),
+                CmdOption::new("2D Polylines", "2D"),
+            ],
             _ => Vec::new(),
         }
     }
@@ -1063,7 +1253,9 @@ impl CadCommand for SectionCommand {
             return CmdResult::CancelWithMessage("Section object not found.".to_string());
         }
         let Some(section) = self.sections.iter().find(|s| s.live).copied() else {
-            return CmdResult::CancelWithMessage("Live section must be turned on for section object.".to_string());
+            return CmdResult::CancelWithMessage(
+                "Live section must be turned on for section object.".to_string(),
+            );
         };
         let Some(cloud) = self.clouds.of(handle) else {
             return CmdResult::CancelWithMessage("The point cloud is not loaded.".to_string());
@@ -1090,11 +1282,17 @@ impl CadCommand for SectionCommand {
             SectionStep::Accept => match text.trim().to_ascii_uppercase().as_str() {
                 "A" | "ACCEPT" => {
                     let entities = std::mem::take(&mut self.result);
-                    if entities.is_empty() { CmdResult::Cancel } else { CmdResult::CommitEntitiesAndExit(entities) }
+                    if entities.is_empty() {
+                        CmdResult::Cancel
+                    } else {
+                        CmdResult::CommitEntitiesAndExit(entities)
+                    }
                 }
                 // Back to the settings dialog with the same cloud and section.
                 "" | "S" | "SETTINGS" if self.ask => {
-                    if let (Some(cloud), Some(section), Ok(mut job)) = (self.cloud.take(), self.section, JOB.lock()) {
+                    if let (Some(cloud), Some(section), Ok(mut job)) =
+                        (self.cloud.take(), self.section, JOB.lock())
+                    {
                         *job = Some((cloud, section));
                     }
                     CmdResult::Dispatch("_PCSECTIONDLG".to_string())
@@ -1123,5 +1321,11 @@ impl CadCommand for SectionCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PCEXTRACTEDGE", "PCEXTRACTCORNER", "PCEXTRACTCENTERLINE", "PCEXTRACTSECTION", "-PCEXTRACTSECTION"]
+    names: &[
+        "PCEXTRACTEDGE",
+        "PCEXTRACTCORNER",
+        "PCEXTRACTCENTERLINE",
+        "PCEXTRACTSECTION",
+        "-PCEXTRACTSECTION"
+    ]
 });

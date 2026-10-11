@@ -195,17 +195,21 @@ pub(crate) mod windows_impl {
 
     #[repr(C)]
     struct ISpellCheckerFactoryVtbl {
-        query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+        query_interface:
+            unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
         add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
         release: unsafe extern "system" fn(*mut c_void) -> u32,
-        get_supported_languages: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+        get_supported_languages:
+            unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
         is_supported: unsafe extern "system" fn(*mut c_void, *const u16, *mut BOOL) -> HRESULT,
-        create_spell_checker: unsafe extern "system" fn(*mut c_void, *const u16, *mut *mut c_void) -> HRESULT,
+        create_spell_checker:
+            unsafe extern "system" fn(*mut c_void, *const u16, *mut *mut c_void) -> HRESULT,
     }
 
     #[repr(C)]
     struct ISpellCheckerVtbl {
-        query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+        query_interface:
+            unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
         add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
         release: unsafe extern "system" fn(*mut c_void) -> u32,
         get_language_tag: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> HRESULT,
@@ -222,7 +226,8 @@ pub(crate) mod windows_impl {
 
     #[repr(C)]
     struct IEnumSpellingErrorVtbl {
-        query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+        query_interface:
+            unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
         add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
         release: unsafe extern "system" fn(*mut c_void) -> u32,
         next: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
@@ -230,7 +235,8 @@ pub(crate) mod windows_impl {
 
     #[repr(C)]
     struct ISpellingErrorVtbl {
-        query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+        query_interface:
+            unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
         add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
         release: unsafe extern "system" fn(*mut c_void) -> u32,
         get_start_index: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
@@ -241,7 +247,8 @@ pub(crate) mod windows_impl {
 
     #[repr(C)]
     struct IEnumStringVtbl {
-        query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+        query_interface:
+            unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
         add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
         release: unsafe extern "system" fn(*mut c_void) -> u32,
         next: unsafe extern "system" fn(*mut c_void, u32, *mut *mut u16, *mut u32) -> HRESULT,
@@ -266,7 +273,10 @@ pub(crate) mod windows_impl {
     }
 
     fn to_wide(s: &str) -> Vec<u16> {
-        std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect()
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(Some(0))
+            .collect()
     }
 
     unsafe fn from_wide_ptr(ptr: *mut u16) -> String {
@@ -367,8 +377,8 @@ pub(crate) mod windows_impl {
 
                 let has_err_exact = has_spelling_error(checker_vtbl, self.checker_obj, &wide_text);
 
-                let is_all_caps = word.chars().any(char::is_alphabetic)
-                    && word == word.to_uppercase();
+                let is_all_caps =
+                    word.chars().any(char::is_alphabetic) && word == word.to_uppercase();
 
                 let mut is_misspelled = has_err_exact;
 
@@ -393,7 +403,11 @@ pub(crate) mod windows_impl {
                         wide_text.clone()
                     };
 
-                    if ((*checker_vtbl).suggest)(self.checker_obj, target_wide.as_ptr(), &mut enum_str) == 0
+                    if ((*checker_vtbl).suggest)(
+                        self.checker_obj,
+                        target_wide.as_ptr(),
+                        &mut enum_str,
+                    ) == 0
                         && !enum_str.is_null()
                     {
                         let enum_vtbl = *(enum_str as *const *const IEnumStringVtbl);
@@ -515,8 +529,8 @@ pub(crate) mod macos_impl {
             }
 
             unsafe {
-                let is_all_caps = word.chars().any(char::is_alphabetic)
-                    && word == word.to_uppercase();
+                let is_all_caps =
+                    word.chars().any(char::is_alphabetic) && word == word.to_uppercase();
 
                 let ns_word = NSString::from_str(word);
                 let range: objc2_foundation::NSRange = msg_send![
@@ -551,7 +565,11 @@ pub(crate) mod macos_impl {
 
                 let mut suggestions = Vec::new();
                 if is_misspelled && want_suggestions {
-                    let target_str = if is_all_caps { word.to_lowercase() } else { word.to_string() };
+                    let target_str = if is_all_caps {
+                        word.to_lowercase()
+                    } else {
+                        word.to_string()
+                    };
                     let ns_target = NSString::from_str(&target_str);
                     let word_len = target_str.encode_utf16().count();
                     let r = objc2_foundation::NSRange {
@@ -679,7 +697,8 @@ pub(crate) mod linux_impl {
 
             // If CLI hunspell is available, fallback to pipe check
             if self.has_cli_tool {
-                if let Some((valid, suggs)) = check_via_cli(word, &self.language, want_suggestions) {
+                if let Some((valid, suggs)) = check_via_cli(word, &self.language, want_suggestions)
+                {
                     return (valid, suggs);
                 }
             }
@@ -691,7 +710,9 @@ pub(crate) mod linux_impl {
     }
 
     fn load_wordlist(path: &Path, words: &mut HashSet<String>) -> bool {
-        let Ok(file) = File::open(path) else { return false };
+        let Ok(file) = File::open(path) else {
+            return false;
+        };
         let reader = BufReader::new(file);
         for line in reader.lines().flatten() {
             let entry = line.trim();
@@ -718,7 +739,11 @@ pub(crate) mod linux_impl {
         false
     }
 
-    fn check_via_cli(word: &str, lang: &str, want_suggestions: bool) -> Option<(bool, Vec<String>)> {
+    fn check_via_cli(
+        word: &str,
+        lang: &str,
+        want_suggestions: bool,
+    ) -> Option<(bool, Vec<String>)> {
         use std::io::Write;
         use std::process::{Command, Stdio};
 

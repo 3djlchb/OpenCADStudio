@@ -948,20 +948,18 @@ impl OpenCADStudio {
                         // Either direction can add/remove a layout: undoing
                         // an insert removes it (`before` is `None`), redoing
                         // re-inserts it — so both sides must be inspected.
-                        layout_touched |= matches!(
-                            entry.before,
-                            Some(codec::objects::ObjectType::Layout(_))
-                        ) || matches!(
-                            entry.after,
-                            Some(codec::objects::ObjectType::Layout(_))
-                        );
-                        scale_touched |= matches!(
-                            entry.before,
-                            Some(codec::objects::ObjectType::Scale(_))
-                        ) || matches!(
-                            entry.after,
-                            Some(codec::objects::ObjectType::Scale(_))
-                        );
+                        layout_touched |=
+                            matches!(entry.before, Some(codec::objects::ObjectType::Layout(_)))
+                                || matches!(
+                                    entry.after,
+                                    Some(codec::objects::ObjectType::Layout(_))
+                                );
+                        scale_touched |=
+                            matches!(entry.before, Some(codec::objects::ObjectType::Scale(_)))
+                                || matches!(
+                                    entry.after,
+                                    Some(codec::objects::ObjectType::Scale(_))
+                                );
                         if let Some(object) = value {
                             self.tabs[i]
                                 .scene

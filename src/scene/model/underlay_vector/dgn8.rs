@@ -7,7 +7,10 @@
 use std::collections::HashMap;
 use std::io::Read;
 
-use super::model::{arc_cubics, dgn_color_table, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS};
+use super::model::{
+    arc_cubics, dgn_color_table, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text,
+    DGN_DEFAULT_COLORS,
+};
 
 // ── Compound file ───────────────────────────────────────────────────────────
 
@@ -53,10 +56,16 @@ impl<'a> Cfb<'a> {
         if mini_sector_shift != 6 {
             return None;
         }
-        let mut difat: Vec<u32> = (0..109).filter_map(|i| u32_at(b, 76 + i * 4)).filter(|&v| v < END).collect();
+        let mut difat: Vec<u32> = (0..109)
+            .filter_map(|i| u32_at(b, 76 + i * 4))
+            .filter(|&v| v < END)
+            .collect();
         // The DIFAT chain cannot hold more sectors than the file does, so a
         // looping chain stops there.
-        let (mut next, mut count) = (u32_at(b, 68)?, u32_at(b, 72)?.min((b.len() / sector) as u32));
+        let (mut next, mut count) = (
+            u32_at(b, 68)?,
+            u32_at(b, 72)?.min((b.len() / sector) as u32),
+        );
         while count > 0 && next < END {
             let at = (next as usize + 1) * sector;
             for i in 0..sector / 4 - 1 {
@@ -74,11 +83,22 @@ impl<'a> Cfb<'a> {
                 fat.push(u32_at(b, at + i * 4).unwrap_or(END));
             }
         }
-        let mut cfb = Cfb { b, sector, fat, mini_fat: Vec::new(), mini: Vec::new(), cutoff: u32_at(b, 56)?, entries: Vec::new() };
+        let mut cfb = Cfb {
+            b,
+            sector,
+            fat,
+            mini_fat: Vec::new(),
+            mini: Vec::new(),
+            cutoff: u32_at(b, 56)?,
+            entries: Vec::new(),
+        };
         let dir = cfb.chain(u32_at(b, 48)?, None);
         for e in dir.chunks_exact(128) {
             let len = u16::from_le_bytes([e[64], e[65]]) as usize;
-            let name16: Vec<u16> = e[..len.saturating_sub(2).min(64)].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let name16: Vec<u16> = e[..len.saturating_sub(2).min(64)]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
             cfb.entries.push(Entry {
                 name: String::from_utf16_lossy(&name16),
                 kind: e[66],
@@ -93,7 +113,10 @@ impl<'a> Cfb<'a> {
         let (root_start, root_size) = (root.start, root.size);
         cfb.mini = cfb.chain(root_start, Some(root_size as usize));
         let mini_fat = cfb.chain(u32_at(b, 60)?, None);
-        cfb.mini_fat = mini_fat.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        cfb.mini_fat = mini_fat
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
         Some(cfb)
     }
 
@@ -112,7 +135,9 @@ impl<'a> Cfb<'a> {
         let mut guard = 0;
         while s < END && guard < max_sectors {
             let at = (s as usize + 1) * self.sector;
-            let Some(block) = self.b.get(at..at + self.sector) else { break };
+            let Some(block) = self.b.get(at..at + self.sector) else {
+                break;
+            };
             out.extend_from_slice(block);
             s = self.fat.get(s as usize).copied().unwrap_or(END);
             guard += 1;
@@ -136,7 +161,9 @@ impl<'a> Cfb<'a> {
         let max_sectors = self.mini.len() / 64;
         while s < END && guard < max_sectors {
             let at = s as usize * 64;
-            let Some(block) = self.mini.get(at..at + 64) else { break };
+            let Some(block) = self.mini.get(at..at + 64) else {
+                break;
+            };
             out.extend_from_slice(block);
             s = self.mini_fat.get(s as usize).copied().unwrap_or(END);
             guard += 1;
@@ -148,13 +175,25 @@ impl<'a> Cfb<'a> {
     /// Every stream with its full path ("Dgn-Md/#000000/Dgn^G/$1").
     fn streams(&self) -> Vec<(String, &Entry)> {
         let mut out = Vec::new();
-        fn walk<'b>(c: &'b Cfb, idx: u32, path: &str, out: &mut Vec<(String, &'b Entry)>, depth: usize) {
-            let Some(e) = c.entries.get(idx as usize) else { return };
+        fn walk<'b>(
+            c: &'b Cfb,
+            idx: u32,
+            path: &str,
+            out: &mut Vec<(String, &'b Entry)>,
+            depth: usize,
+        ) {
+            let Some(e) = c.entries.get(idx as usize) else {
+                return;
+            };
             if depth > 64 {
                 return;
             }
             walk(c, e.left, path, out, depth + 1);
-            let p = if path.is_empty() { e.name.clone() } else { format!("{path}/{}", e.name) };
+            let p = if path.is_empty() {
+                e.name.clone()
+            } else {
+                format!("{path}/{}", e.name)
+            };
             if e.kind == 2 {
                 out.push((p.clone(), e));
             } else if e.kind == 1 {
@@ -177,7 +216,10 @@ fn inflate(data: &[u8]) -> Vec<u8> {
     for skip in [16usize, 0] {
         if let Some(z) = data.get(skip..) {
             let mut out = Vec::new();
-            if flate2::read::ZlibDecoder::new(z).take(STREAM_LIMIT).read_to_end(&mut out).is_ok()
+            if flate2::read::ZlibDecoder::new(z)
+                .take(STREAM_LIMIT)
+                .read_to_end(&mut out)
+                .is_ok()
                 && !out.is_empty()
             {
                 return out;
@@ -194,7 +236,9 @@ fn elements(d: &[u8]) -> Vec<&[u8]> {
     let mut out = Vec::new();
     let mut at = 4;
     while at + 8 <= d.len() {
-        let Some(words) = u32_at(d, at + 4) else { break };
+        let Some(words) = u32_at(d, at + 4) else {
+            break;
+        };
         let len = 4 + words as usize * 2;
         if len < 8 {
             break;
@@ -233,11 +277,19 @@ fn f64_at(e: &[u8], at: usize) -> Option<f64> {
     Some(f64::from_le_bytes(e.get(at..at + 8)?.try_into().ok()?))
 }
 
-
 /// A string stored after the "ff fe 01 00" marker, when the element has one.
 fn marked_string(e: &[u8], from: usize) -> Option<String> {
-    let i = e.get(from..)?.windows(4).position(|w| w == [0xff, 0xfe, 0x01, 0x00])? + from + 4;
-    let end = e[i..].iter().position(|&c| c == 0 || c < 0x20).map(|n| i + n).unwrap_or(e.len());
+    let i = e
+        .get(from..)?
+        .windows(4)
+        .position(|w| w == [0xff, 0xfe, 0x01, 0x00])?
+        + from
+        + 4;
+    let end = e[i..]
+        .iter()
+        .position(|&c| c == 0 || c < 0x20)
+        .map(|n| i + n)
+        .unwrap_or(e.len());
     Some(String::from_utf8_lossy(&e[i..end]).to_string())
 }
 
@@ -255,7 +307,12 @@ struct Styles {
 /// non-model attributes stream reading
 /// `<ExtendedColors><Entry Color="(r,g,b)"/>…</ExtendedColors>`.
 fn extended_colors(cfb: &Cfb) -> Vec<[u8; 3]> {
-    let Some(attrs) = cfb.streams().iter().find(|(p, _)| p == "Dgn^NmA/$1").map(|(_, e)| inflate(&cfb.stream(e))) else {
+    let Some(attrs) = cfb
+        .streams()
+        .iter()
+        .find(|(p, _)| p == "Dgn^NmA/$1")
+        .map(|(_, e)| inflate(&cfb.stream(e)))
+    else {
         return Vec::new();
     };
     for at in 0..attrs.len().saturating_sub(2) {
@@ -276,7 +333,10 @@ fn extended_colors(cfb: &Cfb) -> Vec<[u8; 3]> {
         {
             continue;
         }
-        let units: Vec<u16> = out.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = out
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
         let text = String::from_utf16_lossy(&units);
         if !text.contains("<ExtendedColors") {
             continue;
@@ -285,7 +345,12 @@ fn extended_colors(cfb: &Cfb) -> Vec<[u8; 3]> {
             .split("Color=\"(")
             .skip(1)
             .filter_map(|rest| {
-                let v: Vec<u8> = rest.split(')').next()?.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                let v: Vec<u8> = rest
+                    .split(')')
+                    .next()?
+                    .split(',')
+                    .filter_map(|n| n.trim().parse().ok())
+                    .collect();
                 (v.len() == 3).then(|| [v[0], v[1], v[2]])
             })
             .collect();
@@ -301,14 +366,23 @@ impl Styles {
         // lists it.
         let explicit = u32_at(e, 52).unwrap_or(u32::MAX);
         let index = if explicit == u32::MAX {
-            self.levels.get(&u32_at(e, 12).unwrap_or(0)).copied().unwrap_or(0)
+            self.levels
+                .get(&u32_at(e, 12).unwrap_or(0))
+                .copied()
+                .unwrap_or(0)
         } else {
-            if let Some(rgb) = (explicit >> 8).checked_sub(1).and_then(|n| self.extended.get(n as usize)) {
+            if let Some(rgb) = (explicit >> 8)
+                .checked_sub(1)
+                .and_then(|n| self.extended.get(n as usize))
+            {
                 return *rgb;
             }
             explicit & 0xff
         };
-        self.colors.get(index as usize).copied().unwrap_or([255, 255, 255])
+        self.colors
+            .get(index as usize)
+            .copied()
+            .unwrap_or([255, 255, 255])
     }
 }
 
@@ -330,7 +404,11 @@ struct Instance {
 /// A placement in UORs: x' = r[0]·(x, y, z, 1), y' = r[1]·…, z' = r[2]·….
 type Xf = [[f64; 4]; 3];
 
-const IDENTITY: Xf = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+const IDENTITY: Xf = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+];
 
 fn xf_vector(m: &Xf, v: [f64; 3]) -> [f64; 3] {
     m.map(|r| r[0] * v[0] + r[1] * v[1] + r[2] * v[2])
@@ -344,7 +422,8 @@ fn xf_compose(outer: &Xf, inner: &Xf) -> Xf {
     let mut out = [[0.0; 4]; 3];
     for (i, row) in out.iter_mut().enumerate() {
         for (j, v) in row.iter_mut().enumerate() {
-            *v = (0..3).map(|k| outer[i][k] * inner[k][j]).sum::<f64>() + if j == 3 { outer[i][3] } else { 0.0 };
+            *v = (0..3).map(|k| outer[i][k] * inner[k][j]).sum::<f64>()
+                + if j == 3 { outer[i][3] } else { 0.0 };
         }
     }
     out
@@ -359,10 +438,23 @@ fn is_3d(e: &[u8]) -> bool {
 /// The in-plane x and y axes of a 3D element's orientation quaternion w, x,
 /// y, z stored at `at` (the rows of its rotation matrix).
 fn quat_axes(e: &[u8], at: usize) -> Option<([f64; 3], [f64; 3])> {
-    let (w, x, y, z) = (f64_at(e, at)?, f64_at(e, at + 8)?, f64_at(e, at + 16)?, f64_at(e, at + 24)?);
+    let (w, x, y, z) = (
+        f64_at(e, at)?,
+        f64_at(e, at + 8)?,
+        f64_at(e, at + 16)?,
+        f64_at(e, at + 24)?,
+    );
     Some((
-        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
-        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - w * z),
+            2.0 * (x * z + w * y),
+        ],
+        [
+            2.0 * (x * y + w * z),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - w * x),
+        ],
     ))
 }
 
@@ -373,8 +465,21 @@ fn turned_axes(rotation: f64) -> ([f64; 3], [f64; 3]) {
 }
 
 /// An elliptical arc on axes `u` and `v` (plan projections) as cubics.
-fn projected_arc(c: [f64; 2], a: f64, b: f64, u: [f64; 2], v: [f64; 2], start: f64, sweep: f64) -> Vec<Segment> {
-    let map = |p: [f64; 2]| [c[0] + a * p[0] * u[0] + b * p[1] * v[0], c[1] + a * p[0] * u[1] + b * p[1] * v[1]];
+fn projected_arc(
+    c: [f64; 2],
+    a: f64,
+    b: f64,
+    u: [f64; 2],
+    v: [f64; 2],
+    start: f64,
+    sweep: f64,
+) -> Vec<Segment> {
+    let map = |p: [f64; 2]| {
+        [
+            c[0] + a * p[0] * u[0] + b * p[1] * v[0],
+            c[1] + a * p[0] * u[1] + b * p[1] * v[1],
+        ]
+    };
     arc_cubics([0.0, 0.0], 1.0, 1.0, 0.0, start, sweep)
         .into_iter()
         .map(|[p0, p1, p2, p3]| Segment::Cubic(map(p0), map(p1), map(p2), map(p3)))
@@ -385,8 +490,24 @@ fn projected_arc(c: [f64; 2], a: f64, b: f64, u: [f64; 2], v: [f64; 2], start: f
 fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
     let mut raw = Raw::default();
     // A complex shape or chain collects its components into one path.
-    let mut complex: Option<(usize, PathBuilder, Option<([u8; 3], f64)>, Option<[u8; 3]>, bool)> = None;
-    fn push(raw: &mut Raw, complex: &mut Option<(usize, PathBuilder, Option<([u8; 3], f64)>, Option<[u8; 3]>, bool)>, path: Path) {
+    let mut complex: Option<(
+        usize,
+        PathBuilder,
+        Option<([u8; 3], f64)>,
+        Option<[u8; 3]>,
+        bool,
+    )> = None;
+    fn push(
+        raw: &mut Raw,
+        complex: &mut Option<(
+            usize,
+            PathBuilder,
+            Option<([u8; 3], f64)>,
+            Option<[u8; 3]>,
+            bool,
+        )>,
+        path: Path,
+    ) {
         if let Some((left, pb, _, _, _)) = complex.as_mut() {
             for sp in &path.subpaths {
                 for seg in &sp.segments {
@@ -394,7 +515,11 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                         Segment::Line(a, b) | Segment::Cubic(a, _, _, b) => (*a, *b),
                     };
                     if pb.current() != Some(a) {
-                        if pb.current().is_none() { pb.move_to(a) } else { pb.line_to(a) }
+                        if pb.current().is_none() {
+                            pb.move_to(a)
+                        } else {
+                            pb.line_to(a)
+                        }
                     }
                     match seg {
                         Segment::Line(..) => pb.line_to(b),
@@ -408,7 +533,11 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                 if closed {
                     pb.close();
                 }
-                raw.paths.push(Path { subpaths: pb.finish(), stroke, fill });
+                raw.paths.push(Path {
+                    subpaths: pb.finish(),
+                    stroke,
+                    fill,
+                });
             }
         } else {
             raw.paths.push(path);
@@ -431,25 +560,45 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
         let d3 = is_3d(e);
         // A point: x, y (and z in a 3D element).
         let p3 = |at: usize| -> Option<[f64; 3]> {
-            Some([f64_at(e, at)?, f64_at(e, at + 8)?, if d3 { f64_at(e, at + 16)? } else { 0.0 }])
+            Some([
+                f64_at(e, at)?,
+                f64_at(e, at + 8)?,
+                if d3 { f64_at(e, at + 16)? } else { 0.0 },
+            ])
         };
         match kind(e) {
             12 | 14 => {
                 let n = u32_at(e, 104).unwrap_or(0) as usize;
                 if n > 0 {
-                    let fill = (kind(e) == 14 && e.windows(4).any(|w| w == [0x07, 0x10, 0x41, 0x00])).then_some(color);
+                    let fill = (kind(e) == 14
+                        && e.windows(4).any(|w| w == [0x07, 0x10, 0x41, 0x00]))
+                    .then_some(color);
                     complex = Some((n, PathBuilder::default(), stroke, fill, kind(e) == 14));
                 }
             }
             3 => {
                 if let (Some(a), Some(b)) = (p3(104), p3(if d3 { 128 } else { 120 })) {
-                    push(&mut raw, &mut complex, Path { subpaths: vec![SubPath { segments: vec![Segment::Line(plan(a), plan(b))], closed: false }], stroke, fill: None });
+                    push(
+                        &mut raw,
+                        &mut complex,
+                        Path {
+                            subpaths: vec![SubPath {
+                                segments: vec![Segment::Line(plan(a), plan(b))],
+                                closed: false,
+                            }],
+                            stroke,
+                            fill: None,
+                        },
+                    );
                 }
             }
             4 | 6 | 11 => {
                 let n = u32_at(e, 104).unwrap_or(0) as usize;
                 let stride = if d3 { 24 } else { 16 };
-                let pts: Vec<[f64; 2]> = (0..n).filter_map(|k| p3(112 + k * stride)).map(plan).collect();
+                let pts: Vec<[f64; 2]> = (0..n)
+                    .filter_map(|k| p3(112 + k * stride))
+                    .map(plan)
+                    .collect();
                 if pts.len() >= 2 {
                     let mut pb = PathBuilder::default();
                     pb.move_to(pts[0]);
@@ -459,7 +608,15 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                     if kind(e) == 6 {
                         pb.close();
                     }
-                    push(&mut raw, &mut complex, Path { subpaths: pb.finish(), stroke, fill: None });
+                    push(
+                        &mut raw,
+                        &mut complex,
+                        Path {
+                            subpaths: pb.finish(),
+                            stroke,
+                            fill: None,
+                        },
+                    );
                 }
             }
             15 | 16 => {
@@ -468,18 +625,67 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                 // b 128, quaternion 136, centre 168. 2D: the orientation is an
                 // angle, ellipse centre 128, arc centre 144.
                 let arc = match (kind(e), d3) {
-                    (15, true) => (|| Some((f64_at(e, 104)?, f64_at(e, 112)?, quat_axes(e, 120)?, p3(152)?, 0.0, 0.0)))(),
-                    (_, true) => (|| Some((f64_at(e, 120)?, f64_at(e, 128)?, quat_axes(e, 136)?, p3(168)?, f64_at(e, 104)?, f64_at(e, 112)?)))(),
-                    (15, false) => (|| Some((f64_at(e, 104)?, f64_at(e, 112)?, turned_axes(f64_at(e, 120)?), p3(128)?, 0.0, 0.0)))(),
-                    _ => (|| Some((f64_at(e, 120)?, f64_at(e, 128)?, turned_axes(f64_at(e, 136)?), p3(144)?, f64_at(e, 104)?, f64_at(e, 112)?)))(),
+                    (15, true) => (|| {
+                        Some((
+                            f64_at(e, 104)?,
+                            f64_at(e, 112)?,
+                            quat_axes(e, 120)?,
+                            p3(152)?,
+                            0.0,
+                            0.0,
+                        ))
+                    })(),
+                    (_, true) => (|| {
+                        Some((
+                            f64_at(e, 120)?,
+                            f64_at(e, 128)?,
+                            quat_axes(e, 136)?,
+                            p3(168)?,
+                            f64_at(e, 104)?,
+                            f64_at(e, 112)?,
+                        ))
+                    })(),
+                    (15, false) => (|| {
+                        Some((
+                            f64_at(e, 104)?,
+                            f64_at(e, 112)?,
+                            turned_axes(f64_at(e, 120)?),
+                            p3(128)?,
+                            0.0,
+                            0.0,
+                        ))
+                    })(),
+                    _ => (|| {
+                        Some((
+                            f64_at(e, 120)?,
+                            f64_at(e, 128)?,
+                            turned_axes(f64_at(e, 136)?),
+                            p3(144)?,
+                            f64_at(e, 104)?,
+                            f64_at(e, 112)?,
+                        ))
+                    })(),
                 };
-                let Some((a, b, (u, v), c, start, sweep)) = arc else { continue };
-                let sweep = if sweep == 0.0 { std::f64::consts::TAU } else { sweep };
+                let Some((a, b, (u, v), c, start, sweep)) = arc else {
+                    continue;
+                };
+                let sweep = if sweep == 0.0 {
+                    std::f64::consts::TAU
+                } else {
+                    sweep
+                };
                 let closed = sweep.abs() >= std::f64::consts::TAU - 1e-9;
                 push(
                     &mut raw,
                     &mut complex,
-                    Path { subpaths: vec![SubPath { segments: projected_arc(plan(c), a, b, axis(u), axis(v), start, sweep), closed }], stroke, fill: None },
+                    Path {
+                        subpaths: vec![SubPath {
+                            segments: projected_arc(plan(c), a, b, axis(u), axis(v), start, sweep),
+                            closed,
+                        }],
+                        stroke,
+                        fill: None,
+                    },
                 );
             }
             17 => {
@@ -488,16 +694,34 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                 // 152, a byte count (with its 4-byte marker) at 110 and the
                 // characters from 174.
                 let placed = if d3 {
-                    (|| Some((f64_at(e, 112)?, f64_at(e, 120)?, quat_axes(e, 144)?, p3(176)?, marked_string(e, 200)?)))()
+                    (|| {
+                        Some((
+                            f64_at(e, 112)?,
+                            f64_at(e, 120)?,
+                            quat_axes(e, 144)?,
+                            p3(176)?,
+                            marked_string(e, 200)?,
+                        ))
+                    })()
                 } else {
                     (|| {
                         let count = u16::from_le_bytes(e.get(110..112)?.try_into().ok()?) as usize;
                         let chars = e.get(174..170 + count.max(4))?;
-                        let text = String::from_utf8_lossy(chars).trim_end_matches(char::from(0)).to_string();
-                        Some((f64_at(e, 112)?, f64_at(e, 120)?, turned_axes(f64_at(e, 144)?), p3(152)?, text))
+                        let text = String::from_utf8_lossy(chars)
+                            .trim_end_matches(char::from(0))
+                            .to_string();
+                        Some((
+                            f64_at(e, 112)?,
+                            f64_at(e, 120)?,
+                            turned_axes(f64_at(e, 144)?),
+                            p3(152)?,
+                            text,
+                        ))
                     })()
                 };
-                let Some((width, height, (u, v), origin, text)) = placed else { continue };
+                let Some((width, height, (u, v), origin, text)) = placed else {
+                    continue;
+                };
                 // The text's axes as the plan shows them: its baseline sets the
                 // angle, and each axis's plan length scales its size.
                 let (pu, pv) = (axis(u), axis(v));
@@ -521,10 +745,21 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                 // origin at 232 (z at 248 in 3D), the definition's name after
                 // the string marker.
                 let m: Option<Vec<f64>> = (0..9).map(|k| f64_at(e, 160 + k * 8)).collect();
-                let (Some(m), Some(o)) = (m, p3(232)) else { continue };
-                let Some(name) = marked_string(e, 248) else { continue };
-                let local: Xf = [[m[0], m[1], m[2], o[0]], [m[3], m[4], m[5], o[1]], [m[6], m[7], m[8], o[2]]];
-                raw.instances.push(Instance { name: name.to_ascii_uppercase(), xf: xf_compose(xf, &local) });
+                let (Some(m), Some(o)) = (m, p3(232)) else {
+                    continue;
+                };
+                let Some(name) = marked_string(e, 248) else {
+                    continue;
+                };
+                let local: Xf = [
+                    [m[0], m[1], m[2], o[0]],
+                    [m[3], m[4], m[5], o[1]],
+                    [m[6], m[7], m[8], o[2]],
+                ];
+                raw.instances.push(Instance {
+                    name: name.to_ascii_uppercase(),
+                    xf: xf_compose(xf, &local),
+                });
             }
             _ => {}
         }
@@ -534,7 +769,11 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
         if closed {
             pb.close();
         }
-        raw.paths.push(Path { subpaths: pb.finish(), stroke, fill });
+        raw.paths.push(Path {
+            subpaths: pb.finish(),
+            stroke,
+            fill,
+        });
     }
     raw
 }
@@ -542,12 +781,22 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
 type Affine = [f64; 6];
 
 fn apply(m: &Affine, p: [f64; 2]) -> [f64; 2] {
-    [m[0] * p[0] + m[1] * p[1] + m[4], m[2] * p[0] + m[3] * p[1] + m[5]]
+    [
+        m[0] * p[0] + m[1] * p[1] + m[4],
+        m[2] * p[0] + m[3] * p[1] + m[5],
+    ]
 }
 
 /// Places plan geometry through the sheet mapping `m`, and the shared cells
 /// it instances (each definition read through its own placement).
-fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Vec<&[u8]>>, styles: &Styles, depth: usize, out: &mut Sheet) {
+fn place(
+    raw: &Raw,
+    m: &Affine,
+    defs: &HashMap<String, Vec<&[u8]>>,
+    styles: &Styles,
+    depth: usize,
+    out: &mut Sheet,
+) {
     let map = |p: [f64; 2]| apply(m, p);
     for path in &raw.paths {
         out.paths.push(Path {
@@ -560,7 +809,9 @@ fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Vec<&[u8]>>, styles: &Sty
                         .iter()
                         .map(|s| match s {
                             Segment::Line(a, b) => Segment::Line(map(*a), map(*b)),
-                            Segment::Cubic(a, b, c, d) => Segment::Cubic(map(*a), map(*b), map(*c), map(*d)),
+                            Segment::Cubic(a, b, c, d) => {
+                                Segment::Cubic(map(*a), map(*b), map(*c), map(*d))
+                            }
                         })
                         .collect(),
                     closed: sp.closed,
@@ -573,14 +824,28 @@ fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Vec<&[u8]>>, styles: &Sty
     let scale = (m[0] * m[3] - m[1] * m[2]).abs().sqrt();
     let turn = m[2].atan2(m[0]);
     for t in &raw.texts {
-        out.texts.push(Text { origin: map(t.origin), height: t.height * scale, rotation: t.rotation + turn, ..t.clone() });
+        out.texts.push(Text {
+            origin: map(t.origin),
+            height: t.height * scale,
+            rotation: t.rotation + turn,
+            ..t.clone()
+        });
     }
     if depth >= 8 {
         return;
     }
     for inst in &raw.instances {
-        let Some(def) = defs.get(&inst.name) else { continue };
-        place(&read_run(def, styles, &inst.xf), m, defs, styles, depth + 1, out);
+        let Some(def) = defs.get(&inst.name) else {
+            continue;
+        };
+        place(
+            &read_run(def, styles, &inst.xf),
+            m,
+            defs,
+            styles,
+            depth + 1,
+            out,
+        );
     }
 }
 
@@ -607,7 +872,6 @@ fn units(header: &[u8]) -> (f64, f64) {
     (master, sub)
 }
 
-
 /// Models of the file: (name, graphic stream, header stream).
 fn models(cfb: &Cfb) -> Vec<(String, Vec<u8>, Vec<u8>)> {
     let streams = cfb.streams();
@@ -629,7 +893,13 @@ fn models(cfb: &Cfb) -> Vec<(String, Vec<u8>, Vec<u8>)> {
         if total >= total_limit {
             break;
         }
-        let get = |suffix: &str| streams.iter().find(|(p, _)| *p == format!("{dir}/{suffix}")).map(|(_, e)| inflate(&cfb.stream(e))).unwrap_or_default();
+        let get = |suffix: &str| {
+            streams
+                .iter()
+                .find(|(p, _)| *p == format!("{dir}/{suffix}"))
+                .map(|(_, e)| inflate(&cfb.stream(e)))
+                .unwrap_or_default()
+        };
         let graphics = get("Dgn^G/$1");
         let header = get("Dgn~Mh");
         total = total
@@ -657,7 +927,9 @@ fn level_table(nm: &[&[u8]]) -> Vec<(u32, String, u32)> {
         match kind(e) {
             96 => in_levels = u32_at(e, 12) == Some(1),
             95 if in_levels && e.len() >= 80 => {
-                let (Some(id), Some(color)) = (u32_at(e, 32), u32_at(e, 72)) else { continue };
+                let (Some(id), Some(color)) = (u32_at(e, 32), u32_at(e, 72)) else {
+                    continue;
+                };
                 let mut name = marked_string(e, 32).unwrap_or_default();
                 if id == 64 && name.eq_ignore_ascii_case("Default") {
                     name = "0".to_string();
@@ -671,24 +943,40 @@ fn level_table(nm: &[&[u8]]) -> Vec<(u32, String, u32)> {
 }
 
 fn non_model(cfb: &Cfb) -> Vec<u8> {
-    cfb.streams().iter().find(|(p, _)| p == "Dgn^Nm/$1").map(|(_, e)| inflate(&cfb.stream(e))).unwrap_or_default()
+    cfb.streams()
+        .iter()
+        .find(|(p, _)| p == "Dgn^Nm/$1")
+        .map(|(_, e)| inflate(&cfb.stream(e)))
+        .unwrap_or_default()
 }
 
 /// Level names of the file, for the underlay layers list.
 pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
     let cfb = Cfb::open(bytes)?;
     let nm = non_model(&cfb);
-    Some(level_table(&elements(&nm)).into_iter().map(|l| l.1).filter(|n| !n.is_empty()).collect())
+    Some(
+        level_table(&elements(&nm))
+            .into_iter()
+            .map(|l| l.1)
+            .filter(|n| !n.is_empty())
+            .collect(),
+    )
 }
 
 pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
     let cfb = Cfb::open(bytes)?;
     let all = models(&cfb);
-    let (_, graphics, header) = all.iter().find(|m| m.0.eq_ignore_ascii_case(name)).or_else(|| all.first())?;
+    let (_, graphics, header) = all
+        .iter()
+        .find(|m| m.0.eq_ignore_ascii_case(name))
+        .or_else(|| all.first())?;
     let non_model = non_model(&cfb);
     let nm = elements(&non_model);
     // Colours 0-254 from byte 37, the background (255) opening the table.
-    let color_table = nm.iter().find(|e| kind(e) == 5).and_then(|e| dgn_color_table(e, 37));
+    let color_table = nm
+        .iter()
+        .find(|e| kind(e) == 5)
+        .and_then(|e| dgn_color_table(e, 37));
     let table_colors = color_table.is_some();
     let colors = color_table.unwrap_or_else(|| DGN_DEFAULT_COLORS.to_vec());
     let table = level_table(&nm);
@@ -698,13 +986,20 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         .filter(|l| hidden.iter().any(|h| h.eq_ignore_ascii_case(&l.1)))
         .map(|l| l.0)
         .collect();
-    let styles = Styles { colors, levels, hidden, extended: extended_colors(&cfb) };
+    let styles = Styles {
+        colors,
+        levels,
+        hidden,
+        extended: extended_colors(&cfb),
+    };
     // Shared cell definitions: a type-34 element and its components.
     let mut defs: HashMap<String, Vec<&[u8]>> = HashMap::new();
     let mut i = 0;
     while i < nm.len() {
         if kind(nm[i]) == 34 && !is_component(nm[i]) {
-            let name = marked_string(nm[i], 248).unwrap_or_default().to_ascii_uppercase();
+            let name = marked_string(nm[i], 248)
+                .unwrap_or_default()
+                .to_ascii_uppercase();
             let mut j = i + 1;
             while j < nm.len() && is_component(nm[j]) {
                 j += 1;
@@ -719,8 +1014,19 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
     let raw = read_run(&graphics, &styles, &IDENTITY);
     let (per_unit, sub_uor) = units(header);
     let origin = global_origin(header);
-    let m: Affine = [1.0 / per_unit, 0.0, 0.0, 1.0 / per_unit, -origin[0] / per_unit, -origin[1] / per_unit];
-    let mut sheet = Sheet { sub_per_master: per_unit / sub_uor, table_colors, ..Default::default() };
+    let m: Affine = [
+        1.0 / per_unit,
+        0.0,
+        0.0,
+        1.0 / per_unit,
+        -origin[0] / per_unit,
+        -origin[1] / per_unit,
+    ];
+    let mut sheet = Sheet {
+        sub_per_master: per_unit / sub_uor,
+        table_colors,
+        ..Default::default()
+    };
     place(&raw, &m, &defs, &styles, 0, &mut sheet);
     // The model's extent is its elements' stored ranges (text by its full
     // box), as the reference sizes a model.
@@ -744,10 +1050,23 @@ fn global_origin(header: &[u8]) -> [f64; 2] {
 /// The union of the top-level elements' ranges (UORs): each graphic element
 /// stores its low corner at 56 and its size at 80, as 64-bit integers.
 fn stored_range(graphics: &[&[u8]]) -> Option<[f64; 4]> {
-    let i64_at = |e: &[u8], at: usize| Some(i64::from_le_bytes(e.get(at..at + 8)?.try_into().ok()?) as f64);
-    let mut r = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
-    for e in graphics.iter().filter(|e| e.len() >= 104 && !is_component(e)) {
-        let (Some(x), Some(y), Some(w), Some(h)) = (i64_at(e, 56), i64_at(e, 64), i64_at(e, 80), i64_at(e, 88)) else { continue };
+    let i64_at =
+        |e: &[u8], at: usize| Some(i64::from_le_bytes(e.get(at..at + 8)?.try_into().ok()?) as f64);
+    let mut r = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for e in graphics
+        .iter()
+        .filter(|e| e.len() >= 104 && !is_component(e))
+    {
+        let (Some(x), Some(y), Some(w), Some(h)) =
+            (i64_at(e, 56), i64_at(e, 64), i64_at(e, 80), i64_at(e, 88))
+        else {
+            continue;
+        };
         r = [r[0].min(x), r[1].min(y), r[2].max(x + w), r[3].max(y + h)];
     }
     (r[0] <= r[2]).then_some(r)
@@ -826,8 +1145,16 @@ mod cfb_memory_tests {
                 return NONE;
             }
             let mid = (lo + hi) / 2;
-            let left = if mid > lo { build(b, base, lo, mid - 1) } else { NONE };
-            let right = if mid < hi { build(b, base, mid + 1, hi) } else { NONE };
+            let left = if mid > lo {
+                build(b, base, lo, mid - 1)
+            } else {
+                NONE
+            };
+            let right = if mid < hi {
+                build(b, base, mid + 1, hi)
+            } else {
+                NONE
+            };
             let e = base + (2 + mid * 2) * 128;
             b[e + 68..e + 72].copy_from_slice(&left.to_le_bytes());
             b[e + 72..e + 76].copy_from_slice(&right.to_le_bytes());
@@ -852,10 +1179,10 @@ mod cfb_memory_tests {
         let mut b = vec![0u8; (payload_start + payload_sectors + 1) * sector];
         header(&mut b, 12, 0, ENDOFCHAIN, fat_start as u32);
         b[80..84].copy_from_slice(&((fat_start + 1) as u32).to_le_bytes()); // DIFAT slot 1
-        // Directory: root → storage → model storages, sibling links as a
-        // balanced tree (real CFB directories are red-black; a linear chain
-        // would hit streams()' existing depth-64 guard). Each storage has
-        // one "Dgn^G/$1" stream pointing at the shared payload.
+                                                                            // Directory: root → storage → model storages, sibling links as a
+                                                                            // balanced tree (real CFB directories are red-black; a linear chain
+                                                                            // would hit streams()' existing depth-64 guard). Each storage has
+                                                                            // one "Dgn^G/$1" stream pointing at the shared payload.
         let root_model = (model_count - 1) / 2;
         put_entry(&mut b, sector, 0, "Root", 1, NONE, NONE, 1, ENDOFCHAIN, 0);
         put_entry(

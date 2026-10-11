@@ -4,8 +4,8 @@
 
 use codec::entities::{
     CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind, Dimension, DimensionLinear,
-    Insert, Leader, Line, LwPolyline, LwVertex, MLine, Polyline, Polyline2D, Polyline3D,
-    Vertex2D, Vertex3D,
+    Insert, Leader, Line, LwPolyline, LwVertex, MLine, Polyline, Polyline2D, Polyline3D, Vertex2D,
+    Vertex3D,
 };
 use codec::tables::BlockRecord;
 use codec::types::{Vector2, Vector3};
@@ -102,7 +102,11 @@ fn explode_insert_golden_block_members() {
     add_test_block(&mut doc);
     let insert = Insert::new(BLOCK_NAME, Vector3::new(0.0, 0.0, 0.0));
     let pieces = explode_entity(&EntityType::Insert(insert), &doc);
-    assert_eq!(pieces.len(), 6, "insert must materialize all 6 block members");
+    assert_eq!(
+        pieces.len(),
+        6,
+        "insert must materialize all 6 block members"
+    );
     assert!(pieces.iter().all(|p| matches!(p, EntityType::Line(_))));
 }
 
@@ -123,10 +127,7 @@ fn explode_mline_golden_three_lines_per_segment() {
 #[test]
 fn explode_dimension_linear_golden_segments() {
     let doc = CadDocument::new();
-    let mut d = DimensionLinear::new(
-        Vector3::new(0.0, 0.0, 0.0),
-        Vector3::new(10.0, 0.0, 0.0),
-    );
+    let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
     d.definition_point = Vector3::new(5.0, 3.0, 0.0);
     d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
     let pieces = explode_entity(&EntityType::Dimension(Dimension::Linear(d)), &doc);
@@ -135,12 +136,19 @@ fn explode_dimension_linear_golden_segments() {
     // `linear_dim_bakes_filled_arrowheads`), which is why the Lines count is
     // 3 — the plan's pre-execution "≥4 Lines" research claim was wrong.
     assert_eq!(
-        pieces.iter().filter(|p| matches!(p, EntityType::Line(_))).count(),
+        pieces
+            .iter()
+            .filter(|p| matches!(p, EntityType::Line(_)))
+            .count(),
         3,
         "linear dim must explode to extension + dimension lines, got {pieces:?}"
     );
     assert!(
-        pieces.iter().filter(|p| matches!(p, EntityType::Solid(_))).count() >= 2,
+        pieces
+            .iter()
+            .filter(|p| matches!(p, EntityType::Solid(_)))
+            .count()
+            >= 2,
         "linear dim must bake filled arrowheads (SOLIDs), got {pieces:?}"
     );
     // The measurement label is baked as a Text entity when the style path
@@ -219,7 +227,10 @@ fn lwpolyline_explode_preserves_length_and_closed_counts() {
             _ => 0.0,
         })
         .sum();
-    assert!((total - 7.0).abs() < 1e-9, "total length must be preserved, got {total}");
+    assert!(
+        (total - 7.0).abs() < 1e-9,
+        "total length must be preserved, got {total}"
+    );
 
     let mut sq = LwPolyline::new();
     sq.is_closed = true;
@@ -329,8 +340,10 @@ fn build_differential_scene() -> (Scene, FixtureHandles) {
         Vector3::new(30.0, 5.0, 0.0),
     ])));
 
-    let insert =
-        scene.add_entity(EntityType::Insert(Insert::new(BLOCK_NAME, Vector3::new(0.0, 20.0, 0.0))));
+    let insert = scene.add_entity(EntityType::Insert(Insert::new(
+        BLOCK_NAME,
+        Vector3::new(0.0, 20.0, 0.0),
+    )));
 
     let mut line = Line::new();
     line.start = Vector3::new(0.0, 50.0, 0.0);
@@ -357,7 +370,14 @@ fn build_differential_scene() -> (Scene, FixtureHandles) {
 
     (
         scene,
-        FixtureHandles { poly, mline, insert, survivor, leader1, leader2 },
+        FixtureHandles {
+            poly,
+            mline,
+            insert,
+            survivor,
+            leader1,
+            leader2,
+        },
     )
 }
 
@@ -382,7 +402,10 @@ fn apply_explode_replacements_matches_legacy_loop() {
     assert_eq!(handles_prior.survivor, handles.survivor);
 
     let replacements = plan_from_selection(&scene_legacy);
-    assert!(replacements.len() >= 3, "poly, mline, insert must be planned");
+    assert!(
+        replacements.len() >= 3,
+        "poly, mline, insert must be planned"
+    );
     assert_eq!(
         replacements.iter().map(|(h, _)| *h).collect::<Vec<_>>(),
         vec![handles.poly, handles.mline, handles.insert],
@@ -407,11 +430,26 @@ fn apply_explode_replacements_matches_legacy_loop() {
     );
 
     for scene in [&scene_legacy, &scene_batched] {
-        assert!(scene.document.get_entity(handles.poly).is_none(), "poly erased");
-        assert!(scene.document.get_entity(handles.mline).is_none(), "mline erased");
-        assert!(scene.document.get_entity(handles.insert).is_none(), "insert erased");
-        assert!(scene.document.get_entity(handles.leader1).is_none(), "leader coupling L1");
-        assert!(scene.document.get_entity(handles.leader2).is_none(), "leader coupling L2");
+        assert!(
+            scene.document.get_entity(handles.poly).is_none(),
+            "poly erased"
+        );
+        assert!(
+            scene.document.get_entity(handles.mline).is_none(),
+            "mline erased"
+        );
+        assert!(
+            scene.document.get_entity(handles.insert).is_none(),
+            "insert erased"
+        );
+        assert!(
+            scene.document.get_entity(handles.leader1).is_none(),
+            "leader coupling L1"
+        );
+        assert!(
+            scene.document.get_entity(handles.leader2).is_none(),
+            "leader coupling L2"
+        );
         assert!(
             scene.document.get_entity(handles.survivor).is_some(),
             "non-explodable survivor must survive"
@@ -423,8 +461,9 @@ fn apply_explode_replacements_matches_legacy_loop() {
     }
 
     // explode_batch keeps empty entries so both sides see the same inputs.
-    let items: Vec<(Handle, &EntityType)> = vec![
-        (handles.survivor, scene_batched.document.get_entity(handles.survivor).unwrap()),
-    ];
+    let items: Vec<(Handle, &EntityType)> = vec![(
+        handles.survivor,
+        scene_batched.document.get_entity(handles.survivor).unwrap(),
+    )];
     assert_eq!(explode_batch(&items, &scene_batched.document), vec![vec![]]);
 }

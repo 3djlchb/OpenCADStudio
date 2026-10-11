@@ -103,21 +103,39 @@ fn msg(m: AttdefDialogMsg) -> Message {
 }
 
 fn card<'a>(title: String, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    container(column![text(title.to_uppercase()).size(10).style(accent_text), content.into()].spacing(8))
-        .padding([10, 12])
-        .width(Fill)
-        .style(card_style)
-        .into()
+    container(
+        column![
+            text(title.to_uppercase()).size(10).style(accent_text),
+            content.into()
+        ]
+        .spacing(8),
+    )
+    .padding([10, 12])
+    .width(Fill)
+    .style(card_style)
+    .into()
 }
 
 fn labelled<'a>(label: String, field: Element<'a, Message>, enabled: bool) -> Element<'a, Message> {
     let label = text(label).size(12).width(Length::Fixed(118.0));
-    let label = if enabled { label } else { label.style(muted_style) };
+    let label = if enabled {
+        label
+    } else {
+        label.style(muted_style)
+    };
     row![label, field].spacing(8).align_y(iced::Center).into()
 }
 
-fn input<'a>(value: &str, enabled: bool, on: fn(String) -> AttdefDialogMsg) -> Element<'a, Message> {
-    let mut field = text_input("", value).size(12).padding([5, 8]).width(Fill).style(field_style);
+fn input<'a>(
+    value: &str,
+    enabled: bool,
+    on: fn(String) -> AttdefDialogMsg,
+) -> Element<'a, Message> {
+    let mut field = text_input("", value)
+        .size(12)
+        .padding([5, 8])
+        .width(Fill)
+        .style(field_style);
     if enabled {
         field = field.on_input(move |v| msg(on(v)));
     }
@@ -138,7 +156,12 @@ fn pick<'a>(
         Some(m) => b.on_press(msg(m)),
         None => b,
     };
-    iced::widget::tooltip(b, text(tip).size(11), iced::widget::tooltip::Position::Bottom).into()
+    iced::widget::tooltip(
+        b,
+        text(tip).size(11),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
 }
 
 fn mode<'a>(label: String, on: bool, bit: u8) -> Element<'a, Message> {
@@ -170,8 +193,13 @@ fn error_band<'a>(error: &Option<String>) -> Option<Element<'a, Message>> {
         .padding([6, 10])
         .width(Fill)
         .style(|theme: &iced::Theme| container::Style {
-            background: Some(iced::Background::Color(theme.palette().danger.base.color.scale_alpha(0.18))),
-            border: iced::Border { radius: 4.0.into(), ..Default::default() },
+            background: Some(iced::Background::Color(
+                theme.palette().danger.base.color.scale_alpha(0.18),
+            )),
+            border: iced::Border {
+                radius: 4.0.into(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into(),
@@ -200,30 +228,61 @@ fn footer<'a>(action: std::borrow::Cow<'static, str>, ok: AttdefDialogMsg) -> El
     .into()
 }
 
-pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+pub fn view<'a>(
+    state: &'a AttdefDialogState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
     let f = state.aflags;
     let constant = f & AFLAG_CONSTANT != 0;
     let multiline = f & AFLAG_MULTILINE != 0;
     let modes = card(
         t!("Mode").into_owned(),
         column![
-            mode(t!("Invisible").into_owned(), f & AFLAG_INVISIBLE != 0, AFLAG_INVISIBLE),
+            mode(
+                t!("Invisible").into_owned(),
+                f & AFLAG_INVISIBLE != 0,
+                AFLAG_INVISIBLE
+            ),
             mode(t!("Constant").into_owned(), constant, AFLAG_CONSTANT),
-            mode(t!("Verify").into_owned(), f & AFLAG_VERIFY != 0, AFLAG_VERIFY),
-            mode(t!("Preset").into_owned(), f & AFLAG_PRESET != 0, AFLAG_PRESET),
-            mode(t!("Lock position").into_owned(), f & AFLAG_LOCK != 0, AFLAG_LOCK),
-            mode(t!("Multiple lines").into_owned(), multiline, AFLAG_MULTILINE),
+            mode(
+                t!("Verify").into_owned(),
+                f & AFLAG_VERIFY != 0,
+                AFLAG_VERIFY
+            ),
+            mode(
+                t!("Preset").into_owned(),
+                f & AFLAG_PRESET != 0,
+                AFLAG_PRESET
+            ),
+            mode(
+                t!("Lock position").into_owned(),
+                f & AFLAG_LOCK != 0,
+                AFLAG_LOCK
+            ),
+            mode(
+                t!("Multiple lines").into_owned(),
+                multiline,
+                AFLAG_MULTILINE
+            ),
         ]
         .spacing(7),
     );
     let coords_on = !state.on_screen && !state.align_below;
     let coord = |i: usize, axis: &'static str| -> Element<'a, Message> {
-        let mut field = text_input("", &state.coords[i]).size(12).padding([5, 8]).width(Fill).style(field_style);
+        let mut field = text_input("", &state.coords[i])
+            .size(12)
+            .padding([5, 8])
+            .width(Fill)
+            .style(field_style);
         if coords_on {
             field = field.on_input(move |v| msg(AttdefDialogMsg::Coord(i, v)));
         }
         let label = text(axis).size(12).width(Length::Fixed(14.0));
-        let label = if coords_on { label } else { label.style(muted_style) };
+        let label = if coords_on {
+            label
+        } else {
+            label.style(muted_style)
+        };
         row![label, field].spacing(8).align_y(iced::Center).into()
     };
     let mut on_screen = checkbox(state.on_screen)
@@ -240,7 +299,11 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
     let attribute = card(
         t!("Attribute").into_owned(),
         column![
-            labelled(t!("Tag").into_owned(), input(&state.tag, true, AttdefDialogMsg::Tag), true),
+            labelled(
+                t!("Tag").into_owned(),
+                input(&state.tag, true, AttdefDialogMsg::Tag),
+                true
+            ),
             labelled(
                 t!("Prompt").into_owned(),
                 input(&state.prompt, !constant, AttdefDialogMsg::Prompt),
@@ -249,7 +312,8 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
             labelled(
                 if constant { t!("Value") } else { t!("Default") }.into_owned(),
                 {
-                    let mut value = row![input(&state.default, true, AttdefDialogMsg::Default)].spacing(6);
+                    let mut value =
+                        row![input(&state.default, true, AttdefDialogMsg::Default)].spacing(6);
                     if multiline {
                         value = value.push(pick(
                             text("...").size(13).into(),
@@ -257,7 +321,11 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
                             Some(AttdefDialogMsg::EditValue),
                         ));
                     }
-                    value.push(pick(text("fx").size(12).into(), t!("Insert field").into_owned(), Some(AttdefDialogMsg::InsertField)))
+                    value.push(pick(
+                        text("fx").size(12).into(),
+                        t!("Insert field").into_owned(),
+                        Some(AttdefDialogMsg::InsertField),
+                    ))
                 }
                 .spacing(6)
                 .into(),
@@ -279,22 +347,36 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
         .width(Fill)
         .into()
     } else {
-        container(text(JustifyChoice(state.justify).to_string()).size(12).style(muted_style))
-            .padding([5, 8])
-            .width(Fill)
-            .into()
+        container(
+            text(JustifyChoice(state.justify).to_string())
+                .size(12)
+                .style(muted_style),
+        )
+        .padding([5, 8])
+        .width(Fill)
+        .into()
     };
     let style: Element<'a, Message> = if text_on {
-        pick_list(Some(state.style.clone()), state.styles.clone(), |s: &String| s.clone())
-            .on_select(|s| msg(AttdefDialogMsg::Style(s)))
-            .text_size(12)
+        pick_list(
+            Some(state.style.clone()),
+            state.styles.clone(),
+            |s: &String| s.clone(),
+        )
+        .on_select(|s| msg(AttdefDialogMsg::Style(s)))
+        .text_size(12)
+        .padding([5, 8])
+        .width(Fill)
+        .into()
+    } else {
+        container(text(state.style.clone()).size(12).style(muted_style))
             .padding([5, 8])
             .width(Fill)
             .into()
-    } else {
-        container(text(state.style.clone()).size(12).style(muted_style)).padding([5, 8]).width(Fill).into()
     };
-    let mut annotative = checkbox(state.annotative).label(t!("Annotative").into_owned()).text_size(12).size(14);
+    let mut annotative = checkbox(state.annotative)
+        .label(t!("Annotative").into_owned())
+        .text_size(12)
+        .size(14);
     if text_on {
         annotative = annotative.on_toggle(|v| msg(AttdefDialogMsg::Annotative(v)));
     }
@@ -303,14 +385,22 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
     let settings = card(
         t!("Text Settings").into_owned(),
         column![
-            labelled(t!("Justification").into_owned(), justify, text_on && !multiline),
+            labelled(
+                t!("Justification").into_owned(),
+                justify,
+                text_on && !multiline
+            ),
             labelled(t!("Text style").into_owned(), style, text_on),
             row![Space::new().width(Length::Fixed(126.0)), annotative],
             labelled(
                 t!("Text height").into_owned(),
                 row![
                     input(&state.height, size_on, AttdefDialogMsg::Height),
-                    pick(screen_pick(), t!("Specify on-screen").into_owned(), size_on.then_some(AttdefDialogMsg::PickHeight)),
+                    pick(
+                        screen_pick(),
+                        t!("Specify on-screen").into_owned(),
+                        size_on.then_some(AttdefDialogMsg::PickHeight)
+                    ),
                 ]
                 .spacing(6)
                 .into(),
@@ -320,7 +410,11 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
                 t!("Rotation").into_owned(),
                 row![
                     input(&state.rotation, rot_on, AttdefDialogMsg::Rotation),
-                    pick(screen_pick(), t!("Specify on-screen").into_owned(), rot_on.then_some(AttdefDialogMsg::PickRotation)),
+                    pick(
+                        screen_pick(),
+                        t!("Specify on-screen").into_owned(),
+                        rot_on.then_some(AttdefDialogMsg::PickRotation)
+                    ),
                 ]
                 .spacing(6)
                 .into(),
@@ -351,7 +445,9 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
         align = align.on_toggle(|v| msg(AttdefDialogMsg::AlignBelow(v)));
     }
     let body = row![
-        column![modes, insertion].spacing(10).width(Length::Fixed(200.0)),
+        column![modes, insertion]
+            .spacing(10)
+            .width(Length::Fixed(200.0)),
         column![attribute, settings].spacing(10).width(Fill),
     ]
     .spacing(10);
@@ -367,29 +463,60 @@ pub fn view<'a>(state: &'a AttdefDialogState, sizing: crate::ui::modal::ModalSiz
         .into()
 }
 
-pub fn view_edit<'a>(state: &'a AttdefEditState, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
-    let field = |label: String, value: &'a str, enabled: bool, on: fn(String) -> AttdefDialogMsg| {
-        let mut input = text_input("", value).size(12).padding([5, 8]).width(Fill).style(field_style);
-        if enabled {
-            input = input.on_input(move |v| msg(on(v)));
-        }
-        let label = text(label).size(12).width(Length::Fixed(80.0));
-        let label = if enabled { label } else { label.style(muted_style) };
-        row![label, input].spacing(8).align_y(iced::Center)
-    };
+pub fn view_edit<'a>(
+    state: &'a AttdefEditState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    let field =
+        |label: String, value: &'a str, enabled: bool, on: fn(String) -> AttdefDialogMsg| {
+            let mut input = text_input("", value)
+                .size(12)
+                .padding([5, 8])
+                .width(Fill)
+                .style(field_style);
+            if enabled {
+                input = input.on_input(move |v| msg(on(v)));
+            }
+            let label = text(label).size(12).width(Length::Fixed(80.0));
+            let label = if enabled {
+                label
+            } else {
+                label.style(muted_style)
+            };
+            row![label, input].spacing(8).align_y(iced::Center)
+        };
     let content = card(
         t!("Attribute Definition").into_owned(),
         column![
-            field(t!("Tag").into_owned(), &state.tag, true, AttdefDialogMsg::EditTag),
-            field(t!("Prompt").into_owned(), &state.prompt, !state.constant, AttdefDialogMsg::EditPrompt),
+            field(
+                t!("Tag").into_owned(),
+                &state.tag,
+                true,
+                AttdefDialogMsg::EditTag
+            ),
+            field(
+                t!("Prompt").into_owned(),
+                &state.prompt,
+                !state.constant,
+                AttdefDialogMsg::EditPrompt
+            ),
             row![
                 field(
-                    if state.constant { t!("Value") } else { t!("Default") }.into_owned(),
+                    if state.constant {
+                        t!("Value")
+                    } else {
+                        t!("Default")
+                    }
+                    .into_owned(),
                     &state.default,
                     true,
                     AttdefDialogMsg::EditDefault
                 ),
-                pick(text("fx").size(12).into(), t!("Insert field").into_owned(), Some(AttdefDialogMsg::EditInsertField)),
+                pick(
+                    text("fx").size(12).into(),
+                    t!("Insert field").into_owned(),
+                    Some(AttdefDialogMsg::EditInsertField)
+                ),
             ]
             .spacing(6)
             .align_y(iced::Center),

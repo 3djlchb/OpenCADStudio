@@ -69,12 +69,14 @@ fn close_op_guards_dirty_documents_and_discards() {
     ));
     assert_eq!(r["ok"], true, "{}", r["error"]);
     assert_eq!(r["result"]["closed"], true);
-    assert_eq!(app.tabs[app.active_tab].scene.document.entities().count(), 0);
+    assert_eq!(
+        app.tabs[app.active_tab].scene.document.entities().count(),
+        0
+    );
 
     // Unknown document id: document_closed.
-    let r = app.automation_op(
-        r#"{"protocol":1,"op":"close","request_id":"cl2","document_id":9999}"#,
-    );
+    let r =
+        app.automation_op(r#"{"protocol":1,"op":"close","request_id":"cl2","document_id":9999}"#);
     assert_eq!(r["ok"], false);
     assert_eq!(r["code"], "document_closed");
 }
@@ -109,7 +111,11 @@ fn sysvar_round_trips_and_refuses_unknowns() {
     ));
     assert_eq!(r["ok"], true, "{}", r["error"]);
     assert_eq!(
-        app.tabs[app.active_tab].scene.document.header.current_layer_name,
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .header
+            .current_layer_name,
         "Walls"
     );
     let r = app.automation_op(&format!(
@@ -135,7 +141,11 @@ fn layout_create_and_page_setup_configure_sheets() {
         r#"{{"protocol":1,"op":"layout_create","request_id":"lc1","document_id":{doc},"name":"PLAN"}}"#
     ));
     assert_eq!(r["ok"], true, "{}", r["error"]);
-    assert!(r["result"]["layouts"].as_array().unwrap().iter().any(|n| n == "PLAN"));
+    assert!(r["result"]["layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| n == "PLAN"));
 
     // Duplicate refused.
     let r = app.automation_op(&format!(
@@ -222,7 +232,10 @@ fn wblock_with_template_base_keeps_template_tables() {
     let tpl = std::env::temp_dir().join(format!("ocs_wbtpl_{}.dwg", std::process::id()));
     let _ = std::fs::remove_file(&tpl);
     let tp = tpl.to_string_lossy().replace('\\', "\\\\");
-    assert_eq!(app.automation_op(&format!(r#"{{"op":"save","path":"{tp}"}}"#))["ok"], true);
+    assert_eq!(
+        app.automation_op(&format!(r#"{{"op":"save","path":"{tp}"}}"#))["ok"],
+        true
+    );
 
     // A new drawing holds the one entity to export.
     app.automation_op(r#"{"op":"new"}"#);
@@ -405,8 +418,8 @@ fn diagnostic_layer_survives_plain_io_round_trip() {
 
     // Direct io round trip on a clone of the document.
     let doc = app.tabs[app.active_tab].scene.document.clone();
-    let bytes = crate::io::save_to_bytes(&doc, "dxf", codec::DxfVersion::AC1032)
-        .expect("save to bytes");
+    let bytes =
+        crate::io::save_to_bytes(&doc, "dxf", codec::DxfVersion::AC1032).expect("save to bytes");
     let path = std::env::temp_dir().join(format!("ocs_diag_{}.dxf", std::process::id()));
     std::fs::write(&path, &bytes).unwrap();
     let loaded = crate::io::load_file(&path).expect("load back");
@@ -453,7 +466,11 @@ fn block_delete_and_define_replace_manage_definitions() {
         r#"{{"protocol":1,"op":"block_define","request_id":"bl1","document_id":{doc},"name":"MARK","base":[0,0,0],"handles":["{handle}"],"replace":true}}"#
     ));
     assert_eq!(r["ok"], true, "{}", r["error"]);
-    assert_eq!(count_type(&mut app, "Insert"), 1, "one insert after replace");
+    assert_eq!(
+        count_type(&mut app, "Insert"),
+        1,
+        "one insert after replace"
+    );
     assert_eq!(count_type(&mut app, "Line"), 0, "old children erased");
     assert_eq!(count_type(&mut app, "Circle"), 0, "old children erased");
 
@@ -462,7 +479,10 @@ fn block_delete_and_define_replace_manage_definitions() {
         r#"{{"protocol":1,"op":"block_delete","request_id":"bl2","document_id":{doc},"name":"MARK"}}"#
     ));
     assert_eq!(r["ok"], true, "{}", r["error"]);
-    assert!(r["result"]["erased"].as_u64().unwrap() >= 3, "insert + markers + child");
+    assert!(
+        r["result"]["erased"].as_u64().unwrap() >= 3,
+        "insert + markers + child"
+    );
     assert_eq!(count_type(&mut app, "Insert"), 0);
 
     // Unknown names and protected layout records are refused.
@@ -498,7 +518,10 @@ fn wblock_normalize_shifts_the_export_to_the_origin() {
     ));
     assert_eq!(r["ok"], true, "{}", r["error"]);
     assert_eq!(r["result"]["normalized"], true);
-    assert_eq!(app.automation_op(&format!(r#"{{"op":"open","path":"{op}"}}"#))["ok"], true);
+    assert_eq!(
+        app.automation_op(&format!(r#"{{"op":"open","path":"{op}"}}"#))["ok"],
+        true
+    );
     let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"full"}"#);
     assert_eq!(q["entities"][0]["start"], json!([0.0, 0.0, 0.0]));
     assert_eq!(q["entities"][0]["end"], json!([10.0, 10.0, 0.0]));
@@ -539,8 +562,14 @@ fn file_identity_is_stable_and_survives_a_round_trip() {
     let path = std::env::temp_dir().join(format!("ocs_fid_{}.dwg", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let p = path.to_string_lossy().replace('\\', "\\\\");
-    assert_eq!(app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#))["ok"], true);
-    assert_eq!(app.automation_op(&format!(r#"{{"op":"open","path":"{p}"}}"#))["ok"], true);
+    assert_eq!(
+        app.automation_op(&format!(r#"{{"op":"save","path":"{p}"}}"#))["ok"],
+        true
+    );
+    assert_eq!(
+        app.automation_op(&format!(r#"{{"op":"open","path":"{p}"}}"#))["ok"],
+        true
+    );
     let r4 = mutate(
         &mut app,
         r#"{"protocol":1,"op":"file_identity","request_id":"fi4","document_id":{doc}}"#,
@@ -636,8 +665,14 @@ fn text_replace_op_batch_replaces_preserves_formatting_and_undoes() {
     assert_eq!(q["ok"], true);
     assert_eq!(q["count"], 1);
     let raw = q["matches"][0]["raw_value"].as_str().unwrap();
-    assert!(raw.contains("Century Gothic"), "raw MText should keep font format code: {raw}");
-    assert!(raw.contains("NON TRAITÉE"), "raw MText should contain replaced text: {raw}");
+    assert!(
+        raw.contains("Century Gothic"),
+        "raw MText should keep font format code: {raw}"
+    );
+    assert!(
+        raw.contains("NON TRAITÉE"),
+        "raw MText should contain replaced text: {raw}"
+    );
 
     // Verify Text was replaced
     let q2 = app.automation_op(r#"{"op":"text_search","find":"VANNE D'ARRÊT"}"#);
@@ -692,7 +727,10 @@ fn text_audit_op_simulates_dry_run_checks_terms_and_dictionary() {
 
     // Unmatched reporting
     assert_eq!(audit_res["unmatched_pairs"], json!(["INEXISTANT_PAIR"]));
-    assert_eq!(audit_res["unmatched_check_terms"], json!(["INEXISTANT_TERM"]));
+    assert_eq!(
+        audit_res["unmatched_check_terms"],
+        json!(["INEXISTANT_TERM"])
+    );
 
     // Simulated changes has 2 entries (Text and MText)
     let changes = audit_res["simulated_changes"].as_array().unwrap();
@@ -700,7 +738,10 @@ fn text_audit_op_simulates_dry_run_checks_terms_and_dictionary() {
     assert_eq!(changes[0]["find"], "CIRTUITS");
     assert_eq!(changes[0]["replace"], "CIRCUITS");
     assert_eq!(changes[0]["replaced"], 1);
-    assert!(changes[1]["after"].as_str().unwrap().contains("NON TRAITÉE"));
+    assert!(changes[1]["after"]
+        .as_str()
+        .unwrap()
+        .contains("NON TRAITÉE"));
 
     // Suspect matches
     let suspects = audit_res["suspect_matches"].as_array().unwrap();
@@ -835,7 +876,10 @@ fn text_audit_system_spellcheck_flags_misspelled_words() {
 
         // Summary should reflect unrecognized words
         assert!(
-            audit["summary"]["unrecognized_words_count"].as_u64().unwrap() >= 2,
+            audit["summary"]["unrecognized_words_count"]
+                .as_u64()
+                .unwrap()
+                >= 2,
             "expected at least 2 unrecognized words in summary"
         );
     } else {
@@ -848,4 +892,3 @@ fn text_audit_system_spellcheck_flags_misspelled_words() {
         );
     }
 }
-

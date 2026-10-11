@@ -339,9 +339,7 @@ impl OpenCADStudio {
             }
             if matches!(
                 self.tabs[i].scene.document.get_entity(handle),
-                Some(
-                    codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_)
-                )
+                Some(codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_))
             ) {
                 needs_geometry_bump = true;
             } else {
@@ -373,9 +371,7 @@ impl OpenCADStudio {
                 self.tabs[i].scene.document.get_entity(handle),
                 Some(codec::EntityType::Leader(_))
             ) {
-                let _ = self.tabs[i]
-                    .scene
-                    .sync_displayed_annotation_context(handle);
+                let _ = self.tabs[i].scene.sync_displayed_annotation_context(handle);
             }
         }
         // Recreate any group whose whole membership was copied, so a pasted
@@ -385,7 +381,9 @@ impl OpenCADStudio {
         // clipboard clone to its new handle. Same shared `recreate_groups`
         // the in-drawing COPY path uses. (#440)
         if !deps.groups.is_empty() {
-            self.tabs[i].scene.recreate_groups(deps.groups.clone(), &handle_map);
+            self.tabs[i]
+                .scene
+                .recreate_groups(deps.groups.clone(), &handle_map);
         }
         // Constraints wholly within the pasted selection follow it.
         self.tabs[i]
@@ -467,7 +465,10 @@ pub(crate) fn merge_table_records(doc: &mut codec::CadDocument, deps: &crate::ap
 /// document lacks. Shared by `merge_clipboard_blocks` and
 /// `paste_entities_kernel`. Returns how many definitions were created, so
 /// render-cache callers can bump once instead of per definition.
-pub(crate) fn merge_block_defs(doc: &mut codec::CadDocument, blocks: &[crate::app::BlockDef]) -> usize {
+pub(crate) fn merge_block_defs(
+    doc: &mut codec::CadDocument,
+    blocks: &[crate::app::BlockDef],
+) -> usize {
     let mut created = 0;
     for def in blocks {
         let before = doc.block_records.len();
@@ -500,10 +501,7 @@ pub(crate) fn paste_entities_kernel(
     deps: &crate::app::ClipboardDeps,
     translate: Option<&crate::command::EntityTransform>,
     space: PasteSpace,
-) -> (
-    Vec<Handle>,
-    rustc_hash::FxHashMap<Handle, Handle>,
-) {
+) -> (Vec<Handle>, rustc_hash::FxHashMap<Handle, Handle>) {
     // Shared table-record merge (also used by `merge_dependencies`): recreate
     // missing records with fresh handles from the target document.
     merge_table_records(doc, deps);
@@ -562,7 +560,11 @@ pub(crate) fn paste_entities_kernel(
             if let Some(e) = doc.get_entity_mut(new_entity) {
                 e.common_mut().xdictionary_handle = Some(new_root);
             }
-            crate::scene::annotative::translate_annotation_contexts(doc, new_entity, annotation_delta);
+            crate::scene::annotative::translate_annotation_contexts(
+                doc,
+                new_entity,
+                annotation_delta,
+            );
         }
     }
 
@@ -1015,10 +1017,7 @@ mod clipboard_xdict_clone_tests {
         let new_root = recreate_ext_subtree(&mut dst, &cap, Some(dst_entity))
             .expect("recreated xdictionary root");
         assert!(!new_root.is_null());
-        assert!(
-            !before.contains(&new_root),
-            "clone must use a fresh handle"
-        );
+        assert!(!before.contains(&new_root), "clone must use a fresh handle");
         assert_eq!(dst.objects.len(), before.len() + 2);
 
         let leaf = leaf_of(&dst, new_root);
@@ -1052,8 +1051,7 @@ mod clipboard_xdict_clone_tests {
         let mut dst = codec::CadDocument::new();
         let before_len = dst.objects.len();
 
-        let root =
-            recreate_ext_subtree(&mut dst, &cap, None).expect("recreated xdictionary root");
+        let root = recreate_ext_subtree(&mut dst, &cap, None).expect("recreated xdictionary root");
         let leaf = leaf_of(&dst, root);
         match dst.objects.get(&leaf) {
             Some(ObjectType::XRecord(x)) => assert!(
@@ -1182,9 +1180,7 @@ mod paste_entities_kernel_tests {
             codec::types::Vector3::new(10.0, 0.0, 0.0),
         );
         seed_line.common.layer = "WALLS".to_string();
-        let seed_handle = seed
-            .add_entity(codec::EntityType::Line(seed_line))
-            .unwrap();
+        let seed_handle = seed.add_entity(codec::EntityType::Line(seed_line)).unwrap();
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[seed_handle]);
 
         let mut dst = codec::CadDocument::new();
@@ -1207,8 +1203,16 @@ mod paste_entities_kernel_tests {
             Some(codec::EntityType::Line(l)) => l,
             other => panic!("expected pasted Line, got {other:?}"),
         };
-        assert!((line.start.x - 5.0).abs() < 1e-9, "start.x = {}", line.start.x);
-        assert!((line.start.y - 7.0).abs() < 1e-9, "start.y = {}", line.start.y);
+        assert!(
+            (line.start.x - 5.0).abs() < 1e-9,
+            "start.x = {}",
+            line.start.x
+        );
+        assert!(
+            (line.start.y - 7.0).abs() < 1e-9,
+            "start.y = {}",
+            line.start.y
+        );
         assert!((line.end.x - 15.0).abs() < 1e-9, "end.x = {}", line.end.x);
         // The layer dependency must have been recreated in the target document.
         assert!(dst.layers.contains("WALLS"));
@@ -1223,9 +1227,7 @@ mod paste_entities_kernel_tests {
             .unwrap();
         let mut leader = codec::entities::Leader::default();
         leader.annotation_handle = note;
-        let leader_handle = seed
-            .add_entity(codec::EntityType::Leader(leader))
-            .unwrap();
+        let leader_handle = seed.add_entity(codec::EntityType::Leader(leader)).unwrap();
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[leader_handle, note]);
 
         let mut dst = codec::CadDocument::new();
@@ -1264,10 +1266,8 @@ mod paste_entities_kernel_tests {
         let mut xrec = XRecord::new();
         xrec.handle = src_leaf;
         xrec.owner = src_root;
-        xrec.entries.push(XRecordEntry::new(
-            340,
-            XRecordValue::Handle(seed_entity),
-        ));
+        xrec.entries
+            .push(XRecordEntry::new(340, XRecordValue::Handle(seed_entity)));
         seed.objects.insert(src_root, ObjectType::Dictionary(dict));
         seed.objects.insert(src_leaf, ObjectType::XRecord(xrec));
         if let Some(e) = seed.get_entity_mut(seed_entity) {
@@ -1323,7 +1323,7 @@ mod headless_reuse_proof_tests {
     // (`copy_to_clipboard_kernel`, `paste_entities_kernel`,
     // `match_layer_kernel`, `match_properties_kernel` + `MatchOpts`).
     use super::{copy_to_clipboard_kernel, paste_entities_kernel};
-    use crate::entities::match_props::{MatchOpts, match_layer_kernel, match_properties_kernel};
+    use crate::entities::match_props::{match_layer_kernel, match_properties_kernel, MatchOpts};
 
     #[test]
     fn headless_copy_paste_then_match_kernels_share_one_path() {
@@ -1347,8 +1347,7 @@ mod headless_reuse_proof_tests {
         assert_eq!(entities[0].common().layer, "WALLS");
 
         let mut doc_b = codec::CadDocument::new();
-        let translate =
-            crate::command::EntityTransform::Translate(glam::DVec3::new(5.0, 7.0, 0.0));
+        let translate = crate::command::EntityTransform::Translate(glam::DVec3::new(5.0, 7.0, 0.0));
         let (handles, handle_map) = paste_entities_kernel(
             &mut doc_b,
             &entities,
@@ -1378,16 +1377,12 @@ mod headless_reuse_proof_tests {
         src_line.common.layer = "WALLS".to_string();
         src_line.common.linetype_scale = 2.5;
         src_line.thickness = 1.25;
-        let src = doc_b
-            .add_entity(codec::EntityType::Line(src_line))
-            .unwrap();
+        let src = doc_b.add_entity(codec::EntityType::Line(src_line)).unwrap();
         let mut dst_line = codec::entities::Line::new();
         dst_line.common.layer = "0".to_string();
         dst_line.common.linetype_scale = 1.0;
         dst_line.thickness = 0.0;
-        let dst = doc_b
-            .add_entity(codec::EntityType::Line(dst_line))
-            .unwrap();
+        let dst = doc_b.add_entity(codec::EntityType::Line(dst_line)).unwrap();
 
         let count = match_layer_kernel(&mut doc_b, &[dst], src).expect("match layer");
         assert_eq!(count, 1);
@@ -1423,8 +1418,7 @@ mod headless_reuse_proof_tests {
             .add_entity(codec::EntityType::Line(line))
             .expect("source line");
 
-        let (entities, deps) =
-            copy_to_clipboard_kernel(&source, &[source_handle]);
+        let (entities, deps) = copy_to_clipboard_kernel(&source, &[source_handle]);
 
         let mut target = codec::CadDocument::new();
 
@@ -1448,9 +1442,7 @@ mod headless_reuse_proof_tests {
         let pasted = handles[0];
         assert!(!pasted.is_null());
 
-        let entity = target
-            .get_entity(pasted)
-            .expect("pasted entity must exist");
+        let entity = target.get_entity(pasted).expect("pasted entity must exist");
 
         assert_eq!(
             entity.common().owner_handle,
@@ -1468,5 +1460,4 @@ mod headless_reuse_proof_tests {
             "pasted entity must be registered as a member of the edited block"
         );
     }
-
 }

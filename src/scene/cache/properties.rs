@@ -1,5 +1,5 @@
-use codec::{EntityType, Handle, Transparency};
 use crate::t;
+use codec::{EntityType, Handle, Transparency};
 
 use crate::scene::model::object::{PropSection, PropValue, Property};
 

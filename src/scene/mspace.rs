@@ -192,7 +192,9 @@ impl Scene {
         if !crate::entities::viewport::is_clipped(vp) {
             return true;
         }
-        let Some(boundary) = self.document.get_entity(vp.clip_boundary_handle)
+        let Some(boundary) = self
+            .document
+            .get_entity(vp.clip_boundary_handle)
             .and_then(crate::entities::curve::entity_curve)
         else {
             return false;
@@ -265,7 +267,10 @@ mod viewport_zoom_tests {
         for factor in [3.0, 60.0, 500.0] {
             let steps = factor / 60.0;
             let round_trip = viewport_zoom_factor(steps) * viewport_zoom_factor(-steps);
-            assert!((round_trip - 1.0).abs() < 1e-12, "ZOOMFACTOR {factor}: {round_trip}");
+            assert!(
+                (round_trip - 1.0).abs() < 1e-12,
+                "ZOOMFACTOR {factor}: {round_trip}"
+            );
         }
     }
 
@@ -298,7 +303,10 @@ mod viewport_zoom_tests {
         }
         let first = heights[1] / heights[0];
         let last = heights[3] / heights[2];
-        assert!((first - last).abs() < 1e-9, "the notch saturated: {heights:?}");
+        assert!(
+            (first - last).abs() < 1e-9,
+            "the notch saturated: {heights:?}"
+        );
     }
 }
 
@@ -310,9 +318,16 @@ mod clip_tests {
     fn concave_clip_boundary_rejects_the_notch() {
         let mut scene = Scene::new();
         let mut poly = codec::entities::LwPolyline::from_points(
-            [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (5.0, 5.0), (5.0, 10.0), (0.0, 10.0)]
-                .map(|(x, y)| codec::types::Vector2::new(x, y))
-                .to_vec(),
+            [
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 5.0),
+                (5.0, 5.0),
+                (5.0, 10.0),
+                (0.0, 10.0),
+            ]
+            .map(|(x, y)| codec::types::Vector2::new(x, y))
+            .to_vec(),
         );
         poly.is_closed = true;
         let clip = scene.add_entity(EntityType::LwPolyline(poly));
@@ -324,18 +339,21 @@ mod clip_tests {
         viewport.status.non_rectangular_clipping = true;
         let viewport = scene.add_entity(EntityType::Viewport(viewport));
         for (x, y, inside) in [
-            (2.0, 2.0, true), (8.0, 2.0, true), (8.0, 8.0, false),
-            (-1.0, 5.0, false), (5.0, 7.0, true),
+            (2.0, 2.0, true),
+            (8.0, 2.0, true),
+            (8.0, 8.0, false),
+            (-1.0, 5.0, false),
+            (5.0, 7.0, true),
         ] {
             assert_eq!(
-                scene.viewport_displays_paper_point(viewport, glam::DVec2::new(x, y)), inside,
+                scene.viewport_displays_paper_point(viewport, glam::DVec2::new(x, y)),
+                inside,
             );
         }
     }
 }
 
 impl Scene {
-
     /// Fold the active viewport's saved view onto the effective camera (the
     /// auto-fit centre for stale UTM views) and persist it into `view_target` /
     /// `view_height`. Called on entering MSPACE so pan/zoom, paper↔model and the
@@ -364,11 +382,7 @@ impl Scene {
 
     /// Fit model-space bounds into the active floating viewport without moving
     /// the surrounding paper-space camera.
-    pub fn fit_active_viewport_to_bounds(
-        &mut self,
-        min: glam::Vec3,
-        max: glam::Vec3,
-    ) -> bool {
+    pub fn fit_active_viewport_to_bounds(&mut self, min: glam::Vec3, max: glam::Vec3) -> bool {
         let Some(viewport_handle) = self.active_viewport else {
             return false;
         };
@@ -615,10 +629,8 @@ impl Scene {
             vp.view_direction.y = dir.y as f64;
             vp.view_direction.z = dir.z as f64;
             vp.twist_angle = twist;
-            vp.status.perspective =
-                tmp.projection == view::camera::Projection::Perspective;
-            vp.lens_length =
-                (12.0 / (tmp.fov_y * 0.5).tan().max(1e-6)) as f64;
+            vp.status.perspective = tmp.projection == view::camera::Projection::Perspective;
+            vp.lens_length = (12.0 / (tmp.fov_y * 0.5).tan().max(1e-6)) as f64;
             changed = true;
         }
         if changed {
@@ -629,9 +641,7 @@ impl Scene {
 
     /// Render mode of the active paper-space viewport, or `None` when no
     /// viewport is active (PSPACE / model layout).
-    pub fn active_viewport_render_mode(
-        &self,
-    ) -> Option<codec::entities::ViewportRenderMode> {
+    pub fn active_viewport_render_mode(&self) -> Option<codec::entities::ViewportRenderMode> {
         let h = self.active_viewport?;
         match self.document.get_entity(h) {
             Some(codec::EntityType::Viewport(vp)) => Some(vp.render_mode),
@@ -658,11 +668,12 @@ impl Scene {
     }
 
     /// Visual style of the active Model tile (for the render-mode picker).
-    pub fn active_model_tile_render_mode(
-        &self,
-    ) -> codec::entities::ViewportRenderMode {
+    pub fn active_model_tile_render_mode(&self) -> codec::entities::ViewportRenderMode {
         let tiles = self.model_tiles.borrow();
-        let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+        let active = self
+            .active_model_tile
+            .get()
+            .min(tiles.len().saturating_sub(1));
         tiles
             .get(active)
             .map(|t| t.render_mode)
@@ -670,12 +681,12 @@ impl Scene {
     }
 
     /// Set only the active Model tile's render mode. Other tiles keep theirs.
-    pub fn set_active_model_tile_render_mode(
-        &self,
-        mode: codec::entities::ViewportRenderMode,
-    ) {
+    pub fn set_active_model_tile_render_mode(&self, mode: codec::entities::ViewportRenderMode) {
         let mut tiles = self.model_tiles.borrow_mut();
-        let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+        let active = self
+            .active_model_tile
+            .get()
+            .min(tiles.len().saturating_sub(1));
         if let Some(t) = tiles.get_mut(active) {
             t.render_mode = mode;
         }
@@ -788,12 +799,7 @@ impl Scene {
     /// when it lands on the part the user can actually see — clicking the empty
     /// area beside a viewport that runs off-screen no longer matches its full
     /// (partly off-canvas) paper rect and switches to it by mistake.
-    pub fn viewport_at_screen_point(
-        &self,
-        px: f32,
-        py: f32,
-        canvas: (f32, f32),
-    ) -> Option<Handle> {
+    pub fn viewport_at_screen_point(&self, px: f32, py: f32, canvas: (f32, f32)) -> Option<Handle> {
         let (_, _, handles) = self.paper_viewport_handles();
         handles
             .iter()

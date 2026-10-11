@@ -92,7 +92,12 @@ pub fn rasterize_page_display_at(path: &str, page: &str, dpi: f32) -> Option<Arc
 pub const DISPLAY_DPI: f32 = RASTER_DPI;
 
 fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool) -> Option<Arc<PdfPage>> {
-    let key = (path.to_string(), page.to_string(), dpi.to_bits(), transparent);
+    let key = (
+        path.to_string(),
+        page.to_string(),
+        dpi.to_bits(),
+        transparent,
+    );
     if let Some(hit) = page_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -193,7 +198,11 @@ fn rgb_to_hsl([r, g, b]: [f32; 3]) -> (f32, f32, f32) {
     if d <= f32::EPSILON {
         return (0.0, 0.0, l);
     }
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
     let h = if max == r {
         ((g - b) / d).rem_euclid(6.0)
     } else if max == g {
@@ -208,7 +217,11 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
     if s <= f32::EPSILON {
         return [l; 3];
     }
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
     let channel = |t: f32| {
         let t = t.rem_euclid(1.0);
@@ -306,13 +319,25 @@ pub fn adjust_rgb(rgb: [f32; 3], adjust: &PageAdjust) -> [f32; 3] {
 
 /// The display raster with the underlay's contrast / monochrome / background
 /// adjustments applied, memoised per source, page and adjustment.
-pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdjust) -> Arc<Vec<u8>> {
-    let identity = adjust.contrast >= 100 && !adjust.monochrome && !adjust.adjust_for_background && adjust.fade_before_contrast.is_none();
+pub fn adjusted_pixels(
+    path: &str,
+    page: &str,
+    raster: &PdfPage,
+    adjust: PageAdjust,
+) -> Arc<Vec<u8>> {
+    let identity = adjust.contrast >= 100
+        && !adjust.monochrome
+        && !adjust.adjust_for_background
+        && adjust.fade_before_contrast.is_none();
     if identity {
         return raster.pixels.clone();
     }
     // One entry per raster size: a page is rasterised again for the zoom.
-    let key = (path.to_string(), format!("{page}@{}x{}", raster.width, raster.height), adjust);
+    let key = (
+        path.to_string(),
+        format!("{page}@{}x{}", raster.width, raster.height),
+        adjust,
+    );
     if let Some(hit) = adjusted_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -326,7 +351,14 @@ pub fn adjusted_pixels(path: &str, page: &str, raster: &PdfPage, adjust: PageAdj
         if px[3] == 0 {
             continue;
         }
-        let rgb = adjust_rgb([px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0], &adjust);
+        let rgb = adjust_rgb(
+            [
+                px[0] as f32 / 255.0,
+                px[1] as f32 / 255.0,
+                px[2] as f32 / 255.0,
+            ],
+            &adjust,
+        );
         for (dst, c) in px[..3].iter_mut().zip(rgb) {
             *dst = (c.clamp(0.0, 1.0) * 255.0).round() as u8;
         }
@@ -399,7 +431,10 @@ mod tests {
         register_source(path, Arc::new(bytes));
         let page = rasterize_page_display(path, "1").expect("display raster is clamped");
         assert_eq!((page.width, page.height), (3072, 3072));
-        assert!(page.dpi < DISPLAY_DPI, "clamped raster reports its effective DPI");
+        assert!(
+            page.dpi < DISPLAY_DPI,
+            "clamped raster reports its effective DPI"
+        );
 
         assert!(
             rasterize_page_at_dpi(path, "1", 300.0).is_none(),

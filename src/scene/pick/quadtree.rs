@@ -268,10 +268,7 @@ pub fn normalize_aabb(mut aabb: Aabb) -> Aabb {
 }
 
 fn aabb_contained(outer: Aabb, inner: Aabb) -> bool {
-    inner[0] >= outer[0]
-        && inner[1] >= outer[1]
-        && inner[2] <= outer[2]
-        && inner[3] <= outer[3]
+    inner[0] >= outer[0] && inner[1] >= outer[1] && inner[2] <= outer[2] && inner[3] <= outer[3]
 }
 
 fn aabb_intersects(a: Aabb, b: Aabb) -> bool {
@@ -384,7 +381,13 @@ mod tests {
         let huge = [-1e9, -1e9, 1e9, 1e9];
         let hits = t.query_rect(huge);
         let expected = 40 + 100;
-        assert_eq!(hits.len(), expected, "lost items: tree.len={} hits.len={}", t.len(), hits.len());
+        assert_eq!(
+            hits.len(),
+            expected,
+            "lost items: tree.len={} hits.len={}",
+            t.len(),
+            hits.len()
+        );
     }
 
     #[test]
@@ -429,5 +432,3 @@ mod tests {
         assert_eq!(normalized, [10.0, 20.0, 50.0, 60.0]);
     }
 }
-
-

@@ -13,7 +13,10 @@ where
     T: codec::Entity,
 {
     let t = Transform::from_translation(to_v3(-center))
-        .then(&Transform::from_rotation(to_v3(axis.normalize_or(DVec3::Z)), angle_rad))
+        .then(&Transform::from_rotation(
+            to_v3(axis.normalize_or(DVec3::Z)),
+            angle_rad,
+        ))
         .then(&Transform::from_translation(to_v3(center)));
     entity.apply_transform(&t);
 }
@@ -34,23 +37,24 @@ where
 {
     match t {
         EntityTransform::Translate(d) => entity.translate(to_v3(*d)),
-        EntityTransform::Rotate { center, axis, angle_rad } => {
-            apply_standard_transform(entity, *center, *axis, *angle_rad)
-        }
+        EntityTransform::Rotate {
+            center,
+            axis,
+            angle_rad,
+        } => apply_standard_transform(entity, *center, *axis, *angle_rad),
         EntityTransform::Scale { center, factor } => apply_standard_scale(entity, *center, *factor),
         EntityTransform::Mirror {
             p1,
             p2,
             working_normal,
         } => {
-            if working_normal.normalize_or(DVec3::Z).abs_diff_eq(DVec3::Z, 1e-10) {
+            if working_normal
+                .normalize_or(DVec3::Z)
+                .abs_diff_eq(DVec3::Z, 1e-10)
+            {
                 mirror(entity, *p1, *p2)
             } else {
-                entity.apply_transform(&reflection_about_working_line(
-                    *p1,
-                    *p2,
-                    *working_normal,
-                ));
+                entity.apply_transform(&reflection_about_working_line(*p1, *p2, *working_normal));
             }
         }
         EntityTransform::Affine(transform) => entity.apply_transform(transform),
@@ -84,9 +88,24 @@ pub fn reflection_about_working_line(
     let d = 2.0 * n.dot(p1);
     Transform::from_matrix(Matrix4 {
         m: [
-            [1.0 - 2.0 * n.x * n.x, -2.0 * n.x * n.y, -2.0 * n.x * n.z, d * n.x],
-            [-2.0 * n.y * n.x, 1.0 - 2.0 * n.y * n.y, -2.0 * n.y * n.z, d * n.y],
-            [-2.0 * n.z * n.x, -2.0 * n.z * n.y, 1.0 - 2.0 * n.z * n.z, d * n.z],
+            [
+                1.0 - 2.0 * n.x * n.x,
+                -2.0 * n.x * n.y,
+                -2.0 * n.x * n.z,
+                d * n.x,
+            ],
+            [
+                -2.0 * n.y * n.x,
+                1.0 - 2.0 * n.y * n.y,
+                -2.0 * n.y * n.z,
+                d * n.y,
+            ],
+            [
+                -2.0 * n.z * n.x,
+                -2.0 * n.z * n.y,
+                1.0 - 2.0 * n.z * n.z,
+                d * n.z,
+            ],
             [0.0, 0.0, 0.0, 1.0],
         ],
     })
@@ -151,7 +170,10 @@ pub fn transform_ellipse_geometry(
     };
     ellipse.apply_transform(transform);
     let values = [ellipse.center, ellipse.major_axis, ellipse.normal];
-    if values.iter().any(|v| !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite())) {
+    if values
+        .iter()
+        .any(|v| !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite()))
+    {
         return None;
     }
     Some((
@@ -308,11 +330,15 @@ mod ocs_axes_142 {
     #[test]
     fn x_normal_axes_nonzero() {
         let (ax, ay) = super::ocs_axes((-1.0, 0.0, 0.0));
-        let nz = |v: (f64,f64,f64)| v.0.abs()+v.1.abs()+v.2.abs();
+        let nz = |v: (f64, f64, f64)| v.0.abs() + v.1.abs() + v.2.abs();
         assert!(nz(ax) > 0.5, "ax collapsed: {:?}", ax);
         assert!(nz(ay) > 0.5, "ay collapsed: {:?}", ay);
-        let p = super::ocs_point_to_wcs((-25.0, 90.0, 0.0), (-1.0,0.0,0.0));
-        assert!(p.0.abs()+p.1.abs()+p.2.abs() > 1.0, "point collapsed: {:?}", p);
+        let p = super::ocs_point_to_wcs((-25.0, 90.0, 0.0), (-1.0, 0.0, 0.0));
+        assert!(
+            p.0.abs() + p.1.abs() + p.2.abs() > 1.0,
+            "point collapsed: {:?}",
+            p
+        );
     }
 }
 
@@ -321,7 +347,13 @@ mod ellipse_transform_tests {
     use super::*;
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
-    fn sample_point(center: Vector3, major: Vector3, normal: Vector3, ratio: f64, t: f64) -> Vector3 {
+    fn sample_point(
+        center: Vector3,
+        major: Vector3,
+        normal: Vector3,
+        ratio: f64,
+        t: f64,
+    ) -> Vector3 {
         let u = major;
         let v = normal.normalize().cross(&major) * ratio;
         center + u * t.cos() + v * t.sin()
@@ -341,7 +373,9 @@ mod ellipse_transform_tests {
         let rot_rad = -FRAC_PI_4;
         let transform = Transform::from_scaling(Vector3::new(-1.0, -1.0, 1.0))
             .then(&Transform::from_rotation(Vector3::UNIT_Z, rot_rad))
-            .then(&Transform::from_translation(Vector3::new(100.0, 200.0, 0.0)));
+            .then(&Transform::from_translation(Vector3::new(
+                100.0, 200.0, 0.0,
+            )));
 
         let (c, m, n, r, s, e) = transform_ellipse_geometry(
             center,

@@ -11,7 +11,6 @@ pub(crate) mod edit_block;
 pub(crate) mod image_transparency;
 pub(crate) mod insert_block;
 mod landxml;
-pub(crate) mod picker;
 pub mod minsert;
 mod mview_block;
 mod open_obj;
@@ -22,14 +21,15 @@ pub(crate) mod pc_stylize;
 pub(crate) mod pdf_attach;
 pub(crate) mod pdf_clip;
 pub(crate) mod pdf_import;
+pub(crate) mod picker;
 mod snap_underlays;
 pub(crate) mod solid3d_cmds;
 mod underlay_layers;
 pub(crate) mod wblock;
 mod xadjust;
 pub(crate) mod xattach;
-pub(crate) mod xref_cmd;
 pub(crate) mod xclip;
+pub(crate) mod xref_cmd;
 
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 

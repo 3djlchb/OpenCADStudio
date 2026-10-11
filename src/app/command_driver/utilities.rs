@@ -43,16 +43,10 @@ impl OpenCADStudio {
                     return Some(glam::DVec3::new(line.end.x, line.end.y, line.end.z));
                 }
                 codec::EntityType::Arc(_) => Some(2),
-                codec::EntityType::LwPolyline(polyline) => {
-                    polyline.vertices.len().checked_sub(1)
-                }
+                codec::EntityType::LwPolyline(polyline) => polyline.vertices.len().checked_sub(1),
                 codec::EntityType::Polyline(polyline) => polyline.vertices.len().checked_sub(1),
-                codec::EntityType::Polyline2D(polyline) => {
-                    polyline.vertices.len().checked_sub(1)
-                }
-                codec::EntityType::Polyline3D(polyline) => {
-                    polyline.vertices.len().checked_sub(1)
-                }
+                codec::EntityType::Polyline2D(polyline) => polyline.vertices.len().checked_sub(1),
+                codec::EntityType::Polyline3D(polyline) => polyline.vertices.len().checked_sub(1),
                 _ => None,
             }?;
             crate::scene::view::dispatch::grips(entity)
@@ -127,10 +121,16 @@ impl OpenCADStudio {
     ) {
         let touched: Vec<_> = grip.targets.iter().map(|target| target.handle).collect();
         let connected = self.tabs[i].scene.parametric_connected_handles(
-            self.tabs[i].current_parametric_scope(), &touched, true,
+            self.tabs[i].current_parametric_scope(),
+            &touched,
+            true,
         );
         for handle in connected {
-            if !self.grip_originals.iter().any(|(original, _)| *original == handle) {
+            if !self
+                .grip_originals
+                .iter()
+                .any(|(original, _)| *original == handle)
+            {
                 if let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
                     self.grip_originals.push((handle, entity));
                 }
@@ -142,15 +142,29 @@ impl OpenCADStudio {
                 }
             }
         }
-        let driven_refs: Vec<_> = grip.targets.iter().flat_map(|target| {
-            self.tabs[i].scene.document.get_entity(target.handle)
-                .map(|entity| crate::scene::parametric_constraints::grip_solve_anchor_refs(
-                    entity, target.handle, target.grip_id,
-                )).unwrap_or_default()
-        }).collect();
+        let driven_refs: Vec<_> = grip
+            .targets
+            .iter()
+            .flat_map(|target| {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(target.handle)
+                    .map(|entity| {
+                        crate::scene::parametric_constraints::grip_solve_anchor_refs(
+                            entity,
+                            target.handle,
+                            target.grip_id,
+                        )
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
         let retain_size = self.constraint_solve_mode
             && !driven_refs.is_empty()
-            && driven_refs.iter().all(|reference| reference.marker.is_some());
+            && driven_refs
+                .iter()
+                .all(|reference| reference.marker.is_some());
         let solved = self.tabs[i].scene.solve_parametric_constraints_preview(
             &touched,
             &driven_refs,
@@ -267,7 +281,9 @@ impl OpenCADStudio {
             .into_iter()
             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
             .collect();
-        self.tabs[i].scene.bump_entities_after_parametric_solve(&changes);
+        self.tabs[i]
+            .scene
+            .bump_entities_after_parametric_solve(&changes);
         if let Some(dirty_before) = self.grip_dirty_before.take() {
             self.tabs[i].dirty = dirty_before;
         }
@@ -535,7 +551,10 @@ impl OpenCADStudio {
     /// Only a `Text` token can come back unclaimed (`on_text_input` returning
     /// `None`), which is what lets the caller read it as something else — a
     /// typed distance, say — instead of guessing beforehand.
-    pub(in crate::app) fn feed_command_consumed(&mut self, input: StepInput) -> (Task<Message>, bool) {
+    pub(in crate::app) fn feed_command_consumed(
+        &mut self,
+        input: StepInput,
+    ) -> (Task<Message>, bool) {
         // A command that takes associative dimensions only keeps just those:
         // the rest leave the selection and the count of what went is reported,
         // as the reference does while gathering.
@@ -769,7 +788,11 @@ impl OpenCADStudio {
     /// false: the line is one instalment and the tool stays at its next prompt
     /// for the following one. Only a plugin streaming a command feeds it that
     /// way; the command line and the automation feeder always finish.
-    pub(in crate::app) fn run_command_line_streaming(&mut self, cmd: &str, finish: bool) -> Task<Message> {
+    pub(in crate::app) fn run_command_line_streaming(
+        &mut self,
+        cmd: &str,
+        finish: bool,
+    ) -> Task<Message> {
         let i = self.active_tab;
         self.command_line.unconsumed.clear();
         let tokens: Vec<&str> = cmd.split_whitespace().collect();
@@ -828,7 +851,11 @@ impl OpenCADStudio {
     ///   silently dropped and `TEXT 0,0 5 0 hi` created nothing at all.
     /// * Anything still left over was never claimed by any prompt; it is
     ///   recorded in [`CommandLine::unconsumed`] instead of vanishing.
-    pub(in crate::app) fn finish_active_command(&mut self, tokens: &[String], finish: bool) -> Task<Message> {
+    pub(in crate::app) fn finish_active_command(
+        &mut self,
+        tokens: &[String],
+        finish: bool,
+    ) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].active_cmd.is_none() {
             return Task::none();

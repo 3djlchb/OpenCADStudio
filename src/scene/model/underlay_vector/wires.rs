@@ -19,7 +19,10 @@ pub(crate) fn display_wires(
     name: &str,
     background: [f32; 4],
 ) -> Vec<WireModel> {
-    if def.underlay_type == UnderlayType::Pdf || def.unloaded || !u.flags.contains(UnderlayDisplayFlags::ON) {
+    if def.underlay_type == UnderlayType::Pdf
+        || def.unloaded
+        || !u.flags.contains(UnderlayDisplayFlags::ON)
+    {
         return Vec::new();
     }
     let page = crate::entities::underlay::page_of(def);
@@ -31,10 +34,25 @@ pub(crate) fn display_wires(
     let backdrop = Backdrop::of([background[0], background[1], background[2]]);
     // A DGN model's fade is in its colours; a DWF sheet's blends it with
     // what is under it.
-    let alpha = if def.underlay_type == UnderlayType::Dgn { 1.0 } else { 1.0 - u.fade.min(100) as f32 / 100.0 };
+    let alpha = if def.underlay_type == UnderlayType::Dgn {
+        1.0
+    } else {
+        1.0 - u.fade.min(100) as f32 / 100.0
+    };
     let shown = |c: [u8; 3]| -> [f32; 4] {
-        let c = if sheet.table_colors { model::dgn_table_color(c, backdrop.max_channel, backdrop.light) } else { c };
-        let rgb = crate::scene::model::pdf_raster::adjust_rgb([c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0], &adjust);
+        let c = if sheet.table_colors {
+            model::dgn_table_color(c, backdrop.max_channel, backdrop.light)
+        } else {
+            c
+        };
+        let rgb = crate::scene::model::pdf_raster::adjust_rgb(
+            [
+                c[0] as f32 / 255.0,
+                c[1] as f32 / 255.0,
+                c[2] as f32 / 255.0,
+            ],
+            &adjust,
+        );
         [rgb[0], rgb[1], rgb[2], alpha]
     };
     let world = |p: [f64; 2]| crate::entities::underlay::local_to_world(u, p);
@@ -73,10 +91,12 @@ pub(crate) fn display_wires(
         }
         if let Some((c, width)) = path.stroke {
             let color = shown(c);
-            let at = *line_at.entry((key(color), width.to_bits())).or_insert_with(|| {
-                lines.push((color, width, Vec::new()));
-                lines.len() - 1
-            });
+            let at = *line_at
+                .entry((key(color), width.to_bits()))
+                .or_insert_with(|| {
+                    lines.push((color, width, Vec::new()));
+                    lines.len() - 1
+                });
             for sp in &path.subpaths {
                 let mut pts = polyline(&sp.segments, tolerance);
                 if sp.closed && pts.len() >= 2 && pts.first() != pts.last() {
@@ -130,8 +150,14 @@ pub(crate) fn display_wires(
                 let w = world(p);
                 [w[0], w[1]]
             });
-            let lo = [corners.iter().map(|p| p[0]).fold(f64::MAX, f64::min), corners.iter().map(|p| p[1]).fold(f64::MAX, f64::min)];
-            let hi = [corners.iter().map(|p| p[0]).fold(f64::MIN, f64::max), corners.iter().map(|p| p[1]).fold(f64::MIN, f64::max)];
+            let lo = [
+                corners.iter().map(|p| p[0]).fold(f64::MAX, f64::min),
+                corners.iter().map(|p| p[1]).fold(f64::MAX, f64::min),
+            ];
+            let hi = [
+                corners.iter().map(|p| p[0]).fold(f64::MIN, f64::max),
+                corners.iter().map(|p| p[1]).fold(f64::MIN, f64::max),
+            ];
             crate::scene::pick::xclip::inverted_ring(&clip, (lo, hi))
         } else {
             clip

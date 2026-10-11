@@ -20,21 +20,21 @@ use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 use crate::plugin::all_ribbon_modules;
 use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
-pub(crate) mod widgets;
 mod draw_panel;
+pub(crate) mod widgets;
 pub(crate) use draw_panel::tools as panel_tools;
-mod modify_panel;
 mod color_dropdown;
 mod context_tools;
+mod modify_panel;
 pub use context_tools::{pdf_underlay_tools, point_cloud_tools, xref_tools, UnderlayContext};
 use widgets::{StyleContext, *};
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod collapse;
 mod locate;
-use collapse::{CollapsePanels, Panel};
-pub use collapse::CollapseMode;
-use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 use crate::t;
+use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
+pub use collapse::CollapseMode;
+use collapse::{CollapsePanels, Panel};
 
 pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
     widgets::make_tip(text)
@@ -551,36 +551,42 @@ impl Ribbon {
                 let is_contextual = module.id() == "layout";
                 let holds_tool = holding_tab == Some(i);
                 let btn = container(
-                    button(text(crate::i18n::ribbon_module_title(module.id(), module.title())).size(12))
-                        .on_press(Message::RibbonSelectTab(i))
-                        .style(move |theme: &Theme, status| {
-                            let palette = theme.palette();
-                            let accent = if is_contextual {
-                                palette.warning.base
-                            } else {
-                                palette.primary.base
-                            };
-                            let pair = match (is_active, status) {
-                                (true, _) => palette.background.weakest,
-                                (false, _) if holds_tool => palette.primary.weak,
-                                (false, button::Status::Hovered) => {
-                                    if is_contextual {
-                                        palette.warning.weak
-                                    } else {
-                                        palette.background.weak
-                                    }
+                    button(
+                        text(crate::i18n::ribbon_module_title(
+                            module.id(),
+                            module.title(),
+                        ))
+                        .size(12),
+                    )
+                    .on_press(Message::RibbonSelectTab(i))
+                    .style(move |theme: &Theme, status| {
+                        let palette = theme.palette();
+                        let accent = if is_contextual {
+                            palette.warning.base
+                        } else {
+                            palette.primary.base
+                        };
+                        let pair = match (is_active, status) {
+                            (true, _) => palette.background.weakest,
+                            (false, _) if holds_tool => palette.primary.weak,
+                            (false, button::Status::Hovered) => {
+                                if is_contextual {
+                                    palette.warning.weak
+                                } else {
+                                    palette.background.weak
                                 }
-                                _ => palette.background.base,
-                            };
-                            button::Style {
+                            }
+                            _ => palette.background.base,
+                        };
+                        button::Style {
                             background: (is_active
                                 || holds_tool
                                 || matches!(status, button::Status::Hovered))
-                                .then_some(Background::Color(if holds_tool && !is_active {
-                                    pair.color.scale_alpha(0.35)
-                                } else {
-                                    pair.color
-                                })),
+                            .then_some(Background::Color(if holds_tool && !is_active {
+                                pair.color.scale_alpha(0.35)
+                            } else {
+                                pair.color
+                            })),
                             text_color: if is_active {
                                 pair.text
                             } else if holds_tool {
@@ -601,9 +607,9 @@ impl Ribbon {
                             },
                             shadow: iced::Shadow::default(),
                             snap: false,
-                            }
-                        })
-                        .padding([5, 14]),
+                        }
+                    })
+                    .padding([5, 14]),
                 )
                 .style(move |theme: &Theme| container::Style {
                     border: Border {
@@ -626,7 +632,6 @@ impl Ribbon {
             },
         );
 
-
         // Tabs may squeeze their gaps to fit before wrapping: from the normal 6px
         // down to -12px on a narrow (e.g. phone) tab row, tucking neighbours into
         // each other's 14px side padding without overlapping the labels. When the
@@ -644,9 +649,7 @@ impl Ribbon {
         let dd_open = self.open_dropdown.as_deref() == Some(COLLAPSE_MODE_ID);
         let mode_btn = button(crate::ui::icons::themed_arrow_down(10.0))
             .on_press(Message::ToggleRibbonDropdown(COLLAPSE_MODE_ID.to_string()))
-            .style(move |theme: &Theme, status| {
-                top_hist_btn_style(theme, true, dd_open, status)
-            })
+            .style(move |theme: &Theme, status| top_hist_btn_style(theme, true, dd_open, status))
             .height(24)
             .padding([2, 8]);
         let mode_dd = PosReport::new(COLLAPSE_MODE_ID, mode_btn);
@@ -665,9 +668,7 @@ impl Ribbon {
 
         let tab_bar = container(tab_row)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.base.color,
-                )),
+                background: Some(Background::Color(theme.palette().background.base.color)),
                 ..Default::default()
             })
             .padding(Padding {
@@ -722,9 +723,7 @@ impl Ribbon {
 
         let tool_bar: Element<'_, Message> = container(tool_area)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.weakest.color,
-                )),
+                background: Some(Background::Color(theme.palette().background.weakest.color)),
                 border: Border {
                     color: theme.palette().background.neutral.color,
                     width: 1.0,
@@ -745,12 +744,7 @@ impl Ribbon {
                     .height(Fill)
                     .style(|theme: &Theme| container::Style {
                         background: Some(Background::Color(
-                            theme
-                                .palette()
-                                .background
-                                .strongest
-                                .color
-                                .scale_alpha(0.58),
+                            theme.palette().background.strongest.color.scale_alpha(0.58),
                         )),
                         ..Default::default()
                     }),
@@ -905,9 +899,9 @@ impl Ribbon {
                     RibbonItem::Dropdown {
                         id, items, default, ..
                     } => (*id, items, *default),
-                    RibbonItem::LabeledDropdown { id, items, default, .. } => {
-                        (*id, items, *default)
-                    }
+                    RibbonItem::LabeledDropdown {
+                        id, items, default, ..
+                    } => (*id, items, *default),
                     RibbonItem::LargeDropdown {
                         id, items, default, ..
                     } => (*id, items, *default),
@@ -931,24 +925,16 @@ impl Ribbon {
                 let disabled = widgets::is_disabled_item(cmd);
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_current);
-                let icon_el: Element<Message> =
-                    container(make_icon(*item_icon, 20.0))
-                        .width(Length::Fixed(20.0))
-                        .into();
-                let label_el =
-                    text(t!(*label))
-                        .size(11)
-                        .wrapping(iced::advanced::text::Wrapping::None)
-                        .style(move |theme: &Theme| iced::widget::text::Style {
-                            color: (!is_current || disabled).then_some(
-                                theme
-                                    .palette()
-                                    .background
-                                    .base
-                                    .text
-                                    .scale_alpha(0.72),
-                            ),
-                        });
+                let icon_el: Element<Message> = container(make_icon(*item_icon, 20.0))
+                    .width(Length::Fixed(20.0))
+                    .into();
+                let label_el = text(t!(*label))
+                    .size(11)
+                    .wrapping(iced::advanced::text::Wrapping::None)
+                    .style(move |theme: &Theme| iced::widget::text::Style {
+                        color: (!is_current || disabled)
+                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
+                    });
 
                 button(
                     row![checkmark, icon_el, label_el]
@@ -1005,9 +991,7 @@ impl Ribbon {
         let rows: Vec<Element<Message>> = self
             .layer_infos
             .iter()
-            .filter(|info| {
-                filter.is_empty() || info.name.to_lowercase().contains(&filter)
-            })
+            .filter(|info| filter.is_empty() || info.name.to_lowercase().contains(&filter))
             .map(|info| {
                 let is_active = info.name == self.active_layer;
                 let lc = info.color;
@@ -1050,19 +1034,12 @@ impl Ribbon {
                 });
                 let checkmark: Element<'_, Message> =
                     crate::ui::icons::themed_check_cell(is_active);
-                let label =
-                    text(&info.name)
-                        .size(11)
-                        .style(move |theme: &Theme| iced::widget::text::Style {
-                            color: (!is_active).then_some(
-                                theme
-                                    .palette()
-                                    .background
-                                    .base
-                                    .text
-                                    .scale_alpha(0.72),
-                            ),
-                        });
+                let label = text(&info.name).size(11).style(move |theme: &Theme| {
+                    iced::widget::text::Style {
+                        color: (!is_active)
+                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
+                    }
+                });
 
                 // The swatch + label area selects the layer as active; the
                 // icon buttons above handle their own toggles.
@@ -1125,8 +1102,8 @@ impl Ribbon {
             ]
             .spacing(2),
         )
-            .style(popup_panel_style)
-            .width(Length::Fixed(300.0));
+        .style(popup_panel_style)
+        .width(Length::Fixed(300.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(LAYER_COMBO_ID, 300.0, win.0);
         let positioned = position_ribbon_dropdown(panel.into(), align_right, h_pad, top);
@@ -1180,23 +1157,17 @@ impl Ribbon {
             .map(|name| {
                 let is_sel = name.as_str() == active.as_str();
                 let n = name.clone();
-                let checkmark: Element<Message> =
-                    crate::ui::icons::themed_check_cell(is_sel);
+                let checkmark: Element<Message> = crate::ui::icons::themed_check_cell(is_sel);
                 button(
                     row![
                         checkmark,
-                        text(name.clone())
-                            .size(11)
-                            .style(move |theme: &Theme| iced::widget::text::Style {
+                        text(name.clone()).size(11).style(move |theme: &Theme| {
+                            iced::widget::text::Style {
                                 color: (!is_sel).then_some(
-                                    theme
-                                        .palette()
-                                        .background
-                                        .base
-                                        .text
-                                        .scale_alpha(0.72),
+                                    theme.palette().background.base.text.scale_alpha(0.72),
                                 ),
-                            }),
+                            }
+                        }),
                     ]
                     .spacing(4)
                     .align_y(iced::Center),
@@ -1276,19 +1247,12 @@ impl Ribbon {
             .into_iter()
             .map(|lt| {
                 let is_cur = lt.name == *active_lt;
-                let check: Element<'_, Message> =
-                    crate::ui::icons::themed_check_cell(is_cur);
+                let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 let name_col = text(linetype_display_name(&lt.name))
                     .size(11)
                     .style(move |theme: &Theme| iced::widget::text::Style {
-                        color: (!is_cur).then_some(
-                            theme
-                                .palette()
-                                .background
-                                .base
-                                .text
-                                .scale_alpha(0.72),
-                        ),
+                        color: (!is_cur)
+                            .then_some(theme.palette().background.base.text.scale_alpha(0.72)),
                     })
                     .width(Length::Fixed(90.0));
                 let art_col = text(lt.art.clone()).size(9).style(muted_text_style);
@@ -1326,23 +1290,17 @@ impl Ribbon {
             .map(|item| {
                 let is_cur = item.0 == active_lw;
                 let label = item.to_string();
-                let check: Element<'_, Message> =
-                    crate::ui::icons::themed_check_cell(is_cur);
+                let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 button(
                     row![
                         check,
-                        text(label)
-                            .size(11)
-                            .style(move |theme: &Theme| iced::widget::text::Style {
+                        text(label).size(11).style(move |theme: &Theme| {
+                            iced::widget::text::Style {
                                 color: (!is_cur).then_some(
-                                    theme
-                                        .palette()
-                                        .background
-                                        .base
-                                        .text
-                                        .scale_alpha(0.72),
+                                    theme.palette().background.base.text.scale_alpha(0.72),
                                 ),
-                            })
+                            }
+                        })
                     ]
                     .spacing(5)
                     .align_y(iced::Center),
@@ -1428,13 +1386,7 @@ fn render_group<'a>(
             flush_small_col(&mut small_buf, &mut items_row);
             items_row.push(render_large(item, &ctx));
         } else {
-            small_buf.push(render_small(
-                item,
-                active_tool,
-                open_dd,
-                last_cmd,
-                state,
-            ));
+            small_buf.push(render_small(item, active_tool, open_dd, last_cmd, state));
             if small_buf.len() == 3 {
                 flush_small_col(&mut small_buf, &mut items_row);
             }
@@ -1504,9 +1456,11 @@ fn first_tool_icon(group: &RibbonGroup) -> Option<IconKind> {
         RibbonItem::LayerComboGroup { row2, .. } => row2.first().map(|t| t.icon),
         RibbonItem::StyleComboGroup { rows, .. } => {
             rows.first().and_then(|r| r.first()).map(|t| t.icon)
-        },
-        RibbonItem::ToolGrid { columns } => columns.first()
-            .and_then(|column| column.first()).map(|tool| tool.icon),
+        }
+        RibbonItem::ToolGrid { columns } => columns
+            .first()
+            .and_then(|column| column.first())
+            .map(|tool| tool.icon),
     })
 }
 
@@ -1590,44 +1544,42 @@ fn collapse_button<'a>(
     // For a Properties panel the representative is its Match button.
     let rep = representative(group, last_used);
     // The face lights itself when it is the running tool.
-    let face_lit = rep.zip(active).is_some_and(|(item, id)| locate::item_holds(item, id));
+    let face_lit = rep
+        .zip(active)
+        .is_some_and(|(item, id)| locate::item_holds(item, id));
     let face: Element<'_, Message> = match rep {
-        Some(RibbonItem::PropertiesGroup { match_prop }) => {
-            render_large(
-                &RibbonItem::LargeTool(match_prop.clone()),
-                &widgets::RenderCtx {
-                    active_tool,
-                    open_dd,
-                    last_cmd,
-                    state,
-                    layer_infos,
-                    active_layer,
-                    active_color,
-                    active_linetype,
-                    active_lineweight,
-                    style_ctx,
-                    compact: false,
-                },
-            )
-        }
-        Some(item) => {
-            render_large(
-                item,
-                &widgets::RenderCtx {
-                    active_tool,
-                    open_dd,
-                    last_cmd,
-                    state,
-                    layer_infos,
-                    active_layer,
-                    active_color,
-                    active_linetype,
-                    active_lineweight,
-                    style_ctx,
-                    compact: false,
-                },
-            )
-        }
+        Some(RibbonItem::PropertiesGroup { match_prop }) => render_large(
+            &RibbonItem::LargeTool(match_prop.clone()),
+            &widgets::RenderCtx {
+                active_tool,
+                open_dd,
+                last_cmd,
+                state,
+                layer_infos,
+                active_layer,
+                active_color,
+                active_linetype,
+                active_lineweight,
+                style_ctx,
+                compact: false,
+            },
+        ),
+        Some(item) => render_large(
+            item,
+            &widgets::RenderCtx {
+                active_tool,
+                open_dd,
+                last_cmd,
+                state,
+                layer_infos,
+                active_layer,
+                active_color,
+                active_linetype,
+                active_lineweight,
+                style_ctx,
+                compact: false,
+            },
+        ),
         None => text("").into(),
     };
 
@@ -1699,4 +1651,3 @@ mod tests {
         assert_eq!(ribbon.open_dropdown, None);
     }
 }
-

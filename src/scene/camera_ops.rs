@@ -68,8 +68,16 @@ fn rendered_wire_bounds(
                 && x0 <= x1
                 && y0 <= y1
             {
-                include_bound!(glam::DVec3::new(x0 as f64 - hw, y0 as f64 - hw, fallback_z - hw));
-                include_bound!(glam::DVec3::new(x1 as f64 + hw, y1 as f64 + hw, fallback_z + hw));
+                include_bound!(glam::DVec3::new(
+                    x0 as f64 - hw,
+                    y0 as f64 - hw,
+                    fallback_z - hw
+                ));
+                include_bound!(glam::DVec3::new(
+                    x1 as f64 + hw,
+                    y1 as f64 + hw,
+                    fallback_z + hw
+                ));
             }
         }
     }
@@ -129,28 +137,26 @@ fn block_entity_transform(
     visited.push(record.name.clone());
     let transform = record.entity_handles.iter().find_map(|handle| {
         let entity = document.get_entity(*handle)?;
-        crate::scene::render_graph::entity_render_block_uses(
-            document,
-            entity,
-            annotation_scale,
-        )
-        .into_iter()
-        .filter(|block_use| block_use.active)
-        .find_map(|block_use| {
-            let inner = block_entity_transform(
-                document,
-                &block_use.insert.block_name,
-                target,
-                visited,
-                annotation_scale,
-            )?;
-            Some(inner.then(&crate::scene::render_graph::insert_transform_with_policy(
-                document,
-                &block_use.insert,
-                annotation_scale,
-                block_use.scale_policy,
-            )))
-        })
+        crate::scene::render_graph::entity_render_block_uses(document, entity, annotation_scale)
+            .into_iter()
+            .filter(|block_use| block_use.active)
+            .find_map(|block_use| {
+                let inner = block_entity_transform(
+                    document,
+                    &block_use.insert.block_name,
+                    target,
+                    visited,
+                    annotation_scale,
+                )?;
+                Some(
+                    inner.then(&crate::scene::render_graph::insert_transform_with_policy(
+                        document,
+                        &block_use.insert,
+                        annotation_scale,
+                        block_use.scale_policy,
+                    )),
+                )
+            })
     });
     visited.pop();
     transform
@@ -176,11 +182,15 @@ pub fn named_view_center(view: &codec::tables::View) -> glam::DVec3 {
     let target = DVec3::new(view.target.x, view.target.y, view.target.z);
     let (cx, cy) = (view.center.x, view.center.y);
     let tol = 1e-9 * target.length().max(1.0);
-    let legacy = (target.x != 0.0 || target.y != 0.0) && (cx - target.x).abs() <= tol && (cy - target.y).abs() <= tol;
+    let legacy = (target.x != 0.0 || target.y != 0.0)
+        && (cx - target.x).abs() <= tol
+        && (cy - target.y).abs() <= tol;
     if legacy {
         return target;
     }
-    let eye = DVec3::new(view.direction.x, view.direction.y, view.direction.z).try_normalize().unwrap_or(DVec3::Z);
+    let eye = DVec3::new(view.direction.x, view.direction.y, view.direction.z)
+        .try_normalize()
+        .unwrap_or(DVec3::Z);
     target + DQuat::from_rotation_arc(DVec3::Z, eye) * DVec3::new(cx, cy, 0.0)
 }
 
@@ -246,7 +256,11 @@ impl Scene {
         let width = height * self.active_camera_aspect();
         let mut view = codec::tables::View::new(name);
         // The centre is in view (DCS) coordinates, relative to the target.
-        view.center = Vector3 { x: 0.0, y: 0.0, z: 0.0 };
+        view.center = Vector3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
         view.target = Vector3 {
             x: cam.target.x as f64,
             y: cam.target.y as f64,
@@ -397,9 +411,7 @@ impl Scene {
         self.camera_generation = saved_generation;
 
         if let Some((min, max)) = refreshed {
-            self.camera
-                .borrow_mut()
-                .fit_depth_to_bounds_f64(min, max);
+            self.camera.borrow_mut().fit_depth_to_bounds_f64(min, max);
             self.projection_bounds_epoch.set(self.geometry_epoch);
         }
     }
@@ -432,7 +444,10 @@ impl Scene {
         if self.current_layout == "Model" {
             let (canvas_w, canvas_h) = self.selection.borrow().view.vp_size;
             let tiles = self.model_tiles.borrow();
-            let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+            let active = self
+                .active_model_tile
+                .get()
+                .min(tiles.len().saturating_sub(1));
             if let Some(tile) = tiles.get(active) {
                 let width = tile.rect.width * canvas_w;
                 let height = tile.rect.height * canvas_h;
@@ -452,9 +467,7 @@ impl Scene {
             return;
         }
         let aspect = self.active_camera_aspect();
-        self.camera
-            .borrow_mut()
-            .fit_to_bounds(min, max, aspect);
+        self.camera.borrow_mut().fit_to_bounds(min, max, aspect);
         self.projection_bounds_epoch.set(self.geometry_epoch);
         self.camera_generation += 1;
     }
@@ -645,11 +658,19 @@ impl Scene {
     fn apply_active_vport_camera(&mut self) -> bool {
         // Restore the single tile's visual style + grid/snap from the *Active
         // entry, independent of where the camera itself comes from below.
-        if let Some(vp) = self.document.vports.iter().find(|v| is_active_vport_name(&v.name)) {
+        if let Some(vp) = self
+            .document
+            .vports
+            .iter()
+            .find(|v| is_active_vport_name(&v.name))
+        {
             let mode = vp.render_mode;
             let (grid_on, snap_on) = (vp.grid_on, vp.snap_on);
             let mut tiles = self.model_tiles.borrow_mut();
-            let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+            let active = self
+                .active_model_tile
+                .get()
+                .min(tiles.len().saturating_sub(1));
             if let Some(t) = tiles.get_mut(active) {
                 t.render_mode = mode;
                 t.grid_on = grid_on;
@@ -660,7 +681,12 @@ impl Scene {
         // wrote an app-specific "OpenCADStudio_Camera_Model" View record and
         // preferred it here — that polluted the file for other CAD programs and
         // is no longer written or read; the view round-trips fine via VPORT.)
-        let vp = match self.document.vports.iter().find(|v| is_active_vport_name(&v.name)) {
+        let vp = match self
+            .document
+            .vports
+            .iter()
+            .find(|v| is_active_vport_name(&v.name))
+        {
             Some(v) => v.clone(),
             None => return false,
         };
@@ -725,14 +751,9 @@ impl Scene {
         // (which nudges view_target by sub-metre f64 steps) made the content
         // jump on the f32 grid. The axis directions stay f32 (orientation only);
         // only the position must stay precise — matching the model camera.
-        let base = glam::DVec3::new(
-            view_target.x,
-            view_target.y,
-            view_target.z,
-        );
-        let target = base
-            + view_right.as_dvec3() * view_center.x
-            + view_up.as_dvec3() * view_center.y;
+        let base = glam::DVec3::new(view_target.x, view_target.y, view_target.z);
+        let target =
+            base + view_right.as_dvec3() * view_center.x + view_up.as_dvec3() * view_center.y;
         let lens_length = lens_length.max(1.0) as f32;
         // The saved-view convention uses a 24 mm vertical aperture. This is
         // the inverse of the projection path's documented
@@ -858,7 +879,10 @@ impl Scene {
     }
 
     /// Inverse of `tile_rect_to_vport`.
-    fn vport_to_tile_rect(lower_left: codec::types::Vector2, upper_right: codec::types::Vector2) -> iced::Rectangle {
+    fn vport_to_tile_rect(
+        lower_left: codec::types::Vector2,
+        upper_right: codec::types::Vector2,
+    ) -> iced::Rectangle {
         iced::Rectangle {
             x: lower_left.x as f32,
             y: (1.0 - upper_right.y) as f32,
@@ -920,7 +944,10 @@ impl Scene {
         {
             let live_cam = self.camera.borrow().clone();
             let mut tiles = self.model_tiles.borrow_mut();
-            let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+            let active = self
+                .active_model_tile
+                .get()
+                .min(tiles.len().saturating_sub(1));
             if let Some(t) = tiles.get_mut(active) {
                 t.camera = live_cam;
             }
@@ -954,7 +981,10 @@ impl Scene {
             return;
         }
 
-        let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+        let active = self
+            .active_model_tile
+            .get()
+            .min(tiles.len().saturating_sub(1));
         let mut ordered_tiles = Vec::with_capacity(tiles.len());
         ordered_tiles.push(tiles[active].clone());
         for (i, tile) in tiles.iter().enumerate() {
@@ -1014,26 +1044,27 @@ impl Scene {
                 entry.handle = self.document.allocate_handle();
             }
             if cloned && entry.sun_handle.is_valid() {
-                let source_sun = self.document.objects.get(&entry.sun_handle).and_then(|object| {
-                    match object {
+                let source_sun = self
+                    .document
+                    .objects
+                    .get(&entry.sun_handle)
+                    .and_then(|object| match object {
                         codec::objects::ObjectType::ClassObject(value)
-                            if matches!(
-                                &value.data,
-                                codec::objects::ClassObjectData::Sun(_)
-                            ) => Some(value.clone()),
+                            if matches!(&value.data, codec::objects::ClassObjectData::Sun(_)) =>
+                        {
+                            Some(value.clone())
+                        }
                         _ => None,
-                    }
-                });
+                    });
                 if let Some(mut sun) = source_sun {
                     let handle = self.document.allocate_handle();
                     sun.handle = handle;
                     sun.owner = entry.handle;
                     sun.reactors.clear();
                     sun.xdictionary_handle = None;
-                    self.document.objects.insert(
-                        handle,
-                        codec::objects::ObjectType::ClassObject(sun),
-                    );
+                    self.document
+                        .objects
+                        .insert(handle, codec::objects::ObjectType::ClassObject(sun));
                     entry.sun_handle = handle;
                     scene_objects_changed = true;
                 }
@@ -1041,8 +1072,7 @@ impl Scene {
             self.document.vports.add_allow_duplicate(entry);
         }
         if scene_objects_changed {
-            self.object_data_cache =
-                crate::entities::object_data::build_cache(&self.document);
+            self.object_data_cache = crate::entities::object_data::build_cache(&self.document);
             self.lighting_cache.borrow_mut().clear();
         }
     }
@@ -1068,7 +1098,10 @@ impl Scene {
             return;
         }
         let mut tiles = self.model_tiles.borrow_mut();
-        let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+        let active = self
+            .active_model_tile
+            .get()
+            .min(tiles.len().saturating_sub(1));
         if let Some(t) = tiles.get_mut(active) {
             t.grid_on = grid_on;
             t.snap_on = snap_on;
@@ -1092,7 +1125,10 @@ impl Scene {
             return Some((false, false));
         }
         let tiles = self.model_tiles.borrow();
-        let active = self.active_model_tile.get().min(tiles.len().saturating_sub(1));
+        let active = self
+            .active_model_tile
+            .get()
+            .min(tiles.len().saturating_sub(1));
         tiles.get(active).map(|t| (t.grid_on, t.snap_on))
     }
 
@@ -1119,8 +1155,12 @@ impl Scene {
             _ => {
                 // Back-compat: files OCS saved with the named-View side-channel.
                 let view_name = format!("OpenCADStudio_Camera_{}", self.current_layout);
-                let fallback =
-                    self.document.views.iter().find(|v| v.name == view_name).cloned();
+                let fallback = self
+                    .document
+                    .views
+                    .iter()
+                    .find(|v| v.name == view_name)
+                    .cloned();
                 if let Some(view) = fallback {
                     return self.apply_camera_from_view_entry(&view, false);
                 }
@@ -1177,24 +1217,19 @@ impl Scene {
             // The sheet viewport entity is the authoritative paper-space view;
             // it round-trips natively, so no named-View side-channel is needed.
             let sheet_handle = self.current_layout_sheet_viewport_handle();
-            if let Some(EntityType::Viewport(vp)) =
-                self.document.get_entity_mut(sheet_handle)
-            {
+            if let Some(EntityType::Viewport(vp)) = self.document.get_entity_mut(sheet_handle) {
                 // Paper-space position is stored in view_center (DCS).
-                vp.view_center =
-                    codec::types::Vector3::new(target_wcs.x, target_wcs.y, 0.0);
+                vp.view_center = codec::types::Vector3::new(target_wcs.x, target_wcs.y, 0.0);
                 vp.view_target = codec::types::Vector3::ZERO;
                 vp.view_direction = vd3;
                 vp.view_height = view_height as f64;
                 vp.twist_angle = twist;
-                vp.status.perspective =
-                    cam.projection == view::camera::Projection::Perspective;
+                vp.status.perspective = cam.projection == view::camera::Projection::Perspective;
                 vp.lens_length = (12.0 / (cam.fov_y * 0.5).tan().max(1e-6)) as f64;
             }
             true
         }
     }
-
 
     /// Restore the camera from the file's saved view (called once on open).
     /// Falls back to fit_all() if no saved view is available.
@@ -1249,9 +1284,7 @@ impl Scene {
         }
         let min = glam::DVec3::new(lo.x, lo.y, lo.z);
         let max = glam::DVec3::new(hi.x, hi.y, hi.z);
-        self.camera
-            .borrow_mut()
-            .fit_depth_to_bounds_f64(min, max);
+        self.camera.borrow_mut().fit_depth_to_bounds_f64(min, max);
     }
 
     fn fit_paper_space_extents(&mut self) {

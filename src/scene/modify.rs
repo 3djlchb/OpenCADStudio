@@ -232,13 +232,9 @@ impl Scene {
                         };
                         let follows_selected_point = set.constraints.iter().any(|link| {
                             link.enabled
-                                && link.kind
-                                    == parametric_constraints::ConstraintKind::Coincident
+                                && link.kind == parametric_constraints::ConstraintKind::Coincident
                                 && link.refs.contains(&anchor)
-                                && link
-                                    .refs
-                                    .iter()
-                                    .any(|item| handles.contains(&item.entity))
+                                && link.refs.iter().any(|item| handles.contains(&item.entity))
                         });
                         if !follows_selected_point && !driven_refs.contains(&anchor) {
                             driven_refs.push(anchor);
@@ -674,7 +670,10 @@ impl Scene {
                 // its own context tree; a shared one ties the copy to the
                 // source. (#700)
                 let annotation_scales =
-                    crate::scene::annotative::annotation_scale_handles_for_entity(&self.document, h);
+                    crate::scene::annotative::annotation_scale_handles_for_entity(
+                        &self.document,
+                        h,
+                    );
 
                 Some((h, entity, annotation_scales))
             })
@@ -768,7 +767,9 @@ impl Scene {
                 let image = self.document.get_entity(h).and_then(|entity| {
                     matches!(
                         entity,
-                        EntityType::RasterImage(_) | EntityType::Ole2Frame(_) | EntityType::Underlay(_)
+                        EntityType::RasterImage(_)
+                            | EntityType::Ole2Frame(_)
+                            | EntityType::Underlay(_)
                     )
                     .then(|| self.image_seed_for(entity))
                     .flatten()
@@ -898,7 +899,13 @@ impl Scene {
         let previous: Vec<Handle> = self
             .document
             .solid_history_graph(handle)
-            .map(|graph| graph.nodes.into_iter().chain(graph.evaluation_graph).collect())
+            .map(|graph| {
+                graph
+                    .nodes
+                    .into_iter()
+                    .chain(graph.evaluation_graph)
+                    .collect()
+            })
             .unwrap_or_default();
         self.record_solid_history_before(handle);
         let Some(graph) = self.document.append_solid_history(handle, operation) else {
@@ -933,7 +940,10 @@ impl Scene {
             .chain(steps.iter().map(|(handle, _)| *handle))
             .collect::<Vec<_>>();
         let solid = |handle: &Handle| {
-            matches!(self.document.get_entity(*handle), Some(EntityType::Solid3D(_)))
+            matches!(
+                self.document.get_entity(*handle),
+                Some(EntityType::Solid3D(_))
+            )
         };
         if !solids.iter().all(solid) {
             return false;
@@ -945,10 +955,9 @@ impl Scene {
             let Some(body) = bodies.get(handle) else {
                 return false;
             };
-            if !self.create_solid_history(
-                *handle,
-                crate::scene::model::solid_history::brep_op(body),
-            ) {
+            if !self
+                .create_solid_history(*handle, crate::scene::model::solid_history::brep_op(body))
+            {
                 return false;
             }
         }
@@ -984,7 +993,10 @@ impl Scene {
             let before = self.document.get_entity_arc(tool);
             self.record_undo_before(tool, before);
         }
-        let Some(graph) = self.document.merge_solid_history_boolean(target, tool, operation) else {
+        let Some(graph) = self
+            .document
+            .merge_solid_history_boolean(target, tool, operation)
+        else {
             return false;
         };
         for node in graph.nodes.into_iter().chain(graph.evaluation_graph) {
@@ -1090,17 +1102,31 @@ impl Scene {
     /// reference keeps them associative. Returns the surfaces rebuilt.
     pub fn refresh_expression_sweeps(&mut self) -> Vec<Handle> {
         use crate::scene::model::sweep_model;
-        let linked = self.document.entities()
-            .filter_map(|entity| Some((entity.common().handle, sweep_model::sweep_expressions(entity)?)))
+        let linked = self
+            .document
+            .entities()
+            .filter_map(|entity| {
+                Some((
+                    entity.common().handle,
+                    sweep_model::sweep_expressions(entity)?,
+                ))
+            })
             .collect::<Vec<_>>();
         let mut rebuilt = Vec::new();
         for (handle, [scale, twist]) in linked {
-            let Some(entity) = self.document.get_entity(handle) else { continue };
-            let Some(mut record) = sweep_model::surface_sweep_record(entity) else { continue };
+            let Some(entity) = self.document.get_entity(handle) else {
+                continue;
+            };
+            let Some(mut record) = sweep_model::surface_sweep_record(entity) else {
+                continue;
+            };
             let evaluate = |expression: &str| {
                 let mut table = self.named_parameters().clone();
                 table.set("sweepExpression", expression).ok()?;
-                table.resolve("sweepExpression").ok().filter(|value| value.is_finite())
+                table
+                    .resolve("sweepExpression")
+                    .ok()
+                    .filter(|value| value.is_finite())
             };
             let mut changed = false;
             if let Some(value) = scale.as_deref().and_then(evaluate) {
@@ -1111,15 +1137,29 @@ impl Scene {
                 changed |= (record.twist_angle - value).abs() > 1e-12;
                 record.twist_angle = value;
             }
-            if !changed { continue; }
-            let Ok(body) = kernel::acis::rebuild_sweep_with_mode(&record, true) else { continue };
-            let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else { continue };
-            let Some(display) = self.prepare_solid_model_display(handle, &body) else { continue };
-            let before = self.document.get_entity(handle).cloned().map(std::sync::Arc::new);
+            if !changed {
+                continue;
+            }
+            let Ok(body) = kernel::acis::rebuild_sweep_with_mode(&record, true) else {
+                continue;
+            };
+            let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
+                continue;
+            };
+            let Some(display) = self.prepare_solid_model_display(handle, &body) else {
+                continue;
+            };
+            let before = self
+                .document
+                .get_entity(handle)
+                .cloned()
+                .map(std::sync::Arc::new);
             self.record_undo_before(handle, before);
             if let Some(EntityType::Surface(surface)) = self.document.get_entity_mut(handle) {
                 surface.acis_data = codec::entities::AcisData::from_sat(&document.to_sat_string());
-                if let codec::entities::SurfaceData::Swept { options, .. } = &mut surface.surface_data {
+                if let codec::entities::SurfaceData::Swept { options, .. } =
+                    &mut surface.surface_data
+                {
                     options.scale_factor = record.scale_factor;
                     options.twist_angle = record.twist_angle;
                 }
@@ -1134,24 +1174,36 @@ impl Scene {
     /// swept again from them with the options they were made with. A
     /// surface edited along with its sources keeps its own edit. Returns the
     /// surfaces rebuilt.
-    pub(crate) fn refresh_associative_sweeps(&mut self, changes: &[(Handle, crate::scene::ChangeKind)]) -> Vec<(Handle, crate::scene::ChangeKind)> {
+    pub(crate) fn refresh_associative_sweeps(
+        &mut self,
+        changes: &[(Handle, crate::scene::ChangeKind)],
+    ) -> Vec<(Handle, crate::scene::ChangeKind)> {
         use crate::scene::model::sweep_model;
-        let changed = changes.iter()
+        let changed = changes
+            .iter()
             .filter(|(_, kind)| !matches!(kind, crate::scene::ChangeKind::Removed))
             .map(|(handle, _)| *handle)
             .collect::<rustc_hash::FxHashSet<_>>();
         // Every edit passes through here: a drawing with no associative
         // swept surface (no application registered for them) skips the scan.
-        if changed.is_empty() || !self.document.app_ids.contains(sweep_model::SWEEP_SOURCES_APP) {
+        if changed.is_empty()
+            || !self
+                .document
+                .app_ids
+                .contains(sweep_model::SWEEP_SOURCES_APP)
+        {
             return Vec::new();
         }
-        let linked = self.document.entities()
+        let linked = self
+            .document
+            .entities()
             .filter(|entity| matches!(entity, EntityType::Surface(_)))
             .filter_map(|entity| {
                 let handle = entity.common().handle;
                 let (profile, path) = sweep_model::sweep_sources(entity)?;
-                (!changed.contains(&handle) && (changed.contains(&profile) || changed.contains(&path)))
-                    .then_some((handle, profile, path))
+                (!changed.contains(&handle)
+                    && (changed.contains(&profile) || changed.contains(&path)))
+                .then_some((handle, profile, path))
             })
             .collect::<Vec<_>>();
         let mut rebuilt = Vec::new();
@@ -1160,12 +1212,27 @@ impl Scene {
                 self.document.get_entity(handle),
                 self.document.get_entity(profile),
                 self.document.get_entity(path),
-            ) else { continue };
-            let Some((record, body)) = sweep_model::resweep_from_sources(surface, profile, path) else { continue };
-            let EntityType::Surface(fresh) = sweep_model::swept_surface_entity(&record) else { continue };
-            let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else { continue };
-            let Some(display) = self.prepare_solid_model_display(handle, &body) else { continue };
-            let before = self.document.get_entity(handle).cloned().map(std::sync::Arc::new);
+            ) else {
+                continue;
+            };
+            let Some((record, body)) = sweep_model::resweep_from_sources(surface, profile, path)
+            else {
+                continue;
+            };
+            let EntityType::Surface(fresh) = sweep_model::swept_surface_entity(&record) else {
+                continue;
+            };
+            let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
+                continue;
+            };
+            let Some(display) = self.prepare_solid_model_display(handle, &body) else {
+                continue;
+            };
+            let before = self
+                .document
+                .get_entity(handle)
+                .cloned()
+                .map(std::sync::Arc::new);
             self.record_undo_before(handle, before);
             if let Some(EntityType::Surface(surface)) = self.document.get_entity_mut(handle) {
                 surface.acis_data = codec::entities::AcisData::from_sat(&document.to_sat_string());
@@ -1190,18 +1257,43 @@ impl Scene {
         let mut links = Vec::new();
         let mut sources = Vec::new();
         for item in self.document.objects.values() {
-            let ObjectType::Associative(action) = item else { continue };
-            let AssociativeData::Action(action) = &action.data else { continue };
-            let Some(AssociativeData::SurfaceActionBody(body)) = object(action.action_body) else { continue };
-            if body.kind != AssocSurfaceActionKind::Swept { continue; }
-            let Some(AssociativeData::Dependency(written)) = object(body.surface_body.dependency) else { continue };
+            let ObjectType::Associative(action) = item else {
+                continue;
+            };
+            let AssociativeData::Action(action) = &action.data else {
+                continue;
+            };
+            let Some(AssociativeData::SurfaceActionBody(body)) = object(action.action_body) else {
+                continue;
+            };
+            if body.kind != AssocSurfaceActionKind::Swept {
+                continue;
+            }
+            let Some(AssociativeData::Dependency(written)) = object(body.surface_body.dependency)
+            else {
+                continue;
+            };
             let mut expressions: [Option<String>; 2] = [None, None];
             for value in &action.values {
-                let slot = match value.name.as_str() { "ScaleFactor" => 0, "TwistAngle" => 1, _ => continue };
+                let slot = match value.name.as_str() {
+                    "ScaleFactor" => 0,
+                    "TwistAngle" => 1,
+                    _ => continue,
+                };
                 for variable in &value.variables {
-                    let Some(AssociativeData::ValueDependency(dependency)) = object(variable.handle) else { continue };
-                    let Some(AssociativeData::Variable(source)) = object(dependency.dependency.dependent_on) else { continue };
-                    if !source.expression.trim().is_empty() && source.expression.trim().parse::<f64>().is_err() {
+                    let Some(AssociativeData::ValueDependency(dependency)) =
+                        object(variable.handle)
+                    else {
+                        continue;
+                    };
+                    let Some(AssociativeData::Variable(source)) =
+                        object(dependency.dependency.dependent_on)
+                    else {
+                        continue;
+                    };
+                    if !source.expression.trim().is_empty()
+                        && source.expression.trim().parse::<f64>().is_err()
+                    {
                         expressions[slot] = Some(source.expression.trim().to_string());
                     }
                 }
@@ -1212,11 +1304,21 @@ impl Scene {
             // The profile and path the action reads.
             let source = |name: &str| {
                 action.owned_parameters.iter().find_map(|parameter| {
-                    let Some(AssociativeData::PathActionParam(path)) = object(*parameter) else { return None };
-                    if path.compound.action_param.name != name { return None; }
-                    let Some(AssociativeData::EdgeActionParam(edge)) = object(*path.compound.parameters.first()?) else { return None };
+                    let Some(AssociativeData::PathActionParam(path)) = object(*parameter) else {
+                        return None;
+                    };
+                    if path.compound.action_param.name != name {
+                        return None;
+                    }
+                    let Some(AssociativeData::EdgeActionParam(edge)) =
+                        object(*path.compound.parameters.first()?)
+                    else {
+                        return None;
+                    };
                     match object(edge.single_dependency.dependency) {
-                        Some(AssociativeData::Dependency(dependency)) => Some(dependency.dependent_on),
+                        Some(AssociativeData::Dependency(dependency)) => {
+                            Some(dependency.dependent_on)
+                        }
                         _ => None,
                     }
                 })
@@ -1226,20 +1328,41 @@ impl Scene {
             }
         }
         for (surface, profile, path) in sources {
-            let Some(entity @ EntityType::Surface(value)) = self.document.get_entity(surface) else { continue };
-            if crate::scene::model::sweep_model::sweep_sources(entity).is_some() { continue; }
-            let codec::entities::SurfaceData::Swept { options, .. } = &value.surface_data else { continue };
+            let Some(entity @ EntityType::Surface(value)) = self.document.get_entity(surface)
+            else {
+                continue;
+            };
+            if crate::scene::model::sweep_model::sweep_sources(entity).is_some() {
+                continue;
+            }
+            let codec::entities::SurfaceData::Swept { options, .. } = &value.surface_data else {
+                continue;
+            };
             let linked = crate::command::SweepOptions {
                 align: options.sweep_alignment_flags == 1,
                 bank: options.bank,
                 ..crate::command::SweepOptions::default()
             };
-            crate::scene::model::sweep_model::link_sweep_sources(&mut self.document, surface, profile, path, &linked);
+            crate::scene::model::sweep_model::link_sweep_sources(
+                &mut self.document,
+                surface,
+                profile,
+                path,
+                &linked,
+            );
         }
         for (handle, expressions) in links {
-            let Some(entity) = self.document.get_entity(handle) else { continue };
-            if crate::scene::model::sweep_model::sweep_expressions(entity).is_some() { continue; }
-            crate::scene::model::sweep_model::link_sweep_expressions(&mut self.document, handle, &expressions);
+            let Some(entity) = self.document.get_entity(handle) else {
+                continue;
+            };
+            if crate::scene::model::sweep_model::sweep_expressions(entity).is_some() {
+                continue;
+            }
+            crate::scene::model::sweep_model::link_sweep_expressions(
+                &mut self.document,
+                handle,
+                &expressions,
+            );
         }
     }
 
@@ -1279,8 +1402,7 @@ impl Scene {
         match self.document.get_entity_mut(handle) {
             Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
             Some(EntityType::Surface(entity)) => {
-                entity.acis_data =
-                    codec::entities::AcisData::from_sat(&document.to_sat_string());
+                entity.acis_data = codec::entities::AcisData::from_sat(&document.to_sat_string());
                 if let Some(data) = surface_data {
                     if matches!(&data, codec::entities::SurfaceData::Extruded { .. }) {
                         entity.kind = codec::entities::SurfaceKind::Extruded;
@@ -1322,8 +1444,7 @@ impl Scene {
         match self.document.get_entity_mut(handle) {
             Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
             Some(EntityType::Surface(entity)) => {
-                entity.acis_data =
-                    codec::entities::AcisData::from_sat(&document.to_sat_string());
+                entity.acis_data = codec::entities::AcisData::from_sat(&document.to_sat_string());
                 if let Some(data) = surface_data {
                     if matches!(&data, codec::entities::SurfaceData::Extruded { .. }) {
                         entity.kind = codec::entities::SurfaceKind::Extruded;
@@ -1356,9 +1477,13 @@ impl Scene {
             .and_then(|active| active.base())
             .map(|base| base.node_id());
         let updated = if operation.base().map(|base| base.node_id()) == active {
-            self.document.update_solid_history(handle, operation).is_some()
+            self.document
+                .update_solid_history(handle, operation)
+                .is_some()
         } else {
-            self.document.update_solid_history_step(handle, operation).is_some()
+            self.document
+                .update_solid_history_step(handle, operation)
+                .is_some()
         };
         if !updated {
             return false;
@@ -1578,9 +1703,11 @@ impl Scene {
         {
             return false;
         }
-        let Some(operation) =
-            crate::scene::model::solid_history::operand_to_history(&self.document, handle, operation)
-        else {
+        let Some(operation) = crate::scene::model::solid_history::operand_to_history(
+            &self.document,
+            handle,
+            operation,
+        ) else {
             return false;
         };
         self.preview_solid_history(handle, operation)
@@ -1605,9 +1732,11 @@ impl Scene {
         ) {
             return false;
         }
-        let Some(operation) =
-            crate::scene::model::solid_history::operand_to_history(&self.document, handle, operation)
-        else {
+        let Some(operation) = crate::scene::model::solid_history::operand_to_history(
+            &self.document,
+            handle,
+            operation,
+        ) else {
             return false;
         };
         self.rebuild_solid_history(handle, operation)
@@ -1615,15 +1744,28 @@ impl Scene {
 
     /// The modeler error code the reference reports when it refuses a sweep
     /// property edit (twist or scale along a path with a corner).
-    pub fn solid_history_property_refusal(&self, handle: Handle, field: &str, value: &str) -> Option<u32> {
-        let mut operation = crate::scene::model::solid_history::primitive_property_operation(&self.document, handle)?;
-        if !crate::scene::model::solid_history::apply_primitive_property(&mut operation, field, value) {
+    pub fn solid_history_property_refusal(
+        &self,
+        handle: Handle,
+        field: &str,
+        value: &str,
+    ) -> Option<u32> {
+        let mut operation = crate::scene::model::solid_history::primitive_property_operation(
+            &self.document,
+            handle,
+        )?;
+        if !crate::scene::model::solid_history::apply_primitive_property(
+            &mut operation,
+            field,
+            value,
+        ) {
             return None;
         }
         let codec::objects::SolidHistoryOperation::Sweep(record) = &operation else {
             return None;
         };
-        kernel::acis::sweep_history_refusal(record).map(crate::scene::model::sweep_model::sweep_refusal_code)
+        kernel::acis::sweep_history_refusal(record)
+            .map(crate::scene::model::sweep_model::sweep_refusal_code)
     }
 
     pub fn apply_solid_position_property(
@@ -1893,6 +2035,9 @@ pub(crate) fn remap_copied_reactors(
             continue;
         };
         let reactors = &mut entity.common_mut().reactors;
-        *reactors = reactors.iter().filter_map(|reactor| handle_map.get(reactor).copied()).collect();
+        *reactors = reactors
+            .iter()
+            .filter_map(|reactor| handle_map.get(reactor).copied())
+            .collect();
     }
 }

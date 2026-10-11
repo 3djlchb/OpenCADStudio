@@ -58,9 +58,21 @@ pub struct ImageInstance {
 impl ImageInstance {
     pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
         const ATTRS: &[wgpu::VertexAttribute] = &[
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(ImageInstance, translation) as u64, shader_location: 3, format: wgpu::VertexFormat::Float32x3 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(ImageInstance, translation_low) as u64, shader_location: 4, format: wgpu::VertexFormat::Float32x3 },
-            wgpu::VertexAttribute { offset: std::mem::offset_of!(ImageInstance, draw_depth) as u64, shader_location: 5, format: wgpu::VertexFormat::Float32 },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(ImageInstance, translation) as u64,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(ImageInstance, translation_low) as u64,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::offset_of!(ImageInstance, draw_depth) as u64,
+                shader_location: 5,
+                format: wgpu::VertexFormat::Float32,
+            },
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
@@ -138,7 +150,11 @@ impl ImageGpu {
         groups
             .into_iter()
             .flat_map(|group| {
-                let sampler = if group.first().is_some_and(|m| m.pixelated) { &pixelated } else { &smooth };
+                let sampler = if group.first().is_some_and(|m| m.pixelated) {
+                    &pixelated
+                } else {
+                    &smooth
+                };
                 Self::new(device, queue, &group, bgl1, sampler)
             })
             .collect()
@@ -223,7 +239,14 @@ impl ImageGpu {
                     "image.texture:{}:{}:{}",
                     model.file_path, x.content_start, y.content_start
                 );
-                let levels = mip_chain(&model.pixels, model.width, x.data_start, y.data_start, width, height);
+                let levels = mip_chain(
+                    &model.pixels,
+                    model.width,
+                    x.data_start,
+                    y.data_start,
+                    width,
+                    height,
+                );
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some(&tex_label),
                     size: wgpu::Extent3d {
@@ -235,8 +258,7 @@ impl ImageGpu {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 });
                 for (level, (w, h, data)) in levels.iter().enumerate() {
@@ -260,8 +282,7 @@ impl ImageGpu {
                         },
                     );
                 }
-                let tex_view =
-                    texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let tex_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("image.bind_group1"),
                     layout: bgl1,
@@ -317,7 +338,14 @@ struct TileRange {
 /// lines on a transparent page (PDF, DWF, DGN underlays) stay visible when
 /// zoomed out instead of falling between samples, and opaque images are
 /// averaged as usual.
-fn mip_chain(pixels: &[u8], stride: u32, x0: u32, y0: u32, w: u32, h: u32) -> Vec<(u32, u32, Vec<u8>)> {
+fn mip_chain(
+    pixels: &[u8],
+    stride: u32,
+    x0: u32,
+    y0: u32,
+    w: u32,
+    h: u32,
+) -> Vec<(u32, u32, Vec<u8>)> {
     let (stride, x0, y0) = (stride as usize, x0 as usize, y0 as usize);
     let mut base = Vec::with_capacity(w as usize * h as usize * 4);
     for row in 0..h as usize {

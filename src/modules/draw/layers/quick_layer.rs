@@ -50,18 +50,12 @@ pub struct QuickLayerCommand {
 
 impl QuickLayerCommand {
     pub fn new(layers: Vec<String>, selected: Vec<Handle>) -> Self {
-        let entries = layers
-            .into_iter()
-            .map(QuickLayerEntry::plain)
-            .collect();
+        let entries = layers.into_iter().map(QuickLayerEntry::plain).collect();
 
         Self::new_with_entries(entries, selected)
     }
 
-    pub fn new_with_entries(
-        mut layers: Vec<QuickLayerEntry>,
-        selected: Vec<Handle>,
-    ) -> Self {
+    pub fn new_with_entries(mut layers: Vec<QuickLayerEntry>, selected: Vec<Handle>) -> Self {
         layers.sort_by_key(|layer| layer.name.to_lowercase());
         layers.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&b.name));
 
@@ -127,21 +121,15 @@ impl QuickLayerCommand {
             .layers
             .iter()
             .filter_map(|layer| {
-                Self::fuzzy_score(&layer.name, input)
-                    .map(|score| (score, layer.name.clone()))
+                Self::fuzzy_score(&layer.name, input).map(|score| (score, layer.name.clone()))
             })
             .collect();
 
         matches.sort_by(|a, b| a.0.cmp(&b.0));
 
-        matches
-            .into_iter()
-            .map(|(_, name)| name)
-            .take(8)
-            .collect()
+        matches.into_iter().map(|(_, name)| name).take(8).collect()
     }
 
-    
     fn encode_layer_name(name: &str) -> String {
         let mut out = String::with_capacity(name.len() * 2);
         for byte in name.as_bytes() {
@@ -168,7 +156,7 @@ impl QuickLayerCommand {
         String::from_utf8(bytes).ok()
     }
 
-fn canonical_layer(&self, input: &str) -> Option<String> {
+    fn canonical_layer(&self, input: &str) -> Option<String> {
         self.layers
             .iter()
             .find(|layer| layer.name.eq_ignore_ascii_case(input.trim()))
@@ -226,10 +214,7 @@ impl CadCommand for QuickLayerCommand {
         };
 
         Some(CmdResult::Relaunch(
-            format!(
-                "QLAYER_APPLY_HEX {}",
-                Self::encode_layer_name(&layer)
-            ),
+            format!("QLAYER_APPLY_HEX {}", Self::encode_layer_name(&layer)),
             std::mem::take(&mut self.selected),
         ))
     }
@@ -243,9 +228,7 @@ impl CadCommand for QuickLayerCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration {
-    names: &["QLAYER"]
-});
+inventory::submit!(crate::command::CommandRegistration { names: &["QLAYER"] });
 
 #[cfg(test)]
 mod tests {
@@ -284,10 +267,7 @@ mod tests {
     fn substring_search_finds_layer() {
         let matches = command().matches("nivel");
 
-        assert_eq!(
-            matches.first().map(String::as_str),
-            Some("Curvas de nivel")
-        );
+        assert_eq!(matches.first().map(String::as_str), Some("Curvas de nivel"));
     }
 
     #[test]

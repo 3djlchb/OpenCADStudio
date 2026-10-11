@@ -24,7 +24,9 @@ use iced::{mouse, Point, Task};
 fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     #[cfg(target_arch = "wasm32")]
     {
-        let name = path.file_name().map_or_else(|| "export".into(), |n| n.to_string_lossy());
+        let name = path
+            .file_name()
+            .map_or_else(|| "export".into(), |n| n.to_string_lossy());
         crate::sys::download_bytes(&name, bytes);
         Ok(())
     }
@@ -40,7 +42,11 @@ fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 /// reaches the UI thread: it is caught on the worker and re-surfaced as
 /// [`Message::BackgroundTaskFailed`] so a crashing export or import reports
 /// on the command line instead of killing the application.
-pub(in crate::app) fn background_task<T, F, M>(context: impl Into<String>, work: F, map: M) -> Task<Message>
+pub(in crate::app) fn background_task<T, F, M>(
+    context: impl Into<String>,
+    work: F,
+    map: M,
+) -> Task<Message>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
@@ -298,7 +304,9 @@ fn ratio_scale_name(factor: f64) -> String {
 }
 
 /// The plot device the dialog currently targets.
-fn plot_dialog_device(d: &crate::ui::window::plot::PlotDialogState) -> crate::io::plot_device::PlotDevice {
+fn plot_dialog_device(
+    d: &crate::ui::window::plot::PlotDialogState,
+) -> crate::io::plot_device::PlotDevice {
     use crate::io::plot_device::PlotDevice;
     if d.to_file {
         PlotDevice::Pdf
@@ -347,7 +355,13 @@ fn margins_for_settings(
 }
 
 fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
-    let PlotContent { wires, hatches, wipeouts, images, .. } = content;
+    let PlotContent {
+        wires,
+        hatches,
+        wipeouts,
+        images,
+        ..
+    } = content;
     let mut bounds = (
         f64::INFINITY,
         f64::INFINITY,
@@ -362,7 +376,10 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
             bounds.3 = bounds.3.max(y);
         }
     };
-    for wire in wires.iter().filter(|wire| wire.name != "paper_printable_area") {
+    for wire in wires
+        .iter()
+        .filter(|wire| wire.name != "paper_printable_area")
+    {
         let [x0, y0, x1, y1] = wire.aabb;
         include(x0 as f64, y0 as f64);
         include(x1 as f64, y1 as f64);
@@ -376,8 +393,12 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
         }
     }
     for plot in images {
-        let mut image_bounds = [f64::INFINITY, f64::INFINITY,
-            f64::NEG_INFINITY, f64::NEG_INFINITY];
+        let mut image_bounds = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
         for vertex in &plot.image.verts {
             for axis in 0..2 {
                 let value = vertex.pos[axis] as f64 + vertex.pos_low[axis] as f64;
@@ -388,7 +409,10 @@ fn plot_content_extents(content: &PlotContent) -> Option<(f64, f64, f64, f64)> {
         for clip in &plot.clips {
             for axis in 0..2 {
                 let min = clip.iter().map(|p| p[axis]).fold(f64::INFINITY, f64::min);
-                let max = clip.iter().map(|p| p[axis]).fold(f64::NEG_INFINITY, f64::max);
+                let max = clip
+                    .iter()
+                    .map(|p| p[axis])
+                    .fold(f64::NEG_INFINITY, f64::max);
                 image_bounds[axis] = image_bounds[axis].max(min);
                 image_bounds[axis + 2] = image_bounds[axis + 2].min(max);
             }
@@ -461,10 +485,7 @@ mod plot_owner_aci_tests {
         // the INSERT itself has explicit true-color white, while its block
         // children are layer 0 + ByLayer. BlockCache resolves those children
         // through the INSERT's layer and stores that effective ACI on the wire.
-        let mut insert = codec::entities::Insert::new(
-            "*U264",
-            codec::types::Vector3::ZERO,
-        );
+        let mut insert = codec::entities::Insert::new("*U264", codec::types::Vector3::ZERO);
         insert.common.color = codec::types::Color::Rgb {
             r: 255,
             g: 255,
@@ -558,11 +579,12 @@ fn plot_scene_content(
             .zip(depths)
             .map(|(mut wire, draw_depth)| {
                 if !wire.fill_tris.is_empty() && wire.color[..3] == canvas[..3] {
-                    wire.bg_adapt = Some(Box::new(crate::scene::model::wire_model::BgAdaptInputs {
-                        raw_color: wire.color,
-                        canvas_color: true,
-                        ..Default::default()
-                    }));
+                    wire.bg_adapt =
+                        Some(Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                            raw_color: wire.color,
+                            canvas_color: true,
+                            ..Default::default()
+                        }));
                 }
                 plot_owner_aci(scene, &mut wire);
                 crate::io::pdf_export::PlotWire { wire, draw_depth }
@@ -635,7 +657,13 @@ fn plot_scene_content(
         images.extend(model_images);
         (wires, hatches, wipeouts, images, splits)
     };
-    PlotContent { wires: std::sync::Arc::new(wires), hatches, wipeouts, images, group_splits: splits }
+    PlotContent {
+        wires: std::sync::Arc::new(wires),
+        hatches,
+        wipeouts,
+        images,
+        group_splits: splits,
+    }
 }
 
 impl OpenCADStudio {
@@ -872,7 +900,8 @@ impl OpenCADStudio {
         self.double_click_block_refedit = s.double_click_block_refedit;
         self.double_click_block_attedit = s.double_click_block_attedit;
         self.right_click_mode = s.right_click_mode;
-        self.right_click_hold_ms = super::super::settings::clamp_right_click_hold_ms(s.right_click_hold_ms);
+        self.right_click_hold_ms =
+            super::super::settings::clamp_right_click_hold_ms(s.right_click_hold_ms);
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
         crate::scene::frame::set_profile_image_mode(s.image_frame);
         crate::modules::draw::draw::attdef::session().on_screen = s.attdef_on_screen;
@@ -966,10 +995,8 @@ impl OpenCADStudio {
             crate::app::settings::clamp_commandline_fade_ms(s.commandline_fade_ms);
         self.command_line
             .set_commandline_fade_ms(self.commandline_fade_ms.clamp(0, 60000) as u32);
-        self.snapper.snap_spacing_x =
-            crate::app::settings::sanitize_snap_spacing(s.snap_spacing_x);
-        self.snapper.snap_spacing_y =
-            crate::app::settings::sanitize_snap_spacing(s.snap_spacing_y);
+        self.snapper.snap_spacing_x = crate::app::settings::sanitize_snap_spacing(s.snap_spacing_x);
+        self.snapper.snap_spacing_y = crate::app::settings::sanitize_snap_spacing(s.snap_spacing_y);
         self.grid_spacing_x = crate::app::settings::sanitize_snap_spacing(s.grid_spacing_x);
         self.grid_spacing_y = crate::app::settings::sanitize_snap_spacing(s.grid_spacing_y);
         self.grid_major_every = crate::app::settings::sanitize_grid_major(s.grid_major_every);
@@ -994,7 +1021,8 @@ impl OpenCADStudio {
         self.block_palette.recent = s.block_recent.clone();
         self.block_palette.favorites = s.block_favorites.clone();
         self.block_palette.libraries = s.block_libraries.clone();
-        self.block_palette.view = crate::ui::window::block_palette::ViewMode::from_u8(s.block_palette_view);
+        self.block_palette.view =
+            crate::ui::window::block_palette::ViewMode::from_u8(s.block_palette_view);
         self.block_palette.set_options(s.block_insert.clone());
         self.trim_recent_blocks();
         // Push restored display defaults onto every drawing tab that exists now.
@@ -1938,10 +1966,13 @@ impl OpenCADStudio {
             .count();
         self.tabs[i].xref_missing = missing;
         if missing > 0 {
-            self.command_line.push_output(crate::tf!(
+            self.command_line.push_output(
+                crate::tf!(
                 "{} reference(s) not found — open the reference manager with EXTERNALREFERENCES.",
                 missing
-            ).as_ref());
+            )
+                .as_ref(),
+            );
         }
 
         let mut recovery_report = recovery_needed.then(|| {
@@ -2165,9 +2196,8 @@ impl OpenCADStudio {
                 // fetch them from the community repository before the user
                 // studies garbled substitute text (unless recovery already
                 // owns the modal slot).
-                let mut missing = crate::io::font_repo::missing_shx_fonts(
-                    &self.tabs[i].scene.document,
-                );
+                let mut missing =
+                    crate::io::font_repo::missing_shx_fonts(&self.tabs[i].scene.document);
                 missing.retain(|name| {
                     !self
                         .suppressed_missing_fonts
@@ -2188,12 +2218,22 @@ impl OpenCADStudio {
         };
         let startup_script_task = if !self.pending_startup_script_lines.is_empty() {
             let lines = std::mem::take(&mut self.pending_startup_script_lines);
-            Task::batch(lines.into_iter().map(|l| Task::done(Message::ScriptLine(l))))
+            Task::batch(
+                lines
+                    .into_iter()
+                    .map(|l| Task::done(Message::ScriptLine(l))),
+            )
         } else {
             Task::none()
         };
         let sheet_set_task = self.sheet_set_after_open(i);
-        Task::batch([thumbs_task, pending_open_task, interaction_task, startup_script_task, sheet_set_task])
+        Task::batch([
+            thumbs_task,
+            pending_open_task,
+            interaction_task,
+            startup_script_task,
+            sheet_set_task,
+        ])
     }
 
     pub(super) fn on_wblock_save_result_some(
@@ -2642,11 +2682,7 @@ impl OpenCADStudio {
             let new_base = path.parent().map(|p| p.to_path_buf());
             if let (Some(old), Some(new)) = (old_base, new_base) {
                 if old != new {
-                    crate::io::xref::rebase_relative_paths_for_save_as(
-                        &mut snapshot,
-                        &old,
-                        &new,
-                    );
+                    crate::io::xref::rebase_relative_paths_for_save_as(&mut snapshot, &old, &new);
                 }
             }
         }
@@ -2880,8 +2916,7 @@ impl OpenCADStudio {
                 });
                 match outcome.continuation {
                     crate::app::SaveContinuation::CloseTab => {
-                        self.pending_close =
-                            Some(crate::app::PendingClose::Tab(self.tabs[i].id));
+                        self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[i].id));
                     }
                     crate::app::SaveContinuation::Quit => {
                         self.pending_close = Some(crate::app::PendingClose::Quit);
@@ -2954,8 +2989,7 @@ impl OpenCADStudio {
                         // is pushed.
                         if let Some(old) = old_path.as_deref() {
                             let old_base = old.parent().map(|p| p.to_path_buf());
-                            let new_base =
-                                outcome.path.parent().map(|p| p.to_path_buf());
+                            let new_base = outcome.path.parent().map(|p| p.to_path_buf());
                             if let (Some(old), Some(new)) = (old_base, new_base) {
                                 if old != new {
                                     crate::io::xref::rebase_relative_paths_for_save_as(
@@ -3598,8 +3632,12 @@ impl OpenCADStudio {
     /// corner unless `PLOTOFFSET` says from the paper edge.
     fn dialog_plot_origin_mm(&self) -> (f64, f64) {
         let d = &self.plot_dialog;
-        let x = d.paper_units.to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0));
-        let y = d.paper_units.to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0));
+        let x = d
+            .paper_units
+            .to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0));
+        let y = d
+            .paper_units
+            .to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0));
         if d.plot_offset_from_edge {
             return (x, y);
         }
@@ -3692,8 +3730,10 @@ impl OpenCADStudio {
             (0.0, 0.0)
         } else {
             (
-                d.paper_units.to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0)),
-                d.paper_units.to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0)),
+                d.paper_units
+                    .to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0)),
+                d.paper_units
+                    .to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0)),
             )
         };
         ps.origin_x = origin_x;
@@ -3720,8 +3760,7 @@ impl OpenCADStudio {
             ps.flags.use_standard_scale = false;
             ps.scale_numerator = numerator;
             ps.scale_denominator = denominator;
-            ps.standard_scale_factor =
-                stored_scale_factor(numerator / denominator, ps.paper_units);
+            ps.standard_scale_factor = stored_scale_factor(numerator / denominator, ps.paper_units);
         }
         ps.current_style_sheet = d.style_name.clone();
         ps.flags.scale_lineweights = d.scale_lw;
@@ -3754,7 +3793,9 @@ impl OpenCADStudio {
         let ps = self.plot_settings_from_dialog(self.dialog_base_settings());
         if layout_name == "Model" {
             // Model keeps its page setup too (#1620); it has no sheet limits.
-            self.tabs[i].scene.set_layout_plot_settings(&layout_name, &ps);
+            self.tabs[i]
+                .scene
+                .set_layout_plot_settings(&layout_name, &ps);
             self.tabs[i].dirty = true;
             return;
         }
@@ -3823,8 +3864,7 @@ impl OpenCADStudio {
             self.plot_dialog.printer = kept_printer;
             self.plot_dialog.to_file = kept_to_file;
         }
-        let Some(page) = self.direct_plot_page()
-        else {
+        let Some(page) = self.direct_plot_page() else {
             self.command_line.push_error(
                 crate::t!("Nothing to plot: model space contains no printable geometry.").as_ref(),
             );
@@ -3850,8 +3890,7 @@ impl OpenCADStudio {
             "Extents" => self.extents_plot_job(),
             _ => self.window_plot_job(),
         };
-        let Some(page) = job
-        else {
+        let Some(page) = job else {
             self.command_line
                 .push_error(crate::t!("Plot area is empty. Pick a larger window.").as_ref());
             return Task::none();
@@ -4178,7 +4217,8 @@ impl OpenCADStudio {
         // The printable-area rectangle is an on-screen guide, not drawing
         // content. It used to leak into every paper-space PDF/preview/print.
         if paper_space {
-            content.group_splits.wires = content.wires[..content.group_splits.wires.min(content.wires.len())]
+            content.group_splits.wires = content.wires
+                [..content.group_splits.wires.min(content.wires.len())]
                 .iter()
                 .filter(|wire| wire.name != "paper_printable_area")
                 .count();
@@ -4340,8 +4380,10 @@ impl OpenCADStudio {
         }
         let page = self.extents_plot_job()?;
         let content = &page.content;
-        if content.wires.is_empty() && content.hatches.is_empty()
-            && content.wipeouts.is_empty() && content.images.is_empty()
+        if content.wires.is_empty()
+            && content.hatches.is_empty()
+            && content.wipeouts.is_empty()
+            && content.images.is_empty()
         {
             return None;
         }
@@ -4349,8 +4391,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_print_to_printer(&mut self) -> Task<Message> {
-        let Some(page) = self.direct_plot_page()
-        else {
+        let Some(page) = self.direct_plot_page() else {
             self.command_line.push_error(
                 crate::t!("Nothing to plot: model space contains no printable geometry.").as_ref(),
             );
@@ -4362,9 +4403,9 @@ impl OpenCADStudio {
         background_task(
             crate::t!("Print to printer"),
             move || {
-                iced::futures::executor::block_on(
-                    crate::io::print_to_printer::print_wires_with(page, options),
-                )
+                iced::futures::executor::block_on(crate::io::print_to_printer::print_wires_with(
+                    page, options,
+                ))
             },
             Message::PrintResult,
         )
@@ -4373,10 +4414,7 @@ impl OpenCADStudio {
     /// QUICKPRINT / QP — use the current selection's bounding box as the plot
     /// window and export a PDF (drawing folder + name + timestamp) with the
     /// active page setup, no dialog. Model space only. (#325)
-    pub(crate) fn on_quick_print_handles(
-        &mut self,
-        handles: Vec<codec::Handle>,
-    ) -> Task<Message> {
+    pub(crate) fn on_quick_print_handles(&mut self, handles: Vec<codec::Handle>) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].scene.current_layout != "Model" {
             self.command_line
@@ -4581,10 +4619,9 @@ impl OpenCADStudio {
                 if factor.is_finite() && factor > 0.0 {
                     let name = self.plot_dialog.scale.clone();
                     self.plot_dialog.scales.push((name, factor));
-                    self.plot_dialog.scales.sort_by(|a, b| {
-                        a.1.partial_cmp(&b.1)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    self.plot_dialog
+                        .scales
+                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                 }
             }
         } else {
@@ -4667,12 +4704,9 @@ impl OpenCADStudio {
         // PAPERUPDATE is relevant after the user explicitly changes the
         // device/page setup. Merely reopening Plot must leave the drawing's
         // stored paper untouched.
-        self.plot_reconcile_printer_media =
-            reconcile.then(|| printer.clone());
+        self.plot_reconcile_printer_media = reconcile.then(|| printer.clone());
 
-        if let Some(caps) =
-            crate::io::plot_device::cached_printer_capabilities(&printer)
-        {
+        if let Some(caps) = crate::io::plot_device::cached_printer_capabilities(&printer) {
             self.plot_dialog.printer_media = Some(caps);
 
             if reconcile {
@@ -4689,12 +4723,9 @@ impl OpenCADStudio {
             crate::t!("Printer capabilities"),
             move || crate::io::plot_device::printer_capabilities(&printer),
             move |caps| {
-                Message::PlotDlg(
-                    crate::ui::window::plot::PlotDlgMsg::PrinterMedia(
-                        name,
-                        caps,
-                    ),
-                )
+                Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::PrinterMedia(
+                    name, caps,
+                ))
             },
         )
     }
@@ -4746,7 +4777,8 @@ impl OpenCADStudio {
                 match draft.build() {
                     Ok(custom) => {
                         let canonical = custom.canonical();
-                        d.custom_papers.retain(|existing| existing.canonical() != canonical);
+                        d.custom_papers
+                            .retain(|existing| existing.canonical() != canonical);
                         d.custom_papers.push(custom);
                         d.custom_editor = None;
                         d.paper = canonical;
@@ -4761,7 +4793,8 @@ impl OpenCADStudio {
             C::Remove => {
                 let selected = plot_dialog_paper(d).canonical.into_owned();
                 let before = d.custom_papers.len();
-                d.custom_papers.retain(|custom| custom.canonical() != selected);
+                d.custom_papers
+                    .retain(|custom| custom.canonical() != selected);
                 if d.custom_papers.len() != before {
                     self.save_config();
                 }
@@ -4885,10 +4918,8 @@ impl OpenCADStudio {
                 self.request_printer_media(true)
             }
             M::PrinterMedia(printer, caps) => {
-                let still_current =
-                    !self.plot_dialog.to_file
-                        && self.plot_dialog.printer.as_deref()
-                            == Some(printer.as_str());
+                let still_current = !self.plot_dialog.to_file
+                    && self.plot_dialog.printer.as_deref() == Some(printer.as_str());
 
                 if still_current {
                     self.plot_dialog.printer_media = caps;
@@ -4896,9 +4927,7 @@ impl OpenCADStudio {
                     let reconcile = self
                         .plot_reconcile_printer_media
                         .as_deref()
-                        .is_some_and(|pending| {
-                            pending.eq_ignore_ascii_case(&printer)
-                        });
+                        .is_some_and(|pending| pending.eq_ignore_ascii_case(&printer));
 
                     if reconcile {
                         // Keep the explicit-device context alive while this
@@ -4936,7 +4965,9 @@ impl OpenCADStudio {
                                     .map(|option| {
                                         let choice = remembered
                                             .get(&option.key)
-                                            .filter(|c| option.choices.iter().any(|x| &x.keyword == *c))
+                                            .filter(|c| {
+                                                option.choices.iter().any(|x| &x.keyword == *c)
+                                            })
                                             .cloned()
                                             .unwrap_or_else(|| option.default.clone());
                                         (option.key.clone(), choice)
@@ -4973,7 +5004,9 @@ impl OpenCADStudio {
                     if overrides.is_empty() {
                         self.plot_dialog.driver_options.remove(&draft.printer);
                     } else {
-                        self.plot_dialog.driver_options.insert(draft.printer.clone(), overrides);
+                        self.plot_dialog
+                            .driver_options
+                            .insert(draft.printer.clone(), overrides);
                     }
                     self.save_config();
                 }
@@ -5180,18 +5213,14 @@ impl OpenCADStudio {
                     if is_layout_entry(&previous) {
                         let layout = layout_entry_name(&previous).to_string();
                         self.apply_dialog_to_named_layout(&layout);
-                    } else if previous
-                        == crate::ui::window::plot::SETUP_PREV
-                    {
+                    } else if previous == crate::ui::window::plot::SETUP_PREV {
                         // `<previous>` is a transient snapshot, not an actual
                         // page setup. `plot_prev_context` records which layout
                         // that snapshot came from.
                         //
                         // If the user returns to that same layout, commit the
                         // restored snapshot to it before reloading the row.
-                        if let Some((tab, layout)) =
-                            self.plot_prev_context.clone()
-                        {
+                        if let Some((tab, layout)) = self.plot_prev_context.clone() {
                             let target = format!("*{layout}*");
 
                             if tab == self.active_tab && name == target {
@@ -5430,7 +5459,10 @@ impl OpenCADStudio {
     }
 
     /// Load a `PlotSettings` into the dialog editor fields.
-    pub(in crate::app) fn load_plotsettings_into_dialog(&mut self, ps: &codec::objects::PlotSettings) {
+    pub(in crate::app) fn load_plotsettings_into_dialog(
+        &mut self,
+        ps: &codec::objects::PlotSettings,
+    ) {
         use crate::io::paper_catalog::PaperUnits;
         use codec::objects::{PlotType, ShadePlotMode, ShadePlotResolutionLevel};
         self.plot_setup_template = Some(ps.clone());
@@ -5480,11 +5512,8 @@ impl OpenCADStudio {
         // without a usable name is matched by size, and an unknown size keeps
         // its own dimensions as a custom sheet. The sheet's orientation is the
         // stored width/height order; the rotation below may flip it again.
-        let paper = crate::io::paper_catalog::from_drawing(
-            &ps.paper_size,
-            ps.paper_width,
-            ps.paper_height,
-        );
+        let paper =
+            crate::io::paper_catalog::from_drawing(&ps.paper_size, ps.paper_width, ps.paper_height);
         let orient = if ps.paper_width >= ps.paper_height {
             "Landscape"
         } else {
@@ -5619,7 +5648,8 @@ impl OpenCADStudio {
     ) {
         for warning in &table.load_warnings {
             let name = &table.name;
-            self.command_line.push_warning(&format!("{name}: {warning}"));
+            self.command_line
+                .push_warning(&format!("{name}: {warning}"));
         }
     }
 
@@ -5707,8 +5737,7 @@ impl OpenCADStudio {
                 }
                 _ => None,
             };
-            let Some(page) = job
-            else {
+            let Some(page) = job else {
                 self.command_line
                     .push_error(crate::t!("Plot area is empty. Pick a larger window.").as_ref());
                 self.active_modal = Some(crate::app::ModalKind::Plot);
@@ -5734,9 +5763,7 @@ impl OpenCADStudio {
             let opts = self.plot_print_options(&d);
             let work = move || {
                 crate::io::pdf_export::export_pdf(&page, &tmp)
-                    .and_then(|_| {
-                        crate::io::print_to_printer::print_existing_pdf(&tmp, &opts)
-                    })
+                    .and_then(|_| crate::io::print_to_printer::print_existing_pdf(&tmp, &opts))
                     .map(|printer| crate::tf!("Sent to printer: {printer}").into_owned())
                     .map_err(|e| crate::tf!("Print failed: {e}").into_owned())
             };
@@ -5768,8 +5795,8 @@ impl OpenCADStudio {
             iced::futures::executor::block_on(crate::io::print_to_printer::print_wires_with(
                 page, opts,
             ))
-                .map(|printer| crate::tf!("Sent to printer: {printer}").into_owned())
-                .map_err(|error| crate::tf!("Print failed: {error}").into_owned())
+            .map(|printer| crate::tf!("Sent to printer: {printer}").into_owned())
+            .map_err(|error| crate::tf!("Print failed: {error}").into_owned())
         };
         self.run_plot_work(true, false, work)
     }
@@ -5788,7 +5815,12 @@ impl OpenCADStudio {
                 .printer
                 .as_ref()
                 .and_then(|printer| d.driver_options.get(printer))
-                .map(|options| options.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                .map(|options| {
+                    options
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect()
+                })
                 .unwrap_or_default(),
         }
     }
@@ -5981,8 +6013,10 @@ impl OpenCADStudio {
         );
         let in_window = |wire: &crate::io::pdf_export::PlotWire| {
             wire.name != "paper_printable_area"
-                && wire.aabb[0] <= wx1 && wire.aabb[2] >= wx0
-                && wire.aabb[1] <= wy1 && wire.aabb[3] >= wy0
+                && wire.aabb[0] <= wx1
+                && wire.aabb[2] >= wx0
+                && wire.aabb[1] <= wy1
+                && wire.aabb[3] >= wy0
         };
         content.group_splits.wires = content.wires
             [..content.group_splits.wires.min(content.wires.len())]
@@ -6178,8 +6212,8 @@ mod plot_paper_tests {
 
     #[test]
     fn orientation_is_stored_as_a_rotation_of_the_medium() {
-        use codec::objects::PlotRotation as R;
         use crate::ui::window::plot::PlotFlag;
+        use codec::objects::PlotRotation as R;
         // A newly picked sheet is the catalogue's portrait medium…
         let portrait_medium = [
             ("Portrait", false, R::None),
@@ -6209,9 +6243,16 @@ mod plot_paper_tests {
                 }
                 let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
                 let ps = layout_settings(&app);
-                let medium = if pick_a3 { (297.0, 420.0) } else { (297.0, 210.0) };
+                let medium = if pick_a3 {
+                    (297.0, 420.0)
+                } else {
+                    (297.0, 210.0)
+                };
                 assert_eq!((ps.paper_width, ps.paper_height), medium, "{orientation}");
-                assert_eq!(ps.rotation, rotation, "{orientation} upside-down={upside_down}");
+                assert_eq!(
+                    ps.rotation, rotation,
+                    "{orientation} upside-down={upside_down}"
+                );
                 // The next dialog reads the same choices back out of the rotation.
                 let _ = app.on_plot_dialog_open();
                 assert_eq!(app.plot_dialog.orientation, orientation);
@@ -6230,7 +6271,9 @@ mod plot_paper_tests {
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
-        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(crate::ui::window::plot::PlotFlag::FitToPaper));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::FitToPaper,
+        ));
         assert!(!app.plot_dialog.fit_to_paper);
         let _ = app.on_plot_dlg(PlotDlgMsg::Scale("1:100".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
@@ -6258,7 +6301,9 @@ mod plot_paper_tests {
         assert!((super::plot_dialog_scale_factor(&app.plot_dialog) - 1.0 / 3.0).abs() < 1e-12);
         // Fit to paper is its own scale type and carries the bit; a Layout
         // plot goes back to the 1:1 the dialog holds it at.
-        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(crate::ui::window::plot::PlotFlag::FitToPaper));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::FitToPaper,
+        ));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = layout_settings(&app);
         assert_eq!(ps.scale_type, ScaledType::ScaleToFit);
@@ -6277,15 +6322,25 @@ mod plot_paper_tests {
         use codec::objects::ScaledType;
         let mut app = app_with_printer_named_sheet();
         // Insertion units: metres. "1:100" then plots 10 mm per drawing unit.
-        app.tabs[app.active_tab].scene.document.header.insertion_units = 6;
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .header
+            .insertion_units = 6;
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
-        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(crate::ui::window::plot::PlotFlag::FitToPaper));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::FitToPaper,
+        ));
         let _ = app.on_plot_dlg(PlotDlgMsg::Scale("1:100".into()));
         assert!((super::plot_dialog_scale_factor(&app.plot_dialog) - 10.0).abs() < 1e-9);
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = layout_settings(&app);
-        assert_eq!(ps.scale_type, ScaledType::CustomScale, "not the format's 1:100");
+        assert_eq!(
+            ps.scale_type,
+            ScaledType::CustomScale,
+            "not the format's 1:100"
+        );
         assert_eq!((ps.scale_numerator, ps.scale_denominator), (10.0, 1.0));
         assert!((ps.standard_scale_factor - 254.0).abs() < 1e-9);
         let _ = app.on_plot_dialog_open();
@@ -6299,7 +6354,9 @@ mod plot_paper_tests {
         edit_layout_settings(&mut app, |ps| ps.paper_units = PlotPaperUnits::Inches);
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
-        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(crate::ui::window::plot::PlotFlag::FitToPaper));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::FitToPaper,
+        ));
         let _ = app.on_plot_dlg(PlotDlgMsg::Scale("1:100".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = layout_settings(&app);
@@ -6332,9 +6389,13 @@ mod plot_paper_tests {
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
-        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(crate::ui::window::plot::PlotFlag::FitToPaper));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::FitToPaper,
+        ));
         let _ = app.on_plot_dlg(PlotDlgMsg::Scale("1:50".into()));
-        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(crate::ui::window::plot::PlotFlag::UpsideDown));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::UpsideDown,
+        ));
         let named = app.dialog_to_plotsettings();
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let layout = layout_settings(&app);
@@ -6347,7 +6408,10 @@ mod plot_paper_tests {
         );
         assert_eq!(layout.rotation, named.rotation);
         assert_eq!(layout.plot_type, named.plot_type);
-        assert_eq!((layout.origin_x, layout.origin_y), (named.origin_x, named.origin_y));
+        assert_eq!(
+            (layout.origin_x, layout.origin_y),
+            (named.origin_x, named.origin_y)
+        );
         assert_eq!(layout.scale_type, named.scale_type);
         assert_eq!(
             (layout.scale_numerator, layout.scale_denominator),
@@ -6393,9 +6457,7 @@ mod plot_paper_tests {
         // json! escapes the path: a Windows CARGO_MANIFEST_DIR carries
         // backslashes, and a raw format! would put invalid \X escapes in the
         // JSON string.
-        let reply = app.automation_op(
-            &serde_json::json!({"op": "open", "path": path}).to_string(),
-        );
+        let reply = app.automation_op(&serde_json::json!({"op": "open", "path": path}).to_string());
         assert_eq!(reply["ok"], true, "{reply}");
         app
     }
@@ -6450,7 +6512,11 @@ mod plot_paper_tests {
             let i = app.active_tab;
             let before = app.tabs[i].scene.plot_settings_for(layout).unwrap();
             assert_eq!(before.rotation, rotation, "{layout}");
-            assert_eq!((before.paper_width, before.paper_height), medium, "{layout}");
+            assert_eq!(
+                (before.paper_width, before.paper_height),
+                medium,
+                "{layout}"
+            );
             assert_eq!(before.scale_type, ScaledType::OneToOne, "{layout}");
             let _ = app.on_plot_dialog_open();
             let d = &app.plot_dialog;
@@ -6459,8 +6525,14 @@ mod plot_paper_tests {
             assert_eq!(d.area, "Layout");
             assert_eq!(d.scale, "1:1", "{layout}: a 1:1 plot in either paper unit");
             assert_eq!(d.to_file, pdf, "{layout}");
-            assert_eq!(super::plot_dialog_sheet_mm(d).0 > super::plot_dialog_sheet_mm(d).1, true);
-            assert!(d.lineweights && d.apply_plot_styles && d.paperspace_last, "{layout}");
+            assert_eq!(
+                super::plot_dialog_sheet_mm(d).0 > super::plot_dialog_sheet_mm(d).1,
+                true
+            );
+            assert!(
+                d.lineweights && d.apply_plot_styles && d.paperspace_last,
+                "{layout}"
+            );
             let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
             let after = app.tabs[i].scene.plot_settings_for(layout).unwrap();
             assert_eq!(stored_fields(&after), stored_fields(&before), "{layout}");
@@ -6486,7 +6558,10 @@ mod plot_paper_tests {
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
-        let ps = app.tabs[app.active_tab].scene.plot_settings_for("A4 1-100").unwrap();
+        let ps = app.tabs[app.active_tab]
+            .scene
+            .plot_settings_for("A4 1-100")
+            .unwrap();
         assert_eq!(ps.printer_name, "DWG To PDF.pc3");
         assert_eq!(ps.paper_size, "ISO_A3_(297.00_x_420.00_MM)");
         assert_eq!((ps.paper_width, ps.paper_height), (297.0, 420.0));
@@ -6495,7 +6570,10 @@ mod plot_paper_tests {
         // The sheet sits at minus its displayed margins: top on the left,
         // left at the bottom.
         let ((x0, y0), _) = app.tabs[app.active_tab].scene.paper_limits().unwrap();
-        assert!((x0 + 18.0).abs() < 1e-9 && (y0 + 5.0).abs() < 1e-9, "{x0} {y0}");
+        assert!(
+            (x0 + 18.0).abs() < 1e-9 && (y0 + 5.0).abs() < 1e-9,
+            "{x0} {y0}"
+        );
     }
 
     #[test]
@@ -6517,8 +6595,8 @@ mod plot_paper_tests {
 
     #[test]
     fn switching_the_page_setup_unit_respells_offsets_and_keeps_the_output() {
-        use codec::objects::{PlotPaperUnits, ScaledType};
         use crate::ui::window::plot::PlotFlag;
+        use codec::objects::{PlotPaperUnits, ScaledType};
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
         let sheet_before = app.tabs[app.active_tab].scene.paper_limits().unwrap();
@@ -6530,11 +6608,20 @@ mod plot_paper_tests {
         let _ = app.on_plot_dlg(PlotDlgMsg::PaperUnits("Inches".into()));
         let d = &app.plot_dialog;
         assert_eq!(d.offset_x, "1", "25.4 mm is 1 inch");
-        assert_eq!((d.custom_scale_paper.as_str(), d.custom_scale_drawing.as_str()), ("1", "2540"));
+        assert_eq!(
+            (
+                d.custom_scale_paper.as_str(),
+                d.custom_scale_drawing.as_str()
+            ),
+            ("1", "2540")
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = layout_settings(&app);
         assert_eq!(ps.paper_units, PlotPaperUnits::Inches);
-        assert!((ps.origin_x - 25.4).abs() < 1e-9, "the file keeps millimetres");
+        assert!(
+            (ps.origin_x - 25.4).abs() < 1e-9,
+            "the file keeps millimetres"
+        );
         assert_eq!(ps.scale_type, ScaledType::OneToHundred);
         assert_eq!((ps.scale_numerator, ps.scale_denominator), (1.0, 2540.0));
         // Back to millimetres: the same physical setup, spelled in mm.
@@ -6556,15 +6643,21 @@ mod plot_paper_tests {
 
     #[test]
     fn custom_scale_fields_follow_and_drive_the_picker() {
-        use codec::objects::ScaledType;
         use crate::ui::window::plot::PlotFlag;
+        use codec::objects::ScaledType;
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Area("Extents".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::Flag(PlotFlag::FitToPaper));
         let _ = app.on_plot_dlg(PlotDlgMsg::Scale("1:100".into()));
         let d = &app.plot_dialog;
-        assert_eq!((d.custom_scale_paper.as_str(), d.custom_scale_drawing.as_str()), ("1", "100"));
+        assert_eq!(
+            (
+                d.custom_scale_paper.as_str(),
+                d.custom_scale_drawing.as_str()
+            ),
+            ("1", "100")
+        );
         // A typed ratio the list knows is picked under its name…
         let _ = app.on_plot_dlg(PlotDlgMsg::CustomScalePaper("2".into()));
         assert_eq!(app.plot_dialog.scale, "1:50");
@@ -6608,7 +6701,10 @@ mod plot_paper_tests {
         use crate::ui::window::plot::PlotFlag;
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
-        assert!(app.plot_dialog.save_to_layout, "on by default, as expected of a page setup");
+        assert!(
+            app.plot_dialog.save_to_layout,
+            "on by default, as expected of a page setup"
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
         // A preview never writes the layout.
@@ -6631,8 +6727,15 @@ mod plot_paper_tests {
         use crate::io::paper_catalog::{resolve, Margins};
         use crate::io::plot_device::{PrinterCapabilities, PrinterMedia};
         let a3 = resolve("ISO_A3_(297.00_x_420.00_MM)").unwrap();
-        let media = PrinterMedia { paper: a3.clone(), margins: Margins::uniform(3.0), borderless: false };
-        let caps = std::sync::Arc::new(PrinterCapabilities { media: vec![media], default_paper: Some(a3) });
+        let media = PrinterMedia {
+            paper: a3.clone(),
+            margins: Margins::uniform(3.0),
+            borderless: false,
+        };
+        let caps = std::sync::Arc::new(PrinterCapabilities {
+            media: vec![media],
+            default_paper: Some(a3),
+        });
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer("OCS Test Printer".into()));
@@ -6640,14 +6743,24 @@ mod plot_paper_tests {
         let media = |caps| PlotDlgMsg::PrinterMedia("OCS Test Printer".into(), Some(caps));
         let _ = app.on_plot_dlg(media(caps.clone()));
         assert_eq!(app.plot_dialog.paper, "ISO_A4_(210.00_x_297.00_MM)");
-        let last = app.command_line.history.last().map(|line| line.text.clone());
-        assert!(last.as_deref().unwrap_or("").contains("PAPERUPDATE = 0"), "{last:?}");
+        let last = app
+            .command_line
+            .history
+            .last()
+            .map(|line| line.text.clone());
+        assert!(
+            last.as_deref().unwrap_or("").contains("PAPERUPDATE = 0"),
+            "{last:?}"
+        );
         // PAPERUPDATE 1: the printer's default sheet takes over, in the
         // dialog's orientation.
         let _ = app.run_command_line("PAPERUPDATE 1");
         let _ = app.on_plot_dlg(media(caps));
         assert_eq!(app.plot_dialog.paper, "ISO_A3_(297.00_x_420.00_MM)");
-        assert_eq!(super::plot_dialog_sheet_mm(&app.plot_dialog), (420.0, 297.0));
+        assert_eq!(
+            super::plot_dialog_sheet_mm(&app.plot_dialog),
+            (420.0, 297.0)
+        );
     }
 
     #[test]
@@ -6655,10 +6768,22 @@ mod plot_paper_tests {
         use crate::scene::Scene;
         assert_eq!(Scene::parse_scale_name_ratio("1:250"), Some((1.0, 250.0)));
         assert_eq!(Scene::parse_scale_name_ratio("2:1"), Some((2.0, 1.0)));
-        assert_eq!(Scene::parse_scale_name_ratio("1/8\" = 1'-0\""), Some((0.125, 12.0)));
-        assert_eq!(Scene::parse_scale_name_ratio("3/32\" = 1'-0\""), Some((0.09375, 12.0)));
-        assert_eq!(Scene::parse_scale_name_ratio("1'-0\" = 1'-0\""), Some((12.0, 12.0)));
-        assert_eq!(Scene::parse_scale_name_ratio("6\" = 1'-0\""), Some((6.0, 12.0)));
+        assert_eq!(
+            Scene::parse_scale_name_ratio("1/8\" = 1'-0\""),
+            Some((0.125, 12.0))
+        );
+        assert_eq!(
+            Scene::parse_scale_name_ratio("3/32\" = 1'-0\""),
+            Some((0.09375, 12.0))
+        );
+        assert_eq!(
+            Scene::parse_scale_name_ratio("1'-0\" = 1'-0\""),
+            Some((12.0, 12.0))
+        );
+        assert_eq!(
+            Scene::parse_scale_name_ratio("6\" = 1'-0\""),
+            Some((6.0, 12.0))
+        );
         assert_eq!(Scene::parse_scale_name_ratio("Fit"), None);
         assert_eq!(Scene::parse_scale_name_ratio("1:0"), None);
         assert_eq!(super::ratio_scale_name(0.004), "1:250");
@@ -6672,7 +6797,10 @@ mod plot_paper_tests {
         let _ = app.on_plot_dialog_open();
         assert_eq!(app.plot_dialog.paper, "ISO_A4_(210.00_x_297.00_MM)");
         assert_eq!(app.plot_dialog.orientation, "Landscape");
-        assert_eq!(super::plot_dialog_sheet_mm(&app.plot_dialog), (297.0, 210.0));
+        assert_eq!(
+            super::plot_dialog_sheet_mm(&app.plot_dialog),
+            (297.0, 210.0)
+        );
     }
 
     #[test]
@@ -6681,7 +6809,10 @@ mod plot_paper_tests {
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let (name, w, h) = layout_paper(&app);
-        assert_eq!(name, "A4", "the driver's own spelling must survive the dialog");
+        assert_eq!(
+            name, "A4",
+            "the driver's own spelling must survive the dialog"
+        );
         // …and so must the driver's landscape medium: unrotated, as stored.
         assert_eq!((w, h), (297.0, 210.0));
         assert_eq!(layout_rotation(&app), codec::objects::PlotRotation::None);
@@ -6692,12 +6823,18 @@ mod plot_paper_tests {
         let mut app = app_with_printer_named_sheet();
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
-        assert_eq!(super::plot_dialog_sheet_mm(&app.plot_dialog), (420.0, 297.0));
+        assert_eq!(
+            super::plot_dialog_sheet_mm(&app.plot_dialog),
+            (420.0, 297.0)
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let (name, w, h) = layout_paper(&app);
         assert_eq!(name, "ISO_A3_(297.00_x_420.00_MM)");
         assert_eq!((w, h), (297.0, 420.0));
-        assert_eq!(layout_rotation(&app), codec::objects::PlotRotation::Degrees90);
+        assert_eq!(
+            layout_rotation(&app),
+            codec::objects::PlotRotation::Degrees90
+        );
         // The next dialog remembers the sheet the user chose.
         assert_eq!(app.plot_paper.canonical, "ISO_A3_(297.00_x_420.00_MM)");
     }
@@ -6708,10 +6845,16 @@ mod plot_paper_tests {
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
-        let ps = app.tabs[app.active_tab].scene.plot_settings_for("Layout1").unwrap();
+        let ps = app.tabs[app.active_tab]
+            .scene
+            .plot_settings_for("Layout1")
+            .unwrap();
         assert_eq!(ps.printer_name, "DWG To PDF.pc3");
         // A changed device takes the PDF driver's printable area for the sheet.
-        assert_eq!(ps.margins, codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0));
+        assert_eq!(
+            ps.margins,
+            codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0)
+        );
     }
 
     #[test]
@@ -6722,7 +6865,10 @@ mod plot_paper_tests {
         ps.printer_name = "Save to PDF file…".into();
         assert!(app.tabs[i].scene.set_layout_plot_settings("Layout1", &ps));
         let _ = app.on_plot_dialog_open();
-        assert!(app.plot_dialog.to_file, "the legacy label still means PDF output");
+        assert!(
+            app.plot_dialog.to_file,
+            "the legacy label still means PDF output"
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
         assert_eq!(ps.printer_name, "DWG To PDF.pc3");
@@ -6738,11 +6884,17 @@ mod plot_paper_tests {
         ps.margins = codec::objects::PaperMargin::new(5.793749, 17.793753, 5.793744, 17.793747);
         assert!(app.tabs[i].scene.set_layout_plot_settings("Layout1", &ps));
         let _ = app.on_plot_dialog_open();
-        assert!(app.plot_dialog.to_file, "an unknown plotter plots to PDF here");
+        assert!(
+            app.plot_dialog.to_file,
+            "an unknown plotter plots to PDF here"
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let after = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
         assert_eq!(after.printer_name, "DWF6 ePlot.pc3");
-        assert_eq!(after.margins, ps.margins, "the source application's driver margins survive an unchanged setup");
+        assert_eq!(
+            after.margins, ps.margins,
+            "the source application's driver margins survive an unchanged setup"
+        );
     }
 
     #[test]
@@ -6755,15 +6907,23 @@ mod plot_paper_tests {
         ps.margins = codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0);
         assert!(app.tabs[i].scene.set_layout_plot_settings("Layout1", &ps));
         let _ = app.on_plot_dialog_open();
-        let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_full_bleed_A4_(210.00_x_297.00_MM)".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Paper(
+            "ISO_full_bleed_A4_(210.00_x_297.00_MM)".into(),
+        ));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
         assert_eq!(ps.paper_size, "ISO_full_bleed_A4_(210.00_x_297.00_MM)");
-        assert_eq!(ps.margins, codec::objects::PaperMargin::new(0.0, 1.0, 0.0, 1.0));
+        assert_eq!(
+            ps.margins,
+            codec::objects::PaperMargin::new(0.0, 1.0, 0.0, 1.0)
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::Paper("ISO_A3_(297.00_x_420.00_MM)".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let ps = app.tabs[i].scene.plot_settings_for("Layout1").unwrap();
-        assert_eq!(ps.margins, codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0));
+        assert_eq!(
+            ps.margins,
+            codec::objects::PaperMargin::new(5.0, 17.0, 6.0, 18.0)
+        );
         assert_eq!((ps.paper_width, ps.paper_height), (297.0, 420.0));
     }
 
@@ -6774,7 +6934,10 @@ mod plot_paper_tests {
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer("OCS Test Printer".into()));
         assert!(!app.plot_dialog.to_file);
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
-        let ps = app.tabs[app.active_tab].scene.plot_settings_for("Layout1").unwrap();
+        let ps = app.tabs[app.active_tab]
+            .scene
+            .plot_settings_for("Layout1")
+            .unwrap();
         assert_eq!(ps.printer_name, "OCS Test Printer");
         // Reopening resolves the stored name back to the same printer.
         let _ = app.on_plot_dialog_open();
@@ -6782,7 +6945,10 @@ mod plot_paper_tests {
         // A media answer for a printer that is no longer selected is ignored.
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
         let caps = std::sync::Arc::new(crate::io::plot_device::PrinterCapabilities::default());
-        let _ = app.on_plot_dlg(PlotDlgMsg::PrinterMedia("OCS Test Printer".into(), Some(caps)));
+        let _ = app.on_plot_dlg(PlotDlgMsg::PrinterMedia(
+            "OCS Test Printer".into(),
+            Some(caps),
+        ));
         assert!(app.plot_dialog.printer_media.is_none());
     }
 
@@ -6796,7 +6962,10 @@ mod plot_paper_tests {
         let _ = app.on_plot_dlg(custom(C::Open));
         // Seeded from the selected ISO A4 on the PDF driver, nameless.
         let draft = app.plot_dialog.custom_editor.clone().expect("editor open");
-        assert_eq!((draft.width.as_str(), draft.height.as_str()), ("210", "297"));
+        assert_eq!(
+            (draft.width.as_str(), draft.height.as_str()),
+            ("210", "297")
+        );
         assert_eq!(draft.margins, ["5", "17", "6", "18"]);
         assert!(draft.name.is_empty());
         let _ = app.on_plot_dlg(custom(C::Name("Roll 24".into())));
@@ -6805,19 +6974,41 @@ mod plot_paper_tests {
         let _ = app.on_plot_dlg(custom(C::Margin(MarginSide::Left, "3".into())));
         let _ = app.on_plot_dlg(custom(C::Margin(MarginSide::Top, "4".into())));
         let _ = app.on_plot_dlg(custom(C::Add));
-        assert!(app.plot_dialog.custom_editor.is_none(), "Add closes the editor");
+        assert!(
+            app.plot_dialog.custom_editor.is_none(),
+            "Add closes the editor"
+        );
         assert_eq!(app.plot_dialog.paper, "Roll_24_(609.60_x_1500.00_MM)");
-        assert_eq!(super::plot_dialog_sheet_mm(&app.plot_dialog), (1500.0, 609.6));
-        assert_eq!(app.current_config().plot.custom_papers.len(), 1, "persisted in the plot config");
+        assert_eq!(
+            super::plot_dialog_sheet_mm(&app.plot_dialog),
+            (1500.0, 609.6)
+        );
+        assert_eq!(
+            app.current_config().plot.custom_papers.len(),
+            1,
+            "persisted in the plot config"
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
-        let ps = app.tabs[app.active_tab].scene.plot_settings_for("Layout1").unwrap();
+        let ps = app.tabs[app.active_tab]
+            .scene
+            .plot_settings_for("Layout1")
+            .unwrap();
         assert_eq!(ps.paper_size, "Roll_24_(609.60_x_1500.00_MM)");
         assert_eq!((ps.paper_width, ps.paper_height), (609.6, 1500.0));
         assert_eq!(ps.rotation, codec::objects::PlotRotation::Degrees90);
-        assert_eq!(ps.margins, codec::objects::PaperMargin::new(3.0, 17.0, 6.0, 4.0));
+        assert_eq!(
+            ps.margins,
+            codec::objects::PaperMargin::new(3.0, 17.0, 6.0, 4.0)
+        );
         // Re-adding the same size replaces the definition instead of duplicating it.
         let _ = app.on_plot_dlg(custom(C::Open));
-        assert_eq!(app.plot_dialog.custom_editor.as_ref().map(|d| d.name.as_str()), Some("Roll 24"));
+        assert_eq!(
+            app.plot_dialog
+                .custom_editor
+                .as_ref()
+                .map(|d| d.name.as_str()),
+            Some("Roll 24")
+        );
         let _ = app.on_plot_dlg(custom(C::Margin(MarginSide::Left, "9".into())));
         let _ = app.on_plot_dlg(custom(C::Add));
         assert_eq!(app.plot_dialog.custom_papers.len(), 1);
@@ -6836,12 +7027,22 @@ mod plot_paper_tests {
         let _ = app.on_plot_dlg(PlotDlgMsg::CustomPaper(C::Open));
         let _ = app.on_plot_dlg(PlotDlgMsg::CustomPaper(C::Width("-5".into())));
         let _ = app.on_plot_dlg(PlotDlgMsg::CustomPaper(C::Add));
-        let draft = app.plot_dialog.custom_editor.as_ref().expect("editor stays open");
+        let draft = app
+            .plot_dialog
+            .custom_editor
+            .as_ref()
+            .expect("editor stays open");
         assert_eq!(draft.error, Some(CustomPaperError::Size));
         assert!(app.plot_dialog.custom_papers.is_empty());
         // Typing again clears the message.
         let _ = app.on_plot_dlg(PlotDlgMsg::CustomPaper(C::Width("500".into())));
-        assert!(app.plot_dialog.custom_editor.as_ref().unwrap().error.is_none());
+        assert!(app
+            .plot_dialog
+            .custom_editor
+            .as_ref()
+            .unwrap()
+            .error
+            .is_none());
         let _ = app.on_plot_dlg(PlotDlgMsg::CustomPaper(C::Cancel));
         assert!(app.plot_dialog.custom_editor.is_none());
     }
@@ -6860,7 +7061,11 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         let _ = app.on_plot_dialog_open();
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer("OCS Test Printer".into()));
         let _ = app.on_plot_dlg(PlotDlgMsg::PrinterProperties);
-        let draft = app.plot_dialog.printer_editor.as_ref().expect("editor opens");
+        let draft = app
+            .plot_dialog
+            .printer_editor
+            .as_ref()
+            .expect("editor opens");
         assert_eq!(draft.printer, "OCS Test Printer");
         assert!(draft.options.is_none(), "options load in the background");
         // An answer for another printer is ignored; the right one fills the editor.
@@ -6868,7 +7073,13 @@ cupsPrintQuality/Print Quality: *Normal High\n";
             "Other".into(),
             Ok(parse_lpoptions(LPOPTIONS)),
         ));
-        assert!(app.plot_dialog.printer_editor.as_ref().unwrap().options.is_none());
+        assert!(app
+            .plot_dialog
+            .printer_editor
+            .as_ref()
+            .unwrap()
+            .options
+            .is_none());
         let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionsLoaded(
             "OCS Test Printer".into(),
             Ok(parse_lpoptions(LPOPTIONS)),
@@ -6877,10 +7088,19 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         assert_eq!(draft.options.as_ref().map(|o| o.len()), Some(3));
         assert_eq!(draft.choices["ColorModel"], "RGB");
         assert!(draft.overrides().is_empty(), "defaults are not overrides");
-        let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionSet("ColorModel".into(), "Gray".into()));
-        let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionSet("cupsPrintQuality".into(), "High".into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionSet(
+            "ColorModel".into(),
+            "Gray".into(),
+        ));
+        let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionSet(
+            "cupsPrintQuality".into(),
+            "High".into(),
+        ));
         let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionsApply);
-        assert!(app.plot_dialog.printer_editor.is_none(), "Apply closes the editor");
+        assert!(
+            app.plot_dialog.printer_editor.is_none(),
+            "Apply closes the editor"
+        );
         let remembered = &app.plot_dialog.driver_options["OCS Test Printer"];
         assert_eq!(remembered.len(), 2);
         assert_eq!(remembered["ColorModel"], "Gray");
@@ -6888,12 +7108,18 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         let opts = app.plot_print_options(&app.plot_dialog);
         assert_eq!(
             opts.driver_options,
-            vec![("ColorModel".to_string(), "Gray".to_string()), ("cupsPrintQuality".to_string(), "High".to_string())]
+            vec![
+                ("ColorModel".to_string(), "Gray".to_string()),
+                ("cupsPrintQuality".to_string(), "High".to_string())
+            ]
         );
         // …they survive in the config, and another printer gets none of them.
         assert_eq!(app.current_config().plot.driver_options.len(), 1);
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer("Another".into()));
-        assert!(app.plot_print_options(&app.plot_dialog).driver_options.is_empty());
+        assert!(app
+            .plot_print_options(&app.plot_dialog)
+            .driver_options
+            .is_empty());
         // Reopening the editor starts from the remembered choices; Reset then
         // Apply forgets them.
         let _ = app.on_plot_dlg(PlotDlgMsg::Printer("OCS Test Printer".into()));
@@ -6902,17 +7128,32 @@ cupsPrintQuality/Print Quality: *Normal High\n";
             "OCS Test Printer".into(),
             Ok(parse_lpoptions(LPOPTIONS)),
         ));
-        assert_eq!(app.plot_dialog.printer_editor.as_ref().unwrap().choices["ColorModel"], "Gray");
+        assert_eq!(
+            app.plot_dialog.printer_editor.as_ref().unwrap().choices["ColorModel"],
+            "Gray"
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionsReset);
         let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionsApply);
-        assert!(app.plot_dialog.driver_options.get("OCS Test Printer").is_none());
+        assert!(app
+            .plot_dialog
+            .driver_options
+            .get("OCS Test Printer")
+            .is_none());
         // A failed listing is reported inside the editor, not lost.
         let _ = app.on_plot_dlg(PlotDlgMsg::PrinterProperties);
         let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionsLoaded(
             "OCS Test Printer".into(),
             Err("no cups".into()),
         ));
-        assert_eq!(app.plot_dialog.printer_editor.as_ref().unwrap().error.as_deref(), Some("no cups"));
+        assert_eq!(
+            app.plot_dialog
+                .printer_editor
+                .as_ref()
+                .unwrap()
+                .error
+                .as_deref(),
+            Some("no cups")
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::PrinterOptionsCancel);
         assert!(app.plot_dialog.printer_editor.is_none());
     }
@@ -6928,7 +7169,10 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         assert!(app.tabs[i].scene.set_layout_plot_settings("Layout1", &ps));
         let _ = app.on_plot_dialog_open();
         assert_eq!(app.plot_dialog.paper, "Roll_24_(609.60_x_1500.00_MM)");
-        assert_eq!(super::plot_dialog_sheet_mm(&app.plot_dialog), (1500.0, 609.6));
+        assert_eq!(
+            super::plot_dialog_sheet_mm(&app.plot_dialog),
+            (1500.0, 609.6)
+        );
         let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
         let (name, w, h) = layout_paper(&app);
         assert_eq!(name, "Roll_24_(609.60_x_1500.00_MM)");
@@ -6994,10 +7238,7 @@ mod plot_device_persistence_tests {
         // old page setup and erase those choices.
         let _ = app.on_plot_dialog_open();
 
-        assert_eq!(
-            app.plot_dialog.paper,
-            "ISO_A3_(297.00_x_420.00_MM)"
-        );
+        assert_eq!(app.plot_dialog.paper, "ISO_A3_(297.00_x_420.00_MM)");
         assert_eq!(app.plot_dialog.scale, "1:100");
         assert!(!app.plot_dialog.fit_to_paper);
         assert_eq!(app.plot_dialog.style_name, "office.ctb");
@@ -7022,25 +7263,18 @@ mod plot_device_persistence_tests {
         ps.paper_size = "ISO_A2_(420.00_x_594.00_MM)".into();
         ps.paper_width = 420.0;
         ps.paper_height = 594.0;
-        ps.current_style_sheet =
-            crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        ps.current_style_sheet = crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
         ps.flags.plot_plot_styles = true;
 
-        assert!(
-            app.tabs[i]
-                .scene
-                .set_layout_plot_settings("Layout1", &ps)
-        );
+        assert!(app.tabs[i].scene.set_layout_plot_settings("Layout1", &ps));
 
         // Reproduce stale state inherited from the startup/previous drawing.
-        app.plot_dialog.paper =
-            "ISO_A4_(210.00_x_297.00_MM)".into();
+        app.plot_dialog.paper = "ISO_A4_(210.00_x_297.00_MM)".into();
         app.plot_dialog.style_name.clear();
         app.plot_dialog.apply_plot_styles = false;
 
         app.plot_prev = Some(app.plot_dialog.clone());
-        app.plot_prev_context =
-            Some((i, "Layout1".into()));
+        app.plot_prev_context = Some((i, "Layout1".into()));
 
         // Installing another drawing must make that state unusable.
         app.reset_plot_session_for_opened_document();
@@ -7051,17 +7285,14 @@ mod plot_device_persistence_tests {
         let _ = app.on_plot_dialog_open();
 
         assert_eq!(
-            app.plot_dialog.paper,
-            "ISO_A2_(420.00_x_594.00_MM)",
+            app.plot_dialog.paper, "ISO_A2_(420.00_x_594.00_MM)",
             "the first Plot opening must use the new drawing's paper"
         );
 
         assert!(
             app.plot_dialog
                 .style_name
-                .eq_ignore_ascii_case(
-                    crate::io::plot_style::MONOCHROME_PLOT_STYLE
-                ),
+                .eq_ignore_ascii_case(crate::io::plot_style::MONOCHROME_PLOT_STYLE),
             "the first Plot opening must use the new drawing's CTB"
         );
 
@@ -7079,13 +7310,11 @@ mod plot_device_persistence_tests {
         let mut app = OpenCADStudio::new_for_test();
 
         // Simulate preferences restored from the previous application session.
-        app.plot_dialog.paper =
-            "ISO_A2_(420.00_x_594.00_MM)".into();
+        app.plot_dialog.paper = "ISO_A2_(420.00_x_594.00_MM)".into();
         app.plot_dialog.paper_width_mm = 420.0;
         app.plot_dialog.paper_height_mm = 594.0;
         app.plot_dialog.scale = "1:1000".into();
-        app.plot_dialog.style_name =
-            crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        app.plot_dialog.style_name = crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
         app.plot_dialog.apply_plot_styles = true;
 
         // Fresh process: no explicit Print All override exists yet.
@@ -7094,23 +7323,19 @@ mod plot_device_persistence_tests {
         let _ = app.on_print_all_options();
 
         assert_eq!(
-            app.plot_dialog.paper,
-            "ISO_A2_(420.00_x_594.00_MM)",
+            app.plot_dialog.paper, "ISO_A2_(420.00_x_594.00_MM)",
             "first Print All Options opening must keep the persisted paper"
         );
 
         assert_eq!(
-            app.plot_dialog.scale,
-            "1:1000",
+            app.plot_dialog.scale, "1:1000",
             "first Print All Options opening must keep the persisted scale"
         );
 
         assert!(
             app.plot_dialog
                 .style_name
-                .eq_ignore_ascii_case(
-                    crate::io::plot_style::MONOCHROME_PLOT_STYLE
-                ),
+                .eq_ignore_ascii_case(crate::io::plot_style::MONOCHROME_PLOT_STYLE),
             "first Print All Options opening must keep the persisted CTB"
         );
 
@@ -7148,64 +7373,46 @@ mod plot_device_persistence_tests {
         stored.current_style_sheet.clear();
         stored.flags.plot_plot_styles = false;
 
-        assert!(
-            app.tabs[i]
-                .scene
-                .set_layout_plot_settings("Layout1", &stored)
-        );
+        assert!(app.tabs[i]
+            .scene
+            .set_layout_plot_settings("Layout1", &stored));
 
         // `<previous>` is the desired state that originally belonged to
         // Layout1.
         app.print_all_options = true;
         app.plot_prev_context = Some((i, "Layout1".into()));
-        app.plot_dialog.selected_setup =
-            crate::ui::window::plot::SETUP_PREV.into();
+        app.plot_dialog.selected_setup = crate::ui::window::plot::SETUP_PREV.into();
 
-        app.plot_dialog.paper =
-            "ISO_A2_(420.00_x_594.00_MM)".into();
+        app.plot_dialog.paper = "ISO_A2_(420.00_x_594.00_MM)".into();
         app.plot_dialog.paper_width_mm = 420.0;
         app.plot_dialog.paper_height_mm = 594.0;
-        app.plot_dialog.style_name =
-            crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        app.plot_dialog.style_name = crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
         app.plot_dialog.apply_plot_styles = true;
         app.plot_dialog.save_to_layout = true;
 
-        let _ = app.on_plot_dlg(
-            crate::ui::window::plot::PlotDlgMsg::SelectSetup(
-                "*Layout1*".into(),
-            ),
-        );
+        let _ = app.on_plot_dlg(crate::ui::window::plot::PlotDlgMsg::SelectSetup(
+            "*Layout1*".into(),
+        ));
 
         let saved = app.tabs[i]
             .scene
             .plot_settings_for("Layout1")
             .expect("Layout1 must still exist");
 
-        assert_eq!(
-            saved.paper_size,
-            "ISO_A2_(420.00_x_594.00_MM)"
-        );
+        assert_eq!(saved.paper_size, "ISO_A2_(420.00_x_594.00_MM)");
 
-        assert!(
-            saved.current_style_sheet.eq_ignore_ascii_case(
-                crate::io::plot_style::MONOCHROME_PLOT_STYLE
-            )
-        );
+        assert!(saved
+            .current_style_sheet
+            .eq_ignore_ascii_case(crate::io::plot_style::MONOCHROME_PLOT_STYLE));
 
         assert!(saved.flags.plot_plot_styles);
 
-        assert_eq!(
-            app.plot_dialog.paper,
-            "ISO_A2_(420.00_x_594.00_MM)"
-        );
+        assert_eq!(app.plot_dialog.paper, "ISO_A2_(420.00_x_594.00_MM)");
 
-        assert!(
-            app.plot_dialog
-                .style_name
-                .eq_ignore_ascii_case(
-                    crate::io::plot_style::MONOCHROME_PLOT_STYLE
-                )
-        );
+        assert!(app
+            .plot_dialog
+            .style_name
+            .eq_ignore_ascii_case(crate::io::plot_style::MONOCHROME_PLOT_STYLE));
     }
 
     /// A CTB selected in the dialog must be usable even when the parsed
@@ -7216,8 +7423,7 @@ mod plot_device_persistence_tests {
     fn selected_ctb_is_resolved_when_active_table_is_stale() {
         let mut app = OpenCADStudio::new_for_test();
 
-        app.plot_dialog.style_name =
-            crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
+        app.plot_dialog.style_name = crate::io::plot_style::MONOCHROME_PLOT_STYLE.into();
         app.plot_dialog.apply_plot_styles = true;
         app.plot_dialog.style_missing = false;
 
@@ -7232,9 +7438,7 @@ mod plot_device_persistence_tests {
         assert!(
             table
                 .name
-                .eq_ignore_ascii_case(
-                    crate::io::plot_style::MONOCHROME_PLOT_STYLE
-                ),
+                .eq_ignore_ascii_case(crate::io::plot_style::MONOCHROME_PLOT_STYLE),
             "the table used for plotting must match the visible CTB selection"
         );
     }
@@ -7245,15 +7449,10 @@ mod plot_device_persistence_tests {
     #[test]
     fn opening_plot_does_not_replace_sheet_when_printer_media_arrives() {
         use crate::io::paper_catalog::{resolve, Margins};
-        use crate::io::plot_device::{
-            PrinterCapabilities,
-            PrinterMedia,
-        };
+        use crate::io::plot_device::{PrinterCapabilities, PrinterMedia};
 
-        let a2 =
-            resolve("ISO_A2_(420.00_x_594.00_MM)").expect("A2");
-        let a4 =
-            resolve("ISO_A4_(210.00_x_297.00_MM)").expect("A4");
+        let a2 = resolve("ISO_A2_(420.00_x_594.00_MM)").expect("A2");
+        let a4 = resolve("ISO_A4_(210.00_x_297.00_MM)").expect("A4");
 
         let caps = std::sync::Arc::new(PrinterCapabilities {
             media: vec![PrinterMedia {
@@ -7266,8 +7465,7 @@ mod plot_device_persistence_tests {
 
         let mut app = OpenCADStudio::new_for_test();
         app.plot_dialog.to_file = false;
-        app.plot_dialog.printer =
-            Some("OCS Test Printer".into());
+        app.plot_dialog.printer = Some("OCS Test Printer".into());
         app.plot_dialog.paper = a2.canonical.to_string();
         app.plot_dialog.paper_update = 1;
 
@@ -7281,8 +7479,7 @@ mod plot_device_persistence_tests {
         ));
 
         assert_eq!(
-            app.plot_dialog.paper,
-            a2.canonical,
+            app.plot_dialog.paper, a2.canonical,
             "opening Plot must preserve the drawing's stored sheet"
         );
     }
@@ -7359,8 +7556,11 @@ mod background_task_tests {
 
     #[test]
     fn worker_panic_becomes_a_failure_message() {
-        let task =
-            background_task("STL export", || panic!("worker exploded"), |()| Message::Noop);
+        let task = background_task(
+            "STL export",
+            || panic!("worker exploded"),
+            |()| Message::Noop,
+        );
         match next_message(task) {
             Message::BackgroundTaskFailed { context, detail } => {
                 assert_eq!(context, "STL export");
@@ -7376,8 +7576,11 @@ mod background_task_tests {
     #[test]
     fn worker_panic_is_reported_on_the_command_line() {
         let mut app = OpenCADStudio::new_for_test();
-        let task =
-            background_task("STL export", || panic!("worker exploded"), |()| Message::Noop);
+        let task = background_task(
+            "STL export",
+            || panic!("worker exploded"),
+            |()| Message::Noop,
+        );
         app.drive_headless_task(task)
             .expect("failed worker task drives headlessly");
         let error = app

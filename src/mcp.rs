@@ -3,10 +3,12 @@
 //! `OpenCADStudio --mcp` speaks MCP over stdio. All drawing work is forwarded
 //! to the authenticated GUI control bridge; this module contains no geometry.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+#[cfg(any(windows, target_os = "macos"))]
+use std::collections::HashSet;
 use std::{
     collections::{HashMap, VecDeque},
     fs::{File, OpenOptions},
@@ -18,8 +20,6 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime},
 };
-#[cfg(any(windows, target_os = "macos"))]
-use std::collections::HashSet;
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
 const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
@@ -536,7 +536,8 @@ impl ResourceStore {
 
     fn insert_pyramid_manifest(&mut self, session_id: &str, manifest: Value) -> String {
         let uri = format!("cad://session/{session_id}/pyramid/manifest.json");
-        self.pyramid_manifests.insert(session_id.to_string(), manifest);
+        self.pyramid_manifests
+            .insert(session_id.to_string(), manifest);
         uri
     }
 
@@ -728,7 +729,11 @@ impl CallError {
     }
 }
 
-fn exchange(descriptor: &Descriptor, request: Value, timeout: Duration) -> Result<Value, CallError> {
+fn exchange(
+    descriptor: &Descriptor,
+    request: Value,
+    timeout: Duration,
+) -> Result<Value, CallError> {
     let mut object = request
         .as_object()
         .cloned()
@@ -739,8 +744,7 @@ fn exchange(descriptor: &Descriptor, request: Value, timeout: Duration) -> Resul
         Value::String(descriptor.session_id.clone()),
     );
     object.insert("protocol".into(), Value::from(1));
-    let mut wire = serde_json::to_vec(&Value::Object(object))
-        .map_err(CallError::infra)?;
+    let mut wire = serde_json::to_vec(&Value::Object(object)).map_err(CallError::infra)?;
     wire.push(b'\n');
     if wire.len() > MAX_REQUEST {
         // Caller-caused (batch too big): model-actionable, stays Tool.
@@ -821,16 +825,10 @@ fn descriptors() -> Result<Vec<(Descriptor, Value)>, String> {
                 {
                     match &live_pids {
                         None => false,
-                        Some(set) => {
-                            stale_snapshot_may_delete(!set.contains(&pid), file_age)
-                        }
+                        Some(set) => stale_snapshot_may_delete(!set.contains(&pid), file_age),
                     }
                 }
-                #[cfg(not(any(
-                    target_os = "linux",
-                    windows,
-                    target_os = "macos"
-                )))]
+                #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
                 {
                     let _ = pid;
                     false
@@ -894,10 +892,7 @@ fn write_startup_lock_at(directory: &Path, pid: u64, started: u64) -> Result<(),
 fn read_startup_lock_at(directory: &Path) -> Option<(u64, u64)> {
     let text = std::fs::read_to_string(startup_lock_path_for(directory)).ok()?;
     let value: Value = serde_json::from_str(&text).ok()?;
-    Some((
-        value.get("pid")?.as_u64()?,
-        value.get("started")?.as_u64()?,
-    ))
+    Some((value.get("pid")?.as_u64()?, value.get("started")?.as_u64()?))
 }
 
 fn claim_pid_alive(pid: u64) -> bool {
@@ -950,8 +945,8 @@ fn start_gui() -> Result<Child, String> {
 }
 
 fn automation_dir() -> Result<PathBuf, String> {
-    let base = crate::config::config_dir()
-        .ok_or_else(|| "No user configuration directory".to_string())?;
+    let base =
+        crate::config::config_dir().ok_or_else(|| "No user configuration directory".to_string())?;
     Ok(base.join("automation"))
 }
 
@@ -1100,7 +1095,17 @@ impl GuiClient {
                 );
             }
             insert_default(&mut object, "revision", self.state["revision"].clone());
-            if ["input", "property", "run", "action", "save", "save_verified", "undo", "redo"].contains(&op.as_str())
+            if [
+                "input",
+                "property",
+                "run",
+                "action",
+                "save",
+                "save_verified",
+                "undo",
+                "redo",
+            ]
+            .contains(&op.as_str())
             {
                 insert_default(&mut object, "selection", self.state["selection"].clone());
             }
@@ -1121,7 +1126,10 @@ impl GuiClient {
             Value::Object(object),
             Duration::from_secs(15),
         )?;
-        let gui_id = request_id.as_ref().and_then(Value::as_str).map(str::to_string);
+        let gui_id = request_id
+            .as_ref()
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let mkey = mcp_id.map(mcp_key);
         // Track the GUI op while it stays pending so an idle-arriving
         // cancel can find and dismiss it. Terminal outcomes remove the
@@ -1622,8 +1630,7 @@ fn read_resource(
                 let manifest = crate::app::control::vision::compute_pyramid_manifest(
                     session_id, &unit, bounds, 4, 512,
                 );
-                let manifest_val =
-                    serde_json::to_value(&manifest).map_err(|e| e.to_string())?;
+                let manifest_val = serde_json::to_value(&manifest).map_err(|e| e.to_string())?;
                 resources.insert_pyramid_manifest(session_id, manifest_val.clone());
                 let text = serde_json::to_string_pretty(&manifest_val)
                     .unwrap_or_else(|_| manifest_val.to_string());
@@ -1695,7 +1702,10 @@ fn read_resource(
                             }
                         }
                         let tile_bounds = crate::app::control::vision::compute_tile_bounds(
-                            base_bounds, level, x, y,
+                            base_bounds,
+                            level,
+                            x,
+                            y,
                         )?;
                         let path = std::env::temp_dir()
                             .join(format!("ocs-tile-{session_id}-{level}-{x}-{y}.png"));
@@ -1712,14 +1722,13 @@ fn read_resource(
                         if result["ok"].as_bool() != Some(true)
                             || result["status"].as_str() != Some("completed")
                         {
-                return Err(result.to_string().into());
+                            return Err(result.to_string().into());
                         }
                         let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
                         let _ = std::fs::remove_file(path);
                         let b64 = BASE64.encode(&bytes);
                         let bytes_len = bytes.len();
-                        let mut meta =
-                            result.get("result").cloned().unwrap_or_else(|| json!({}));
+                        let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
                         if let Some(obj) = meta.as_object_mut() {
                             obj.remove("path");
                             obj.insert(
@@ -1775,8 +1784,7 @@ fn read_resource(
                     "scope": "viewport",
                     "max_dimension": 1600,
                 });
-                let result = client(clients, session_id)?
-                    .request(req, 15.0, pump, mcp_id)?;
+                let result = client(clients, session_id)?.request(req, 15.0, pump, mcp_id)?;
                 if result["ok"].as_bool() != Some(true)
                     || result["status"].as_str() != Some("completed")
                 {
@@ -2020,8 +2028,7 @@ fn call_tool(
             if let Some(annotate) = arguments.get("annotate").and_then(Value::as_bool) {
                 req["annotate"] = json!(annotate);
             }
-            let result = client(clients, session_id)?
-                .request(req, 30.0, pump, mcp_id)?;
+            let result = client(clients, session_id)?.request(req, 30.0, pump, mcp_id)?;
             if result["ok"].as_bool() != Some(true)
                 || result["status"].as_str() != Some("completed")
             {
@@ -2060,7 +2067,11 @@ fn call_tool(
                 }
 
                 if let Some((prev_img, prev_hash)) = resources.last_captures.get(session_id) {
-                    let diff_res = crate::app::control::vision::compute_visual_diff(prev_img, &current_img, &p2w);
+                    let diff_res = crate::app::control::vision::compute_visual_diff(
+                        prev_img,
+                        &current_img,
+                        &p2w,
+                    );
                     let diff_info = json!({
                         "is_baseline": false,
                         "baseline_hash": prev_hash,
@@ -2080,11 +2091,14 @@ fn call_tool(
                         match diff_mode {
                             "crop" => {
                                 if let Some(crop) = &diff_res.cropped_patch {
-                                    final_bytes = crate::app::control::vision::encode_image_png(crop)?;
+                                    final_bytes =
+                                        crate::app::control::vision::encode_image_png(crop)?;
                                 }
                             }
                             "highlight" => {
-                                final_bytes = crate::app::control::vision::encode_image_png(&diff_res.diff_overlay)?;
+                                final_bytes = crate::app::control::vision::encode_image_png(
+                                    &diff_res.diff_overlay,
+                                )?;
                             }
                             _ => {}
                         }
@@ -2107,7 +2121,9 @@ fn call_tool(
                 let full_png = crate::app::control::vision::encode_image_png(&current_img)?;
                 base_hasher.update(&full_png);
                 let current_full_hash = format!("{:x}", base_hasher.finalize());
-                resources.last_captures.insert(session_id.to_string(), (current_img, current_full_hash));
+                resources
+                    .last_captures
+                    .insert(session_id.to_string(), (current_img, current_full_hash));
             }
 
             let mut hasher = Sha256::new();
@@ -2119,7 +2135,10 @@ fn call_tool(
             let uri = resources.insert(session_id, &hash, b64.clone(), bytes_len, meta.clone());
             if let Some(obj) = meta.as_object_mut() {
                 obj.insert("uri".into(), Value::String(uri.clone()));
-                obj.insert("latest_uri".into(), Value::String(format!("cad://session/{session_id}/snapshot/latest.png")));
+                obj.insert(
+                    "latest_uri".into(),
+                    Value::String(format!("cad://session/{session_id}/snapshot/latest.png")),
+                );
                 obj.insert("hash".into(), Value::String(hash.clone()));
                 obj.insert("bytes".into(), Value::from(bytes_len));
             }
@@ -2409,9 +2428,7 @@ fn bridge_identity() -> Value {
 /// through untouched; an existing `bridge` key (GUI-provided) is kept.
 fn with_bridge_identity(mut value: Value) -> Value {
     if let Some(object) = value.as_object_mut() {
-        object
-            .entry("bridge")
-            .or_insert_with(bridge_identity);
+        object.entry("bridge").or_insert_with(bridge_identity);
     }
     value
 }
@@ -2558,7 +2575,11 @@ fn handle_message(
     // not hang waiting for a response that will never come. Id-less
     // *objects* stay silent (notifications).
     if !message.is_object() {
-        return Some(rpc_error(Value::Null, -32600, "Invalid request: expected a JSON-RPC object"));
+        return Some(rpc_error(
+            Value::Null,
+            -32600,
+            "Invalid request: expected a JSON-RPC object",
+        ));
     }
     let id = message.get("id").cloned();
     let method = message.get("method").and_then(Value::as_str)?;
@@ -2652,7 +2673,9 @@ fn handle_message(
                 return Some(rpc_error(id, -32602, "Missing resource uri"));
             };
             match read_resource(uri, clients, resources, pump, Some(&id)) {
-                Ok(contents) => response(id, protocol_result(contents, modern, Some(RESOURCE_TTL_MS))),
+                Ok(contents) => {
+                    response(id, protocol_result(contents, modern, Some(RESOURCE_TTL_MS)))
+                }
                 // -32002 was THE not-found code in 2025-11-25 and earlier;
                 // 2026-07-28 says MUST NOT emit it, so modern gets -32602.
                 Err(err) => rpc_error(id, if modern { -32602 } else { -32002 }, err),
@@ -2681,7 +2704,11 @@ fn handle_message(
         ),
         "tools/list" => response(
             id,
-            protocol_result(json!({"tools":tool_definitions()}), modern, Some(CACHE_TTL_MS)),
+            protocol_result(
+                json!({"tools":tool_definitions()}),
+                modern,
+                Some(CACHE_TTL_MS),
+            ),
         ),
         "tools/call" => {
             let Some(name) = params["name"].as_str() else {
@@ -2757,7 +2784,10 @@ fn handle_message(
             let Some(task) = tasks.get_mut(task_id) else {
                 return Some(rpc_error(id, -32602, "Unknown or expired taskId"));
             };
-            response(id, protocol_result(poll_task(task, clients, resources, pump), true, None))
+            response(
+                id,
+                protocol_result(poll_task(task, clients, resources, pump), true, None),
+            )
         }
         "tasks/update" if modern && supports_tasks(&params) => {
             let Some(task_id) = params["taskId"].as_str() else {
@@ -2837,10 +2867,7 @@ pub fn sync_agent_tool_schemas() -> bool {
 /// dismiss it now, so the next poll answers `cancelled`. Unknown ids are
 /// ignored (spec: fire-and-forget, races expected).
 fn idle_cancel(clients: &mut HashMap<String, GuiClient>, params: &Value) {
-    let Some(key) = params
-        .get("requestId")
-        .map(|id| id.to_string())
-    else {
+    let Some(key) = params.get("requestId").map(|id| id.to_string()) else {
         return;
     };
     for gui in clients.values_mut() {
@@ -2874,10 +2901,9 @@ pub fn run() {
     let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
     let stdin = io::stdin();
     thread::spawn(move || {
-        for line in crate::io::line_read::lines_capped(
-            stdin.lock(),
-            crate::io::line_read::MAX_LINE_BYTES,
-        ) {
+        for line in
+            crate::io::line_read::lines_capped(stdin.lock(), crate::io::line_read::MAX_LINE_BYTES)
+        {
             if tx.send(line.map_err(|error| error.to_string())).is_err() {
                 break;
             }
@@ -2907,13 +2933,7 @@ pub fn run() {
                         idle_cancel(&mut clients, &message["params"]);
                         None
                     } else {
-                        handle_message(
-                            message,
-                            &mut clients,
-                            &mut tasks,
-                            &mut resources,
-                            &mut pump,
-                        )
+                        handle_message(message, &mut clients, &mut tasks, &mut resources, &mut pump)
                     }
                 }
                 Err(error) => Some(rpc_error(Value::Null, -32700, error)),
@@ -2972,17 +2992,13 @@ mod tests {
         );
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], false);
         for tool in [&tools[1], &tools[2], &tools[3]] {
-            assert!(
-                tool["inputSchema"]["properties"]
-                    .get("session_id")
-                    .is_none()
-            );
-            assert!(
-                tool["inputSchema"]["required"]
-                    .as_array()
-                    .unwrap()
-                    .contains(&json!("ocs_session_id"))
-            );
+            assert!(tool["inputSchema"]["properties"]
+                .get("session_id")
+                .is_none());
+            assert!(tool["inputSchema"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("ocs_session_id")));
         }
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["request"]["required"],
@@ -3028,13 +3044,10 @@ mod tests {
         assert!(EXECUTE_OPS.contains(&"text_replace"));
         assert!(BATCH_STEP_OPS.contains(&"text_replace"));
         let save_var = find_variant("save_verified");
+        assert_eq!(save_var["properties"]["target_version"]["enum"][0], "R14");
         assert_eq!(
-            save_var["properties"]["target_version"]["enum"][0],
-            "R14"
-        );
-        assert_eq!(
-            tools[1]["inputSchema"]["properties"]["parameters"]["properties"]["where"]["items"]["properties"]
-                ["op"]["enum"],
+            tools[1]["inputSchema"]["properties"]["parameters"]["properties"]["where"]["items"]
+                ["properties"]["op"]["enum"],
             json!([
                 "eq",
                 "ne",
@@ -3076,12 +3089,10 @@ mod tests {
             initialized["result"]["capabilities"]["resources"]["subscribe"],
             false
         );
-        assert!(
-            initialized["result"]["instructions"]
-                .as_str()
-                .unwrap()
-                .contains("geometry kernel")
-        );
+        assert!(initialized["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("geometry kernel"));
 
         let listed = handle_message(
             json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
@@ -3116,10 +3127,9 @@ mod tests {
         assert_eq!(discovered["result"]["cacheScope"], "public");
         assert_eq!(discovered["result"]["supportedVersions"][0], "2026-07-28");
         assert!(discovered["result"]["capabilities"]["resources"].is_object());
-        assert!(
-            discovered["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/tasks"]
-                .is_object()
-        );
+        assert!(discovered["result"]["capabilities"]["extensions"]
+            ["io.modelcontextprotocol/tasks"]
+            .is_object());
         assert_eq!(
             discovered["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
             "OpenCADStudio"
@@ -3366,14 +3376,12 @@ mod tests {
             )
             .unwrap();
             let templates = listed["result"]["resourceTemplates"].as_array().unwrap();
-            assert!(templates.iter().any(|t| t["uriTemplate"]
-                .as_str()
-                .unwrap()
-                .contains("{level}")));
-            assert!(templates.iter().any(|t| t["uriTemplate"]
-                .as_str()
-                .unwrap()
-                .contains("{hash}")));
+            assert!(templates
+                .iter()
+                .any(|t| t["uriTemplate"].as_str().unwrap().contains("{level}")));
+            assert!(templates
+                .iter()
+                .any(|t| t["uriTemplate"].as_str().unwrap().contains("{hash}")));
             assert_eq!(listed["result"]["ttlMs"], RESOURCE_TTL_MS);
             assert_eq!(listed["result"]["cacheScope"], "public");
         }
@@ -3389,8 +3397,13 @@ mod tests {
             let annotations = tool["annotations"].as_object().unwrap();
             for key in annotations.keys() {
                 assert!(
-                    ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]
-                        .contains(&key.as_str()),
+                    [
+                        "readOnlyHint",
+                        "destructiveHint",
+                        "idempotentHint",
+                        "openWorldHint"
+                    ]
+                    .contains(&key.as_str()),
                     "unexpected annotation key: {key}"
                 );
             }
@@ -3478,8 +3491,7 @@ mod tests {
     fn task_envelope_errors_use_public_codes() {
         // The legacy -32000 range is grandfathered, not for new use.
         let mut task = stub_task("t-fail");
-        task.arguments =
-            json!({"ocs_session_id":"00000000","op":"state","wait_seconds":0});
+        task.arguments = json!({"ocs_session_id":"00000000","op":"state","wait_seconds":0});
         let failed = poll_task(
             &mut task,
             &mut HashMap::new(),
@@ -3524,12 +3536,10 @@ mod tests {
             .unwrap();
         let prop = &capture["inputSchema"]["properties"]["request_id"];
         assert_eq!(prop["type"], "string");
-        assert!(
-            !capture["inputSchema"]["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("request_id"))
-        );
+        assert!(!capture["inputSchema"]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("request_id")));
     }
 
     #[test]
@@ -3546,10 +3556,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(guided["ok"], false);
-        assert!(guided["error"]
-            .as_str()
-            .unwrap()
-            .contains("ocs_capture"));
+        assert!(guided["error"].as_str().unwrap().contains("ocs_capture"));
     }
 
     #[test]
@@ -3629,12 +3636,10 @@ mod tests {
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
         assert!(called["result"].get("structuredContent").is_none());
-        assert!(
-            called["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("request_id")
-        );
+        assert!(called["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("request_id"));
     }
 
     #[test]
@@ -3683,7 +3688,9 @@ mod tests {
         .unwrap();
         let res_arr = listed["result"]["resources"].as_array().unwrap();
         assert!(res_arr.iter().any(|r| r["uri"] == uri));
-        assert!(res_arr.iter().any(|r| r["uri"] == "cad://session/sess1/snapshot/latest.png"));
+        assert!(res_arr
+            .iter()
+            .any(|r| r["uri"] == "cad://session/sess1/snapshot/latest.png"));
 
         // Test resources/read with png
         let read_png = handle_message(
@@ -3758,16 +3765,25 @@ mod tests {
         let res_res = tool_result(res_value);
         assert_eq!(res_res["isError"], false);
         assert_eq!(res_res["structuredContent"]["_spatial"]["crs"], "CAD_WCS");
-        assert_eq!(res_res["structuredContent"]["_spatial"]["unit"], "Millimeters");
+        assert_eq!(
+            res_res["structuredContent"]["_spatial"]["unit"],
+            "Millimeters"
+        );
         assert_eq!(
             res_res["structuredContent"]["_spatial"]["pixel_to_world_matrix"],
             json!([0.05, 0.0, 0.0, -0.05, -20.0, 15.0])
         );
         let content = res_res["content"].as_array().unwrap();
         assert_eq!(content[0]["type"], "text");
-        assert!(content[0]["text"].as_str().unwrap().contains("cad://session/s1/snapshot/hash123.png"));
+        assert!(content[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("cad://session/s1/snapshot/hash123.png"));
         assert_eq!(content[1]["type"], "resource");
-        assert_eq!(content[1]["resource"]["uri"], "cad://session/s1/snapshot/hash123.png");
+        assert_eq!(
+            content[1]["resource"]["uri"],
+            "cad://session/s1/snapshot/hash123.png"
+        );
         // Ensure no image block was sent
         assert!(!content.iter().any(|c| c["type"] == "image"));
 
@@ -3792,7 +3808,9 @@ mod tests {
     fn unchanged_capture_omits_media_but_preserves_metadata() {
         let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 255, 255, 255]));
         let diff = crate::app::control::vision::compute_visual_diff(
-            &image, &image, &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            &image,
+            &image,
+            &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
         );
         assert!(!diff.changed);
         for delivery in ["inline", "resource", "both"] {
@@ -3815,7 +3833,10 @@ mod tests {
             let content = result["content"].as_array().unwrap();
             assert_eq!(content.len(), 1);
             assert_eq!(content[0]["type"], "text");
-            assert_eq!(serde_json::from_str::<Value>(content[0]["text"].as_str().unwrap()).unwrap(), metadata);
+            assert_eq!(
+                serde_json::from_str::<Value>(content[0]["text"].as_str().unwrap()).unwrap(),
+                metadata
+            );
         }
     }
 
@@ -3830,9 +3851,13 @@ mod tests {
                 "$image":"baseline-or-changed-png",
                 "metadata":{"diff":diff}
             }));
-            assert!(result["content"].as_array().unwrap().iter().any(|block|
-                block["type"] == "image" && block["data"] == "baseline-or-changed-png"
-            ));
+            assert!(result["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(
+                    |block| block["type"] == "image" && block["data"] == "baseline-or-changed-png"
+                ));
         }
     }
 
@@ -3901,7 +3926,10 @@ mod tests {
             structured["structuredContent"]["diff"]["dirty_world_bounds"],
             json!([-15.0, -2.5, -5.0, 7.5])
         );
-        assert_eq!(structured["structuredContent"]["_spatial"]["crs"], "CAD_WCS");
+        assert_eq!(
+            structured["structuredContent"]["_spatial"]["crs"],
+            "CAD_WCS"
+        );
 
         let content = structured["content"].as_array().unwrap();
         let text_block = content.iter().find(|c| {
@@ -3911,7 +3939,10 @@ mod tests {
                     .unwrap_or("")
                     .contains("\"dirty_pixel_bounds\"")
         });
-        assert!(text_block.is_some(), "Metadata text block must format diff parameters");
+        assert!(
+            text_block.is_some(),
+            "Metadata text block must format diff parameters"
+        );
     }
 
     #[test]
@@ -3991,7 +4022,10 @@ mod tests {
         .unwrap();
         let man_contents = read_man["result"]["contents"].as_array().unwrap();
         assert_eq!(man_contents[0]["mimeType"], "application/json");
-        assert!(man_contents[0]["text"].as_str().unwrap().contains("cad://session/sess1/tile/{level}/{x}/{y}.png"));
+        assert!(man_contents[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("cad://session/sess1/tile/{level}/{x}/{y}.png"));
 
         // 5. Test resources/read with tile png
         let read_tile = handle_message(
@@ -4032,7 +4066,10 @@ mod tests {
         assert_eq!(structured["structuredContent"]["pyramid"]["level"], 1);
         assert_eq!(structured["structuredContent"]["pyramid"]["x"], 0);
         assert_eq!(structured["structuredContent"]["pyramid"]["y"], 1);
-        assert_eq!(structured["structuredContent"]["pyramid"]["tile_uri"], tile_uri);
+        assert_eq!(
+            structured["structuredContent"]["pyramid"]["tile_uri"],
+            tile_uri
+        );
     }
 
     #[test]
@@ -4048,11 +4085,9 @@ mod tests {
             "request_id":"draw",
             "steps":[{"op":"run","request_id":"nested","cmd":"LINE 0,0 10,0"}]
         });
-        assert!(
-            validate_execute_request(&invalid, "batch")
-                .unwrap_err()
-                .contains("omit request_id")
-        );
+        assert!(validate_execute_request(&invalid, "batch")
+            .unwrap_err()
+            .contains("omit request_id"));
 
         let compact = compact_state(&json!({
             "session_id":"s","document_id":3,"revision":4,"geometry_revision":5,
@@ -4183,7 +4218,8 @@ mod tests {
         });
         let batch_res = validate_execute_request(&batch, "batch").expect("batch passes");
         assert_eq!(batch_res.warnings.len(), 1);
-        assert!(batch_res.warnings[0].contains("batch step 0: unknown parameter 'stray' ignored for op 'run'"));
+        assert!(batch_res.warnings[0]
+            .contains("batch step 0: unknown parameter 'stray' ignored for op 'run'"));
     }
 
     #[test]
@@ -4191,7 +4227,10 @@ mod tests {
         // Missing required field
         let missing_cmd = json!({"op": "run", "request_id": "r1"});
         let err = crate::mcp_ops::validate_request(&missing_cmd, false).unwrap_err();
-        assert!(err.contains("Missing cmd for run. Example request:"), "{err}");
+        assert!(
+            err.contains("Missing cmd for run. Example request:"),
+            "{err}"
+        );
 
         // Required-when rule (scale requires factor)
         let scale_missing_factor = json!({
@@ -4201,7 +4240,10 @@ mod tests {
             "action": "scale"
         });
         let err2 = crate::mcp_ops::validate_request(&scale_missing_factor, false).unwrap_err();
-        assert!(err2.contains("Missing factor for entities_transform. Example request:"), "{err2}");
+        assert!(
+            err2.contains("Missing factor for entities_transform. Example request:"),
+            "{err2}"
+        );
 
         // Hex handle enforcement
         let invalid_handle = json!({
@@ -4215,20 +4257,30 @@ mod tests {
         // Non-batchable op rejected in batch
         let stop_in_batch = json!({"op": "stop"});
         let err4 = crate::mcp_ops::validate_request(&stop_in_batch, true).unwrap_err();
-        assert!(err4.contains("operation 'stop' cannot be used in a batch step"), "{err4}");
+        assert!(
+            err4.contains("operation 'stop' cannot be used in a batch step"),
+            "{err4}"
+        );
     }
 
     #[test]
     fn schema_size_and_defs_structure() {
         let schema = execute_request_schema();
-        assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+        assert_eq!(
+            schema["$schema"],
+            "https://json-schema.org/draft/2020-12/schema"
+        );
         assert!(schema["$defs"]["handle"].is_object());
         assert!(schema["$defs"]["point"].is_object());
         assert!(schema["$defs"]["window"].is_object());
         assert!(schema["$defs"]["batch_step"].is_object());
         let json_str = schema.to_string();
         // Generates cleanly without exponential blowup: compact ~15KB to 45KB
-        assert!(json_str.len() < 45_000, "schema size is {} bytes", json_str.len());
+        assert!(
+            json_str.len() < 45_000,
+            "schema size is {} bytes",
+            json_str.len()
+        );
     }
 
     #[test]
@@ -4243,7 +4295,10 @@ mod tests {
             .join("mcp")
             .join("opencadstudio");
         if base_dir.exists() {
-            assert!(synced, "sync_agent_tool_schemas must succeed when directory exists");
+            assert!(
+                synced,
+                "sync_agent_tool_schemas must succeed when directory exists"
+            );
             assert!(base_dir.join("ocs_capture.json").exists());
             assert!(base_dir.join("ocs_execute.json").exists());
             assert!(base_dir.join("ocs_read.json").exists());
@@ -4253,7 +4308,8 @@ mod tests {
     }
 
     #[test]
-    fn read_op_tools_returns_current_schemas_and_instructions() {        let mut clients = HashMap::new();
+    fn read_op_tools_returns_current_schemas_and_instructions() {
+        let mut clients = HashMap::new();
         let mut resources = ResourceStore::default();
         let req = json!({
             "name": "ocs_read",
@@ -4269,7 +4325,8 @@ mod tests {
             &mut resources,
             &mut detached_pump(),
             None,
-        ).expect("ocs_read op: tools must succeed");
+        )
+        .expect("ocs_read op: tools must succeed");
         assert_eq!(result["ok"], true);
         assert!(result["tools"].is_array());
         assert!(result["instructions"].is_string());

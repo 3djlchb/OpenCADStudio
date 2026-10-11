@@ -94,12 +94,10 @@ mod parametric_constraint_undo_tests {
     fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> Handle {
         app.tabs[app.active_tab]
             .scene
-            .add_entity(codec::EntityType::Line(
-                codec::entities::Line::from_points(
-                    codec::types::Vector3::new(x1, y1, 0.0),
-                    codec::types::Vector3::new(x2, y2, 0.0),
-                ),
-            ))
+            .add_entity(codec::EntityType::Line(codec::entities::Line::from_points(
+                codec::types::Vector3::new(x1, y1, 0.0),
+                codec::types::Vector3::new(x2, y2, 0.0),
+            )))
     }
 
     fn line_angle_deg(app: &OpenCADStudio, handle: Handle) -> f64 {
@@ -211,14 +209,11 @@ mod parametric_constraint_undo_tests {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let handle = add_line(&mut app, 0.0, 0.0, 5.0, 2.0);
-        let (original_start, original_end, original_length) = match app.tabs[app.active_tab]
-            .scene
-            .document
-            .get_entity(handle)
-        {
-            Some(codec::EntityType::Line(line)) => (line.start, line.end, line.length()),
-            other => panic!("expected a Line, got {other:?}"),
-        };
+        let (original_start, original_end, original_length) =
+            match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+                Some(codec::EntityType::Line(line)) => (line.start, line.end, line.length()),
+                other => panic!("expected a Line, got {other:?}"),
+            };
         let direction = codec::types::Vector3::new(3.0, 4.0, 0.0).normalize();
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
@@ -264,7 +259,13 @@ mod parametric_constraint_undo_tests {
             Some(codec::EntityType::Line(line)) => line,
             other => panic!("expected a Line after redo, got {other:?}"),
         };
-        assert!((line.end - line.start).normalize().cross(&direction).length() < 1.0e-7);
+        assert!(
+            (line.end - line.start)
+                .normalize()
+                .cross(&direction)
+                .length()
+                < 1.0e-7
+        );
     }
 
     #[test]
@@ -832,9 +833,7 @@ mod parametric_constraint_undo_tests {
         else {
             panic!("expected second line");
         };
-        assert!(
-            (first.end - codec::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7
-        );
+        assert!((first.end - codec::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7);
         assert!((second.start - first.end).length() < 1.0e-7);
         assert!((second.length() - 5.0).abs() < 1.0e-7);
     }
@@ -889,13 +888,12 @@ mod delobj_tests {
         let profile = app.tabs[i]
             .scene
             .add_entity(codec::EntityType::Circle(circle));
-        let path =
-            app.tabs[i]
-                .scene
-                .add_entity(codec::EntityType::Line(codec::Line::from_points(
-                    Vector3::new(0.0, 0.0, 0.0),
-                    Vector3::new(0.0, 0.0, 5.0),
-                )));
+        let path = app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::Line(codec::Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(0.0, 0.0, 5.0),
+            )));
         app.delete_objects = value;
 
         let _ = app.apply_cmd_result(CmdResult::SweepEntities {
@@ -1211,9 +1209,9 @@ mod bedit_characterization_tests {
 
     fn add_circle_in_bedit(app: &mut OpenCADStudio) -> Handle {
         let tab = app.active_tab;
-        app.tabs[tab].scene.add_entity(EntityType::Circle(Circle::from_coords(
-            0.0, 0.0, 0.0, 2.0,
-        )))
+        app.tabs[tab]
+            .scene
+            .add_entity(EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 2.0)))
     }
 
     // ---- locked: must survive Phase 1 ----
@@ -1228,7 +1226,11 @@ mod bedit_characterization_tests {
         let _ = app.dispatch_command("BEDIT_SAVE");
 
         assert!(app.tabs[app.active_tab].active_block_edit.is_none());
-        assert_eq!(block_members(&app, "BLK").len(), 2, "save keeps the new entity");
+        assert_eq!(
+            block_members(&app, "BLK").len(),
+            2,
+            "save keeps the new entity"
+        );
     }
 
     /// Locked: discard restores the definition to its entry state exactly
@@ -1350,7 +1352,11 @@ mod bedit_characterization_tests {
 
         let _ = app.dispatch_command("BEDIT_DISCARD");
         app.finish_pending_history(tab);
-        assert_eq!(definition_state(&app, "BLK"), entry, "discard restores entry");
+        assert_eq!(
+            definition_state(&app, "BLK"),
+            entry,
+            "discard restores entry"
+        );
 
         app.undo_steps(1);
         // Pinned: the state after one undo, observed on current code.
@@ -1379,7 +1385,11 @@ mod bedit_characterization_tests {
         // its handle in the block record, so the definition holds a dangling
         // member. Expected to flip in Phase 1 (members should match the store).
         let members = block_members(&app, "BLK");
-        assert_eq!(members.len(), 2, "documenting: block record keeps the undone handle");
+        assert_eq!(
+            members.len(),
+            2,
+            "documenting: block record keeps the undone handle"
+        );
         let dangling = members
             .iter()
             .filter(|h| app.tabs[tab].scene.document.get_entity(**h).is_none())

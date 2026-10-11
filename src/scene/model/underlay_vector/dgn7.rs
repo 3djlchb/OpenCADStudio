@@ -5,7 +5,10 @@
 
 use std::collections::HashMap;
 
-use super::model::{arc_cubics, bspline_points, dgn_color_table, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS};
+use super::model::{
+    arc_cubics, bspline_points, dgn_color_table, paths_bounds, Path, PathBuilder, Segment, Sheet,
+    SubPath, Text, DGN_DEFAULT_COLORS,
+};
 
 /// A 32-bit integer stored as two little-endian words, high word first.
 fn int32(b: &[u8], at: usize) -> Option<i32> {
@@ -67,7 +70,9 @@ fn elements(b: &[u8]) -> Vec<&[u8]> {
     let mut out = Vec::new();
     let mut at = 0usize;
     while at + 4 <= b.len() && !(b[at] == 0xff && b[at + 1] == 0xff) {
-        let Some(words) = uint16(b, at + 2) else { break };
+        let Some(words) = uint16(b, at + 2) else {
+            break;
+        };
         let len = 4 + words as usize * 2;
         let Some(e) = b.get(at..at + len) else { break };
         out.push(e);
@@ -135,21 +140,43 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
     let mut spline: Option<(usize, usize, [u8; 3], f64)> = None;
     let mut knots: Vec<f64> = Vec::new();
     // A complex shape or chain collects its components into one path.
-    let mut complex: Option<(usize, PathBuilder, Option<([u8; 3], f64)>, Option<[u8; 3]>, bool)> = None;
-    let push = |raw: &mut Raw, complex: &mut Option<(usize, PathBuilder, Option<([u8; 3], f64)>, Option<[u8; 3]>, bool)>, path: Path| {
+    let mut complex: Option<(
+        usize,
+        PathBuilder,
+        Option<([u8; 3], f64)>,
+        Option<[u8; 3]>,
+        bool,
+    )> = None;
+    let push = |raw: &mut Raw,
+                complex: &mut Option<(
+        usize,
+        PathBuilder,
+        Option<([u8; 3], f64)>,
+        Option<[u8; 3]>,
+        bool,
+    )>,
+                path: Path| {
         if let Some((left, pb, _, _, _)) = complex.as_mut() {
             for sp in &path.subpaths {
                 for seg in &sp.segments {
                     match seg {
                         Segment::Line(a, b) => {
                             if pb.current() != Some(*a) {
-                                if pb.current().is_none() { pb.move_to(*a) } else { pb.line_to(*a) }
+                                if pb.current().is_none() {
+                                    pb.move_to(*a)
+                                } else {
+                                    pb.line_to(*a)
+                                }
                             }
                             pb.line_to(*b);
                         }
                         Segment::Cubic(a, c1, c2, b) => {
                             if pb.current() != Some(*a) {
-                                if pb.current().is_none() { pb.move_to(*a) } else { pb.line_to(*a) }
+                                if pb.current().is_none() {
+                                    pb.move_to(*a)
+                                } else {
+                                    pb.line_to(*a)
+                                }
                             }
                             pb.cubic_to(*c1, *c2, *b);
                         }
@@ -162,7 +189,11 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
                 if closed {
                     pb.close();
                 }
-                raw.paths.push(Path { subpaths: pb.finish(), stroke, fill });
+                raw.paths.push(Path {
+                    subpaths: pb.finish(),
+                    stroke,
+                    fill,
+                });
             }
         } else {
             raw.paths.push(path);
@@ -179,61 +210,126 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
         // lineweight, not shown while lineweights are off.
         let stroke = Some((color, -1.0));
         let fill = fill_index(e).map(|i| colors[i as usize]);
-        let int_pt = |i: usize| -> Option<[f64; 2]> { Some([int32(e, i)? as f64, int32(e, i + 4)? as f64]) };
+        let int_pt =
+            |i: usize| -> Option<[f64; 2]> { Some([int32(e, i)? as f64, int32(e, i + 4)? as f64]) };
         match kind {
             12 | 14 => {
                 let n = uint16(e, 38).unwrap_or(0) as usize;
                 if n > 0 {
-                    complex = Some((n, PathBuilder::default(), stroke, if kind == 14 { fill } else { None }, kind == 14));
+                    complex = Some((
+                        n,
+                        PathBuilder::default(),
+                        stroke,
+                        if kind == 14 { fill } else { None },
+                        kind == 14,
+                    ));
                 }
             }
             3 => {
                 if let (Some(a), Some(b)) = (int_pt(36), int_pt(44)) {
-                    push(&mut raw, &mut complex, Path { subpaths: vec![SubPath { segments: vec![Segment::Line(a, b)], closed: false }], stroke, fill: None });
+                    push(
+                        &mut raw,
+                        &mut complex,
+                        Path {
+                            subpaths: vec![SubPath {
+                                segments: vec![Segment::Line(a, b)],
+                                closed: false,
+                            }],
+                            stroke,
+                            fill: None,
+                        },
+                    );
                 }
             }
             4 | 6 | 11 => {
                 let n = uint16(e, 36).unwrap_or(0) as usize;
                 let pts: Vec<[f64; 2]> = (0..n).filter_map(|k| int_pt(38 + k * 8)).collect();
                 if pts.len() >= 2 {
-                    push(&mut raw, &mut complex, polyline(&pts, kind == 6, stroke, if kind == 6 { fill } else { None }));
+                    push(
+                        &mut raw,
+                        &mut complex,
+                        polyline(&pts, kind == 6, stroke, if kind == 6 { fill } else { None }),
+                    );
                 }
             }
             15 | 16 => {
                 let arc = if kind == 15 {
-                    (|| Some((vax_double(e, 36)?, vax_double(e, 44)?, int32(e, 52)?, vax_double(e, 56)?, vax_double(e, 64)?, 0.0, 360.0)))()
+                    (|| {
+                        Some((
+                            vax_double(e, 36)?,
+                            vax_double(e, 44)?,
+                            int32(e, 52)?,
+                            vax_double(e, 56)?,
+                            vax_double(e, 64)?,
+                            0.0,
+                            360.0,
+                        ))
+                    })()
                 } else {
                     (|| {
                         let sw = int32(e, 40)? as u32;
-                        let mut sweep = if sw & 0x8000_0000 != 0 { -((sw & 0x7fff_ffff) as f64) } else { sw as f64 } / 360000.0;
+                        let mut sweep = if sw & 0x8000_0000 != 0 {
+                            -((sw & 0x7fff_ffff) as f64)
+                        } else {
+                            sw as f64
+                        } / 360000.0;
                         if sweep == 0.0 {
                             sweep = 360.0;
                         }
-                        Some((vax_double(e, 44)?, vax_double(e, 52)?, int32(e, 60)?, vax_double(e, 64)?, vax_double(e, 72)?, int32(e, 36)? as f64 / 360000.0, sweep))
+                        Some((
+                            vax_double(e, 44)?,
+                            vax_double(e, 52)?,
+                            int32(e, 60)?,
+                            vax_double(e, 64)?,
+                            vax_double(e, 72)?,
+                            int32(e, 36)? as f64 / 360000.0,
+                            sweep,
+                        ))
                     })()
                 };
-                let Some((a, b, r, ox, oy, start, sweep)) = arc else { continue };
-                let pieces = arc_cubics([ox, oy], a, b, (r as f64 / 360000.0).to_radians(), start.to_radians(), sweep.to_radians());
+                let Some((a, b, r, ox, oy, start, sweep)) = arc else {
+                    continue;
+                };
+                let pieces = arc_cubics(
+                    [ox, oy],
+                    a,
+                    b,
+                    (r as f64 / 360000.0).to_radians(),
+                    start.to_radians(),
+                    sweep.to_radians(),
+                );
                 let closed = sweep.abs() >= 360.0;
                 push(
                     &mut raw,
                     &mut complex,
                     Path {
-                        subpaths: vec![SubPath { segments: pieces.into_iter().map(|[a, b, c, d]| Segment::Cubic(a, b, c, d)).collect(), closed }],
+                        subpaths: vec![SubPath {
+                            segments: pieces
+                                .into_iter()
+                                .map(|[a, b, c, d]| Segment::Cubic(a, b, c, d))
+                                .collect(),
+                            closed,
+                        }],
                         stroke,
                         fill: if closed { fill } else { None },
                     },
                 );
             }
             17 => {
-                let (Some(width), Some(height), Some(rotation), Some(origin)) = (int32(e, 38), int32(e, 42), int32(e, 46), int_pt(50)) else {
+                let (Some(width), Some(height), Some(rotation), Some(origin)) =
+                    (int32(e, 38), int32(e, 42), int32(e, 46), int_pt(50))
+                else {
                     continue;
                 };
                 let n = e.get(58).copied().unwrap_or(0) as usize;
-                let Some(chars) = e.get(60..60 + n) else { continue };
+                let Some(chars) = e.get(60..60 + n) else {
+                    continue;
+                };
                 let (height, width) = (height as f64 * 6.0 / 1000.0, width as f64 * 6.0 / 1000.0);
                 raw.texts.push(Text {
-                    text: String::from_utf8_lossy(chars).trim_end_matches('\0').to_string(),
+                    text: String::from_utf8_lossy(chars)
+                        .trim_end_matches('\0')
+                        .to_string(),
                     origin,
                     height,
                     width_factor: if height > 0.0 { width / height } else { 1.0 },
@@ -252,7 +348,10 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
             26 => {
                 // Interior knots as fractions of the parameter range.
                 let n = spline.map(|s| s.1.saturating_sub(s.0)).unwrap_or(0);
-                knots = (0..n).filter_map(|k| int32(e, 36 + k * 4)).map(|v| v as u32 as f64 / 2_147_483_648.0).collect();
+                knots = (0..n)
+                    .filter_map(|k| int32(e, 36 + k * 4))
+                    .map(|v| v as u32 as f64 / 2_147_483_648.0)
+                    .collect();
             }
             21 => {
                 let n = uint16(e, 36).unwrap_or(0) as usize;
@@ -262,26 +361,49 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
                         let interior = if knots.len() == count - order {
                             knots.clone()
                         } else {
-                            (1..=count - order).map(|k| k as f64 / (count - order + 1) as f64).collect()
+                            (1..=count - order)
+                                .map(|k| k as f64 / (count - order + 1) as f64)
+                                .collect()
                         };
                         let mut full = vec![0.0; order];
                         full.extend(interior);
                         full.extend(vec![1.0; order]);
                         let pts = bspline_points(order, &poles, &full, 24 * count);
-                        push(&mut raw, &mut complex, polyline(&pts, false, Some((color, width)), None));
+                        push(
+                            &mut raw,
+                            &mut complex,
+                            polyline(&pts, false, Some((color, width)), None),
+                        );
                     }
                 }
             }
             35 => {
                 // Shared cell instance: the definition's name, a 2×2 matrix
                 // and the origin.
-                let name = e.get(164..180).map(|n| String::from_utf8_lossy(n).trim_end_matches('\0').trim().to_string()).unwrap_or_default();
-                let (Some(m0), Some(m1), Some(m2), Some(m3), Some(ox), Some(oy)) =
-                    (vax_double(e, 76), vax_double(e, 84), vax_double(e, 92), vax_double(e, 100), le_i32(e, 148), le_i32(e, 152))
-                else {
+                let name = e
+                    .get(164..180)
+                    .map(|n| {
+                        String::from_utf8_lossy(n)
+                            .trim_end_matches('\0')
+                            .trim()
+                            .to_string()
+                    })
+                    .unwrap_or_default();
+                let (Some(m0), Some(m1), Some(m2), Some(m3), Some(ox), Some(oy)) = (
+                    vax_double(e, 76),
+                    vax_double(e, 84),
+                    vax_double(e, 92),
+                    vax_double(e, 100),
+                    le_i32(e, 148),
+                    le_i32(e, 152),
+                ) else {
                     continue;
                 };
-                raw.instances.push(Instance { name, m: [m0, m1, m2, m3], origin: [ox as f64, oy as f64] });
+                raw.instances.push(Instance {
+                    name,
+                    m: [m0, m1, m2, m3],
+                    origin: [ox as f64, oy as f64],
+                });
             }
             _ => {}
         }
@@ -289,7 +411,12 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]]) -> Raw {
     raw
 }
 
-fn polyline(pts: &[[f64; 2]], closed: bool, stroke: Option<([u8; 3], f64)>, fill: Option<[u8; 3]>) -> Path {
+fn polyline(
+    pts: &[[f64; 2]],
+    closed: bool,
+    stroke: Option<([u8; 3], f64)>,
+    fill: Option<[u8; 3]>,
+) -> Path {
     let mut pb = PathBuilder::default();
     pb.move_to(pts[0]);
     for p in &pts[1..] {
@@ -298,14 +425,21 @@ fn polyline(pts: &[[f64; 2]], closed: bool, stroke: Option<([u8; 3], f64)>, fill
     if closed {
         pb.close();
     }
-    Path { subpaths: pb.finish(), stroke, fill }
+    Path {
+        subpaths: pb.finish(),
+        stroke,
+        fill,
+    }
 }
 
 /// x' = a·x + b·y + e, y' = c·x + d·y + f.
 type Affine = [f64; 6];
 
 fn apply(m: &Affine, p: [f64; 2]) -> [f64; 2] {
-    [m[0] * p[0] + m[1] * p[1] + m[4], m[2] * p[0] + m[3] * p[1] + m[5]]
+    [
+        m[0] * p[0] + m[1] * p[1] + m[4],
+        m[2] * p[0] + m[3] * p[1] + m[5],
+    ]
 }
 
 fn compose(outer: &Affine, inner: &Affine) -> Affine {
@@ -333,7 +467,9 @@ fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Raw>, depth: usize, out: 
                         .iter()
                         .map(|s| match s {
                             Segment::Line(a, b) => Segment::Line(map(*a), map(*b)),
-                            Segment::Cubic(a, b, c, d) => Segment::Cubic(map(*a), map(*b), map(*c), map(*d)),
+                            Segment::Cubic(a, b, c, d) => {
+                                Segment::Cubic(map(*a), map(*b), map(*c), map(*d))
+                            }
                         })
                         .collect(),
                     closed: sp.closed,
@@ -346,14 +482,28 @@ fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Raw>, depth: usize, out: 
     let scale = (m[0] * m[3] - m[1] * m[2]).abs().sqrt();
     let turn = m[2].atan2(m[0]);
     for t in &raw.texts {
-        out.texts.push(Text { origin: map(t.origin), height: t.height * scale, rotation: t.rotation + turn, ..t.clone() });
+        out.texts.push(Text {
+            origin: map(t.origin),
+            height: t.height * scale,
+            rotation: t.rotation + turn,
+            ..t.clone()
+        });
     }
     if depth >= 8 {
         return;
     }
     for inst in &raw.instances {
-        let Some(def) = defs.get(&inst.name.to_ascii_uppercase()) else { continue };
-        let local: Affine = [inst.m[0], inst.m[1], inst.m[2], inst.m[3], inst.origin[0], inst.origin[1]];
+        let Some(def) = defs.get(&inst.name.to_ascii_uppercase()) else {
+            continue;
+        };
+        let local: Affine = [
+            inst.m[0],
+            inst.m[1],
+            inst.m[2],
+            inst.m[3],
+            inst.origin[0],
+            inst.origin[1],
+        ];
         place(def, &compose(m, &local), defs, depth + 1, out);
     }
 }
@@ -372,11 +522,15 @@ fn level_names(all: &[&[u8]]) -> HashMap<u8, String> {
     for e in all.iter().filter(|e| e[1] & 0x7f == 66 && level(e) == 6) {
         for j in 36..e.len().saturating_sub(3) {
             let n = u16::from_le_bytes([e[j], e[j + 1]]);
-            if !(1..=63).contains(&n) || (j > 36 && e[j - 1] != 0) || names.contains_key(&(n as u8)) {
+            if !(1..=63).contains(&n) || (j > 36 && e[j - 1] != 0) || names.contains_key(&(n as u8))
+            {
                 continue;
             }
             let rest = &e[j + 2..];
-            let len = rest.iter().position(|c| !(c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'$'))).unwrap_or(rest.len());
+            let len = rest
+                .iter()
+                .position(|c| !(c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'$')))
+                .unwrap_or(rest.len());
             if len > 0 && rest.get(len) == Some(&0) {
                 names.insert(n as u8, String::from_utf8_lossy(&rest[..len]).to_string());
             }
@@ -399,7 +553,11 @@ pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
         .collect();
     used.sort_unstable();
     used.dedup();
-    Some(used.into_iter().map(|l| names.get(&l).cloned().unwrap_or_else(|| l.to_string())).collect())
+    Some(
+        used.into_iter()
+            .map(|l| names.get(&l).cloned().unwrap_or_else(|| l.to_string()))
+            .collect(),
+    )
 }
 
 /// The model's geometry, in master units, without the `hidden` levels.
@@ -427,7 +585,15 @@ pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
     while i < all.len() {
         let e = all[i];
         if e[1] & 0x7f == 34 && e[0] & 0x80 == 0 {
-            let name = e.get(164..180).map(|n| String::from_utf8_lossy(n).trim_end_matches('\0').trim().to_ascii_uppercase()).unwrap_or_default();
+            let name = e
+                .get(164..180)
+                .map(|n| {
+                    String::from_utf8_lossy(n)
+                        .trim_end_matches('\0')
+                        .trim()
+                        .to_ascii_uppercase()
+                })
+                .unwrap_or_default();
             let mut j = i + 1;
             while j < all.len() && all[j][0] & 0x80 != 0 {
                 j += 1;
@@ -441,12 +607,28 @@ pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
     }
     let raw = read_run(&top, &colors);
     let per_unit = u.uor_per_sub * u.sub_per_master;
-    let m: Affine = [1.0 / per_unit, 0.0, 0.0, 1.0 / per_unit, -u.origin[0] / per_unit, -u.origin[1] / per_unit];
-    let mut sheet = Sheet { sub_per_master: u.sub_per_master, table_colors, ..Default::default() };
+    let m: Affine = [
+        1.0 / per_unit,
+        0.0,
+        0.0,
+        1.0 / per_unit,
+        -u.origin[0] / per_unit,
+        -u.origin[1] / per_unit,
+    ];
+    let mut sheet = Sheet {
+        sub_per_master: u.sub_per_master,
+        table_colors,
+        ..Default::default()
+    };
     place(&raw, &m, &defs, 0, &mut sheet);
     sheet.rect = paths_bounds(&sheet.paths).or_else(|| {
         let t = sheet.texts.first()?;
-        Some([t.origin[0], t.origin[1], t.origin[0] + t.height, t.origin[1] + t.height])
+        Some([
+            t.origin[0],
+            t.origin[1],
+            t.origin[0] + t.height,
+            t.origin[1] + t.height,
+        ])
     })?;
     Some(sheet)
 }

@@ -5,10 +5,15 @@
 
 use super::*;
 use codec::entities::{ExtendedEntityData, PointCloudExData};
-use codec::objects::{ClassObject, ClassObjectData, Dictionary, ObjectType, PointCloudColorMap, PointCloudColorRamp, PointCloudRampColor};
+use codec::objects::{
+    ClassObject, ClassObjectData, Dictionary, ObjectType, PointCloudColorMap, PointCloudColorRamp,
+    PointCloudRampColor,
+};
 use codec::types::Handle;
 
-use crate::ui::window::pdf_dialogs::{short, MapRamp, MapSlot, OutOfRange, PdfDialogMsg, PointCloudColorMapState};
+use crate::ui::window::pdf_dialogs::{
+    short, MapRamp, MapSlot, OutOfRange, PdfDialogMsg, PointCloudColorMapState,
+};
 
 const MAP_DICTIONARY: &str = "ACAD_POINTCLOUD_COLORMAP_DICT";
 const MAP_ENTRY: &str = "ACAD_POINTCLOUD_COLORMAP";
@@ -28,10 +33,17 @@ fn cloud_data(document: &codec::CadDocument, handle: Handle) -> Option<&PointClo
 /// The drawing's colour map object, created (with the built-in schemes)
 /// under its dictionary when the drawing has none.
 fn ensure_color_map(document: &mut codec::CadDocument) -> Option<Handle> {
-    let existing = document.objects.iter().find_map(|(handle, object)| match object {
-        ObjectType::ClassObject(object) if matches!(object.data, ClassObjectData::PointCloudColorMap(_)) => Some(*handle),
-        _ => None,
-    });
+    let existing = document
+        .objects
+        .iter()
+        .find_map(|(handle, object)| match object {
+            ObjectType::ClassObject(object)
+                if matches!(object.data, ClassObjectData::PointCloudColorMap(_)) =>
+            {
+                Some(*handle)
+            }
+            _ => None,
+        });
     if existing.is_some() {
         return existing;
     }
@@ -40,13 +52,22 @@ fn ensure_color_map(document: &mut codec::CadDocument) -> Option<Handle> {
         return None;
     };
     let dictionary = match root_dictionary.get(MAP_DICTIONARY) {
-        Some(handle) if matches!(document.objects.get(&handle), Some(ObjectType::Dictionary(_))) => handle,
+        Some(handle)
+            if matches!(
+                document.objects.get(&handle),
+                Some(ObjectType::Dictionary(_))
+            ) =>
+        {
+            handle
+        }
         _ => {
             let handle = document.allocate_handle();
             let mut dictionary = Dictionary::new();
             dictionary.handle = handle;
             dictionary.owner = root;
-            document.objects.insert(handle, ObjectType::Dictionary(dictionary));
+            document
+                .objects
+                .insert(handle, ObjectType::Dictionary(dictionary));
             if let Some(ObjectType::Dictionary(root_dictionary)) = document.objects.get_mut(&root) {
                 root_dictionary.add_entry(MAP_DICTIONARY, handle);
             }
@@ -60,15 +81,19 @@ fn ensure_color_map(document: &mut codec::CadDocument) -> Option<Handle> {
         .collect();
     let mut map = ClassObject::new(ClassObjectData::PointCloudColorMap(PointCloudColorMap {
         class_version: 4,
-        default_intensity_scheme: crate::entities::extended::point_cloud_ramp_id("Spectrum").to_string(),
-        default_elevation_scheme: crate::entities::extended::point_cloud_ramp_id("Earth").to_string(),
+        default_intensity_scheme: crate::entities::extended::point_cloud_ramp_id("Spectrum")
+            .to_string(),
+        default_elevation_scheme: crate::entities::extended::point_cloud_ramp_id("Earth")
+            .to_string(),
         default_classification_scheme: CLASSIFICATION_SCHEME.to_string(),
         color_ramps: ramps,
         classification_color_ramps: Vec::new(),
     }));
     map.handle = handle;
     map.owner = dictionary;
-    document.objects.insert(handle, ObjectType::ClassObject(map));
+    document
+        .objects
+        .insert(handle, ObjectType::ClassObject(map));
     if let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary) {
         dictionary.add_entry(MAP_ENTRY, handle);
     }
@@ -84,7 +109,8 @@ fn to_codec_ramp(ramp: &MapRamp) -> PointCloudColorRamp {
             .colors
             .iter()
             .map(|[r, g, b]| PointCloudRampColor {
-                color: (0xC2u32 << 24 | u32::from(*r) << 16 | u32::from(*g) << 8 | u32::from(*b)) as i32,
+                color: (0xC2u32 << 24 | u32::from(*r) << 16 | u32::from(*g) << 8 | u32::from(*b))
+                    as i32,
                 visible: true,
             })
             .collect(),
@@ -97,7 +123,14 @@ fn new_scheme_id() -> String {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).expect("OS random source");
     let hex: String = bytes.iter().map(|b| format!("{b:02X}")).collect();
-    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 /// `count` colours taken evenly along a scheme's blend.
@@ -127,13 +160,20 @@ impl OpenCADStudio {
                 (low, high)
             })
             .unwrap_or((0.0, 0.0));
-        let slot = |scheme: &str, fallback: &str, gradient: bool, max: String, min: String, out: i16| MapSlot {
-            scheme: if scheme.is_empty() { fallback.to_string() } else { scheme.to_string() },
-            gradient,
-            max,
-            min,
-            out_of_range: OutOfRange(out),
-        };
+        let slot =
+            |scheme: &str, fallback: &str, gradient: bool, max: String, min: String, out: i16| {
+                MapSlot {
+                    scheme: if scheme.is_empty() {
+                        fallback.to_string()
+                    } else {
+                        scheme.to_string()
+                    },
+                    gradient,
+                    max,
+                    min,
+                    out_of_range: OutOfRange(out),
+                }
+            };
         let (intensity, elevation, extents, elevation_tab) = match data {
             Some(data) => (
                 slot(
@@ -148,8 +188,16 @@ impl OpenCADStudio {
                     &data.current_color_scheme,
                     &defaults.1,
                     data.elevation_as_gradient,
-                    short(if data.elevation_apply_to_fixed_range { data.elevation_max } else { height.1 }),
-                    short(if data.elevation_apply_to_fixed_range { data.elevation_min } else { height.0 }),
+                    short(if data.elevation_apply_to_fixed_range {
+                        data.elevation_max
+                    } else {
+                        height.1
+                    }),
+                    short(if data.elevation_apply_to_fixed_range {
+                        data.elevation_min
+                    } else {
+                        height.0
+                    }),
                     data.elevation_out_of_range_behavior,
                 ),
                 !data.elevation_apply_to_fixed_range,
@@ -179,7 +227,10 @@ impl OpenCADStudio {
         self.active_modal = Some(crate::app::ModalKind::PointCloudColorMap);
     }
 
-    pub(in crate::app) fn update_point_cloud_color_map(&mut self, message: PdfDialogMsg) -> Task<Message> {
+    pub(in crate::app) fn update_point_cloud_color_map(
+        &mut self,
+        message: PdfDialogMsg,
+    ) -> Task<Message> {
         let i = self.active_tab;
         let Some(state) = self.point_cloud_color_map.as_mut() else {
             return Task::none();
@@ -219,7 +270,12 @@ impl OpenCADStudio {
                 // "Color Scheme 0", or the first number not taken.
                 let name = (0..)
                     .map(|n| format!("Color Scheme {n}"))
-                    .find(|name| !state.ramps.iter().any(|r| r.name.eq_ignore_ascii_case(name)))
+                    .find(|name| {
+                        !state
+                            .ramps
+                            .iter()
+                            .any(|r| r.name.eq_ignore_ascii_case(name))
+                    })
                     .unwrap_or_default();
                 state.naming = Some((true, name));
             }
@@ -238,17 +294,31 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 let name = name.trim().to_string();
-                let taken = state.ramps.iter().any(|r| r.name.eq_ignore_ascii_case(&name))
+                let taken = state
+                    .ramps
+                    .iter()
+                    .any(|r| r.name.eq_ignore_ascii_case(&name))
                     && !(!new && state.ramp().is_some_and(|r| r.name == name));
                 if name.is_empty() || taken {
-                    self.command_line.push_error(crate::t!("A color scheme with this name already exists.").as_ref());
-                    self.point_cloud_color_map.as_mut().map(|s| s.naming = Some((new, name)));
+                    self.command_line.push_error(
+                        crate::t!("A color scheme with this name already exists.").as_ref(),
+                    );
+                    self.point_cloud_color_map
+                        .as_mut()
+                        .map(|s| s.naming = Some((new, name)));
                     return Task::none();
                 }
                 if new {
-                    let colors = state.ramp().map(|r| r.colors.clone()).unwrap_or_else(|| vec![[255; 3], [0; 3]]);
+                    let colors = state
+                        .ramp()
+                        .map(|r| r.colors.clone())
+                        .unwrap_or_else(|| vec![[255; 3], [0; 3]]);
                     let id = new_scheme_id();
-                    state.ramps.push(MapRamp { id: id.clone(), name, colors });
+                    state.ramps.push(MapRamp {
+                        id: id.clone(),
+                        name,
+                        colors,
+                    });
                     state.slot_mut().scheme = id;
                 } else if let Some(ramp) = state.ramp_mut() {
                     ramp.name = name;
@@ -279,7 +349,10 @@ impl OpenCADStudio {
             // A band height sets the maximum from the minimum.
             PdfDialogMsg::MapInterval(value) => {
                 let count = state.ramp().map_or(1, |r| r.colors.len()) as f64;
-                if let (Ok(step), Ok(min)) = (value.trim().parse::<f64>(), state.elevation.min.trim().parse::<f64>()) {
+                if let (Ok(step), Ok(min)) = (
+                    value.trim().parse::<f64>(),
+                    state.elevation.min.trim().parse::<f64>(),
+                ) {
                     state.elevation.max = short(min + step * count);
                 }
                 state.interval = value;
@@ -314,20 +387,28 @@ impl OpenCADStudio {
         let Some(state) = self.point_cloud_color_map.as_ref() else {
             return false;
         };
-        let intensity = (state.intensity.min.trim().parse::<i32>(), state.intensity.max.trim().parse::<i32>());
-        let elevation = (state.elevation.min.trim().parse::<f64>(), state.elevation.max.trim().parse::<f64>());
+        let intensity = (
+            state.intensity.min.trim().parse::<i32>(),
+            state.intensity.max.trim().parse::<i32>(),
+        );
+        let elevation = (
+            state.elevation.min.trim().parse::<f64>(),
+            state.elevation.max.trim().parse::<f64>(),
+        );
         let cloud = state.cloud;
         if cloud.is_some() {
             let ok_intensity = matches!(intensity, (Ok(lo), Ok(hi)) if (0..=100).contains(&lo) && (0..=100).contains(&hi) && lo < hi);
             let ok_elevation = state.extents || matches!(elevation, (Ok(lo), Ok(hi)) if lo < hi);
             if !ok_intensity || !ok_elevation {
-                self.command_line.push_error(crate::t!("Invalid range of colorized points.").as_ref());
+                self.command_line
+                    .push_error(crate::t!("Invalid range of colorized points.").as_ref());
                 return false;
             }
         }
         let ramps: Vec<PointCloudColorRamp> = state.ramps.iter().map(to_codec_ramp).collect();
         let (intensity_slot, elevation_slot) = (state.intensity.clone(), state.elevation.clone());
-        let (extents, make_current, elevation_tab) = (state.extents, state.make_current, state.elevation_tab);
+        let (extents, make_current, elevation_tab) =
+            (state.extents, state.make_current, state.elevation_tab);
         self.push_undo_snapshot(i, "POINTCLOUDCOLORMAP");
         let document = &mut self.tabs[i].scene.document;
         if let Some(handle) = ensure_color_map(document) {

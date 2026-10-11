@@ -104,8 +104,8 @@ pub fn available_ctb_names() -> Vec<String> {
 /// Lineweight table: index value → mm, matching the stored LWEIGHT codes.
 /// Index 0 = 0.00 mm (hairline), others follow the DXF lineweight enum.
 pub const LW_TABLE: &[f32] = &[
-    0.00, 0.05, 0.09, 0.10, 0.13, 0.15, 0.18, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50,
-    0.53, 0.60, 0.65, 0.70, 0.80, 0.90, 1.00, 1.06, 1.20, 1.40, 1.58, 2.00, 2.11,
+    0.00, 0.05, 0.09, 0.10, 0.13, 0.15, 0.18, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.53, 0.60,
+    0.65, 0.70, 0.80, 0.90, 1.00, 1.06, 1.20, 1.40, 1.58, 2.00, 2.11,
 ];
 
 // ── Per-color entry ───────────────────────────────────────────────────────────
@@ -235,8 +235,7 @@ impl PlotStyleTable {
                         let gray = if aci == 7 {
                             0
                         } else {
-                            (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32)
-                                .round() as u8
+                            (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).round() as u8
                         };
                         table.aci_entries[aci as usize].color = Some([gray, gray, gray]);
                     }
@@ -274,13 +273,19 @@ impl PlotStyleTable {
         {
             return Err(format!("Invalid plot style name: {name}"));
         }
-        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("stb")) {
-            return Err(crate::tf!(
-                "Named plot style tables (.stb) are not supported yet: {name}"
-            )
-            .into_owned());
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("stb"))
+        {
+            return Err(
+                crate::tf!("Named plot style tables (.stb) are not supported yet: {name}")
+                    .into_owned(),
+            );
         }
-        if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("ctb")) {
+        if !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ctb"))
+        {
             return Err(format!("Invalid plot style name: {name}"));
         }
 
@@ -332,9 +337,8 @@ impl PlotStyleTable {
                 if aci == 7 {
                     Some([0.0; 3])
                 } else {
-                    codec::types::aci_to_rgb(aci).map(|(r, g, b)| {
-                        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
-                    })
+                    codec::types::aci_to_rgb(aci)
+                        .map(|(r, g, b)| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
                 }
             })?;
             let gray = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
@@ -350,13 +354,16 @@ impl PlotStyleTable {
         if matches!(entry.lineweight, 0 | 255) {
             None
         } else {
-            self.lineweights.get(entry.lineweight as usize).copied().map(|weight| {
-                if self.apply_factor {
-                    weight * self.scale_factor.max(0.0)
-                } else {
-                    weight
-                }
-            })
+            self.lineweights
+                .get(entry.lineweight as usize)
+                .copied()
+                .map(|weight| {
+                    if self.apply_factor {
+                        weight * self.scale_factor.max(0.0)
+                    } else {
+                        weight
+                    }
+                })
         }
     }
 
@@ -423,7 +430,11 @@ impl PlotStyleTable {
                 "  linepattern_size={}\n  linetype={}\n  adaptive_linetype={}\n",
                 entry.linepattern_size,
                 entry.linetype,
-                if entry.adaptive_linetype { "TRUE" } else { "FALSE" }
+                if entry.adaptive_linetype {
+                    "TRUE"
+                } else {
+                    "FALSE"
+                }
             ));
             s.push_str(&format!("  lineweight={}\n", entry.lineweight));
             s.push_str(&format!(
@@ -756,12 +767,8 @@ fn parse_plot_style_text(text: &str, name: String, is_stb: bool) -> Result<PlotS
                 "physical_pen_number" => {
                     style.entry.physical_pen_number = value.parse().unwrap_or(0)
                 }
-                "virtual_pen_number" => {
-                    style.entry.virtual_pen_number = value.parse().unwrap_or(0)
-                }
-                "linepattern_size" => {
-                    style.entry.linepattern_size = value.parse().unwrap_or(0.5)
-                }
+                "virtual_pen_number" => style.entry.virtual_pen_number = value.parse().unwrap_or(0),
+                "linepattern_size" => style.entry.linepattern_size = value.parse().unwrap_or(0.5),
                 "linetype" => style.entry.linetype = value.parse().unwrap_or(31),
                 "adaptive_linetype" => {
                     style.entry.adaptive_linetype = value.eq_ignore_ascii_case("TRUE")
@@ -974,14 +981,20 @@ mod lenient_loading_tests {
         bytes[52..56].copy_from_slice(&(text_len - 1).to_le_bytes());
         let table = PlotStyleTable::from_bytes("foreign.ctb", &bytes).expect("loads");
         assert_pens_kept(&table);
-        assert!(table.load_warnings.iter().any(|w| w.contains("bytes of text")));
+        assert!(table
+            .load_warnings
+            .iter()
+            .any(|w| w.contains("bytes of text")));
 
         let mut bytes = compressed(&table_with_description("ok"));
         let compressed_len = u32::from_le_bytes(bytes[56..60].try_into().unwrap());
         bytes[56..60].copy_from_slice(&(compressed_len + 100).to_le_bytes());
         let table = PlotStyleTable::from_bytes("foreign.ctb", &bytes).expect("loads");
         assert_pens_kept(&table);
-        assert!(table.load_warnings.iter().any(|w| w.contains("compressed bytes")));
+        assert!(table
+            .load_warnings
+            .iter()
+            .any(|w| w.contains("compressed bytes")));
     }
 
     #[test]
@@ -999,7 +1012,10 @@ mod lenient_loading_tests {
         let table = PlotStyleTable::from_bytes("foreign.ctb", &compressed).expect("loads");
         assert_pens_kept(&table);
         assert_eq!(table.description, "Plumas – señal");
-        assert!(table.load_warnings.iter().any(|w| w.contains("Windows-1252")));
+        assert!(table
+            .load_warnings
+            .iter()
+            .any(|w| w.contains("Windows-1252")));
         // Clean UTF-8 gets no note.
         let (text, note) = decode_plot_style_text("Ελληνικά".as_bytes().to_vec());
         assert_eq!(text, "Ελληνικά");
@@ -1094,7 +1110,10 @@ mod inflate_limit_tests {
             flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(&bomb_plaintext()).expect("compress");
         let payload = encoder.finish().expect("finish");
-        assert_ne!(payload[0], 0x78, "raw deflate takes the legacy DeflateDecoder path");
+        assert_ne!(
+            payload[0], 0x78,
+            "raw deflate takes the legacy DeflateDecoder path"
+        );
 
         let mut data = vec![b'\n'];
         data.extend(payload);

@@ -16,9 +16,7 @@ use codec::types::{Vector2, Vector3};
 use codec::{CadDocument, EntityType, Handle};
 
 use harness::BenchmarkRunner;
-use OpenCADStudio::modules::draw::modify::explode::{
-    apply_explode_replacements, explode_batch,
-};
+use OpenCADStudio::modules::draw::modify::explode::{apply_explode_replacements, explode_batch};
 use OpenCADStudio::modules::draw::modify::flatten;
 use OpenCADStudio::scene::Scene;
 
@@ -79,10 +77,8 @@ fn push_fixture_entities(doc: &mut CadDocument, quick: bool) -> Vec<Handle> {
         let mut pl = LwPolyline::new();
         pl.vertices = (0..VERTS_PER_POLYLINE)
             .map(|k| {
-                let mut v = LwVertex::new(Vector2::new(
-                    base + k as f64 * 2.0,
-                    (k % 5) as f64 * 0.75,
-                ));
+                let mut v =
+                    LwVertex::new(Vector2::new(base + k as f64 * 2.0, (k % 5) as f64 * 0.75));
                 if k % 2 == 1 {
                     v.bulge = 0.5;
                 }
@@ -101,13 +97,13 @@ fn push_fixture_entities(doc: &mut CadDocument, quick: bool) -> Vec<Handle> {
     for i in 0..n_dim {
         let x = (i % 100) as f64 * 12.0;
         let y = (i / 100) as f64 * 12.0;
-        let mut d = DimensionLinear::new(
-            Vector3::new(x, y, 0.0),
-            Vector3::new(x + 10.0, y, 0.0),
-        );
+        let mut d = DimensionLinear::new(Vector3::new(x, y, 0.0), Vector3::new(x + 10.0, y, 0.0));
         d.definition_point = Vector3::new(x + 5.0, y + 3.0, 0.0);
         d.base.text_middle_point = Vector3::new(x + 5.0, y + 4.0, 0.0);
-        handles.push(doc.add_entity(EntityType::Dimension(Dimension::Linear(d))).unwrap());
+        handles.push(
+            doc.add_entity(EntityType::Dimension(Dimension::Linear(d)))
+                .unwrap(),
+        );
     }
 
     for i in 0..n_ml {
@@ -121,7 +117,10 @@ fn push_fixture_entities(doc: &mut CadDocument, quick: bool) -> Vec<Handle> {
             Vector3::new(x + 8.0, y + 8.0, 0.0),
             Vector3::new(x + 12.0, y + 8.0, 0.0),
         ];
-        handles.push(doc.add_entity(EntityType::MLine(MLine::from_points(&pts))).unwrap());
+        handles.push(
+            doc.add_entity(EntityType::MLine(MLine::from_points(&pts)))
+                .unwrap(),
+        );
     }
 
     handles
@@ -274,7 +273,8 @@ fn push_flatten_fixture(doc: &mut CadDocument, quick: bool) -> Vec<Handle> {
         handles.push(doc.add_entity(EntityType::Line(line)).unwrap());
     }
     for i in 0..n_circle {
-        let mut c = Circle::from_center_radius(Vector3::new(i as f64, 0.0, 1.0 + (i % 3) as f64), 2.0);
+        let mut c =
+            Circle::from_center_radius(Vector3::new(i as f64, 0.0, 1.0 + (i % 3) as f64), 2.0);
         if i % 2 == 1 {
             c.normal = Vector3::new(0.0, 0.6, 0.8); // tilted → ellipse
         }
@@ -296,7 +296,8 @@ fn push_flatten_fixture(doc: &mut CadDocument, quick: bool) -> Vec<Handle> {
         let mut pl = Polyline2D::new();
         pl.elevation = 3.0 + (i % 5) as f64;
         for k in 0..6 {
-            pl.vertices.push(Vertex2D::new(Vector3::new(k as f64, i as f64, 0.0)));
+            pl.vertices
+                .push(Vertex2D::new(Vector3::new(k as f64, i as f64, 0.0)));
         }
         handles.push(doc.add_entity(EntityType::Polyline2D(pl)).unwrap());
     }
@@ -321,7 +322,10 @@ fn push_flatten_fixture(doc: &mut CadDocument, quick: bool) -> Vec<Handle> {
         handles.push(doc.add_entity(EntityType::Solid(s)).unwrap());
     }
     for i in 0..n_ray {
-        let r = Ray::new(Vector3::new(i as f64, 0.0, 5.0), Vector3::new(0.0, 0.0, 1.0));
+        let r = Ray::new(
+            Vector3::new(i as f64, 0.0, 5.0),
+            Vector3::new(0.0, 0.0, 1.0),
+        );
         handles.push(doc.add_entity(EntityType::Ray(r)).unwrap());
     }
     for i in 0..n_flat {

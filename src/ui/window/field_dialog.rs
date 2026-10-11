@@ -2,7 +2,9 @@
 //! dialogs): a category and field list on the left, the chosen field's
 //! format on the right, a live preview and the field expression below.
 
-use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space};
+use iced::widget::{
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
+};
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;
@@ -26,17 +28,49 @@ pub enum FieldTarget {
 /// application evaluates).
 pub const CATEGORIES: &[(&str, &[&str])] = &[
     ("All", &[]),
-    ("Date & Time", &["CreateDate", "Date", "PlotDate", "SaveDate"]),
+    (
+        "Date & Time",
+        &["CreateDate", "Date", "PlotDate", "SaveDate"],
+    ),
     (
         "Document",
-        &["Author", "Comments", "Filename", "Filesize", "HyperlinkBase", "Keywords", "LastSavedBy", "Subject", "Title"],
+        &[
+            "Author",
+            "Comments",
+            "Filename",
+            "Filesize",
+            "HyperlinkBase",
+            "Keywords",
+            "LastSavedBy",
+            "Subject",
+            "Title",
+        ],
     ),
     ("Linked", &["Hyperlink"]),
-    ("Objects", &["BlockPlaceholder", "Count", "CountInArea", "Formula", "NamedObject", "Object"]),
+    (
+        "Objects",
+        &[
+            "BlockPlaceholder",
+            "Count",
+            "CountInArea",
+            "Formula",
+            "NamedObject",
+            "Object",
+        ],
+    ),
     ("Other", &["DieselExpression", "SystemVariable"]),
     (
         "Plot",
-        &["DeviceName", "Login", "PageSetupName", "PaperSize", "PlotDate", "PlotOrientation", "PlotScale", "PlotStyleTable"],
+        &[
+            "DeviceName",
+            "Login",
+            "PageSetupName",
+            "PaperSize",
+            "PlotDate",
+            "PlotOrientation",
+            "PlotScale",
+            "PlotStyleTable",
+        ],
     ),
     ("SheetSet", SHEET_SET_FIELDS),
 ];
@@ -92,24 +126,40 @@ fn sheet_set_code(name: &str, custom: &str) -> String {
 
 /// The navigation tree of a SheetSet (set, subsets, sheets) or SheetView
 /// (set, view categories) field: depth, component id, label, is a sheet.
-pub fn nav_nodes(db: &codec::sheet_set::SheetSetDatabase, views: bool) -> Vec<(u16, String, String, bool)> {
+pub fn nav_nodes(
+    db: &codec::sheet_set::SheetSetDatabase,
+    views: bool,
+) -> Vec<(u16, String, String, bool)> {
     use codec::sheet_set::{number_and_title, ComponentKind, Element as SsElement};
     let set = db.sheet_set();
     let mut out = vec![(0, set.id().to_string(), db.name().to_string(), false)];
     if views {
         // Views of the unnamed (default) category sit under the set, then each
         // named category with its views.
-        let all: Vec<&SsElement> = db.sheets().into_iter().flat_map(|s| db.sheet_views(s)).collect();
+        let all: Vec<&SsElement> = db
+            .sheets()
+            .into_iter()
+            .flat_map(|s| db.sheet_views(s))
+            .collect();
         let named: Vec<&SsElement> = db.view_categories();
         let in_named = |v: &SsElement| {
-            codec::sheet_set::SheetSetDatabase::view_category_of(v).is_some_and(|c| named.iter().any(|n| n.id() == c))
+            codec::sheet_set::SheetSetDatabase::view_category_of(v)
+                .is_some_and(|c| named.iter().any(|n| n.id() == c))
         };
         for v in all.iter().filter(|v| !in_named(v)) {
             out.push((1, v.id().to_string(), number_and_title(v), true));
         }
         for c in &named {
-            out.push((1, c.id().to_string(), c.prop("Name").unwrap_or("").to_string(), false));
-            for v in all.iter().filter(|v| codec::sheet_set::SheetSetDatabase::view_category_of(v) == Some(c.id())) {
+            out.push((
+                1,
+                c.id().to_string(),
+                c.prop("Name").unwrap_or("").to_string(),
+                false,
+            ));
+            for v in all
+                .iter()
+                .filter(|v| codec::sheet_set::SheetSetDatabase::view_category_of(v) == Some(c.id()))
+            {
                 out.push((2, v.id().to_string(), number_and_title(v), true));
             }
         }
@@ -119,10 +169,17 @@ pub fn nav_nodes(db: &codec::sheet_set::SheetSetDatabase, views: bool) -> Vec<(u
         for c in &el.children {
             match ComponentKind::of(c) {
                 Some(ComponentKind::Subset) => {
-                    out.push((depth, c.id().to_string(), c.prop("Name").unwrap_or("").to_string(), false));
+                    out.push((
+                        depth,
+                        c.id().to_string(),
+                        c.prop("Name").unwrap_or("").to_string(),
+                        false,
+                    ));
                     go(c, depth + 1, out);
                 }
-                Some(ComponentKind::Sheet) => out.push((depth, c.id().to_string(), number_and_title(c), true)),
+                Some(ComponentKind::Sheet) => {
+                    out.push((depth, c.id().to_string(), number_and_title(c), true))
+                }
                 _ => {}
             }
         }
@@ -132,14 +189,27 @@ pub fn nav_nodes(db: &codec::sheet_set::SheetSetDatabase, views: bool) -> Vec<(u
 }
 
 /// The properties a navigation node offers: list label, code property, version.
-pub fn nav_props(db: &codec::sheet_set::SheetSetDatabase, id: &str) -> Vec<(String, String, &'static str)> {
-    use codec::sheet_set::{custom_properties, ComponentKind, CUSTOM_SHEET_PROP, CUSTOM_SHEET_SET_PROP};
-    let Some(el) = db.find(id) else { return Vec::new() };
+pub fn nav_props(
+    db: &codec::sheet_set::SheetSetDatabase,
+    id: &str,
+) -> Vec<(String, String, &'static str)> {
+    use codec::sheet_set::{
+        custom_properties, ComponentKind, CUSTOM_SHEET_PROP, CUSTOM_SHEET_SET_PROP,
+    };
+    let Some(el) = db.find(id) else {
+        return Vec::new();
+    };
     let fixed = |list: &[(&str, &str, &'static str)]| -> Vec<(String, String, &'static str)> {
-        list.iter().map(|(l, p, v)| (l.to_string(), p.to_string(), *v)).collect()
+        list.iter()
+            .map(|(l, p, v)| (l.to_string(), p.to_string(), *v))
+            .collect()
     };
     let custom = |flag: i32| -> Vec<(String, String, &'static str)> {
-        custom_properties(db.sheet_set()).into_iter().filter(|(_, _, f)| f & flag != 0).map(|(n, _, _)| (n.clone(), n, "")).collect()
+        custom_properties(db.sheet_set())
+            .into_iter()
+            .filter(|(_, _, f)| f & flag != 0)
+            .map(|(n, _, _)| (n.clone(), n, ""))
+            .collect()
     };
     match ComponentKind::of(el) {
         Some(ComponentKind::SheetSet) => {
@@ -180,13 +250,24 @@ pub fn nav_props(db: &codec::sheet_set::SheetSetDatabase, id: &str) -> Vec<(Stri
 }
 
 /// The sheet drawing, named view and layout a sheet or sheet view node links to.
-pub fn nav_link(db: &codec::sheet_set::SheetSetDatabase, id: &str) -> Option<(String, String, String)> {
+pub fn nav_link(
+    db: &codec::sheet_set::SheetSetDatabase,
+    id: &str,
+) -> Option<(String, String, String)> {
     let el = db.find(id)?;
     let (sheet, view) = if el.name == "AcSmSheetView" {
         let views = db.parent_of(id)?;
         let sheet = db.parent_of(views.id())?;
-        (sheet.id().to_string(), el.named("NamedView").and_then(|v| v.prop("Name")).unwrap_or("").to_string())
-    } else if codec::sheet_set::ComponentKind::of(el) == Some(codec::sheet_set::ComponentKind::Sheet) {
+        (
+            sheet.id().to_string(),
+            el.named("NamedView")
+                .and_then(|v| v.prop("Name"))
+                .unwrap_or("")
+                .to_string(),
+        )
+    } else if codec::sheet_set::ComponentKind::of(el)
+        == Some(codec::sheet_set::ComponentKind::Sheet)
+    {
         (id.to_string(), String::new())
     } else {
         return None;
@@ -199,8 +280,13 @@ impl FieldDialogState {
     /// `\AcSm Database("…").SheetSet("…")[.Component("…")].Property` of the
     /// picked node, with the text case and, on a sheet, the hyperlink to it.
     fn navigation_code(&self) -> String {
-        let Some(db) = self.ss_sets.get(self.ss_set) else { return "\\AcSm".into() };
-        let Some((_, prop, version)) = nav_props(db, &self.ss_node).into_iter().find(|(l, _, _)| *l == self.ss_prop) else {
+        let Some(db) = self.ss_sets.get(self.ss_set) else {
+            return "\\AcSm".into();
+        };
+        let Some((_, prop, version)) = nav_props(db, &self.ss_node)
+            .into_iter()
+            .find(|(l, _, _)| *l == self.ss_prop)
+        else {
             return "\\AcSm".into();
         };
         let set = db.sheet_set().id().to_string();
@@ -210,7 +296,13 @@ impl FieldDialogState {
         let version = if scale {
             codec::fields::PLOT_SCALE_FORMATS
                 .get(self.ss_scale_format)
-                .map_or("", |(_, c)| if c.starts_with("\\AcVar.16.2") { ".16.2" } else { "" })
+                .map_or("", |(_, c)| {
+                    if c.starts_with("\\AcVar.16.2") {
+                        ".16.2"
+                    } else {
+                        ""
+                    }
+                })
         } else {
             version
         };
@@ -269,25 +361,67 @@ pub fn viewport_scale_picture(k: usize) -> String {
 /// The fields of a category; "All" lists every field once, sorted.
 pub fn fields_of(category: usize) -> Vec<&'static str> {
     if category == 0 {
-        let mut all: Vec<&'static str> = CATEGORIES.iter().flat_map(|(_, f)| f.iter().copied()).collect();
+        let mut all: Vec<&'static str> = CATEGORIES
+            .iter()
+            .flat_map(|(_, f)| f.iter().copied())
+            .collect();
         all.sort_unstable_by_key(|s| s.to_ascii_lowercase());
         all.dedup();
         return all;
     }
-    CATEGORIES.get(category).map(|(_, f)| f.to_vec()).unwrap_or_default()
+    CATEGORIES
+        .get(category)
+        .map(|(_, f)| f.to_vec())
+        .unwrap_or_default()
 }
 
 /// The date formats the dialog lists, in the reference order.
 pub const DATE_FORMATS: &[&str] = &[
-    "M/d/yyyy", "dddd, MMMM dd, yyyy", "MMMM d, yyyy", "M/d/yy", "yyyy-MM-dd", "d-MMM-yy",
-    "M.d.yyyy", "MMM. d, yy", "d MMMM yyyy", "dd.MM.yyyy", "dd/MM/yyyy", "yyyy/MM/dd",
-    "yyyy-M-d", "MMMM yy", "MMM-yy", "M/d/yyyy h:mm tt", "M/d/yyyy h:mm:ss tt", "h:mm tt",
-    "h:mm:ss tt", "HH:mm", "HH:mm:ss", "%#x", "%#c", "%x", "%c", "%X",
+    "M/d/yyyy",
+    "dddd, MMMM dd, yyyy",
+    "MMMM d, yyyy",
+    "M/d/yy",
+    "yyyy-MM-dd",
+    "d-MMM-yy",
+    "M.d.yyyy",
+    "MMM. d, yy",
+    "d MMMM yyyy",
+    "dd.MM.yyyy",
+    "dd/MM/yyyy",
+    "yyyy/MM/dd",
+    "yyyy-M-d",
+    "MMMM yy",
+    "MMM-yy",
+    "M/d/yyyy h:mm tt",
+    "M/d/yyyy h:mm:ss tt",
+    "h:mm tt",
+    "h:mm:ss tt",
+    "HH:mm",
+    "HH:mm:ss",
+    "%#x",
+    "%#c",
+    "%x",
+    "%c",
+    "%X",
 ];
 
-pub const TEXT_CASES: &[&str] = &["(none)", "Uppercase", "Lowercase", "First capital", "Title case"];
+pub const TEXT_CASES: &[&str] = &[
+    "(none)",
+    "Uppercase",
+    "Lowercase",
+    "First capital",
+    "Title case",
+];
 pub const SIZE_UNITS: &[&str] = &["Bytes", "Kilobytes", "Megabytes"];
-pub const NAMED_TYPES: &[&str] = &["Block", "Dimstyle", "Layer", "Linetype", "Tablestyle", "Textstyle", "View"];
+pub const NAMED_TYPES: &[&str] = &[
+    "Block",
+    "Dimstyle",
+    "Layer",
+    "Linetype",
+    "Tablestyle",
+    "Textstyle",
+    "View",
+];
 
 /// How a field is formatted, by its name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,8 +450,18 @@ pub enum FieldKind {
 }
 
 /// Formula precisions: the current one, then 0 to 8 decimals.
-pub const FORMULA_PRECISIONS: &[&str] =
-    &["Current precision", "0", "0.0", "0.00", "0.000", "0.0000", "0.00000", "0.000000", "0.0000000", "0.00000000"];
+pub const FORMULA_PRECISIONS: &[&str] = &[
+    "Current precision",
+    "0",
+    "0.0",
+    "0.00",
+    "0.000",
+    "0.0000",
+    "0.00000",
+    "0.000000",
+    "0.0000000",
+    "0.00000000",
+];
 
 pub fn kind_of(name: &str) -> FieldKind {
     match name {
@@ -450,10 +594,18 @@ impl FieldDialogState {
             n => format!("{base} \\f \"%tc{n}\""),
         };
         match kind_of(self.name) {
-            FieldKind::Date => (format!("\\AcVar {} \\f \"{}\"", self.name, self.date_format), vec![]),
+            FieldKind::Date => (
+                format!("\\AcVar {} \\f \"{}\"", self.name, self.date_format),
+                vec![],
+            ),
             FieldKind::Text => (case(format!("\\AcVar {}", self.name)), vec![]),
             FieldKind::Filename => {
-                let bits = self.file_parts + if self.file_extension && self.file_parts & 2 != 0 { 4 } else { 0 };
+                let bits = self.file_parts
+                    + if self.file_extension && self.file_parts & 2 != 0 {
+                        4
+                    } else {
+                        0
+                    };
                 // The text case goes first in the same format: "%tc1%fn6".
                 let case = match self.text_case {
                     0 => String::new(),
@@ -470,7 +622,9 @@ impl FieldDialogState {
                 vec![],
             ),
             FieldKind::Formula => {
-                let format = codec::fields::FORMULA_FORMATS.get(self.formula_format).map_or("", |f| f.1);
+                let format = codec::fields::FORMULA_FORMATS
+                    .get(self.formula_format)
+                    .map_or("", |f| f.1);
                 let precision = match self.formula_precision {
                     0 => String::new(),
                     n => format!("%pr{}", n - 1),
@@ -483,7 +637,11 @@ impl FieldDialogState {
                 }
             }
             FieldKind::Hyperlink => (
-                format!("\\AcVar \\href \"{}##{}#0\"", self.hyperlink_url.trim(), self.hyperlink_text),
+                format!(
+                    "\\AcVar \\href \"{}##{}#0\"",
+                    self.hyperlink_url.trim(),
+                    self.hyperlink_text
+                ),
                 vec![],
             ),
             FieldKind::PlotScale => (
@@ -493,22 +651,39 @@ impl FieldDialogState {
                 vec![],
             ),
             FieldKind::Count => {
-                let evaluator = if self.name == "CountInArea" { "AcCount2" } else { "AcCount" };
+                let evaluator = if self.name == "CountInArea" {
+                    "AcCount2"
+                } else {
+                    "AcCount"
+                };
                 match self.count_expression.trim() {
                     "" => (format!("\\{evaluator}"), vec![]),
                     json => (format!("\\{evaluator} {json}"), vec![]),
                 }
             }
-            FieldKind::SheetSet | FieldKind::SheetSetCustom => (case(sheet_set_code(self.name, &self.ss_custom)), vec![]),
+            FieldKind::SheetSet | FieldKind::SheetSetCustom => {
+                (case(sheet_set_code(self.name, &self.ss_custom)), vec![])
+            }
             FieldKind::SheetSetNavigation => (self.navigation_code(), vec![]),
             FieldKind::SheetSetPlaceholder => {
-                let (label, target, version) = PLACEHOLDER_TYPES[self.ss_placeholder.min(PLACEHOLDER_TYPES.len() - 1)];
-                let target = if label == "Custom" { format!("{target}{}", self.ss_custom) } else { target.to_string() };
+                let (label, target, version) =
+                    PLACEHOLDER_TYPES[self.ss_placeholder.min(PLACEHOLDER_TYPES.len() - 1)];
+                let target = if label == "Custom" {
+                    format!("{target}{}", self.ss_custom)
+                } else {
+                    target.to_string()
+                };
                 if label == "ViewportScale" {
                     // The version follows the format, as for PlotScale.
                     let version = codec::fields::PLOT_SCALE_FORMATS
                         .get(self.ss_scale_format)
-                        .map_or("", |(_, code)| if code.starts_with("\\AcVar.16.2") { ".16.2" } else { "" });
+                        .map_or("", |(_, code)| {
+                            if code.starts_with("\\AcVar.16.2") {
+                                ".16.2"
+                            } else {
+                                ""
+                            }
+                        });
                     let base = format!("\\AcSm{version} {target}");
                     match viewport_scale_picture(self.ss_scale_format) {
                         f if f.is_empty() => (base, vec![]),
@@ -519,7 +694,8 @@ impl FieldDialogState {
                 }
             }
             FieldKind::BlockPlaceholder => {
-                let (_, property, format) = codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[self.placeholder_property];
+                let (_, property, format) =
+                    codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[self.placeholder_property];
                 // Text properties take the chosen case; the others keep their own format.
                 let format = match (format, self.text_case) {
                     ("%tc4", 0) => String::new(),
@@ -536,13 +712,17 @@ impl FieldDialogState {
             FieldKind::SystemVariable => (format!("\\AcVar {}", self.sysvar), vec![]),
             FieldKind::Diesel => (format!("\\AcDiesel {}", self.diesel), vec![]),
             FieldKind::NamedObject => match self.named.and_then(|i| self.named_names.get(i)) {
-                Some((_, handle)) => (case("\\AcObjProp Object(%<\\_ObjIdx 0>%).Name".into()), vec![*handle]),
+                Some((_, handle)) => (
+                    case("\\AcObjProp Object(%<\\_ObjIdx 0>%).Name".into()),
+                    vec![*handle],
+                ),
                 None => ("\\AcObjProp".into(), vec![]),
             },
             FieldKind::Object => match (&self.object, self.object_prop) {
-                (Some((handle, _)), Some(prop)) => {
-                    (format!("\\AcObjProp Object(%<\\_ObjIdx 0>%).{prop}"), vec![*handle])
-                }
+                (Some((handle, _)), Some(prop)) => (
+                    format!("\\AcObjProp Object(%<\\_ObjIdx 0>%).{prop}"),
+                    vec![*handle],
+                ),
                 _ => ("\\AcObjProp".into(), vec![]),
             },
         }
@@ -572,12 +752,17 @@ fn indexed_object_ids(formula: &str) -> (String, Vec<codec::Handle>) {
     while let Some(start) = rest.find("%<\\_ObjId ") {
         let after = &rest[start + "%<\\_ObjId ".len()..];
         let Some(end) = after.find(">%") else { break };
-        let Ok(value) = u64::from_str_radix(after[..end].trim(), 16) else { break };
+        let Ok(value) = u64::from_str_radix(after[..end].trim(), 16) else {
+            break;
+        };
         let handle = codec::Handle::new(value);
-        let index = objects.iter().position(|h| *h == handle).unwrap_or_else(|| {
-            objects.push(handle);
-            objects.len() - 1
-        });
+        let index = objects
+            .iter()
+            .position(|h| *h == handle)
+            .unwrap_or_else(|| {
+                objects.push(handle);
+                objects.len() - 1
+            });
         out.push_str(&rest[..start]);
         out.push_str(&format!("%<\\_ObjIdx {index}>%"));
         rest = &after[end + 2..];
@@ -656,11 +841,17 @@ fn msg(m: FieldDialogMsg) -> Message {
 }
 
 fn card<'a>(title: String, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    container(column![text(title.to_uppercase()).size(10).style(accent_text), content.into()].spacing(8))
-        .padding([10, 12])
-        .width(Fill)
-        .style(card_style)
-        .into()
+    container(
+        column![
+            text(title.to_uppercase()).size(10).style(accent_text),
+            content.into()
+        ]
+        .spacing(8),
+    )
+    .padding([10, 12])
+    .width(Fill)
+    .style(card_style)
+    .into()
 }
 
 /// A selectable list: one row per item, the chosen one highlighted.
@@ -673,11 +864,13 @@ fn list<'a>(rows: Vec<(String, bool, FieldDialogMsg)>, height: f32) -> Element<'
             .width(Fill)
             .into()
     });
-    container(scrollable(iced::widget::Column::with_children(rows.collect::<Vec<Element<'a, Message>>>()).spacing(1)))
-        .height(Length::Fixed(height))
-        .padding(2)
-        .style(|theme: &iced::Theme| field_style(theme, text_input::Status::Active).into_container())
-        .into()
+    container(scrollable(
+        iced::widget::Column::with_children(rows.collect::<Vec<Element<'a, Message>>>()).spacing(1),
+    ))
+    .height(Length::Fixed(height))
+    .padding(2)
+    .style(|theme: &iced::Theme| field_style(theme, text_input::Status::Active).into_container())
+    .into()
 }
 
 trait IntoContainer {
@@ -707,7 +900,13 @@ fn case_list<'a>(state: &FieldDialogState) -> Element<'a, Message> {
         TEXT_CASES
             .iter()
             .enumerate()
-            .map(|(i, c)| (t!(*c).into_owned(), state.text_case == i, FieldDialogMsg::TextCase(i)))
+            .map(|(i, c)| {
+                (
+                    t!(*c).into_owned(),
+                    state.text_case == i,
+                    FieldDialogMsg::TextCase(i),
+                )
+            })
             .collect(),
         130.0,
     )
@@ -732,14 +931,20 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 examples
                     .iter()
                     .enumerate()
-                    .map(|(i, e)| (e.clone(), DATE_FORMATS.get(i) == Some(&state.date_format.as_str()), FieldDialogMsg::DateExample(i)))
+                    .map(|(i, e)| (
+                        e.clone(),
+                        DATE_FORMATS.get(i) == Some(&state.date_format.as_str()),
+                        FieldDialogMsg::DateExample(i)
+                    ))
                     .collect(),
                 220.0,
             ),
         ]
         .spacing(8)
         .into(),
-        FieldKind::Text => column![text(t!("Format")).size(12), case_list(state)].spacing(8).into(),
+        FieldKind::Text => column![text(t!("Format")).size(12), case_list(state)]
+            .spacing(8)
+            .into(),
         FieldKind::Filename => {
             let part = |label: &str, bits: u8| {
                 checkbox(state.file_parts == bits)
@@ -772,7 +977,11 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 SIZE_UNITS
                     .iter()
                     .enumerate()
-                    .map(|(i, u)| (t!(*u).into_owned(), state.size_unit == i, FieldDialogMsg::SizeUnit(i)))
+                    .map(|(i, u)| (
+                        t!(*u).into_owned(),
+                        state.size_unit == i,
+                        FieldDialogMsg::SizeUnit(i)
+                    ))
                     .collect(),
                 90.0,
             ),
@@ -784,7 +993,11 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
             list(
                 crate::entities::field::SYSVARS
                     .iter()
-                    .map(|v| (v.to_string(), state.sysvar == *v, FieldDialogMsg::SysVar(v.to_string())))
+                    .map(|v| (
+                        v.to_string(),
+                        state.sysvar == *v,
+                        FieldDialogMsg::SysVar(v.to_string())
+                    ))
                     .collect(),
                 250.0,
             ),
@@ -803,10 +1016,19 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         .into(),
         FieldKind::NamedObject => column![
             row![
-                text(t!("Named object type")).size(12).width(Length::Fixed(120.0)),
+                text(t!("Named object type"))
+                    .size(12)
+                    .width(Length::Fixed(120.0)),
                 pick_list(
-                    Some(Pick(state.named_type, t!(NAMED_TYPES[state.named_type]).into_owned())),
-                    NAMED_TYPES.iter().enumerate().map(|(i, n)| Pick(i, t!(*n).into_owned())).collect::<Vec<_>>(),
+                    Some(Pick(
+                        state.named_type,
+                        t!(NAMED_TYPES[state.named_type]).into_owned()
+                    )),
+                    NAMED_TYPES
+                        .iter()
+                        .enumerate()
+                        .map(|(i, n)| Pick(i, t!(*n).into_owned()))
+                        .collect::<Vec<_>>(),
                     |p: &Pick| p.1.clone(),
                 )
                 .on_select(|p| msg(FieldDialogMsg::NamedType(p.0)))
@@ -822,7 +1044,11 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                     .named_names
                     .iter()
                     .enumerate()
-                    .map(|(i, (n, _))| (n.clone(), state.named == Some(i), FieldDialogMsg::Named(i)))
+                    .map(|(i, (n, _))| (
+                        n.clone(),
+                        state.named == Some(i),
+                        FieldDialogMsg::Named(i)
+                    ))
                     .collect(),
                 150.0,
             ),
@@ -837,16 +1063,23 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 .enumerate()
                 .map(|(i, (n, _))| Pick(i, t!(*n).into_owned()))
                 .collect();
-            let precisions: Vec<Pick> =
-                FORMULA_PRECISIONS.iter().enumerate().map(|(i, n)| Pick(i, t!(*n).into_owned())).collect();
+            let precisions: Vec<Pick> = FORMULA_PRECISIONS
+                .iter()
+                .enumerate()
+                .map(|(i, n)| Pick(i, t!(*n).into_owned()))
+                .collect();
             column![
                 row![
                     text(t!("Format")).size(12).width(Length::Fixed(80.0)),
-                    pick_list(Some(formats[state.formula_format].clone()), formats.clone(), |p: &Pick| p.1.clone())
-                        .on_select(|p| msg(FieldDialogMsg::FormulaFormat(p.0)))
-                        .text_size(12)
-                        .padding([5, 8])
-                        .width(Fill),
+                    pick_list(
+                        Some(formats[state.formula_format].clone()),
+                        formats.clone(),
+                        |p: &Pick| p.1.clone()
+                    )
+                    .on_select(|p| msg(FieldDialogMsg::FormulaFormat(p.0)))
+                    .text_size(12)
+                    .padding([5, 8])
+                    .width(Fill),
                 ]
                 .spacing(8)
                 .align_y(iced::Center),
@@ -870,7 +1103,9 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         }
         FieldKind::Hyperlink => column![
             row![
-                text(t!("Text to display")).size(12).width(Length::Fixed(120.0)),
+                text(t!("Text to display"))
+                    .size(12)
+                    .width(Length::Fixed(120.0)),
                 text_input("", &state.hyperlink_text)
                     .size(12)
                     .padding([5, 8])
@@ -898,13 +1133,19 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         .spacing(8)
         .into(),
         FieldKind::BlockPlaceholder => match &state.placeholder_block {
-            None => column![text(t!("Only accessible in the block editor")).size(12).style(muted_style)].into(),
+            None => column![text(t!("Only accessible in the block editor"))
+                .size(12)
+                .style(muted_style)]
+            .into(),
             Some(block) => {
-                let (_, _, format) = codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
+                let (_, _, format) =
+                    codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
                 let mut panel = column![
                     row![
                         text(t!("Block name")).size(12).width(Length::Fixed(110.0)),
-                        container(text(block.clone()).size(12).style(muted_style)).padding([5, 8]).width(Fill),
+                        container(text(block.clone()).size(12).style(muted_style))
+                            .padding([5, 8])
+                            .width(Fill),
                     ]
                     .spacing(8)
                     .align_y(iced::Center),
@@ -914,7 +1155,11 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                             .iter()
                             .enumerate()
                             .map(|(i, (label, _, _))| {
-                                (t!(*label).into_owned(), state.placeholder_property == i, FieldDialogMsg::PlaceholderProperty(i))
+                                (
+                                    t!(*label).into_owned(),
+                                    state.placeholder_property == i,
+                                    FieldDialogMsg::PlaceholderProperty(i),
+                                )
                             })
                             .collect(),
                         150.0,
@@ -922,7 +1167,9 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 ]
                 .spacing(8);
                 if format == "%tc4" {
-                    panel = panel.push(text(t!("Format")).size(12)).push(case_list(state));
+                    panel = panel
+                        .push(text(t!("Format")).size(12))
+                        .push(case_list(state));
                 }
                 panel.into()
             }
@@ -933,7 +1180,11 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 codec::fields::PLOT_SCALE_FORMATS
                     .iter()
                     .enumerate()
-                    .map(|(i, (n, _))| (t!(*n).into_owned(), state.plot_scale == i, FieldDialogMsg::PlotScale(i)))
+                    .map(|(i, (n, _))| (
+                        t!(*n).into_owned(),
+                        state.plot_scale == i,
+                        FieldDialogMsg::PlotScale(i)
+                    ))
                     .collect(),
                 170.0,
             ),
@@ -941,9 +1192,15 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         .spacing(8)
         .into(),
         FieldKind::Count => column![].into(),
-        FieldKind::SheetSet => column![text(t!("Format")).size(12), case_list(state)].spacing(8).into(),
+        FieldKind::SheetSet => column![text(t!("Format")).size(12), case_list(state)]
+            .spacing(8)
+            .into(),
         FieldKind::SheetSetCustom => {
-            let names = if state.name == "CurrentSheetCustom" { &state.ss_sheet_custom } else { &state.ss_set_custom };
+            let names = if state.name == "CurrentSheetCustom" {
+                &state.ss_sheet_custom
+            } else {
+                &state.ss_set_custom
+            };
             column![
                 text(t!("Format")).size(12),
                 case_list(state),
@@ -967,7 +1224,13 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 PLACEHOLDER_TYPES
                     .iter()
                     .enumerate()
-                    .map(|(i, (n, _, _))| (n.to_string(), state.ss_placeholder == i, FieldDialogMsg::SsPlaceholder(i)))
+                    .map(|(i, (n, _, _))| {
+                        (
+                            n.to_string(),
+                            state.ss_placeholder == i,
+                            FieldDialogMsg::SsPlaceholder(i),
+                        )
+                    })
                     .collect(),
                 200.0,
             );
@@ -976,14 +1239,26 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                     codec::fields::PLOT_SCALE_FORMATS
                         .iter()
                         .enumerate()
-                        .map(|(i, (n, _))| (t!(*n).into_owned(), state.ss_scale_format == i, FieldDialogMsg::SsScaleFormat(i)))
+                        .map(|(i, (n, _))| {
+                            (
+                                t!(*n).into_owned(),
+                                state.ss_scale_format == i,
+                                FieldDialogMsg::SsScaleFormat(i),
+                            )
+                        })
                         .collect(),
                     170.0,
                 )
             } else {
                 case_list(state)
             };
-            let mut col = column![text(t!("Placeholder type")).size(12), types, text(t!("Format")).size(12), format].spacing(8);
+            let mut col = column![
+                text(t!("Placeholder type")).size(12),
+                types,
+                text(t!("Format")).size(12),
+                format
+            ]
+            .spacing(8);
             if kind == "Custom" {
                 col = col.push(text(t!("Custom property name")).size(12)).push(
                     pick_list(
@@ -1000,7 +1275,12 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
             col.into()
         }
         FieldKind::SheetSetNavigation => {
-            let picks: Vec<Pick> = state.ss_sets.iter().enumerate().map(|(i, d)| Pick(i, d.name().to_string())).collect();
+            let picks: Vec<Pick> = state
+                .ss_sets
+                .iter()
+                .enumerate()
+                .map(|(i, d)| Pick(i, d.name().to_string()))
+                .collect();
             let current = picks.get(state.ss_set).cloned();
             let set_row = row![
                 pick_list(current, picks, |p: &Pick| p.1.clone())
@@ -1008,27 +1288,49 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                     .text_size(12)
                     .padding([5, 8])
                     .width(Fill),
-                button(text("...").size(12)).on_press(msg(FieldDialogMsg::SsBrowse)).style(button_style(false)).padding([5, 10]),
+                button(text("...").size(12))
+                    .on_press(msg(FieldDialogMsg::SsBrowse))
+                    .style(button_style(false))
+                    .padding([5, 10]),
             ]
             .spacing(6);
             let db = state.ss_sets.get(state.ss_set);
-            let nodes = db.map(|d| nav_nodes(d, state.name == "SheetView")).unwrap_or_default();
+            let nodes = db
+                .map(|d| nav_nodes(d, state.name == "SheetView"))
+                .unwrap_or_default();
             let tree = list(
                 nodes
                     .iter()
                     .map(|(depth, id, label, _)| {
-                        (format!("{}{label}", "    ".repeat(usize::from(*depth))), *id == state.ss_node, FieldDialogMsg::SsNode(id.clone()))
+                        (
+                            format!("{}{label}", "    ".repeat(usize::from(*depth))),
+                            *id == state.ss_node,
+                            FieldDialogMsg::SsNode(id.clone()),
+                        )
                     })
                     .collect(),
                 118.0,
             );
             let props = db.map(|d| nav_props(d, &state.ss_node)).unwrap_or_default();
             let prop_list = list(
-                props.iter().map(|(l, _, _)| (l.clone(), *l == state.ss_prop, FieldDialogMsg::SsProp(l.clone()))).collect(),
+                props
+                    .iter()
+                    .map(|(l, _, _)| {
+                        (
+                            l.clone(),
+                            *l == state.ss_prop,
+                            FieldDialogMsg::SsProp(l.clone()),
+                        )
+                    })
+                    .collect(),
                 92.0,
             );
-            let linkable = db.is_some_and(|d| nav_link(d, &state.ss_node).is_some()) && state.ss_prop != "ViewportScale";
-            let mut href = checkbox(state.ss_href && linkable).label(t!("Associate hyperlink").into_owned()).text_size(12).size(14);
+            let linkable = db.is_some_and(|d| nav_link(d, &state.ss_node).is_some())
+                && state.ss_prop != "ViewportScale";
+            let mut href = checkbox(state.ss_href && linkable)
+                .label(t!("Associate hyperlink").into_owned())
+                .text_size(12)
+                .size(14);
             if linkable {
                 href = href.on_toggle(|v| msg(FieldDialogMsg::SsHref(v)));
             }
@@ -1037,7 +1339,13 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                     codec::fields::PLOT_SCALE_FORMATS
                         .iter()
                         .enumerate()
-                        .map(|(i, (n, _))| (t!(*n).into_owned(), state.ss_scale_format == i, FieldDialogMsg::SsScaleFormat(i)))
+                        .map(|(i, (n, _))| {
+                            (
+                                t!(*n).into_owned(),
+                                state.ss_scale_format == i,
+                                FieldDialogMsg::SsScaleFormat(i),
+                            )
+                        })
                         .collect(),
                     120.0,
                 )
@@ -1062,7 +1370,15 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
             row![
                 text(t!("Object type")).size(12).width(Length::Fixed(96.0)),
                 container(
-                    text(state.object.as_ref().map(|(_, t)| t.clone()).unwrap_or_default()).size(12).style(muted_style)
+                    text(
+                        state
+                            .object
+                            .as_ref()
+                            .map(|(_, t)| t.clone())
+                            .unwrap_or_default()
+                    )
+                    .size(12)
+                    .style(muted_style)
                 )
                 .padding([5, 8])
                 .width(Fill),
@@ -1078,7 +1394,11 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                 state
                     .object_props
                     .iter()
-                    .map(|p| (t!(*p).into_owned(), state.object_prop == Some(*p), FieldDialogMsg::ObjectProp(p)))
+                    .map(|p| (
+                        t!(*p).into_owned(),
+                        state.object_prop == Some(*p),
+                        FieldDialogMsg::ObjectProp(p)
+                    ))
                     .collect(),
                 180.0,
             ),
@@ -1092,17 +1412,25 @@ pub fn view<'a>(
     state: &'a FieldDialogState,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    let categories: Vec<Pick> = CATEGORIES.iter().enumerate().map(|(i, (c, _))| Pick(i, t!(*c).into_owned())).collect();
+    let categories: Vec<Pick> = CATEGORIES
+        .iter()
+        .enumerate()
+        .map(|(i, (c, _))| Pick(i, t!(*c).into_owned()))
+        .collect();
     let left = card(
         t!("Field").into_owned(),
         column![
             row![
                 text(t!("Category")).size(12).width(Length::Fixed(70.0)),
-                pick_list(Some(categories[state.category].clone()), categories.clone(), |p: &Pick| p.1.clone())
-                    .on_select(|p| msg(FieldDialogMsg::Category(p.0)))
-                    .text_size(12)
-                    .padding([5, 8])
-                    .width(Fill),
+                pick_list(
+                    Some(categories[state.category].clone()),
+                    categories.clone(),
+                    |p: &Pick| p.1.clone()
+                )
+                .on_select(|p| msg(FieldDialogMsg::Category(p.0)))
+                .text_size(12)
+                .padding([5, 8])
+                .width(Fill),
             ]
             .spacing(8)
             .align_y(iced::Center),
@@ -1118,9 +1446,16 @@ pub fn view<'a>(
     );
     let preview = card(
         t!("Preview").into_owned(),
-        container(text(if state.preview.is_empty() { "----".to_string() } else { state.preview.clone() }).size(15))
-            .padding([6, 8])
-            .width(Fill),
+        container(
+            text(if state.preview.is_empty() {
+                "----".to_string()
+            } else {
+                state.preview.clone()
+            })
+            .size(15),
+        )
+        .padding([6, 8])
+        .width(Fill),
     );
     let right = match kind_of(state.name) {
         FieldKind::Formula => column![
@@ -1152,7 +1487,11 @@ pub fn view<'a>(
             preview,
         ]
         .spacing(10),
-        FieldKind::Hyperlink => column![card(t!("Hyperlink").into_owned(), format_panel(state)), preview].spacing(10),
+        FieldKind::Hyperlink => column![
+            card(t!("Hyperlink").into_owned(), format_panel(state)),
+            preview
+        ]
+        .spacing(10),
         FieldKind::Count => column![
             card(
                 t!("Expression").into_owned(),
@@ -1180,27 +1519,49 @@ pub fn view<'a>(
             preview,
         ]
         .spacing(10),
-        FieldKind::BlockPlaceholder => column![card(t!("Block placeholder").into_owned(), format_panel(state)), preview].spacing(10),
-        FieldKind::SheetSetNavigation => column![card(t!("Sheet set").into_owned(), format_panel(state)), preview].spacing(10),
-        _ => column![card(t!("Format").into_owned(), format_panel(state)), preview].spacing(10),
+        FieldKind::BlockPlaceholder => column![
+            card(t!("Block placeholder").into_owned(), format_panel(state)),
+            preview
+        ]
+        .spacing(10),
+        FieldKind::SheetSetNavigation => column![
+            card(t!("Sheet set").into_owned(), format_panel(state)),
+            preview
+        ]
+        .spacing(10),
+        _ => column![
+            card(t!("Format").into_owned(), format_panel(state)),
+            preview
+        ]
+        .spacing(10),
     };
     let (code, _) = state.code();
     let expression = column![
         text(t!("Field expression")).size(12),
-        container(text(format!("%<{code}>%")).size(12).font(iced::Font::MONOSPACE).style(muted_style))
-            .padding([5, 8])
-            .width(Fill)
-            .style(|theme: &iced::Theme| field_style(theme, text_input::Status::Disabled).into_container()),
+        container(
+            text(format!("%<{code}>%"))
+                .size(12)
+                .font(iced::Font::MONOSPACE)
+                .style(muted_style)
+        )
+        .padding([5, 8])
+        .width(Fill)
+        .style(
+            |theme: &iced::Theme| field_style(theme, text_input::Status::Disabled).into_container()
+        ),
     ]
     .spacing(4);
     let mut insert = button(text(t!("Insert")).size(12))
-    .style(button_style(true))
-    .padding([6, 16]);
+        .style(button_style(true))
+        .padding([6, 16]);
     if state.complete() {
         insert = insert.on_press(msg(FieldDialogMsg::Ok));
     }
     let footer = row![
-        button(text("?").size(12)).on_press(msg(FieldDialogMsg::Help)).style(button_style(false)).padding([5, 11]),
+        button(text("?").size(12))
+            .on_press(msg(FieldDialogMsg::Help))
+            .style(button_style(false))
+            .padding([5, 11]),
         Space::new().width(Fill),
         dialog_button(t!("Cancel"), Message::CloseModal, false),
         insert,

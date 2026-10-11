@@ -22,8 +22,8 @@ use codec::{CadDocument, EntityType};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
-use crate::scene::model::wire_model::WireModel;
 use crate::modules::IconKind;
+use crate::scene::model::wire_model::WireModel;
 
 pub const ICON: IconKind =
     IconKind::Svg(include_bytes!("../../../assets/icons/underlay_layers.svg"));
@@ -174,9 +174,11 @@ impl PdfAttachCommand {
     /// Reads the file's pages or sheet / model names; false when it cannot.
     fn open(&mut self, path: &str) -> bool {
         let found = match self.kind {
-            UnderlayType::Pdf => crate::scene::model::pdf_raster::page_count(path).filter(|n| *n > 0).map(|n| {
-                self.page_count = n;
-            }),
+            UnderlayType::Pdf => crate::scene::model::pdf_raster::page_count(path)
+                .filter(|n| *n > 0)
+                .map(|n| {
+                    self.page_count = n;
+                }),
             kind => crate::scene::model::underlay_vector::item_names(kind, path)
                 .filter(|names| !names.is_empty())
                 .map(|names| {
@@ -193,9 +195,11 @@ impl PdfAttachCommand {
 
     fn page_rect(&self, page: &str) -> [f64; 4] {
         match self.kind {
-            UnderlayType::Pdf => crate::scene::model::pdf_raster::page_size_inches(&self.path, page)
-                .map(|(w, h)| [0.0, 0.0, w, h])
-                .unwrap_or([0.0; 4]),
+            UnderlayType::Pdf => {
+                crate::scene::model::pdf_raster::page_size_inches(&self.path, page)
+                    .map(|(w, h)| [0.0, 0.0, w, h])
+                    .unwrap_or([0.0; 4])
+            }
             kind => crate::scene::model::underlay_vector::sheet(kind, &self.path, page)
                 .map(|s| s.rect)
                 .unwrap_or([0.0; 4]),
@@ -288,7 +292,11 @@ impl PdfAttachCommand {
             return CmdResult::NeedPoint;
         }
         if self.kind != UnderlayType::Pdf {
-            let name = if text.is_empty() { self.items[0].clone() } else { text.to_string() };
+            let name = if text.is_empty() {
+                self.items[0].clone()
+            } else {
+                text.to_string()
+            };
             let Some(found) = self.items.iter().find(|n| n.eq_ignore_ascii_case(&name)) else {
                 // ponytail: the PDF wording; the reference's message for an
                 // unknown sheet / model name was not measured.
@@ -300,10 +308,11 @@ impl PdfAttachCommand {
             self.page = found.clone();
             self.rect = self.page_rect(&self.page);
             if self.kind == UnderlayType::Dgn {
-                self.sub_per_master = crate::scene::model::underlay_vector::sheet(self.kind, &self.path, &self.page)
-                    .map(|s| s.sub_per_master)
-                    .filter(|v| *v > 0.0)
-                    .unwrap_or(1.0);
+                self.sub_per_master =
+                    crate::scene::model::underlay_vector::sheet(self.kind, &self.path, &self.page)
+                        .map(|s| s.sub_per_master)
+                        .filter(|v| *v > 0.0)
+                        .unwrap_or(1.0);
                 self.step = Step::Conversion;
             } else {
                 self.step = Step::Insertion;
@@ -342,7 +351,11 @@ impl PdfAttachCommand {
     }
 
     fn list_pages(&mut self, pattern: &str) -> CmdResult {
-        let pattern = if pattern.trim().is_empty() { "*" } else { pattern.trim() };
+        let pattern = if pattern.trim().is_empty() {
+            "*"
+        } else {
+            pattern.trim()
+        };
         let names: Vec<String> = match self.kind {
             UnderlayType::Pdf => (1..=self.page_count).map(|n| n.to_string()).collect(),
             _ => self.items.clone(),
@@ -427,13 +440,20 @@ impl PdfAttachCommand {
         .collect();
         CmdResult::AttachPdfPages {
             kind: self.kind,
-            path: self.stored_path.clone().unwrap_or_else(|| self.path.clone()),
+            path: self
+                .stored_path
+                .clone()
+                .unwrap_or_else(|| self.path.clone()),
             pages: placed,
         }
     }
 
     fn frame_at(&self, pt: DVec3) -> Vec<[f64; 3]> {
-        let at = |x: f64, y: f64| pt + self.plane.vector_to_world(DVec3::new(x * self.scale, y * self.scale, 0.0));
+        let at = |x: f64, y: f64| {
+            pt + self
+                .plane
+                .vector_to_world(DVec3::new(x * self.scale, y * self.scale, 0.0))
+        };
         let [x0, y0, x1, y1] = self.rect;
         let corners = [at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1), at(x0, y0)];
         corners.iter().map(|p| p.to_array()).collect()
@@ -454,7 +474,11 @@ impl CadCommand for PdfAttachCommand {
     }
 
     fn prompt(&self) -> String {
-        let item = if self.kind == UnderlayType::Dwf { "sheet" } else { "model" };
+        let item = if self.kind == UnderlayType::Dwf {
+            "sheet"
+        } else {
+            "model"
+        };
         match self.step {
             Step::Path => format!(
                 "Path to {} file to attach:",
@@ -464,9 +488,16 @@ impl CadCommand for PdfAttachCommand {
                     UnderlayType::Dgn => "DGN",
                 }
             ),
-            Step::Page if self.kind == UnderlayType::Pdf => "Enter page number or [?] <1>:".to_string(),
-            Step::Page => format!("Enter name of {item} or [?] <{}>:", self.items.first().map_or("", |s| s)),
-            Step::ListPages if self.kind == UnderlayType::Pdf => "Enter page(s) to list <*>:".to_string(),
+            Step::Page if self.kind == UnderlayType::Pdf => {
+                "Enter page number or [?] <1>:".to_string()
+            }
+            Step::Page => format!(
+                "Enter name of {item} or [?] <{}>:",
+                self.items.first().map_or("", |s| s)
+            ),
+            Step::ListPages if self.kind == UnderlayType::Pdf => {
+                "Enter page(s) to list <*>:".to_string()
+            }
             Step::ListPages => format!("Enter {item}(s) to list <*>:"),
             Step::Conversion => "Specify conversion units [Master/Sub] <Master>:".to_string(),
             Step::Insertion => "Specify insertion point:".to_string(),
@@ -608,7 +639,10 @@ fn ensure_definitions_dictionary(document: &mut CadDocument, kind: UnderlayType)
         return None;
     };
     if let Some(existing) = root_dictionary.get(name) {
-        if matches!(document.objects.get(&existing), Some(ObjectType::Dictionary(_))) {
+        if matches!(
+            document.objects.get(&existing),
+            Some(ObjectType::Dictionary(_))
+        ) {
             return Some(existing);
         }
     }
@@ -616,7 +650,9 @@ fn ensure_definitions_dictionary(document: &mut CadDocument, kind: UnderlayType)
     let mut dictionary = Dictionary::new();
     dictionary.handle = handle;
     dictionary.owner = root;
-    document.objects.insert(handle, ObjectType::Dictionary(dictionary));
+    document
+        .objects
+        .insert(handle, ObjectType::Dictionary(dictionary));
     if let Some(ObjectType::Dictionary(root_dictionary)) = document.objects.get_mut(&root) {
         root_dictionary.add_entry(name, handle);
     }
@@ -631,17 +667,25 @@ fn same_path(a: &str, b: &str) -> bool {
 /// The definition for a file and page / sheet / model of the kind: the
 /// existing one, or a new one registered in its dictionary as
 /// "<file> - <page>".
-pub fn ensure_underlay_definition(document: &mut CadDocument, kind: UnderlayType, path: &str, page: &str) -> Handle {
-    let existing = document.objects.iter().find_map(|(handle, object)| match object {
-        ObjectType::UnderlayDefinition(def)
-            if def.underlay_type == kind
-                && same_path(&def.file_path, path)
-                && crate::entities::underlay::page_of(def) == page =>
-        {
-            Some(*handle)
-        }
-        _ => None,
-    });
+pub fn ensure_underlay_definition(
+    document: &mut CadDocument,
+    kind: UnderlayType,
+    path: &str,
+    page: &str,
+) -> Handle {
+    let existing = document
+        .objects
+        .iter()
+        .find_map(|(handle, object)| match object {
+            ObjectType::UnderlayDefinition(def)
+                if def.underlay_type == kind
+                    && same_path(&def.file_path, path)
+                    && crate::entities::underlay::page_of(def) == page =>
+            {
+                Some(*handle)
+            }
+            _ => None,
+        });
     if let Some(handle) = existing {
         return handle;
     }
@@ -672,5 +716,12 @@ pub fn ensure_underlay_definition(document: &mut CadDocument, kind: UnderlayType
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PDFATTACH", "-PDFATTACH", "DWFATTACH", "-DWFATTACH", "DGNATTACH", "-DGNATTACH"]
+    names: &[
+        "PDFATTACH",
+        "-PDFATTACH",
+        "DWFATTACH",
+        "-DWFATTACH",
+        "DGNATTACH",
+        "-DGNATTACH"
+    ]
 });

@@ -46,7 +46,9 @@ pub fn note_update_time(duration_us: u64) {
 /// Mark when view() finishes, to time the layout/draw gap until prepare().
 pub fn note_view_finish() {
     if enabled() {
-        let mut guard = VIEW_FINISH_INSTANT.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = VIEW_FINISH_INSTANT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         *guard = Some(iced::time::Instant::now());
     }
 }
@@ -56,7 +58,9 @@ pub fn take_view_to_prepare_ms() -> Option<f64> {
     if !enabled() {
         return None;
     }
-    let mut guard = VIEW_FINISH_INSTANT.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = VIEW_FINISH_INSTANT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     guard.take().map(|t| t.elapsed().as_secs_f64() * 1000.0)
 }
 

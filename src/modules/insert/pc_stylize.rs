@@ -50,7 +50,10 @@ impl CadCommand for PointCloudStylizeCommand {
     }
 
     fn options(&self) -> Vec<CmdOption> {
-        OPTIONS.iter().map(|(name, key, _)| CmdOption::new(name, key)).collect()
+        OPTIONS
+            .iter()
+            .map(|(name, key, _)| CmdOption::new(name, key))
+            .collect()
     }
 
     fn input_kind(&self) -> InputKind {
@@ -63,17 +66,30 @@ impl CadCommand for PointCloudStylizeCommand {
             LAST.lock().map(|v| *v).unwrap_or(0)
         } else {
             match OPTIONS.iter().position(|(name, key, _)| {
-                text == *key || (text.len() >= key.len() && name.to_ascii_uppercase().starts_with(&text))
+                text == *key
+                    || (text.len() >= key.len() && name.to_ascii_uppercase().starts_with(&text))
             }) {
                 Some(at) => at,
-                None => return Some(CmdResult::ReportError("Invalid option keyword.".to_string())),
+                None => {
+                    return Some(CmdResult::ReportError(
+                        "Invalid option keyword.".to_string(),
+                    ))
+                }
             }
         };
         if let Ok(mut last) = LAST.lock() {
             *last = chosen;
         }
-        let handles: Vec<String> = self.handles.iter().map(|h| format!("{:X}", h.value())).collect();
-        Some(CmdResult::Dispatch(format!("_PCSTYLIZEAPPLY {} {}", OPTIONS[chosen].2, handles.join(" "))))
+        let handles: Vec<String> = self
+            .handles
+            .iter()
+            .map(|h| format!("{:X}", h.value()))
+            .collect();
+        Some(CmdResult::Dispatch(format!(
+            "_PCSTYLIZEAPPLY {} {}",
+            OPTIONS[chosen].2,
+            handles.join(" ")
+        )))
     }
 
     fn on_point(&mut self, _pt: glam::DVec3) -> CmdResult {
@@ -85,7 +101,9 @@ impl CadCommand for PointCloudStylizeCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["POINTCLOUDSTYLIZE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["POINTCLOUDSTYLIZE"]
+});
 
 // POINTCLOUDCOLORMAP — the Point Cloud Color Map dialog.
 //
@@ -149,7 +167,9 @@ impl CadCommand for PointCloudColorMapCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         match text.trim().to_ascii_uppercase().as_str() {
             "" | "N" | "NONE" => Some(CmdResult::Dispatch("_PCCOLORMAP".to_string())),
-            _ => Some(CmdResult::ReportError("Invalid option keyword.".to_string())),
+            _ => Some(CmdResult::ReportError(
+                "Invalid option keyword.".to_string(),
+            )),
         }
     }
 
@@ -162,4 +182,6 @@ impl CadCommand for PointCloudColorMapCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["POINTCLOUDCOLORMAP"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["POINTCLOUDCOLORMAP"]
+});

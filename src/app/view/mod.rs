@@ -625,7 +625,10 @@ bg={bg_ms:.1}ms n={view_count}"
             let control_polygon = tab.selected_handle.and_then(|handle| {
                 let spline = match tab.scene.document.get_entity(handle) {
                     Some(codec::EntityType::Spline(spline))
-                        if crate::entities::spline::shows_control_vertices(spline) => spline,
+                        if crate::entities::spline::shows_control_vertices(spline) =>
+                    {
+                        spline
+                    }
                     _ => return None,
                 };
                 if tab
@@ -797,7 +800,7 @@ bg={bg_ms:.1}ms n={view_count}"
                                 && b.y.is_finite()
                                 && a.x.is_finite()
                                 && a.y.is_finite())
-                                .then_some((b, a))
+                            .then_some((b, a))
                         })
                         .collect()
                 }
@@ -1131,8 +1134,12 @@ bg={bg_ms:.1}ms n={view_count}"
                         (None, _) if rectangle_values.is_some() => {
                             let (width, height) = rectangle_values.unwrap();
                             match f.role {
-                                crate::command::DynRole::Width => crate::entities::common::format_length(width),
-                                crate::command::DynRole::Height => crate::entities::common::format_length(height),
+                                crate::command::DynRole::Width => {
+                                    crate::entities::common::format_length(width)
+                                }
+                                crate::command::DynRole::Height => {
+                                    crate::entities::common::format_length(height)
+                                }
                                 _ => String::new(),
                             }
                         }
@@ -1673,8 +1680,10 @@ bg={bg_ms:.1}ms n={view_count}"
             // Count mode: a blue frame round the drawing and the count toolbar.
             if let (Some(mode), false) = (tab.count.as_ref(), tab.is_start) {
                 viewport_stack = viewport_stack.push(crate::ui::window::count_palette::border());
-                viewport_stack = viewport_stack
-                    .push(crate::ui::window::count_palette::toolbar(mode, &tab.scene.document));
+                viewport_stack = viewport_stack.push(crate::ui::window::count_palette::toolbar(
+                    mode,
+                    &tab.scene.document,
+                ));
             }
 
             // Reserve the overlaid command line when placing cursor-anchored panels.
@@ -1887,9 +1896,7 @@ bg={bg_ms:.1}ms n={view_count}"
         // hovered or unpinned panel expands to the full column height on top.
         // Single source of truth with dock_visible_len (#57): one new panel
         // updated in only one place used to break drag math vs rendering.
-        let visible_panel = |id: crate::ui::dock::PanelId| -> bool {
-            self.dock_panel_visible(id)
-        };
+        let visible_panel = |id: crate::ui::dock::PanelId| -> bool { self.dock_panel_visible(id) };
         let edge_stack = |side: crate::app::config::DockSide| -> Option<Element<'_, Message>> {
             let ids: Vec<crate::ui::dock::PanelId> = match side {
                 crate::app::config::DockSide::Left => self.dock.left.clone(),
@@ -1915,8 +1922,7 @@ bg={bg_ms:.1}ms n={view_count}"
         // value is numeric input, not the prefix of a new command (for example,
         // `3` must not open the 3DALIGN / 3DARRAY suggestions).
         let allow_autocomplete = self.grip_pending.is_none()
-            && (tab.active_cmd.is_none()
-                || self.command_line.has_contextual_suggestions());
+            && (tab.active_cmd.is_none() || self.command_line.has_contextual_suggestions());
         // Dynamic input captures keystrokes when its fields are showing,
         // so the command-line field must release focus / its on_input.
         // The MText preview also captures keystrokes (typing edits it), so the
@@ -2323,18 +2329,18 @@ bg={bg_ms:.1}ms n={view_count}"
         // otherwise an empty slice short-circuits the overlay gate
         // (`dropdown_overlay` returns `None` for empty labels anyway).
         let open_dropdown = self.ribbon.open_dropdown.as_deref();
-        let undo_labels: Vec<String> =
-            if open_dropdown == Some(crate::ui::ribbon::UNDO_HISTORY_ID) {
-                history_dropdown_labels(&self.tabs[self.active_tab].history.undo_stack)
-            } else {
-                Vec::new()
-            };
-        let redo_labels: Vec<String> =
-            if open_dropdown == Some(crate::ui::ribbon::REDO_HISTORY_ID) {
-                history_dropdown_labels(&self.tabs[self.active_tab].history.redo_stack)
-            } else {
-                Vec::new()
-            };
+        let undo_labels: Vec<String> = if open_dropdown == Some(crate::ui::ribbon::UNDO_HISTORY_ID)
+        {
+            history_dropdown_labels(&self.tabs[self.active_tab].history.undo_stack)
+        } else {
+            Vec::new()
+        };
+        let redo_labels: Vec<String> = if open_dropdown == Some(crate::ui::ribbon::REDO_HISTORY_ID)
+        {
+            history_dropdown_labels(&self.tabs[self.active_tab].history.redo_stack)
+        } else {
+            Vec::new()
+        };
         let gallery_open = open_dropdown == Some(crate::modules::insert::insert_block::GALLERY_ID)
             && !self.tabs[self.active_tab].is_start;
         let dropdown_layer: Element<'_, Message> = if gallery_open {
@@ -2345,16 +2351,15 @@ bg={bg_ms:.1}ms n={view_count}"
                 self.win_size.0,
             )
         } else {
-            self
-            .ribbon
-            .dropdown_overlay(
-                &undo_labels,
-                &redo_labels,
-                self.win_size,
-                self.tabs[self.active_tab].is_start,
-                &self.recent_colors,
-            )
-            .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into())
+            self.ribbon
+                .dropdown_overlay(
+                    &undo_labels,
+                    &redo_labels,
+                    self.win_size,
+                    self.tabs[self.active_tab].is_start,
+                    &self.recent_colors,
+                )
+                .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into())
         };
 
         let snap_override_layer: Element<'_, Message> = if let Some(pos) = self.snap_override_popup
@@ -2719,10 +2724,9 @@ impl OpenCADStudio {
                             && modifiers.alt()
                             && !modifiers.control()
                             && !modifiers.logo();
-                        let shortcut_modifier = (modifiers.control()
-                            || modifiers.alt()
-                            || modifiers.logo())
-                            && !(types_glyph && (altgr || mac_option));
+                        let shortcut_modifier =
+                            (modifiers.control() || modifiers.alt() || modifiers.logo())
+                                && !(types_glyph && (altgr || mac_option));
                         // Any key that produces a printable glyph types it,
                         // even when its logical key resolves to navigation
                         // (NumLock-on Numpad8 / Numpad2 arrive as
@@ -2832,7 +2836,9 @@ impl OpenCADStudio {
             } else {
                 Subscription::none()
             },
-            self.spacemouse.subscription().map(|_| Message::SpaceMouseWake),
+            self.spacemouse
+                .subscription()
+                .map(|_| Message::SpaceMouseWake),
             crate::input::trackpad::subscription().map(Message::TrackpadPinch),
             event::listen_with(|event, _, id| match event {
                 iced::Event::Window(window::Event::Focused) => {
@@ -3023,15 +3029,15 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, auto_collapse)
             }
-            crate::ui::dock::PanelId::ExternalReferences => self.xref_manager.view(
-                width,
-                auto_collapse,
-                tab.xref_missing,
-                &tab.scene.document,
-            ),
+            crate::ui::dock::PanelId::ExternalReferences => {
+                self.xref_manager
+                    .view(width, auto_collapse, tab.xref_missing, &tab.scene.document)
+            }
             crate::ui::dock::PanelId::Browser => crate::ui::window::browser::view(
                 &tab.scene.document,
-                tab.sketch_session.as_ref().map(|session| session.name.as_str()),
+                tab.sketch_session
+                    .as_ref()
+                    .map(|session| session.name.as_str()),
                 width,
                 auto_collapse,
             ),

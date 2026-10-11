@@ -20,7 +20,11 @@ fn point_field(req: &Value, key: &str) -> Parsed<codec::types::Vector3> {
             .filter(|v| v.is_finite())
             .ok_or_else(|| failure("invalid_point", format!("{key} needs finite coordinates")))
     };
-    Ok(codec::types::Vector3::new(coord(0)?, coord(1)?, values.get(2).and_then(Value::as_f64).unwrap_or(0.0)))
+    Ok(codec::types::Vector3::new(
+        coord(0)?,
+        coord(1)?,
+        values.get(2).and_then(Value::as_f64).unwrap_or(0.0),
+    ))
 }
 
 fn deg_field(req: &Value, key: &str) -> f64 {
@@ -31,7 +35,12 @@ pub(super) fn hex_handles(req: &Value, key: &str) -> Parsed<Vec<codec::Handle>> 
     let list = req[key]
         .as_array()
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| failure("handles_required", format!("Supply a non-empty {key}:[…] list")))?;
+        .ok_or_else(|| {
+            failure(
+                "handles_required",
+                format!("Supply a non-empty {key}:[…] list"),
+            )
+        })?;
     list.iter()
         .map(|v| {
             u64::from_str_radix(
@@ -54,7 +63,10 @@ pub(super) fn hex_handles(req: &Value, key: &str) -> Parsed<Vec<codec::Handle>> 
 
 /// Every handle must exist in the document; otherwise `entity_absent` naming
 /// the missing ones so the caller can refresh instead of guessing.
-pub(super) fn require_existing(document: &codec::CadDocument, handles: &[codec::Handle]) -> Parsed<()> {
+pub(super) fn require_existing(
+    document: &codec::CadDocument,
+    handles: &[codec::Handle],
+) -> Parsed<()> {
     let missing: Vec<String> = handles
         .iter()
         .filter(|h| document.get_entity(**h).is_none())
@@ -560,7 +572,11 @@ impl OpenCADStudio {
                     .map(|record| {
                         (
                             record.application_name.clone(),
-                            json!(record.values.iter().map(xdata_value_json).collect::<Vec<_>>()),
+                            json!(record
+                                .values
+                                .iter()
+                                .map(xdata_value_json)
+                                .collect::<Vec<_>>()),
                         )
                     })
                     .collect();
@@ -594,11 +610,10 @@ impl OpenCADStudio {
 
         // World → block space translates `base` onto the block origin; the
         // inverse places the Insert so entities keep their world position.
-        let world_to_block = codec::types::Transform::from_translation(
-            codec::types::Vector3::new(-base.x, -base.y, -base.z),
-        );
-        let block_to_world =
-            codec::types::Transform::from_translation(insert_at);
+        let world_to_block = codec::types::Transform::from_translation(codec::types::Vector3::new(
+            -base.x, -base.y, -base.z,
+        ));
+        let block_to_world = codec::types::Transform::from_translation(insert_at);
         self.push_undo_snapshot(i, "BLOCKDEFINE");
         // CF-01.3 (barcode re-import): `replace:true` drops the previous
         // definition — its children, markers and inserts — inside the same
@@ -629,7 +644,13 @@ impl OpenCADStudio {
             ));
         }
         let i = self.active_tab;
-        if self.tabs[i].scene.document.block_records.get(&name).is_none() {
+        if self.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get(&name)
+            .is_none()
+        {
             return Err(failure(
                 "block_missing",
                 format!("Block '{name}' does not exist"),

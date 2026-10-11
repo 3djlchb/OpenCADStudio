@@ -138,10 +138,7 @@ fn flatten_curve_entity(entity: &codec::EntityType) -> Option<codec::EntityType>
             let plane = crate::entities::curve::ocs_plane(source.normal, source.elevation);
             let mut polyline = source.clone();
             for vertex in &mut polyline.vertices {
-                let point = flatten_array(plane.point_at([
-                    vertex.location.x,
-                    vertex.location.y,
-                ]))?;
+                let point = flatten_array(plane.point_at([vertex.location.x, vertex.location.y]))?;
                 vertex.location = Vector2::new(point.x, point.y);
             }
             polyline.elevation = 0.0;
@@ -153,10 +150,7 @@ fn flatten_curve_entity(entity: &codec::EntityType) -> Option<codec::EntityType>
             let plane = crate::entities::curve::ocs_plane(source.normal, source.elevation);
             let mut polyline = source.clone();
             for vertex in &mut polyline.vertices {
-                let point = flatten_array(plane.point_at([
-                    vertex.location.x,
-                    vertex.location.y,
-                ]))?;
+                let point = flatten_array(plane.point_at([vertex.location.x, vertex.location.y]))?;
                 vertex.location = point;
             }
             polyline.elevation = 0.0;
@@ -216,8 +210,7 @@ fn flatten_curve_entity(entity: &codec::EntityType) -> Option<codec::EntityType>
             }
             let mut polyline = source.clone();
             for (target, projected) in polyline.vertices.iter_mut().zip(curve.vertices) {
-                target.location =
-                    Vector3::new(projected.position[0], projected.position[1], 0.0);
+                target.location = Vector3::new(projected.position[0], projected.position[1], 0.0);
                 target.bulge = projected.bulge;
             }
             polyline.elevation = 0.0;
@@ -268,12 +261,8 @@ fn flatten_array(point: [f64; 3]) -> Option<codec::types::Vector3> {
 fn flatten_vector(vector: codec::types::Vector3) -> Option<codec::types::Vector3> {
     use kernel::space::Plane;
 
-    let vector = Plane::XY.vector_at(Plane::XY.project_vector([
-        vector.x, vector.y, vector.z,
-    ])?);
-    Some(codec::types::Vector3::new(
-        vector[0], vector[1], vector[2],
-    ))
+    let vector = Plane::XY.vector_at(Plane::XY.project_vector([vector.x, vector.y, vector.z])?);
+    Some(codec::types::Vector3::new(vector[0], vector[1], vector[2]))
 }
 
 fn positive_z_normal(normal: codec::types::Vector3) -> bool {
@@ -337,7 +326,9 @@ mod flatten_tests {
         let mut pl = codec::entities::Polyline3D::new();
         for z in [5.0, -2.0, 7.5] {
             pl.vertices
-                .push(codec::entities::Vertex3DPolyline::new(Vector3::new(1.0, 2.0, z)));
+                .push(codec::entities::Vertex3DPolyline::new(Vector3::new(
+                    1.0, 2.0, z,
+                )));
         }
         pl.elevation = 5.0;
 
@@ -350,7 +341,10 @@ mod flatten_tests {
         assert_eq!(pl.elevation, 0.0);
         assert!(pl.vertices.iter().all(|v| v.position.z == 0.0));
         // X/Y must survive the projection.
-        assert!(pl.vertices.iter().all(|v| v.position.x == 1.0 && v.position.y == 2.0));
+        assert!(pl
+            .vertices
+            .iter()
+            .all(|v| v.position.x == 1.0 && v.position.y == 2.0));
     }
 
     #[test]
@@ -387,7 +381,12 @@ mod flatten_tests {
             panic!("wrong variant")
         };
         assert_eq!(
-            [s.first_corner.z, s.second_corner.z, s.third_corner.z, s.fourth_corner.z],
+            [
+                s.first_corner.z,
+                s.second_corner.z,
+                s.third_corner.z,
+                s.fourth_corner.z
+            ],
             [0.0; 4]
         );
     }
@@ -408,7 +407,9 @@ mod flatten_tests {
         line.end = Vector3::new(1.0, 1.0, 4.0);
         let entity = EntityType::Line(line);
         let entity = flatten_entity_z(&entity).expect("projection");
-        let EntityType::Line(l) = entity else { panic!("wrong variant") };
+        let EntityType::Line(l) = entity else {
+            panic!("wrong variant")
+        };
         assert_eq!((l.start.z, l.end.z), (0.0, 0.0));
     }
 
@@ -423,10 +424,8 @@ mod flatten_tests {
 
     #[test]
     fn tilted_circle_projects_to_ellipse() {
-        let mut circle = codec::entities::Circle::from_center_radius(
-            Vector3::new(2.0, 3.0, 4.0),
-            5.0,
-        );
+        let mut circle =
+            codec::entities::Circle::from_center_radius(Vector3::new(2.0, 3.0, 4.0), 5.0);
         circle.normal = Vector3::new(0.0, 0.6, 0.8);
         circle.thickness = 2.0;
         let entity = EntityType::Circle(circle);

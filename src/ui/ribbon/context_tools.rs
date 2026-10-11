@@ -42,7 +42,11 @@ pub fn pdf_underlay_tools(kind: codec::entities::UnderlayType) -> Vec<ToolDef> {
             "Enable\nSnap",
             include_bytes!("../../../assets/icons/snap_underlays.svg"),
         ),
-        tool("EXTERNALREFERENCES", "External\nReferences", crate::ui::icons::FOLDER_OPEN),
+        tool(
+            "EXTERNALREFERENCES",
+            "External\nReferences",
+            crate::ui::icons::FOLDER_OPEN,
+        ),
         tool(
             "ULAYERS",
             "Edit\nLayers",
@@ -73,7 +77,11 @@ pub fn point_cloud_tools() -> Vec<ToolDef> {
         ),
         tool("_PCCROPINVERT", "Invert\nCropping", CLIP),
         tool("_PCUNCROP", "Remove All\nCropping", UNCLIP),
-        tool("EXTERNALREFERENCES", "External\nReferences", crate::ui::icons::FOLDER_OPEN),
+        tool(
+            "EXTERNALREFERENCES",
+            "External\nReferences",
+            crate::ui::icons::FOLDER_OPEN,
+        ),
     ]
 }
 
@@ -85,10 +93,18 @@ pub fn xref_tools() -> Vec<ToolDef> {
             "Edit Reference\nIn-Place",
             include_bytes!("../../../assets/icons/edit_block.svg"),
         ),
-        tool("_XREFOPEN", "Open\nReference", crate::ui::icons::FOLDER_OPEN),
+        tool(
+            "_XREFOPEN",
+            "Open\nReference",
+            crate::ui::icons::FOLDER_OPEN,
+        ),
         tool("_XREFCLIP", "Create Clipping\nBoundary", CLIP),
         tool("_XREFUNCLIP", "Remove\nClipping", UNCLIP),
-        tool("EXTERNALREFERENCES", "External\nReferences", crate::ui::icons::FOLDER_OPEN),
+        tool(
+            "EXTERNALREFERENCES",
+            "External\nReferences",
+            crate::ui::icons::FOLDER_OPEN,
+        ),
     ]
 }
 

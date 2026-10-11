@@ -14,8 +14,7 @@ use codec::CadDocument;
 
 /// The community folder's GitHub contents API (lists name + download URL).
 #[cfg(not(target_arch = "wasm32"))]
-const REPO_API_URL: &str =
-    "https://api.github.com/repos/HakanSeven12/OpenCADStudio/contents/fonts";
+const REPO_API_URL: &str = "https://api.github.com/repos/HakanSeven12/OpenCADStudio/contents/fonts";
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_FONT_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -126,7 +125,10 @@ fn fetch_repo_fonts() -> Result<Vec<RepoFont>, String> {
     let agent = crate::network::agent(std::time::Duration::from_secs(15));
     let mut response = agent
         .get(REPO_API_URL)
-        .header("User-Agent", concat!("OpenCADStudio/", env!("OCS_APP_VERSION")))
+        .header(
+            "User-Agent",
+            concat!("OpenCADStudio/", env!("OCS_APP_VERSION")),
+        )
         .header("Accept", "application/vnd.github+json")
         .call()
         .map_err(|e| format!("Could not reach the font repository: {e}"))?;
@@ -175,7 +177,8 @@ pub fn download_fonts(
         FontSource::Custom(_) => None,
     };
     let dir = fonts_dir().ok_or_else(|| "Could not resolve the fonts folder.".to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
     let mut downloaded = Vec::new();
     for want in missing {
         let file = want.rsplit(['/', '\\']).next().unwrap_or(want);
@@ -189,16 +192,17 @@ pub fn download_fonts(
             }
             // Custom folder: the font is simply `{base}/{file_name}`; a miss
             // (404) is skipped without failing the batch.
-            (FontSource::Custom(base), _) => {
-                Some(format!("{base}/{}", percent_encode_path(file)))
-            }
+            (FontSource::Custom(base), _) => Some(format!("{base}/{}", percent_encode_path(file))),
             (FontSource::Community, None) => None,
         };
         let Some(url) = url else { continue };
         let agent = crate::network::agent(std::time::Duration::from_secs(30));
         let mut response = agent
             .get(&url)
-            .header("User-Agent", concat!("OpenCADStudio/", env!("OCS_APP_VERSION")))
+            .header(
+                "User-Agent",
+                concat!("OpenCADStudio/", env!("OCS_APP_VERSION")),
+            )
             .call()
             .map_err(|e| format!("Could not download {file}: {e}"))?;
         if response.status() != 200 {

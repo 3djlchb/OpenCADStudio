@@ -24,7 +24,6 @@ const STANDARD_SCALES: &[(&str, f64)] = &[
     ("10:1", 10.0),
 ];
 
-
 fn scale_label(scale: f64) -> String {
     for (label, val) in STANDARD_SCALES {
         if (scale - val).abs() < val * 0.01 {
@@ -195,7 +194,11 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
         "vp_on" => {
             // turn_on/turn_off keep the explicit-off bit in step, so a
             // viewport the file marked off can be turned back on.
-            let on = if value == "toggle" { !vp.is_on() } else { value == "true" };
+            let on = if value == "toggle" {
+                !vp.is_on()
+            } else {
+                value == "true"
+            };
             if on {
                 vp.turn_on();
             } else {
@@ -439,9 +442,7 @@ fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
 crate::impl_entity_basics!(Viewport);
 
 impl crate::entities::traits::FallbackTess for Viewport {
-    fn fallback_geometry(
-        &self,
-    ) -> crate::scene::convert::tess_util::FallbackGeometry {
+    fn fallback_geometry(&self) -> crate::scene::convert::tess_util::FallbackGeometry {
         // A clipped viewport uses its linked boundary entity as its visible
         // frame. Drawing the viewport's rectangular extents as well leaves an
         // incorrect box around polygonal/Object MVIEW results.

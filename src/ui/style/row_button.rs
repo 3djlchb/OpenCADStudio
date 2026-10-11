@@ -40,10 +40,7 @@ pub(crate) fn cell_button_style(
 /// Column-header button style (layers panel).
 pub(crate) fn header_button_style(theme: &Theme, status: button::Status) -> button::Style {
     let palette = theme.palette();
-    let highlighted = matches!(
-        status,
-        button::Status::Hovered | button::Status::Pressed
-    );
+    let highlighted = matches!(status, button::Status::Hovered | button::Status::Pressed);
     let pair = if highlighted {
         palette.background.strong
     } else {

@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
-use super::model::{arc_cubics, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text, CAP_PER_EM};
+use super::model::{
+    arc_cubics, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text, CAP_PER_EM,
+};
 
 /// The package's files, with `\` separators turned into `/`.
 fn unzip(bytes: &[u8]) -> Option<HashMap<String, Vec<u8>>> {
@@ -19,7 +21,11 @@ fn unzip(bytes: &[u8]) -> Option<HashMap<String, Vec<u8>>> {
     let mut budget: u64 = 1 << 30;
     for i in 0..archive.len() {
         let file = archive.by_index(i).ok()?;
-        let name = file.name().replace('\\', "/").trim_start_matches('/').to_string();
+        let name = file
+            .name()
+            .replace('\\', "/")
+            .trim_start_matches('/')
+            .to_string();
         let mut data = Vec::new();
         file.take(budget + 1).read_to_end(&mut data).ok()?;
         budget = budget.checked_sub(data.len() as u64)?;
@@ -42,7 +48,9 @@ struct SheetEntry {
 }
 
 fn attr<'a>(node: roxmltree::Node<'a, '_>, name: &str) -> Option<&'a str> {
-    node.attributes().find(|a| a.name() == name).map(|a| a.value())
+    node.attributes()
+        .find(|a| a.name() == name)
+        .map(|a| a.value())
 }
 
 fn numbers(text: &str) -> Vec<f64> {
@@ -197,8 +205,12 @@ fn sheets(files: &HashMap<String, Vec<u8>>) -> Vec<SheetEntry> {
         if !name.ends_with("descriptor.xml") {
             continue;
         }
-        let Ok(text) = std::str::from_utf8(data) else { continue };
-        let Some(doc) = parse_xml(text.trim_start_matches('\u{feff}')) else { continue };
+        let Ok(text) = std::str::from_utf8(data) else {
+            continue;
+        };
+        let Some(doc) = parse_xml(text.trim_start_matches('\u{feff}')) else {
+            continue;
+        };
         let page = doc.root_element();
         if page.tag_name().name() != "Page" {
             continue;
@@ -218,7 +230,9 @@ fn sheets(files: &HashMap<String, Vec<u8>>) -> Vec<SheetEntry> {
                     joined
                 } else {
                     let parent = dir.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                    format!("{parent}/{href}").trim_start_matches('/').to_string()
+                    format!("{parent}/{href}")
+                        .trim_start_matches('/')
+                        .to_string()
                 }
             }
         };
@@ -233,7 +247,10 @@ fn sheets(files: &HashMap<String, Vec<u8>>) -> Vec<SheetEntry> {
                         Some("in") => 25.4,
                         _ => 1.0,
                     };
-                    paper_height_mm = attr(node, "height").and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) * scale;
+                    paper_height_mm = attr(node, "height")
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .unwrap_or(0.0)
+                        * scale;
                 }
                 "GraphicResource" if attr(node, "role") == Some("2d streaming graphics") => {
                     graphics = attr(node, "href").map(resolve);
@@ -251,7 +268,9 @@ fn sheets(files: &HashMap<String, Vec<u8>>) -> Vec<SheetEntry> {
         let Some(graphics) = graphics else { continue };
         out.push(SheetEntry {
             name: attr(page, "name").unwrap_or("").to_string(),
-            order: attr(page, "plotOrder").and_then(|v| v.parse().ok()).unwrap_or(0),
+            order: attr(page, "plotOrder")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
             graphics,
             paper,
             paper_height_mm,
@@ -278,18 +297,26 @@ struct Units {
 
 impl Units {
     fn identity() -> Self {
-        Self { scale: [1.0, 1.0], offset: [0.0, 0.0] }
+        Self {
+            scale: [1.0, 1.0],
+            offset: [0.0, 0.0],
+        }
     }
     fn model(&self, p: [f64; 2]) -> [f64; 2] {
-        [(p[0] - self.offset[0]) / self.scale[0], (p[1] - self.offset[1]) / self.scale[1]]
+        [
+            (p[0] - self.offset[0]) / self.scale[0],
+            (p[1] - self.offset[1]) / self.scale[1],
+        ]
     }
     fn length(&self, v: f64) -> f64 {
         v / self.scale[0].abs().max(1e-12)
     }
     /// A 4×4 matrix written row by row, translation in the last row.
     fn from_matrix(m: &[f64]) -> Option<Self> {
-        (m.len() == 16 && m[0] != 0.0 && m[5] != 0.0)
-            .then(|| Self { scale: [m[0], m[5]], offset: [m[12], m[13]] })
+        (m.len() == 16 && m[0] != 0.0 && m[5] != 0.0).then(|| Self {
+            scale: [m[0], m[5]],
+            offset: [m[12], m[13]],
+        })
     }
 }
 
@@ -307,10 +334,18 @@ pub fn sheet(bytes: &[u8], name: &str) -> Option<Sheet> {
     } else {
         let w2x = entry.w2x.as_ref().and_then(|p| files.get(p));
         // An embedded font (FontUri, relative to the page) names its family.
-        let page_dir = entry.graphics.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+        let page_dir = entry
+            .graphics
+            .rsplit_once('/')
+            .map(|(d, _)| d.to_string())
+            .unwrap_or_default();
         let family = |uri: &str| -> Option<String> {
             let uri = uri.trim_start_matches("./");
-            let key = if let Some(abs) = uri.strip_prefix('/') { abs.to_string() } else { format!("{page_dir}/{uri}") };
+            let key = if let Some(abs) = uri.strip_prefix('/') {
+                abs.to_string()
+            } else {
+                format!("{page_dir}/{uri}")
+            };
             let data = files.get(&key)?;
             let name = key.rsplit('/').next()?;
             font_family(&deobfuscate(data, name)?)
@@ -318,17 +353,31 @@ pub fn sheet(bytes: &[u8], name: &str) -> Option<Sheet> {
         xps::read(data, w2x.map(|v| v.as_slice()), entry, &family)?
     };
     let rect = view.or_else(|| paths_bounds(&paths))?;
-    Some(Sheet { rect, paths, texts, sub_per_master: 1.0, table_colors: false, element_colors: Vec::new() })
+    Some(Sheet {
+        rect,
+        paths,
+        texts,
+        sub_per_master: 1.0,
+        table_colors: false,
+        element_colors: Vec::new(),
+    })
 }
 
 /// An XPS obfuscated font (.odttf): its first 32 bytes are XORed with the
 /// GUID of its file name, byte order reversed.
 fn deobfuscate(data: &[u8], file_name: &str) -> Option<Vec<u8>> {
-    let hex: String = file_name.split('.').next()?.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    let hex: String = file_name
+        .split('.')
+        .next()?
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .collect();
     if hex.len() != 32 || data.len() < 32 {
         return None;
     }
-    let bytes: Vec<u8> = (0..16).filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()).collect();
+    let bytes: Vec<u8> = (0..16)
+        .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
+        .collect();
     let key: Vec<u8> = bytes.into_iter().rev().collect();
     let mut out = data.to_vec();
     for i in 0..32 {
@@ -344,7 +393,9 @@ fn font_family(font: &[u8]) -> Option<String> {
     let tables = u16be(4)? as usize;
     let name = (0..tables).find_map(|t| {
         let at = 12 + t * 16;
-        (font.get(at..at + 4)? == b"name").then(|| u32be(at + 8)).flatten()
+        (font.get(at..at + 4)? == b"name")
+            .then(|| u32be(at + 8))
+            .flatten()
     })? as usize;
     let count = u16be(name + 2)? as usize;
     let strings = name + u16be(name + 4)? as usize;
@@ -360,7 +411,10 @@ fn font_family(font: &[u8]) -> Option<String> {
         match platform {
             // Windows: UTF-16 big endian.
             3 | 0 => {
-                let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+                let units: Vec<u16> = raw
+                    .chunks_exact(2)
+                    .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                    .collect();
                 return Some(String::from_utf16_lossy(&units));
             }
             _ => fallback = Some(String::from_utf8_lossy(raw).to_string()),
@@ -472,8 +526,14 @@ mod w2d {
             // A stream cut off right after its '(' has no body at all.
             let end = self.i.saturating_sub(1).max(start + 1);
             let body = self.b.get(start + 1..end)?;
-            let name_len = body.iter().position(|c| c.is_ascii_whitespace() || *c == b'(').unwrap_or(body.len());
-            Some((String::from_utf8_lossy(&body[..name_len]).to_string(), &body[name_len..]))
+            let name_len = body
+                .iter()
+                .position(|c| c.is_ascii_whitespace() || *c == b'(')
+                .unwrap_or(body.len());
+            Some((
+                String::from_utf8_lossy(&body[..name_len]).to_string(),
+                &body[name_len..],
+            ))
         }
     }
 
@@ -495,15 +555,28 @@ mod w2d {
         text.split_whitespace()
             .filter_map(|tok| {
                 let (x, y) = tok.split_once(',')?;
-                Some([x.trim_matches(')').parse().ok()?, y.trim_matches(')').parse().ok()?])
+                Some([
+                    x.trim_matches(')').parse().ok()?,
+                    y.trim_matches(')').parse().ok()?,
+                ])
             })
             .collect()
     }
 
     fn rect_of(points: &[[f64; 2]]) -> Option<[f64; 4]> {
-        let mut r = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        let mut r = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
         for p in points {
-            r = [r[0].min(p[0]), r[1].min(p[1]), r[2].max(p[0]), r[3].max(p[1])];
+            r = [
+                r[0].min(p[0]),
+                r[1].min(p[1]),
+                r[2].max(p[0]),
+                r[3].max(p[1]),
+            ];
         }
         (r[0] < r[2] && r[1] < r[3]).then_some(r)
     }
@@ -589,9 +662,17 @@ mod w2d {
                     let wide = op == b'l';
                     let mut pb = PathBuilder::default();
                     for k in 0..2 {
-                        let (dx, dy) = if wide { (r.i32()? as f64, r.i32()? as f64) } else { (r.i16()? as f64, r.i16()? as f64) };
+                        let (dx, dy) = if wide {
+                            (r.i32()? as f64, r.i32()? as f64)
+                        } else {
+                            (r.i16()? as f64, r.i16()? as f64)
+                        };
                         let p = rel(&mut at, dx, dy);
-                        if k == 0 { pb.move_to(p) } else { pb.line_to(p) }
+                        if k == 0 {
+                            pb.move_to(p)
+                        } else {
+                            pb.line_to(p)
+                        }
                     }
                     raw.push((pb.finish(), color, weight, visible));
                 }
@@ -601,9 +682,17 @@ mod w2d {
                     let n = r.count()?;
                     let mut pb = PathBuilder::default();
                     for k in 0..n {
-                        let (dx, dy) = if wide { (r.i32()? as f64, r.i32()? as f64) } else { (r.i16()? as f64, r.i16()? as f64) };
+                        let (dx, dy) = if wide {
+                            (r.i32()? as f64, r.i32()? as f64)
+                        } else {
+                            (r.i16()? as f64, r.i16()? as f64)
+                        };
                         let p = rel(&mut at, dx, dy);
-                        if k == 0 { pb.move_to(p) } else { pb.line_to(p) }
+                        if k == 0 {
+                            pb.move_to(p)
+                        } else {
+                            pb.line_to(p)
+                        }
                     }
                     raw.push((pb.finish(), color, weight, visible));
                 }
@@ -613,7 +702,11 @@ mod w2d {
                     let n = r.count()?;
                     let mut pts = Vec::with_capacity(n);
                     for _ in 0..n {
-                        let (dx, dy) = if wide { (r.i32()? as f64, r.i32()? as f64) } else { (r.i16()? as f64, r.i16()? as f64) };
+                        let (dx, dy) = if wide {
+                            (r.i32()? as f64, r.i32()? as f64)
+                        } else {
+                            (r.i16()? as f64, r.i16()? as f64)
+                        };
                         pts.push(rel(&mut at, dx, dy));
                     }
                     // A triangle strip: each point closes a triangle with the
@@ -621,7 +714,11 @@ mod w2d {
                     let subpaths = pts
                         .windows(3)
                         .map(|t| SubPath {
-                            segments: vec![Segment::Line(t[0], t[1]), Segment::Line(t[1], t[2]), Segment::Line(t[2], t[0])],
+                            segments: vec![
+                                Segment::Line(t[0], t[1]),
+                                Segment::Line(t[1], t[2]),
+                                Segment::Line(t[2], t[0]),
+                            ],
                             closed: true,
                         })
                         .collect();
@@ -642,7 +739,12 @@ mod w2d {
                     } else if sweep < 0.0 {
                         sweep += std::f64::consts::TAU;
                     }
-                    raw.push((arc_path(c, radius, radius, 0.0, start, sweep), color, weight, visible));
+                    raw.push((
+                        arc_path(c, radius, radius, 0.0, start, sweep),
+                        color,
+                        weight,
+                        visible,
+                    ));
                 }
                 b'e' | b'E' => {
                     // Ellipse: relative centre, major and minor radius, start
@@ -657,7 +759,12 @@ mod w2d {
                         sweep += std::f64::consts::TAU;
                     }
                     let fill = op == b'E';
-                    raw.push((arc_path(c, major, minor, tilt * turn, s * turn, sweep), color, if fill { -1.0 } else { weight }, visible));
+                    raw.push((
+                        arc_path(c, major, minor, tilt * turn, s * turn, sweep),
+                        color,
+                        if fill { -1.0 } else { weight },
+                        visible,
+                    ));
                 }
                 0x06 => {
                     // Font: a field mask, then the fields it names in order.
@@ -708,18 +815,34 @@ mod w2d {
             .into_iter()
             .filter(|(_, _, _, visible)| *visible)
             .map(|(subpaths, color, weight, _)| {
-                let subpaths = subpaths.into_iter().map(|sp| map_subpath(sp, |p| units.model(p))).collect();
+                let subpaths = subpaths
+                    .into_iter()
+                    .map(|sp| map_subpath(sp, |p| units.model(p)))
+                    .collect();
                 if weight < 0.0 {
-                    Path { subpaths, stroke: None, fill: Some(color) }
+                    Path {
+                        subpaths,
+                        stroke: None,
+                        fill: Some(color),
+                    }
                 } else {
-                    Path { subpaths, stroke: Some((color, units.length(weight))), fill: None }
+                    Path {
+                        subpaths,
+                        stroke: Some((color, units.length(weight))),
+                        fill: None,
+                    }
                 }
             })
             .collect();
         let view = view.map(|v| {
             let a = units.model([v[0], v[1]]);
             let b = units.model([v[2], v[3]]);
-            [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]
+            [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[0].max(b[0]),
+                a[1].max(b[1]),
+            ]
         });
         let texts = texts
             .into_iter()
@@ -748,12 +871,11 @@ mod w2d {
             Some(String::from_utf8_lossy(&r.b[start..r.i - 1]).to_string())
         } else {
             let n = r.count()?;
-            let units: Vec<u16> = r
-                .b
-                .get(r.i..r.i + n * 2)?
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                .collect();
+            let units: Vec<u16> =
+                r.b.get(r.i..r.i + n * 2)?
+                    .chunks_exact(2)
+                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                    .collect();
             r.i += n * 2;
             Some(String::from_utf16_lossy(&units))
         }
@@ -763,7 +885,13 @@ mod w2d {
 fn arc_path(c: [f64; 2], rx: f64, ry: f64, rot: f64, start: f64, sweep: f64) -> Vec<SubPath> {
     let pieces = arc_cubics(c, rx, ry, rot, start, sweep);
     let closed = (sweep.abs() - std::f64::consts::TAU).abs() < 1e-9;
-    vec![SubPath { segments: pieces.into_iter().map(|[a, b, cc, d]| Segment::Cubic(a, b, cc, d)).collect(), closed }]
+    vec![SubPath {
+        segments: pieces
+            .into_iter()
+            .map(|[a, b, cc, d]| Segment::Cubic(a, b, cc, d))
+            .collect(),
+        closed,
+    }]
 }
 
 fn map_subpath(sp: SubPath, f: impl Fn([f64; 2]) -> [f64; 2]) -> SubPath {
@@ -800,7 +928,10 @@ mod xps {
     }
 
     fn apply(m: Affine, p: [f64; 2]) -> [f64; 2] {
-        [m[0] * p[0] + m[2] * p[1] + m[4], m[1] * p[0] + m[3] * p[1] + m[5]]
+        [
+            m[0] * p[0] + m[2] * p[1] + m[4],
+            m[1] * p[0] + m[3] * p[1] + m[5],
+        ]
     }
 
     fn parse_affine(text: &str) -> Option<Affine> {
@@ -831,7 +962,10 @@ mod xps {
                 for node in doc.descendants() {
                     match node.tag_name().name() {
                         "Units" => {
-                            if let Some(u) = attr(node, "Transform").map(numbers).and_then(|m| Units::from_matrix(&m)) {
+                            if let Some(u) = attr(node, "Transform")
+                                .map(numbers)
+                                .and_then(|m| Units::from_matrix(&m))
+                            {
                                 units = u;
                             }
                         }
@@ -859,53 +993,88 @@ mod xps {
         };
         let mut paths = Vec::new();
         let mut texts = Vec::new();
-        walk(doc.root_element(), [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], &mut |node, m| {
-            let m = match attr(node, "RenderTransform").and_then(parse_affine) {
-                Some(local) => mul(m, local),
-                None => m,
-            };
-            if node.tag_name().name() == "Glyphs" {
-                // Text: its baseline origin and em size in page units (y
-                // down), drawn in the embedded font's family.
-                let num = |name: &str| attr(node, name).and_then(|v| v.parse::<f64>().ok());
-                let (Some(em), Some(text)) = (num("FontRenderingEmSize"), attr(node, "UnicodeString")) else { return };
-                let o = [num("OriginX").unwrap_or(0.0), num("OriginY").unwrap_or(0.0)];
+        walk(
+            doc.root_element(),
+            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            &mut |node, m| {
+                let m = match attr(node, "RenderTransform").and_then(parse_affine) {
+                    Some(local) => mul(m, local),
+                    None => m,
+                };
+                if node.tag_name().name() == "Glyphs" {
+                    // Text: its baseline origin and em size in page units (y
+                    // down), drawn in the embedded font's family.
+                    let num = |name: &str| attr(node, name).and_then(|v| v.parse::<f64>().ok());
+                    let (Some(em), Some(text)) =
+                        (num("FontRenderingEmSize"), attr(node, "UnicodeString"))
+                    else {
+                        return;
+                    };
+                    let o = [num("OriginX").unwrap_or(0.0), num("OriginY").unwrap_or(0.0)];
+                    let map = |p: [f64; 2]| units.model(to_logical(apply(m, p)));
+                    let (a, along, up) = (map(o), map([o[0] + em, o[1]]), map([o[0], o[1] - em]));
+                    let len = |p: [f64; 2]| ((p[0] - a[0]).powi(2) + (p[1] - a[1]).powi(2)).sqrt();
+                    if !text.trim().is_empty() {
+                        texts.push(Text {
+                            text: text.to_string(),
+                            origin: a,
+                            height: len(up) * CAP_PER_EM,
+                            width_factor: if len(up) > 0.0 {
+                                len(along) / len(up)
+                            } else {
+                                1.0
+                            },
+                            rotation: (along[1] - a[1]).atan2(along[0] - a[0]),
+                            color: attr(node, "Fill")
+                                .and_then(parse_color)
+                                .unwrap_or([0, 0, 0]),
+                            font: attr(node, "FontUri")
+                                .and_then(family)
+                                .unwrap_or_else(|| "Arial".to_string()),
+                        });
+                    }
+                    return;
+                }
+                let Some(data) = attr(node, "Data") else {
+                    return;
+                };
                 let map = |p: [f64; 2]| units.model(to_logical(apply(m, p)));
-                let (a, along, up) = (map(o), map([o[0] + em, o[1]]), map([o[0], o[1] - em]));
-                let len = |p: [f64; 2]| ((p[0] - a[0]).powi(2) + (p[1] - a[1]).powi(2)).sqrt();
-                if !text.trim().is_empty() {
-                    texts.push(Text {
-                        text: text.to_string(),
-                        origin: a,
-                        height: len(up) * CAP_PER_EM,
-                        width_factor: if len(up) > 0.0 { len(along) / len(up) } else { 1.0 },
-                        rotation: (along[1] - a[1]).atan2(along[0] - a[0]),
-                        color: attr(node, "Fill").and_then(parse_color).unwrap_or([0, 0, 0]),
-                        font: attr(node, "FontUri").and_then(family).unwrap_or_else(|| "Arial".to_string()),
+                let subpaths: Vec<SubPath> = parse_data(data)
+                    .into_iter()
+                    .map(|sp| map_subpath(sp, map))
+                    .collect();
+                if subpaths.is_empty() {
+                    return;
+                }
+                let stroke_scale = (m[0] * m[3] - m[1] * m[2]).abs().sqrt() * px_mm
+                    / scale[0]
+                    / units.scale[0].abs();
+                let stroke = attr(node, "Stroke").and_then(parse_color).map(|c| {
+                    let t = attr(node, "StrokeThickness")
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    (c, t * stroke_scale)
+                });
+                let fill = attr(node, "Fill").and_then(parse_color);
+                if stroke.is_some() || fill.is_some() {
+                    paths.push(Path {
+                        subpaths,
+                        stroke,
+                        fill,
                     });
                 }
-                return;
-            }
-            let Some(data) = attr(node, "Data") else { return };
-            let map = |p: [f64; 2]| units.model(to_logical(apply(m, p)));
-            let subpaths: Vec<SubPath> = parse_data(data).into_iter().map(|sp| map_subpath(sp, map)).collect();
-            if subpaths.is_empty() {
-                return;
-            }
-            let stroke_scale = (m[0] * m[3] - m[1] * m[2]).abs().sqrt() * px_mm / scale[0] / units.scale[0].abs();
-            let stroke = attr(node, "Stroke").and_then(parse_color).map(|c| {
-                let t = attr(node, "StrokeThickness").and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
-                (c, t * stroke_scale)
-            });
-            let fill = attr(node, "Fill").and_then(parse_color);
-            if stroke.is_some() || fill.is_some() {
-                paths.push(Path { subpaths, stroke, fill });
-            }
-        }, 0);
+            },
+            0,
+        );
         let view = view_log.map(|v: [f64; 4]| {
             let a = units.model([v[0], v[1]]);
             let b = units.model([v[2], v[3]]);
-            [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]
+            [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[0].max(b[0]),
+                a[1].max(b[1]),
+            ]
         });
         Some((paths, view, texts))
     }
@@ -961,7 +1130,12 @@ mod xps {
                 while i < bytes.len() {
                     let d = bytes[i] as char;
                     let prev = bytes[i - 1] as char;
-                    if d.is_ascii_digit() || d == '.' || d == 'e' || d == 'E' || ((d == '-' || d == '+') && (prev == 'e' || prev == 'E')) {
+                    if d.is_ascii_digit()
+                        || d == '.'
+                        || d == 'e'
+                        || d == 'E'
+                        || ((d == '-' || d == '+') && (prev == 'e' || prev == 'E'))
+                    {
                         i += 1;
                     } else {
                         break;
@@ -998,15 +1172,25 @@ mod xps {
             }
             let cur = pb.current().unwrap_or([0.0, 0.0]);
             let relative = cmd.is_ascii_lowercase();
-            let pt = |x: f64, y: f64| if relative { [cur[0] + x, cur[1] + y] } else { [x, y] };
+            let pt = |x: f64, y: f64| {
+                if relative {
+                    [cur[0] + x, cur[1] + y]
+                } else {
+                    [x, y]
+                }
+            };
             match cmd.to_ascii_uppercase() {
                 'M' => {
-                    let (Some(x), Some(y)) = (num(&toks, &mut k), num(&toks, &mut k)) else { break };
+                    let (Some(x), Some(y)) = (num(&toks, &mut k), num(&toks, &mut k)) else {
+                        break;
+                    };
                     pb.move_to(pt(x, y));
                     cmd = if relative { 'l' } else { 'L' };
                 }
                 'L' => {
-                    let (Some(x), Some(y)) = (num(&toks, &mut k), num(&toks, &mut k)) else { break };
+                    let (Some(x), Some(y)) = (num(&toks, &mut k), num(&toks, &mut k)) else {
+                        break;
+                    };
                     pb.line_to(pt(x, y));
                 }
                 'H' => {
@@ -1019,7 +1203,9 @@ mod xps {
                 }
                 'C' => {
                     let v: Vec<f64> = (0..6).filter_map(|_| num(&toks, &mut k)).collect();
-                    if v.len() < 6 { break }
+                    if v.len() < 6 {
+                        break;
+                    }
                     let (c1, c2, p) = (pt(v[0], v[1]), pt(v[2], v[3]), pt(v[4], v[5]));
                     pb.cubic_to(c1, c2, p);
                     last_ctrl = Some(c2);
@@ -1027,8 +1213,12 @@ mod xps {
                 }
                 'S' => {
                     let v: Vec<f64> = (0..4).filter_map(|_| num(&toks, &mut k)).collect();
-                    if v.len() < 4 { break }
-                    let c1 = last_ctrl.map(|c| [2.0 * cur[0] - c[0], 2.0 * cur[1] - c[1]]).unwrap_or(cur);
+                    if v.len() < 4 {
+                        break;
+                    }
+                    let c1 = last_ctrl
+                        .map(|c| [2.0 * cur[0] - c[0], 2.0 * cur[1] - c[1]])
+                        .unwrap_or(cur);
                     let (c2, p) = (pt(v[0], v[1]), pt(v[2], v[3]));
                     pb.cubic_to(c1, c2, p);
                     last_ctrl = Some(c2);
@@ -1036,17 +1226,35 @@ mod xps {
                 }
                 'Q' => {
                     let v: Vec<f64> = (0..4).filter_map(|_| num(&toks, &mut k)).collect();
-                    if v.len() < 4 { break }
+                    if v.len() < 4 {
+                        break;
+                    }
                     let (q, p) = (pt(v[0], v[1]), pt(v[2], v[3]));
-                    let c1 = [cur[0] + 2.0 / 3.0 * (q[0] - cur[0]), cur[1] + 2.0 / 3.0 * (q[1] - cur[1])];
-                    let c2 = [p[0] + 2.0 / 3.0 * (q[0] - p[0]), p[1] + 2.0 / 3.0 * (q[1] - p[1])];
+                    let c1 = [
+                        cur[0] + 2.0 / 3.0 * (q[0] - cur[0]),
+                        cur[1] + 2.0 / 3.0 * (q[1] - cur[1]),
+                    ];
+                    let c2 = [
+                        p[0] + 2.0 / 3.0 * (q[0] - p[0]),
+                        p[1] + 2.0 / 3.0 * (q[1] - p[1]),
+                    ];
                     pb.cubic_to(c1, c2, p);
                 }
                 'A' => {
                     let v: Vec<f64> = (0..7).filter_map(|_| num(&toks, &mut k)).collect();
-                    if v.len() < 7 { break }
+                    if v.len() < 7 {
+                        break;
+                    }
                     let end = pt(v[5], v[6]);
-                    for [_, c1, c2, p] in svg_arc(cur, v[0], v[1], v[2].to_radians(), v[3] != 0.0, v[4] != 0.0, end) {
+                    for [_, c1, c2, p] in svg_arc(
+                        cur,
+                        v[0],
+                        v[1],
+                        v[2].to_radians(),
+                        v[3] != 0.0,
+                        v[4] != 0.0,
+                        end,
+                    ) {
                         pb.cubic_to(c1, c2, p);
                     }
                 }
@@ -1063,7 +1271,15 @@ mod xps {
     }
 
     /// An SVG/XPS endpoint arc as cubic pieces.
-    fn svg_arc(p0: [f64; 2], rx: f64, ry: f64, phi: f64, large: bool, sweep: bool, p1: [f64; 2]) -> Vec<[[f64; 2]; 4]> {
+    fn svg_arc(
+        p0: [f64; 2],
+        rx: f64,
+        ry: f64,
+        phi: f64,
+        large: bool,
+        sweep: bool,
+        p1: [f64; 2],
+    ) -> Vec<[[f64; 2]; 4]> {
         let (mut rx, mut ry) = (rx.abs(), ry.abs());
         if rx == 0.0 || ry == 0.0 || p0 == p1 {
             return vec![[p0, p0, p1, p1]];
@@ -1093,7 +1309,12 @@ mod xps {
             a
         };
         let t1 = ang(1.0, 0.0, (x1 - cx1) / rx, (y1 - cy1) / ry);
-        let mut dt = ang((x1 - cx1) / rx, (y1 - cy1) / ry, (-x1 - cx1) / rx, (-y1 - cy1) / ry);
+        let mut dt = ang(
+            (x1 - cx1) / rx,
+            (y1 - cy1) / ry,
+            (-x1 - cx1) / rx,
+            (-y1 - cy1) / ry,
+        );
         if !sweep && dt > 0.0 {
             dt -= std::f64::consts::TAU;
         } else if sweep && dt < 0.0 {
@@ -1170,22 +1391,36 @@ mod xps_depth_tests {
             s.push_str(&"</r>".repeat(n));
             s
         };
-        assert!(super::xml_depth_within(&nest(super::MAX_XML_DEPTH), super::MAX_XML_DEPTH));
-        assert!(!super::xml_depth_within(&nest(super::MAX_XML_DEPTH + 1), super::MAX_XML_DEPTH));
+        assert!(super::xml_depth_within(
+            &nest(super::MAX_XML_DEPTH),
+            super::MAX_XML_DEPTH
+        ));
+        assert!(!super::xml_depth_within(
+            &nest(super::MAX_XML_DEPTH + 1),
+            super::MAX_XML_DEPTH
+        ));
 
         // 1000 hostile-looking chunks, actual depth 1 each.
         let mut s = String::from("<r>");
         for _ in 0..1000 {
-            s.push_str(r#"<n t="</n><n><!-- --> <![CDATA[<b></b>]]>"/>
-"#);
+            s.push_str(
+                r#"<n t="</n><n><!-- --> <![CDATA[<b></b>]]>"/>
+"#,
+            );
         }
         s.push_str(&"</r>".repeat(1000));
         assert!(super::xml_depth_within(&s, super::MAX_XML_DEPTH));
 
         // Self-closing tags add no depth; only real opens do.
-        assert!(super::xml_depth_within(&"<a/>".repeat(5000), super::MAX_XML_DEPTH));
         assert!(super::xml_depth_within(
-            &format!("<?xml version='1.0'?><a><!-- {} --></a>", "<b></b>".repeat(1000)),
+            &"<a/>".repeat(5000),
+            super::MAX_XML_DEPTH
+        ));
+        assert!(super::xml_depth_within(
+            &format!(
+                "<?xml version='1.0'?><a><!-- {} --></a>",
+                "<b></b>".repeat(1000)
+            ),
             super::MAX_XML_DEPTH
         ));
     }
@@ -1205,13 +1440,9 @@ mod xps_depth_tests {
         let xml = r##"<FixedPage xmlns="http://schemas.microsoft.com/xps/2005/08" Width="100" Height="100">
             <Path Data="M 10 10 L 50 50" Stroke="#FF0000"/>
         </FixedPage>"##;
-        let (paths, _view, _texts) = xps::read(
-            xml.as_bytes(),
-            Some(deep.as_bytes()),
-            &entry(),
-            &|_| None,
-        )
-        .expect("page parses");
+        let (paths, _view, _texts) =
+            xps::read(xml.as_bytes(), Some(deep.as_bytes()), &entry(), &|_| None)
+                .expect("page parses");
         assert_eq!(paths.len(), 1);
     }
 
@@ -1227,10 +1458,7 @@ mod xps_depth_tests {
         }
         deep.push_str("</Page>");
         let mut files = std::collections::HashMap::new();
-        files.insert(
-            "3D/descriptor.xml".to_string(),
-            deep.into_bytes(),
-        );
+        files.insert("3D/descriptor.xml".to_string(), deep.into_bytes());
         assert!(super::sheets(&files).is_empty());
     }
 }
