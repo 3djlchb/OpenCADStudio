@@ -73,7 +73,6 @@ pub struct Ribbon {
     /// shows this tool on its button, defaulting to the panel's first tool.
     last_panel_tool: HashMap<&'static str, &'static str>,
     last_cmd: HashMap<&'static str, &'static str>,
-    pub layer_names: Vec<String>,
     pub active_layer: String,
     pub layer_infos: Vec<LayerInfo>,
     /// Live filter for the layer dropdown's search box (#343). Cleared on
@@ -189,7 +188,6 @@ impl Ribbon {
             last_panel_tool: HashMap::default(),
             last_cmd: HashMap::default(),
             // Empty until a document is open — populated by sync_ribbon_layers.
-            layer_names: vec![],
             active_layer: String::new(),
             layer_infos: vec![],
             layer_filter: String::new(),
@@ -285,7 +283,6 @@ impl Ribbon {
 
     pub fn set_layers(&mut self, infos: Vec<LayerInfo>, active: &str) {
         self.active_layer = active.to_string();
-        self.layer_names = infos.iter().map(|l| l.name.clone()).collect();
         self.layer_infos = infos;
     }
 

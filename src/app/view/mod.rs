@@ -1885,20 +1885,10 @@ bg={bg_ms:.1}ms n={view_count}"
         // view. Auto-collapsing (pinned) panels that aren't being hovered
         // reduce to a rail sharing 1/N of the edge column's height; the
         // hovered or unpinned panel expands to the full column height on top.
+        // Single source of truth with dock_visible_len (#57): one new panel
+        // updated in only one place used to break drag math vs rendering.
         let visible_panel = |id: crate::ui::dock::PanelId| -> bool {
-            if tab.is_start || self.clean_screen {
-                return false;
-            }
-            match id {
-                crate::ui::dock::PanelId::Properties => self.show_properties,
-                crate::ui::dock::PanelId::BlockPalette => self.show_block_palette,
-                crate::ui::dock::PanelId::ExternalReferences => self.show_external_references,
-                crate::ui::dock::PanelId::Browser => self.show_browser,
-                crate::ui::dock::PanelId::NodeGraph => self.show_node_graph,
-                crate::ui::dock::PanelId::PointCloudManager => self.pc_manager.show,
-                crate::ui::dock::PanelId::Count => self.count_palette.show,
-                crate::ui::dock::PanelId::SheetSetManager => self.sheet_set.show,
-            }
+            self.dock_panel_visible(id)
         };
         let edge_stack = |side: crate::app::config::DockSide| -> Option<Element<'_, Message>> {
             let ids: Vec<crate::ui::dock::PanelId> = match side {

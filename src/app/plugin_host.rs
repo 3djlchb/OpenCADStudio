@@ -9701,7 +9701,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
         // Verify COGO_LINES does not exist initially
         assert!(!app.tabs[0].scene.document.layers.contains("COGO_LINES"));
-        assert!(!app.ribbon.layer_names.contains(&"COGO_LINES".to_string()));
+        assert!(!app.ribbon.layer_infos.iter().any(|l| l.name == "COGO_LINES"));
 
         // 1. Add entity via HostSession (simulating plugin add_entity / add_line)
         {
@@ -9714,7 +9714,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
         // Verify layer is created in document AND refreshed in ribbon + layer panel
         assert!(app.tabs[0].scene.document.layers.contains("COGO_LINES"));
-        assert!(app.ribbon.layer_names.contains(&"COGO_LINES".to_string()),
+        assert!(app.ribbon.layer_infos.iter().any(|l| l.name == "COGO_LINES"),
             "Ribbon layers should contain COGO_LINES after add_entity");
         assert!(app.tabs[0].layers.layers.iter().any(|l| l.name == "COGO_LINES"),
             "Layer panel should contain COGO_LINES after add_entity");
@@ -9726,7 +9726,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
         // Verify SURVEY_TRAVERSE layer is created and refreshed in ribbon + layer panel
         assert!(app.tabs[0].scene.document.layers.contains("SURVEY_TRAVERSE"));
-        assert!(app.ribbon.layer_names.contains(&"SURVEY_TRAVERSE".to_string()),
+        assert!(app.ribbon.layer_infos.iter().any(|l| l.name == "SURVEY_TRAVERSE"),
             "Ribbon layers should contain SURVEY_TRAVERSE after commit_entity");
         assert!(app.tabs[0].layers.layers.iter().any(|l| l.name == "SURVEY_TRAVERSE"),
             "Layer panel should contain SURVEY_TRAVERSE after commit_entity");
