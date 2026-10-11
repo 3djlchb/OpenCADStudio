@@ -309,7 +309,8 @@ impl OpenCADStudio {
             StyleKind::Text => self.load_textstyle_bufs(i),
             StyleKind::Dim => self.load_dimstyle_bufs(i),
             StyleKind::MLeader => self.load_mleaderstyle_bufs(i),
-            StyleKind::Table | StyleKind::MLine => {}
+            StyleKind::Table => self.load_tablestyle_bufs(i),
+            StyleKind::MLine => self.load_mlstyle_bufs(i),
         }
     }
 
