@@ -11499,6 +11499,29 @@ mod free_text_entry_tests {
             .as_ref()
             .is_some_and(|cmd| cmd.name() == "PASTECLIP"));
     }
+
+    #[test]
+    fn space_bound_to_finalize_finalizes_in_free_text_mode() {
+        // #1710: when the user rebinds SPACE to FINALIZE in the CUI, pressing
+        // SPACE must run FINALIZE even while the command line holds focus,
+        // instead of falling through to the command line's CommandSpace
+        // (space-insert) behavior. FreeText mode distinguishes the two: a
+        // COMMANDSPACE would insert a space, while FINALIZE finishes the edit.
+        let (mut app, _) = app_with_cell_command("");
+        assert_eq!(app.text_entry_mode(), TextEntryMode::FreeText);
+
+        // Bind SPACE to FINALIZE (the CUI assignment from the issue).
+        app.shortcut_bindings
+            .insert("SPACE".to_string(), "FINALIZE".to_string());
+
+        // Pressing SPACE runs FINALIZE, which finishes the edit instead of
+        // inserting a space.
+        let _ = app.update(Message::ShortcutPressed("SPACE".to_string()));
+        assert!(
+            app.tabs[0].active_cmd.is_none(),
+            "SPACE bound to FINALIZE must finalize, not insert a space"
+        );
+    }
 }
 
 /// Set or clear one bit of `SELECTIONPREVIEW`.

@@ -449,6 +449,7 @@ impl OpenCADStudio {
                                 }
                             }
                         }
+                        crate::app::shortcuts::sync_space_dispatch_flag(&self.shortcut_bindings);
                         self.persist_settings_if_changed();
                         self.command_line.push_output(
                             crate::tf!("CUIIMPORT: loaded {n} shortcut(s) from \"{path}\".")
@@ -483,6 +484,9 @@ impl OpenCADStudio {
                                 self.command_line.push_error(crate::t!("Usage: SHORTCUTS SET <key> <command>  e.g. SHORTCUTS SET CTRL+D DIST").as_ref());
                             } else {
                                 self.shortcut_bindings.insert(key.clone(), cmd_str.clone());
+                                crate::app::shortcuts::sync_space_dispatch_flag(
+                                    &self.shortcut_bindings,
+                                );
                                 self.persist_settings_if_changed();
                                 self.command_line.push_output(
                                     crate::tf!("Shortcut set: {key} → {cmd_str}").as_ref(),
@@ -500,6 +504,9 @@ impl OpenCADStudio {
                             .remove(&crate::app::shortcuts::normalize_key(&key))
                             .is_some()
                         {
+                            crate::app::shortcuts::sync_space_dispatch_flag(
+                                &self.shortcut_bindings,
+                            );
                             self.persist_settings_if_changed();
                             self.command_line
                                 .push_output(crate::tf!("Shortcut '{key}' removed.").as_ref());
