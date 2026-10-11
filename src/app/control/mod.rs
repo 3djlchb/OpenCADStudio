@@ -436,6 +436,7 @@ impl OpenCADStudio {
     /// Mirror a real selection change into the automation event stream. The
     /// plugin host already publishes the V4 selection event; automation clients
     /// need the same signal instead of polling `state`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn control_record_selection_event(&mut self, handles: &[codec::Handle]) {
         let (document_id, revision) = {
             let tab = &self.tabs[self.active_tab];
