@@ -716,6 +716,10 @@ pub fn extrusion_history(
         sweep_entity_transform,
         path_entity_transform,
         reference_point: Vector3::new(reference_point[0], reference_point[1], reference_point[2]),
+        // Group 295: the profile frame is given, as the reference records
+        // it. Left to be computed, the reference cannot open a drawing with
+        // a tapered extrusion (ErrorStatus 53).
+        flags_294_296: [false, true, false],
         ..SolidHistorySweep::default()
     }))
 }
