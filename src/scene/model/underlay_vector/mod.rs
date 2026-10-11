@@ -58,14 +58,25 @@ fn raster_cache() -> &'static Mutex<HashMap<Key, Option<Arc<PdfPage>>>> {
 
 /// Forget what was read from `path` (its bytes changed).
 pub fn forget(path: &str) {
-    sheet_cache().lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k.0 != path);
-    raster_cache().lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k.0 != path);
-    vector_cache().lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k.0 != path);
+    sheet_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|k, _| k.0 != path);
+    raster_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|k, _| k.0 != path);
+    vector_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|k, _| k.0 != path);
 }
 
 /// Layer (DWF) or level (DGN) names of a file; empty when it has none.
 pub fn layer_names(kind: UnderlayType, path: &str) -> Vec<String> {
-    let Some(bytes) = source_bytes(path) else { return Vec::new() };
+    let Some(bytes) = source_bytes(path) else {
+        return Vec::new();
+    };
     match kind {
         // A plotted DWF carries no layers.
         UnderlayType::Dwf | UnderlayType::Pdf => None,
@@ -83,16 +94,27 @@ pub fn sheet(kind: UnderlayType, path: &str, item: &str) -> Option<Arc<Sheet>> {
 
 /// The sheet without the `hidden` layers / levels, on the full sheet's
 /// rectangle (turning layers off never moves the underlay), memoised.
-pub fn sheet_without(kind: UnderlayType, path: &str, item: &str, hidden: &[String]) -> Option<Arc<Sheet>> {
+pub fn sheet_without(
+    kind: UnderlayType,
+    path: &str,
+    item: &str,
+    hidden: &[String],
+) -> Option<Arc<Sheet>> {
     let key = (path.to_string(), layered_item(item, hidden));
-    if let Some(hit) = sheet_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+    if let Some(hit) = sheet_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
         return hit.clone();
     }
     let read = || -> Option<Sheet> {
         let bytes = source_bytes(path)?;
         let mut sheet = match kind {
             UnderlayType::Dwf => dwf::sheet(&bytes, item)?,
-            UnderlayType::Dgn if dgn7::is_v7(&bytes) => dgn7::model(&bytes, hidden).unwrap_or_default(),
+            UnderlayType::Dgn if dgn7::is_v7(&bytes) => {
+                dgn7::model(&bytes, hidden).unwrap_or_default()
+            }
             UnderlayType::Dgn => dgn8::model(&bytes, item, hidden).unwrap_or_default(),
             UnderlayType::Pdf => return None,
         };
@@ -112,11 +134,25 @@ pub fn sheet_without(kind: UnderlayType, path: &str, item: &str, hidden: &[Strin
                     &t.font,
                     &t.text,
                 );
-                let length = strokes.iter().flatten().map(|p| p[0] as f64).fold(0.0, f64::max);
+                let length = strokes
+                    .iter()
+                    .flatten()
+                    .map(|p| p[0] as f64)
+                    .fold(0.0, f64::max);
                 let (c, s) = (t.rotation.cos(), t.rotation.sin());
-                for [x, y] in [[0.0, 0.0], [length, 0.0], [length, t.height], [0.0, t.height]] {
+                for [x, y] in [
+                    [0.0, 0.0],
+                    [length, 0.0],
+                    [length, t.height],
+                    [0.0, t.height],
+                ] {
                     let p = [t.origin[0] + x * c - y * s, t.origin[1] + x * s + y * c];
-                    r = [r[0].min(p[0]), r[1].min(p[1]), r[2].max(p[0]), r[3].max(p[1])];
+                    r = [
+                        r[0].min(p[0]),
+                        r[1].min(p[1]),
+                        r[2].max(p[0]),
+                        r[3].max(p[1]),
+                    ];
                 }
             }
             sheet.rect = r;
@@ -129,7 +165,10 @@ pub fn sheet_without(kind: UnderlayType, path: &str, item: &str, hidden: &[Strin
         Some(sheet)
     };
     let value = read().map(Arc::new);
-    sheet_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
+    sheet_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, value.clone());
     value
 }
 
@@ -161,14 +200,24 @@ pub fn dgn_contrast_pivot(
         return None;
     }
     let lightness = |c: [u8; 3]| {
-        let c = if sheet.table_colors { model::dgn_table_color(c, backdrop.max_channel, backdrop.light) } else { c };
+        let c = if sheet.table_colors {
+            model::dgn_table_color(c, backdrop.max_channel, backdrop.light)
+        } else {
+            c
+        };
         let c = match fade {
-            Some((bg, f)) => [0, 1, 2].map(|i| c[i] as f64 + (bg[i] as f64 - c[i] as f64) * f.min(100) as f64 / 100.0),
+            Some((bg, f)) => [0, 1, 2]
+                .map(|i| c[i] as f64 + (bg[i] as f64 - c[i] as f64) * f.min(100) as f64 / 100.0),
             None => c.map(|v| v as f64),
         };
         (c[0].max(c[1]).max(c[2]) + c[0].min(c[1]).min(c[2])) / 510.0
     };
-    let mean = sheet.element_colors.iter().map(|&c| lightness(c)).sum::<f64>() / sheet.element_colors.len() as f64;
+    let mean = sheet
+        .element_colors
+        .iter()
+        .map(|&c| lightness(c))
+        .sum::<f64>()
+        / sheet.element_colors.len() as f64;
     Some((0.788 * mean * 1000.0).round() as u16)
 }
 
@@ -188,20 +237,38 @@ fn outline_texts(sheet: &mut Sheet) {
         let subpaths: Vec<SubPath> = strokes
             .iter()
             .filter(|s| s.len() >= 2)
-            .map(|s| SubPath { segments: s.windows(2).map(|w| Segment::Line(at(w[0]), at(w[1]))).collect(), closed: false })
+            .map(|s| SubPath {
+                segments: s
+                    .windows(2)
+                    .map(|w| Segment::Line(at(w[0]), at(w[1])))
+                    .collect(),
+                closed: false,
+            })
             .collect();
         if !subpaths.is_empty() {
-            sheet.paths.push(Path { subpaths, stroke: Some((t.color, -1.0)), fill: None });
+            sheet.paths.push(Path {
+                subpaths,
+                stroke: Some((t.color, -1.0)),
+                fill: None,
+            });
         }
         let triangles: Vec<SubPath> = fills
             .chunks_exact(3)
             .map(|t| SubPath {
-                segments: vec![Segment::Line(at(t[0]), at(t[1])), Segment::Line(at(t[1]), at(t[2])), Segment::Line(at(t[2]), at(t[0]))],
+                segments: vec![
+                    Segment::Line(at(t[0]), at(t[1])),
+                    Segment::Line(at(t[1]), at(t[2])),
+                    Segment::Line(at(t[2]), at(t[0])),
+                ],
                 closed: true,
             })
             .collect();
         if !triangles.is_empty() {
-            sheet.paths.push(Path { subpaths: triangles, stroke: None, fill: Some(t.color) });
+            sheet.paths.push(Path {
+                subpaths: triangles,
+                stroke: None,
+                fill: Some(t.color),
+            });
         }
     }
 }
@@ -249,13 +316,27 @@ pub fn display_raster(
     let side = side.clamp(16.0, RASTER_SIDE).round();
     let key = (
         path.to_string(),
-        format!("{}@{side}~{}{}", layered_item(item, hidden), backdrop.max_channel, backdrop.light),
+        format!(
+            "{}@{side}~{}{}",
+            layered_item(item, hidden),
+            backdrop.max_channel,
+            backdrop.light
+        ),
     );
-    if let Some(hit) = raster_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+    if let Some(hit) = raster_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
         return hit.clone();
     }
-    let value = sheet_without(kind, path, item, hidden).and_then(|s| rasterize(&s, side, backdrop)).map(Arc::new);
-    raster_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
+    let value = sheet_without(kind, path, item, hidden)
+        .and_then(|s| rasterize(&s, side, backdrop))
+        .map(Arc::new);
+    raster_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, value.clone());
     value
 }
 
@@ -273,16 +354,26 @@ fn rasterize(sheet: &Sheet, side: f64, backdrop: Backdrop) -> Option<PdfPage> {
         return None;
     }
     let scale = side / w.max(h);
-    let (pw, ph) = ((w * scale).ceil().max(1.0) as u32, (h * scale).ceil().max(1.0) as u32);
+    let (pw, ph) = (
+        (w * scale).ceil().max(1.0) as u32,
+        (h * scale).ceil().max(1.0) as u32,
+    );
     let mut pixmap = tiny_skia::Pixmap::new(pw, ph)?;
     // The rectangle's edges fall on the centres of the outer pixels, so a
     // line along the edge of the extent (every extent has some) is drawn.
     let (sx, sy) = ((pw.max(2) - 1) as f64 / w, (ph.max(2) - 1) as f64 / h);
-    let to_px = |p: [f64; 2]| (((p[0] - x0) * sx + 0.5) as f32, ((y1 - p[1]) * sy + 0.5) as f32);
+    let to_px = |p: [f64; 2]| {
+        (
+            ((p[0] - x0) * sx + 0.5) as f32,
+            ((y1 - p[1]) * sy + 0.5) as f32,
+        )
+    };
     for path in &sheet.paths {
         let mut pb = tiny_skia::PathBuilder::new();
         for sp in &path.subpaths {
-            let Some(first) = sp.segments.first() else { continue };
+            let Some(first) = sp.segments.first() else {
+                continue;
+            };
             let s = to_px(first.start());
             pb.move_to(s.0, s.1);
             for seg in &sp.segments {
@@ -307,13 +398,23 @@ fn rasterize(sheet: &Sheet, side: f64, backdrop: Backdrop) -> Option<PdfPage> {
             paint.set_color_rgba8(c[0], c[1], c[2], 255);
             // Fills that share an edge (triangle strips) would show a seam.
             paint.anti_alias = false;
-            pixmap.fill_path(&p, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+            pixmap.fill_path(
+                &p,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
         if let Some((c, width)) = path.stroke.map(|(c, w)| (shown(c), w)) {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color_rgba8(c[0], c[1], c[2], 255);
             // A negative width is in pixels (DGN line weights).
-            let px = if width < 0.0 { (-width) as f32 } else { ((width * scale) as f32).max(1.0) };
+            let px = if width < 0.0 {
+                (-width) as f32
+            } else {
+                ((width * scale) as f32).max(1.0)
+            };
             let stroke = tiny_skia::Stroke {
                 width: px,
                 line_cap: tiny_skia::LineCap::Round,
@@ -350,7 +451,12 @@ fn rasterize(sheet: &Sheet, side: f64, backdrop: Backdrop) -> Option<PdfPage> {
             }
         }
     }
-    Some(PdfPage { pixels: Arc::new(pixels), width: pw, height: ph, dpi: 0.0 })
+    Some(PdfPage {
+        pixels: Arc::new(pixels),
+        width: pw,
+        height: ph,
+        dpi: 0.0,
+    })
 }
 
 /// A path's horizontal and vertical segments, and its slanted and curved
@@ -405,19 +511,32 @@ fn along_axis(a: (f32, f32), b: (f32, f32)) -> bool {
 }
 
 fn vector_cache() -> &'static Mutex<HashMap<Key, Option<Arc<super::pdf_vector::PageVectors>>>> {
-    static CACHE: OnceLock<Mutex<HashMap<Key, Option<Arc<super::pdf_vector::PageVectors>>>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<Key, Option<Arc<super::pdf_vector::PageVectors>>>>> =
+        OnceLock::new();
     CACHE.get_or_init(Default::default)
 }
 
 /// The sheet's geometry as page vectors for object snaps, in sheet units,
 /// memoised.
-pub fn page_vectors(kind: UnderlayType, path: &str, item: &str, hidden: &[String]) -> Option<Arc<super::pdf_vector::PageVectors>> {
+pub fn page_vectors(
+    kind: UnderlayType,
+    path: &str,
+    item: &str,
+    hidden: &[String],
+) -> Option<Arc<super::pdf_vector::PageVectors>> {
     let key = (path.to_string(), layered_item(item, hidden));
-    if let Some(hit) = vector_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+    if let Some(hit) = vector_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
         return hit.clone();
     }
     let value = sheet_without(kind, path, item, hidden).map(|s| Arc::new(to_page_vectors(&s)));
-    vector_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
+    vector_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, value.clone());
     value
 }
 
@@ -446,5 +565,8 @@ fn to_page_vectors(sheet: &Sheet) -> super::pdf_vector::PageVectors {
             fill: p.fill,
         })
         .collect();
-    pv::PageVectors { paths, ..Default::default() }
+    pv::PageVectors {
+        paths,
+        ..Default::default()
+    }
 }

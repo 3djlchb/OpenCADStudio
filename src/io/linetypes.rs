@@ -120,10 +120,9 @@ pub fn document_lt_segments(document: &CadDocument, name: &str) -> Option<Comple
                         .find(|s| s.handle == c.style_handle)
                         .map(|s| s.name.as_str())
                         .unwrap_or("");
-                    let font = crate::entities::text_support::resolve_text_style(
-                        style_name, document,
-                    )
-                    .font_name;
+                    let font =
+                        crate::entities::text_support::resolve_text_style(style_name, document)
+                            .font_name;
                     let scale = c.scale as f32;
                     segments.push(LtSegment::Text {
                         text: text.clone(),
@@ -275,16 +274,17 @@ pub fn populate_document_from_source(doc: &mut CadDocument, source: &str) -> usi
     for mut lt in parse(source) {
         let segments = complex.get(&lt.name.to_ascii_uppercase());
         if let Some(existing) = doc.line_types.get(&lt.name) {
-            let stripped = segments.is_some()
-                && !existing.is_complex()
-                && existing.elements.len() == lt.elements.len()
-                && existing
-                    .elements
-                    .iter()
-                    .zip(&lt.elements)
-                    .all(|(a, b)| (a.length - b.length).abs() <= 1e-9 * b.length.abs().max(1.0));
+            let stripped =
+                segments.is_some()
+                    && !existing.is_complex()
+                    && existing.elements.len() == lt.elements.len()
+                    && existing.elements.iter().zip(&lt.elements).all(|(a, b)| {
+                        (a.length - b.length).abs() <= 1e-9 * b.length.abs().max(1.0)
+                    });
             if stripped {
-                if let Some(elements) = segments.and_then(|s| complex_elements(doc, s, &lt.elements)) {
+                if let Some(elements) =
+                    segments.and_then(|s| complex_elements(doc, s, &lt.elements))
+                {
                     if let Some(existing) = doc.line_types.get_mut(&lt.name) {
                         existing.elements = elements;
                     }
@@ -338,7 +338,11 @@ fn shape_file_stem(file: &str) -> String {
 /// reads as `ltypeshp`).
 fn bundled_shape_name(file: &str, number: i16) -> Option<&'static str> {
     let stem = shape_file_stem(file);
-    let stem = if stem.is_empty() { "ltypeshp".to_string() } else { stem };
+    let stem = if stem.is_empty() {
+        "ltypeshp".to_string()
+    } else {
+        stem
+    };
     BUNDLED_SHAPES
         .iter()
         .find(|(file, _, n)| *file == stem && *n == number)
@@ -392,14 +396,24 @@ fn complex_elements(
                 out.push(lengths.next()?.clone());
                 continue;
             }
-            LtSegment::Shape { name, shx_file, x, y, scale, rot_deg, .. } => {
+            LtSegment::Shape {
+                name,
+                shx_file,
+                x,
+                y,
+                scale,
+                rot_deg,
+                ..
+            } => {
                 let stem = shape_file_stem(shx_file);
                 let number = BUNDLED_SHAPES
                     .iter()
                     .find(|(file, shape, _)| *file == stem && shape.eq_ignore_ascii_case(name))?
                     .2;
                 LineTypeComplexData {
-                    content: LineTypeComplexContent::Shape { shape_number: number },
+                    content: LineTypeComplexContent::Shape {
+                        shape_number: number,
+                    },
                     style_handle: shape_file_style(doc, shx_file),
                     scale: decimal(*scale),
                     rotation: decimal(*rot_deg).to_radians(),
@@ -407,7 +421,14 @@ fn complex_elements(
                     offset: [decimal(*x), decimal(*y)],
                 }
             }
-            LtSegment::Text { text, style, x, y, scale, rot_deg } => LineTypeComplexData {
+            LtSegment::Text {
+                text,
+                style,
+                x,
+                y,
+                scale,
+                rot_deg,
+            } => LineTypeComplexData {
                 content: LineTypeComplexContent::Text { text: text.clone() },
                 style_handle: doc
                     .text_styles
@@ -424,7 +445,6 @@ fn complex_elements(
     }
     (lengths.next().is_none()).then_some(out)
 }
-
 
 // ── Parser ────────────────────────────────────────────────────────────────
 

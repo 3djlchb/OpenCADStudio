@@ -1,6 +1,7 @@
 //! Layer Manager — floating window.
 
 use crate::app::Message;
+use crate::t;
 use crate::ui::properties::{lw_options, LinetypeItem, LwItem};
 use crate::ui::style::common::muted_style;
 use crate::ui::style::row_button::{cell_button_style, header_button_style};
@@ -15,7 +16,6 @@ use iced::widget::{
 };
 use iced::Padding;
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
-use crate::t;
 use std::borrow::Cow;
 
 // ── Per-viewport column descriptor ───────────────────────────────────────────
@@ -127,11 +127,15 @@ pub struct LayerPanel {
     /// All selected rows (Ctrl/Shift extend it). Bulk property changes and
     /// deletion act on every row here. Empty ⇔ nothing selected.
     pub selected_multi: Vec<usize>,
-    pub editing: Option<usize>,
+    /// Layer being renamed (row text-input open). Keyed by NAME so a
+    /// rebuild/sort between start and commit cannot retarget it (#44);
+    /// `selected`/`selected_multi` below stay index-based and are re-resolved.
+    pub editing: Option<String>,
     pub edit_buf: String,
     pub current_layer: String,
     pub linetype_items: Vec<LinetypeItem>,
-    pub color_picker_row: Option<usize>,
+    /// Row whose color swatch is open. Name-keyed for the same reason (#44).
+    pub color_picker_row: Option<String>,
     pub color_full_palette: bool,
     pub linetype_combo: combo_box::State<LinetypeItem>,
     pub lw_combo: combo_box::State<LwItem>,
@@ -237,8 +241,7 @@ impl LayerPanel {
             .collect();
 
         // Re-resolve the selection against the rebuilt rows by name.
-        self.selected = anchor_name
-            .and_then(|n| self.layers.iter().position(|l| l.name == n));
+        self.selected = anchor_name.and_then(|n| self.layers.iter().position(|l| l.name == n));
         self.selected_multi = multi_names
             .iter()
             .filter_map(|n| self.layers.iter().position(|l| l.name == *n))
@@ -290,9 +293,7 @@ impl LayerPanel {
                 LayerSortCol::Lock => a.locked.cmp(&b.locked),
                 LayerSortCol::Plot => a.plottable.cmp(&b.plottable),
                 LayerSortCol::Color => color_sort_key(a.color).cmp(&color_sort_key(b.color)),
-                LayerSortCol::Linetype => {
-                    a.linetype.to_lowercase().cmp(&b.linetype.to_lowercase())
-                }
+                LayerSortCol::Linetype => a.linetype.to_lowercase().cmp(&b.linetype.to_lowercase()),
                 LayerSortCol::Lineweight => a.lineweight.value().cmp(&b.lineweight.value()),
                 LayerSortCol::Transparency => a.transparency.cmp(&b.transparency),
             };
@@ -321,6 +322,19 @@ impl LayerPanel {
     pub fn sync_linetypes(&mut self, items: Vec<LinetypeItem>) {
         self.linetype_combo = combo_box::State::new(items.clone());
         self.linetype_items = items;
+    }
+
+    /// Row indices passing the live name filter — the rows the view actually
+    /// draws. Index math over "what the user sees" (shift-ranges) must use
+    /// these; raw `selected_multi` ranges would sweep in hidden rows (#50).
+    pub fn visible_indices(&self) -> Vec<usize> {
+        let filter = self.filter.to_lowercase();
+        self.layers
+            .iter()
+            .enumerate()
+            .filter(|(_, layer)| filter.is_empty() || layer.name.to_lowercase().contains(&filter))
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// Render the layer panel as the full content of its own OS window.
@@ -376,9 +390,7 @@ impl LayerPanel {
             .align_y(iced::Center),
         )
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().background.weak.color
-            )),
+            background: Some(Background::Color(theme.palette().background.weak.color)),
             ..Default::default()
         })
         .width(sizing.width)
@@ -389,27 +401,69 @@ impl LayerPanel {
         let sa = self.sort_asc;
         let mut header_row = row![
             text(t!("Status")).size(10).style(muted_style).width(50),
-            sortable_header(t!("Name"), LayerSortCol::Name, Length::Fixed(name_col_w), sc, sa),
+            sortable_header(
+                t!("Name"),
+                LayerSortCol::Name,
+                Length::Fixed(name_col_w),
+                sc,
+                sa
+            ),
             // Draggable divider: adjusts the Name column width (#359).
             iced::widget::mouse_area(
-                container(iced::widget::Space::new().width(2).height(14)).style(
-                    |theme: &Theme| container::Style {
+                container(iced::widget::Space::new().width(2).height(14)).style(|theme: &Theme| {
+                    container::Style {
                         background: Some(Background::Color(
-                            theme.palette().background.neutral.color
+                            theme.palette().background.neutral.color,
                         )),
                         ..Default::default()
-                    },
-                ),
+                    }
+                },),
             )
             .on_press(Message::LayerNameColGrab)
             .interaction(iced::mouse::Interaction::ResizingHorizontally),
             sortable_header(t!("On"), LayerSortCol::On, Length::Fixed(COL_ICON), sc, sa),
-            sortable_header(t!("Freeze"), LayerSortCol::Freeze, Length::Fixed(COL_ICON), sc, sa),
-            sortable_header(t!("Lock"), LayerSortCol::Lock, Length::Fixed(COL_ICON), sc, sa),
-            sortable_header(t!("Plot"), LayerSortCol::Plot, Length::Fixed(COL_ICON), sc, sa),
-            sortable_header(t!("Color"), LayerSortCol::Color, Length::Fixed(COL_COLOR), sc, sa),
-            sortable_header(t!("Linetype"), LayerSortCol::Linetype, Length::Fixed(COL_LT), sc, sa),
-            sortable_header(t!("Lineweight"), LayerSortCol::Lineweight, Length::Fixed(COL_LW), sc, sa),
+            sortable_header(
+                t!("Freeze"),
+                LayerSortCol::Freeze,
+                Length::Fixed(COL_ICON),
+                sc,
+                sa
+            ),
+            sortable_header(
+                t!("Lock"),
+                LayerSortCol::Lock,
+                Length::Fixed(COL_ICON),
+                sc,
+                sa
+            ),
+            sortable_header(
+                t!("Plot"),
+                LayerSortCol::Plot,
+                Length::Fixed(COL_ICON),
+                sc,
+                sa
+            ),
+            sortable_header(
+                t!("Color"),
+                LayerSortCol::Color,
+                Length::Fixed(COL_COLOR),
+                sc,
+                sa
+            ),
+            sortable_header(
+                t!("Linetype"),
+                LayerSortCol::Linetype,
+                Length::Fixed(COL_LT),
+                sc,
+                sa
+            ),
+            sortable_header(
+                t!("Lineweight"),
+                LayerSortCol::Lineweight,
+                Length::Fixed(COL_LW),
+                sc,
+                sa
+            ),
             sortable_header(
                 t!("Transparency"),
                 LayerSortCol::Transparency,
@@ -435,13 +489,13 @@ impl LayerPanel {
             .style(|theme: &Theme| {
                 let palette = theme.palette();
                 container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
+                    background: Some(Background::Color(palette.background.weak.color)),
+                    border: Border {
+                        color: palette.background.neutral.color,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
                 }
             })
             .padding([4, 8])
@@ -449,18 +503,15 @@ impl LayerPanel {
 
         // ── Layer rows ────────────────────────────────────────────────────
         let mut rows_col = column![].spacing(0);
-        let filter = self.filter.to_lowercase();
-        for (i, layer) in self.layers.iter().enumerate() {
-            if !filter.is_empty() && !layer.name.to_lowercase().contains(&filter) {
-                continue;
-            }
+        for i in self.visible_indices() {
+            let layer = &self.layers[i];
             // Highlight every selected row; show the editable combos only on the
             // anchor (a single shared combo state can't drive several rows).
             let is_anchor = self.selected == Some(i);
             let is_sel = is_anchor || self.selected_multi.contains(&i);
             let is_current = layer.name == self.current_layer;
-            let is_editing = self.editing == Some(i);
-            let color_open = self.color_picker_row == Some(i);
+            let is_editing = self.editing.as_deref() == Some(layer.name.as_str());
+            let color_open = self.color_picker_row.as_deref() == Some(layer.name.as_str());
 
             let (ltc, lwc) = if is_anchor {
                 (Some(&self.linetype_combo), Some(&self.lw_combo))
@@ -481,7 +532,6 @@ impl LayerPanel {
                 &self.vp_cols,
                 name_col_w,
             ));
-
         }
 
         let table = scrollable(rows_col)
@@ -491,9 +541,7 @@ impl LayerPanel {
         // ── Full-window frame ─────────────────────────────────────────────
         container(column![toolbar, col_header, table].spacing(0))
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.base.color
-                )),
+                background: Some(Background::Color(theme.palette().background.base.color)),
                 ..Default::default()
             })
             .width(sizing.width)
@@ -545,25 +593,24 @@ fn sortable_header<'a>(
 
 // ── Toolbar buttons ───────────────────────────────────────────────────────
 
-fn toolbar_btn<'a>(icon: &'static [u8], label: Cow<'static, str>, msg: Message) -> Element<'a, Message> {
+fn toolbar_btn<'a>(
+    icon: &'static [u8],
+    label: Cow<'static, str>,
+    msg: Message,
+) -> Element<'a, Message> {
     button(
-        row![
-            crate::ui::icons::themed(icon, 12.0),
-            text(label).size(11),
-        ]
-        .spacing(5)
-        .align_y(iced::Center),
+        row![crate::ui::icons::themed(icon, 12.0), text(label).size(11),]
+            .spacing(5)
+            .align_y(iced::Center),
     )
     .on_press(msg)
-        .style(|theme: &Theme, status| {
-            let palette = theme.palette();
-            let pair = match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    palette.background.strong
-                }
-                _ => palette.background.weak,
-            };
-            button::Style {
+    .style(|theme: &Theme, status| {
+        let palette = theme.palette();
+        let pair = match status {
+            button::Status::Hovered | button::Status::Pressed => palette.background.strong,
+            _ => palette.background.weak,
+        };
+        button::Style {
             background: Some(Background::Color(pair.color)),
             border: Border {
                 radius: 3.0.into(),
@@ -572,10 +619,10 @@ fn toolbar_btn<'a>(icon: &'static [u8], label: Cow<'static, str>, msg: Message) 
             },
             text_color: pair.text,
             ..Default::default()
-            }
-        })
-        .padding([4, 10])
-        .into()
+        }
+    })
+    .padding([4, 10])
+    .into()
 }
 
 fn toolbar_btn_cond<'a>(
@@ -594,11 +641,11 @@ fn toolbar_btn_cond<'a>(
             if enabled {
                 text(label).size(11)
             } else {
-                text(label).size(11).style(|theme: &Theme| iced::widget::text::Style {
-                    color: Some(
-                        theme.palette().background.base.text.scale_alpha(0.42)
-                    ),
-                })
+                text(label)
+                    .size(11)
+                    .style(|theme: &Theme| iced::widget::text::Style {
+                        color: Some(theme.palette().background.base.text.scale_alpha(0.42)),
+                    })
             },
         ]
         .spacing(5)
@@ -611,18 +658,18 @@ fn toolbar_btn_cond<'a>(
             _ => palette.background.weak,
         };
         button::Style {
-        background: Some(Background::Color(pair.color)),
-        border: Border {
-            radius: 3.0.into(),
-            color: palette.background.neutral.color,
-            width: 1.0,
-        },
-        text_color: if enabled {
-            pair.text
-        } else {
-            pair.text.scale_alpha(0.42)
-        },
-        ..Default::default()
+            background: Some(Background::Color(pair.color)),
+            border: Border {
+                radius: 3.0.into(),
+                color: palette.background.neutral.color,
+                width: 1.0,
+            },
+            text_color: if enabled {
+                pair.text
+            } else {
+                pair.text.scale_alpha(0.42)
+            },
+            ..Default::default()
         }
     })
     .padding([4, 10]);
@@ -647,14 +694,14 @@ fn name_tip<'a>(name: &'a str) -> Element<'a, Message> {
         .style(|theme: &Theme| {
             let palette = theme.palette();
             container::Style {
-            background: Some(Background::Color(palette.background.strong.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            text_color: Some(palette.background.strong.text),
-            ..Default::default()
+                background: Some(Background::Color(palette.background.strong.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                text_color: Some(palette.background.strong.text),
+                ..Default::default()
             }
         })
         .into()
@@ -678,16 +725,16 @@ fn layer_row<'a>(
     let lname = layer.name.clone();
     let svg_btn = |bytes: &'static [u8], on_press: Message| -> Element<'a, Message> {
         button(crate::ui::icons::semantic(bytes, ICON_SZ))
-        .on_press(on_press)
-        .style(cell_button_style(is_selected, index))
-        .padding(Padding {
-            top: COMBO_PAD_V,
-            bottom: COMBO_PAD_V,
-            left: 4.0,
-            right: 4.0,
-        })
-        .height(Length::Fixed(ROW_H))
-        .into()
+            .on_press(on_press)
+            .style(cell_button_style(is_selected, index))
+            .padding(Padding {
+                top: COMBO_PAD_V,
+                bottom: COMBO_PAD_V,
+                left: 4.0,
+                right: 4.0,
+            })
+            .height(Length::Fixed(ROW_H))
+            .into()
     };
 
     let vis_svg = crate::ui::icons::layer_visible(layer.visible);
@@ -741,24 +788,27 @@ fn layer_row<'a>(
     } else {
         // ~6 px per glyph at the 10 px row font — track the column width.
         let name_budget = ((name_col_w / 6.0) as usize).max(8);
-        let name_btn = button(
-            text(crate::ui::text_util::elide(&layer.name, name_budget))
-                .size(FONT_SZ),
-        )
-        .on_press(Message::LayerRenameStart(lname.clone()))
-        .style(cell_button_style(is_selected, index))
-        .padding(Padding {
-            top: COMBO_PAD_V,
-            bottom: COMBO_PAD_V,
-            left: 4.0,
-            right: 4.0,
-        })
-        .height(Length::Fixed(ROW_H))
-        .width(Length::Fixed(name_col_w));
+        let name_btn =
+            button(text(crate::ui::text_util::elide(&layer.name, name_budget)).size(FONT_SZ))
+                .on_press(Message::LayerRenameStart(lname.clone()))
+                .style(cell_button_style(is_selected, index))
+                .padding(Padding {
+                    top: COMBO_PAD_V,
+                    bottom: COMBO_PAD_V,
+                    left: 4.0,
+                    right: 4.0,
+                })
+                .height(Length::Fixed(ROW_H))
+                .width(Length::Fixed(name_col_w));
         // When the name is truncated, reveal the full text on hover so the
         // user can still read it without widening the column.
         if layer.name.chars().count() > name_budget {
-            tooltip(name_btn, name_tip(&layer.name), tooltip::Position::FollowCursor).into()
+            tooltip(
+                name_btn,
+                name_tip(&layer.name),
+                tooltip::Position::FollowCursor,
+            )
+            .into()
         } else {
             name_btn.into()
         }
@@ -767,24 +817,25 @@ fn layer_row<'a>(
     // Color cell — looks like a combo_box input; click opens swatch dropdown below row.
     // Shared colour selector. Layers carry a concrete colour (no ByLayer /
     // ByBlock); true colours stay RGB instead of being collapsed to ACI 7.
-    let color_cell: Element<'_, Message> = container(crate::ui::color_select::color_selector_with_name(
-        layer.color,
-        layer.color_name.as_deref(),
-        color_picker_open,
-        crate::ui::color_select::ColorExtras {
-            by_layer: false,
-            by_block: false,
-            ..Default::default()
-        },
-        Message::LayerColorSet,
-        Message::LayerColorPickerToggle(lname.clone()),
-        Message::OpenColorWindow(
-            crate::app::ColorPickTarget::Layer(lname.clone()),
+    let color_cell: Element<'_, Message> =
+        container(crate::ui::color_select::color_selector_with_name(
             layer.color,
-        ),
-    ))
-    .width(Length::Fixed(COL_COLOR))
-    .into();
+            layer.color_name.as_deref(),
+            color_picker_open,
+            crate::ui::color_select::ColorExtras {
+                by_layer: false,
+                by_block: false,
+                ..Default::default()
+            },
+            Message::LayerColorSet,
+            Message::LayerColorPickerToggle(lname.clone()),
+            Message::OpenColorWindow(
+                crate::app::ColorPickTarget::Layer(lname.clone()),
+                layer.color,
+            ),
+        ))
+        .width(Length::Fixed(COL_COLOR))
+        .into();
 
     // Linetype cell — uses LinetypeItem (with ASCII art) same as Properties panel
     let cur_lt_item = LinetypeItem {
@@ -821,9 +872,12 @@ fn layer_row<'a>(
     // Lineweight cell
     let cur_lw_item = LwItem(layer.lineweight);
     let lw_cell: Element<'_, Message> = if let Some(state) = lw_combo_state {
-        combo_box(state, t!("lineweight").as_ref(), Some(&cur_lw_item), |item: LwItem| {
-            Message::LayerLineweightSet(item.0)
-        })
+        combo_box(
+            state,
+            t!("lineweight").as_ref(),
+            Some(&cur_lw_item),
+            |item: LwItem| Message::LayerLineweightSet(item.0),
+        )
         .size(FONT_SZ)
         .padding(Padding {
             top: COMBO_PAD_V,
@@ -892,7 +946,7 @@ fn layer_row<'a>(
     // Per-viewport freeze columns
     for (vp_idx, _vp_col) in vp_cols.iter().enumerate() {
         let is_vp_frozen = layer.vp_frozen.get(vp_idx).copied().unwrap_or(false);
-        let vp_frz_svg = crate::ui::icons::layer_freeze(is_vp_frozen);
+        let vp_frz_svg = crate::ui::icons::layer_vp_freeze(is_vp_frozen);
         row_content = row_content.push(
             container(svg_btn(
                 vp_frz_svg,
@@ -915,9 +969,9 @@ fn layer_row<'a>(
                     palette.background.weak
                 };
                 container::Style {
-                background: Some(Background::Color(pair.color)),
-                text_color: Some(pair.text),
-                ..Default::default()
+                    background: Some(Background::Color(pair.color)),
+                    text_color: Some(pair.text),
+                    ..Default::default()
                 }
             })
             .padding(Padding {

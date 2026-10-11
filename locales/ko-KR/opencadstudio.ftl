@@ -13,6 +13,7 @@ language =
     .arabic = العربية
     .japanese = 日本語
     .korean = 한국어
+    .lao = ລາວ
     .czech = Čeština
     .italian = Italiano
     .finnish = Suomi
@@ -1436,6 +1437,8 @@ common =
     .user-preferences = 사용자 환경설정
     .zoom = 줌
     .reverse-mouse-wheel-zoom-zoomwheel = 마우스 휠 줌 방향 반전 (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = 터치패드: 스크롤은 화면 이동, Ctrl+스크롤 또는 핀치는 확대/축소
+    .interface-scale = 인터페이스 배율
     .zoom-factor = 줌 배율
     .how-far-one-wheel-notch-zooms-zoomfactor = 휠 한 칸이 확대하는 정도 (ZOOMFACTOR).
     .text-and-dimensions = 문자 및 치수
@@ -2505,6 +2508,12 @@ inquiry =
     .id-specify-point = ID 지점 지정:
     .list-no-entities-selected-select-entities-firs = LIST: 선택된 엔터티가 없습니다. 먼저 엔터티를 선택하세요.
     .massprop-no-entities-selected-select-entities = MASSPROP: 선택된 엔터티가 없습니다. 먼저 엔터티를 선택하세요.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ 에 측정할 닫힌 바디가 없습니다.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  부피=__ocs_fmt_1__  도심=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = 관성 모멘트  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = 관성 곱  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = 회전 반경  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = 도심에 대한 주 모멘트  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE 측정할 물체 선택:
     .measure-specify-segment-length = MEASURE 세그먼트 길이 지정:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM Enter 옵션 [거리/반경/각도/지역]:

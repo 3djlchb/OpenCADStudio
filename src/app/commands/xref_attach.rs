@@ -5,8 +5,8 @@
 use super::*;
 use crate::io::xref_model::Pathtype;
 use crate::modules::insert::xattach::{
-    existing_reference, path_to_block_name, prepare_xref_definition, stored_path,
-    XAttachCommand, XrefAttachRequest, XrefPlacement,
+    existing_reference, path_to_block_name, prepare_xref_definition, stored_path, XAttachCommand,
+    XrefAttachRequest, XrefPlacement,
 };
 use crate::modules::insert::xref_cmd::display_path;
 use crate::ui::window::xref_attach::{XrefAttachMsg, XrefAttachState};
@@ -22,9 +22,12 @@ impl OpenCADStudio {
     ) {
         use crate::command::CadCommand;
         let insunits = self.tabs[i].scene.document.header.insertion_units;
-        let mut command = crate::modules::insert::pdf_attach::PdfAttachCommand::for_kind(kind, insunits);
+        let mut command =
+            crate::modules::insert::pdf_attach::PdfAttachCommand::for_kind(kind, insunits);
         if !file.trim().is_empty() {
-            if let Some(crate::command::CmdResult::ReportError(message)) = command.on_text_input(file) {
+            if let Some(crate::command::CmdResult::ReportError(message)) =
+                command.on_text_input(file)
+            {
                 self.command_line.push_error(&message);
             }
         }
@@ -66,7 +69,9 @@ impl OpenCADStudio {
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
                 if !rest.is_empty() {
-                    return Some(self.feed_command(crate::command::StepInput::Text(rest.to_string())));
+                    return Some(
+                        self.feed_command(crate::command::StepInput::Text(rest.to_string())),
+                    );
                 }
                 Some(Task::none())
             }
@@ -131,26 +136,31 @@ impl OpenCADStudio {
             .block_records
             .iter()
             .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
-            .filter(|br| {
-                pattern == "*" || crate::io::xref_model::wildcard_match(&br.name, pattern)
-            })
+            .filter(|br| pattern == "*" || crate::io::xref_model::wildcard_match(&br.name, pattern))
             .map(|br| {
-                let kind = if br.flags.is_xref_overlay { "Overlay" } else { "Attach" };
+                let kind = if br.flags.is_xref_overlay {
+                    "Overlay"
+                } else {
+                    "Attach"
+                };
                 (br.name.clone(), kind, display_path(&br.xref_path))
             })
             .collect();
         let out = &mut self.command_line;
         out.push_output("");
+        out.push_output(&format!("{:<34}{:<13}{}", "Xref name", "Xref Type", "Path"));
         out.push_output(&format!(
             "{:<34}{:<13}{}",
-            "Xref name",
-            "Xref Type",
-            "Path"
+            "----------------------", "---------", "----------"
         ));
-        out.push_output(&format!("{:<34}{:<13}{}", "----------------------", "---------", "----------"));
         out.push_output("");
         for (name, kind, path) in &rows {
-            out.push_output(&format!("{:<34}{:<13}{}", format!("\"{name}\""), *kind, path));
+            out.push_output(&format!(
+                "{:<34}{:<13}{}",
+                format!("\"{name}\""),
+                *kind,
+                path
+            ));
         }
         out.push_output("");
         out.push_output(&format!("Total Xref(s): {}", rows.len()));
@@ -170,9 +180,8 @@ impl OpenCADStudio {
         let host = self.tabs[i].current_path.clone();
         if let Some(host) = host.as_deref() {
             if crate::modules::insert::xattach::is_self_attach(host, &full, host.parent()) {
-                self.command_line.push_error(
-                    "Error: Possible circular reference to current drawing. *Invalid*",
-                );
+                self.command_line
+                    .push_error("Error: Possible circular reference to current drawing. *Invalid*");
                 return;
             }
         }
@@ -180,8 +189,7 @@ impl OpenCADStudio {
         if let Some(existing) = existing.as_ref() {
             self.command_line
                 .push_output(&format!("Xref \"{}\" has already been defined.", existing));
-            self.command_line
-                .push_output("Using existing definition.");
+            self.command_line.push_output("Using existing definition.");
         } else {
             let verb = if request.overlay {
                 format!("Overlay Xref \"{}\": {}", name, display_path(&full))
@@ -209,7 +217,8 @@ impl OpenCADStudio {
         }
         let (wires, source_units) = self.xref_preview(i, existing.as_deref(), &full);
         let host_units = self.tabs[i].scene.document.header.insertion_units;
-        let unit = crate::app::properties::insert_unit_scale(host_units, source_units).unwrap_or(1.0);
+        let unit =
+            crate::app::properties::insert_unit_scale(host_units, source_units).unwrap_or(1.0);
         let command = command.with_preview(wires, unit);
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(Box::new(command));
@@ -326,8 +335,8 @@ impl OpenCADStudio {
             let source_units = crate::io::load_file(std::path::Path::new(path))
                 .map(|doc| doc.header.insertion_units)
                 .unwrap_or(0);
-            state.unit_label = crate::t!(crate::app::properties::insunits_name(source_units))
-                .into_owned();
+            state.unit_label =
+                crate::t!(crate::app::properties::insunits_name(source_units)).into_owned();
             let factor =
                 crate::app::properties::insert_unit_scale(host_units, source_units).unwrap_or(1.0);
             state.unit_factor = crate::app::properties::format_unit_factor(factor);
@@ -434,9 +443,14 @@ impl OpenCADStudio {
                         let path = path.to_string_lossy().into_owned();
                         match std::fs::read(&path) {
                             Ok(bytes) => {
-                                crate::scene::model::pdf_raster::register_source(&path, std::sync::Arc::new(bytes));
+                                crate::scene::model::pdf_raster::register_source(
+                                    &path,
+                                    std::sync::Arc::new(bytes),
+                                );
                                 crate::scene::model::underlay_vector::forget(&path);
-                                if crate::scene::model::underlay_vector::item_names(kind, &path).is_some_and(|n| !n.is_empty()) {
+                                if crate::scene::model::underlay_vector::item_names(kind, &path)
+                                    .is_some_and(|n| !n.is_empty())
+                                {
                                     self.open_underlay_attach_dialog(kind, &path);
                                 } else {
                                     self.command_line.push_error(&format!(
@@ -455,7 +469,8 @@ impl OpenCADStudio {
                     // A point cloud goes on to the Attach Point Cloud dialog.
                     "rcp" | "rcs" => {
                         if crate::scene::model::point_cloud::load(&path).is_none() {
-                            self.command_line.push_error("All scans are not found or invalid.");
+                            self.command_line
+                                .push_error("All scans are not found or invalid.");
                             self.command_line.push_error("Attach point cloud failed");
                             return Task::none();
                         }
@@ -509,7 +524,8 @@ impl OpenCADStudio {
                 {
                     let host = self.tabs[self.active_tab].current_path.clone();
                     let base = host.as_deref().and_then(|h| h.parent());
-                    let full = crate::modules::insert::xattach::resolve_xref_store_path(&saved, base);
+                    let full =
+                        crate::modules::insert::xattach::resolve_xref_store_path(&saved, base);
                     self.load_xref_attach_file(&mut state, &full);
                 }
             }
@@ -569,7 +585,9 @@ impl OpenCADStudio {
                     insert: (!state.insert_on_screen)
                         .then(|| state.insert_point())
                         .flatten(),
-                    scale: (!state.scale_on_screen).then(|| state.scale_values()).flatten(),
+                    scale: (!state.scale_on_screen)
+                        .then(|| state.scale_values())
+                        .flatten(),
                     rotation: (!state.rotation_on_screen)
                         .then(|| crate::entities::common::parse_typed_angle(&state.rotation))
                         .flatten()
@@ -577,9 +595,7 @@ impl OpenCADStudio {
                 };
                 let invalid = (!state.insert_on_screen && placement.insert.is_none())
                     || (!state.scale_on_screen
-                        && placement
-                            .scale
-                            .is_none_or(|s| s.iter().any(|v| *v == 0.0)))
+                        && placement.scale.is_none_or(|s| s.iter().any(|v| *v == 0.0)))
                     || (!state.rotation_on_screen && placement.rotation.is_none());
                 if invalid || state.path.is_empty() {
                     self.command_line

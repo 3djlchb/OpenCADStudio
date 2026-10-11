@@ -136,7 +136,11 @@ fn with_layer_config(bytes: &[u8], all: &[PdfLayer], off: &[&PdfLayer]) -> Optio
         .and_then(|i| tail[i + 9..].split_whitespace().next()?.parse().ok())?;
     let size: usize = {
         let region = String::from_utf8_lossy(&bytes[prev.min(bytes.len())..]).into_owned();
-        let region = if region.contains("/Size") { region } else { tail.clone() };
+        let region = if region.contains("/Size") {
+            region
+        } else {
+            tail.clone()
+        };
         let i = region.find("/Size")?;
         region[i + 5..]
             .trim_start()
@@ -193,7 +197,11 @@ fn without_key(dict: &str, key: &str) -> Option<String> {
     let value = rest.trim_start();
     let lead = rest.len() - value.len();
     let length = if value.starts_with("<<") || value.starts_with('[') {
-        let (open, close) = if value.starts_with('[') { ("[", "]") } else { ("<<", ">>") };
+        let (open, close) = if value.starts_with('[') {
+            ("[", "]")
+        } else {
+            ("<<", ">>")
+        };
         let mut depth = 0i32;
         let mut i = 0;
         loop {

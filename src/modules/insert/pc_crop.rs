@@ -82,7 +82,10 @@ impl PointCloudCropCommand {
     }
 
     pub fn uncrop() -> Self {
-        Self { uncrop: true, ..Self::new() }
+        Self {
+            uncrop: true,
+            ..Self::new()
+        }
     }
 
     /// The toolbar's crops: the cloud already chosen, the shape too
@@ -125,7 +128,11 @@ impl PointCloudCropCommand {
 
     fn axes(data: &PointCloudExData) -> glam::DMat3 {
         let v = |a: Vector3| DVec3::new(a.x, a.y, a.z);
-        glam::DMat3::from_cols(v(data.ucs_x_direction), v(data.ucs_y_direction), v(data.ucs_z_direction))
+        glam::DMat3::from_cols(
+            v(data.ucs_x_direction),
+            v(data.ucs_y_direction),
+            v(data.ucs_z_direction),
+        )
     }
 
     /// A point of the drawing in the cloud's own coordinates.
@@ -137,7 +144,10 @@ impl PointCloudCropCommand {
     /// The view's right and up directions in the cloud's own coordinates.
     fn view_local(&self, data: &PointCloudExData) -> (DVec3, DVec3) {
         let inverse = Self::axes(data).inverse();
-        ((inverse * self.view.0).normalize_or(DVec3::X), (inverse * self.view.1).normalize_or(DVec3::Y))
+        (
+            (inverse * self.view.0).normalize_or(DVec3::X),
+            (inverse * self.view.1).normalize_or(DVec3::Y),
+        )
     }
 
     fn option(&mut self, text: &str) -> CmdResult {
@@ -181,7 +191,11 @@ impl PointCloudCropCommand {
             return CmdResult::Cancel;
         };
         let (right, up) = self.view_local(data);
-        let local: Vec<DVec3> = self.points.iter().map(|p| Self::to_local(data, *p)).collect();
+        let local: Vec<DVec3> = self
+            .points
+            .iter()
+            .map(|p| Self::to_local(data, *p))
+            .collect();
         let local = match self.shape {
             // The corners along the view's right and up directions.
             Shape::Rectangle => {
@@ -215,14 +229,19 @@ impl PointCloudCropCommand {
 
 impl CadCommand for PointCloudCropCommand {
     fn name(&self) -> &'static str {
-        if self.uncrop { "POINTCLOUDUNCROP" } else { "POINTCLOUDCROP" }
+        if self.uncrop {
+            "POINTCLOUDUNCROP"
+        } else {
+            "POINTCLOUDCROP"
+        }
     }
 
     fn prompt(&self) -> String {
         match self.step {
             Step::Select => "Select point cloud:".to_string(),
             Step::First if self.has_crops() => {
-                "Specify first corner point or [Polygon/Circular/Invert/Remove last/ON/OFF]:".to_string()
+                "Specify first corner point or [Polygon/Circular/Invert/Remove last/ON/OFF]:"
+                    .to_string()
             }
             Step::First => "Specify first corner point or [Polygon/Circular]:".to_string(),
             Step::RectSecond => "Specify other corner point:".to_string(),
@@ -240,7 +259,10 @@ impl CadCommand for PointCloudCropCommand {
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
             Step::First => {
-                let mut options = vec![CmdOption::new("Polygon", "P"), CmdOption::new("Circular", "C")];
+                let mut options = vec![
+                    CmdOption::new("Polygon", "P"),
+                    CmdOption::new("Circular", "C"),
+                ];
                 if self.has_crops() {
                     options.extend([
                         CmdOption::new("Invert", "I"),
@@ -252,7 +274,10 @@ impl CadCommand for PointCloudCropCommand {
                 options
             }
             Step::PolyNext => vec![CmdOption::new("Undo", "U")],
-            Step::Keep => vec![CmdOption::new("Inside", "I"), CmdOption::new("Outside", "O")],
+            Step::Keep => vec![
+                CmdOption::new("Inside", "I"),
+                CmdOption::new("Outside", "O"),
+            ],
             _ => Vec::new(),
         }
     }
@@ -279,7 +304,14 @@ impl CadCommand for PointCloudCropCommand {
     fn set_point_pick_context(&mut self, context: Option<crate::command::PointPickContext>) {
         // The projection's first two rows run along the view's right and up.
         if let Some(context) = context {
-            let row = |i: usize| context.view.row(i).truncate().as_dvec3().normalize_or_zero();
+            let row = |i: usize| {
+                context
+                    .view
+                    .row(i)
+                    .truncate()
+                    .as_dvec3()
+                    .normalize_or_zero()
+            };
             let (right, up) = (row(0), row(1));
             if right != DVec3::ZERO && up != DVec3::ZERO {
                 self.view = (right, up);
@@ -297,7 +329,9 @@ impl CadCommand for PointCloudCropCommand {
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
         match self.picked.take() {
-            Some(EntityType::Extended(cloud)) if matches!(cloud.data, ExtendedEntityData::PointCloudEx(_)) => {
+            Some(EntityType::Extended(cloud))
+                if matches!(cloud.data, ExtendedEntityData::PointCloudEx(_)) =>
+            {
                 self.handle = handle;
                 self.cloud = Some(*cloud);
                 if self.uncrop {
@@ -382,9 +416,15 @@ impl CadCommand for PointCloudCropCommand {
         let outline: Vec<[f64; 3]> = match self.step {
             Step::RectSecond => {
                 let a = self.points[0];
-                [a, DVec3::new(pt.x, a.y, a.z), DVec3::new(pt.x, pt.y, a.z), DVec3::new(a.x, pt.y, a.z), a]
-                    .map(|p| p.to_array())
-                    .to_vec()
+                [
+                    a,
+                    DVec3::new(pt.x, a.y, a.z),
+                    DVec3::new(pt.x, pt.y, a.z),
+                    DVec3::new(a.x, pt.y, a.z),
+                    a,
+                ]
+                .map(|p| p.to_array())
+                .to_vec()
             }
             Step::PolyNext => self
                 .points
@@ -405,8 +445,15 @@ impl CadCommand for PointCloudCropCommand {
             }
             _ => return None,
         };
-        Some(WireModel::solid_f64("pc_crop_boundary".into(), outline, WireModel::CYAN, false))
+        Some(WireModel::solid_f64(
+            "pc_crop_boundary".into(),
+            outline,
+            WireModel::CYAN,
+            false,
+        ))
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["POINTCLOUDCROP", "POINTCLOUDUNCROP"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["POINTCLOUDCROP", "POINTCLOUDUNCROP"]
+});

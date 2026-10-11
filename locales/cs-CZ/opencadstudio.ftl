@@ -13,6 +13,7 @@ language =
     .arabic = العربية
     .japanese = 日本語
     .korean = 한국어
+    .lao = ລາວ
     .czech = Čeština
     .italian = Italiano
     .finnish = Suomi
@@ -1436,6 +1437,8 @@ common =
     .user-preferences = Předvolby uživatele
     .zoom = Zoom
     .reverse-mouse-wheel-zoom-zoomwheel = Obrátit zoom kolečkem myši (ZOOMWHEEL)
+    .touchpad-scroll-pans-ctrl-scroll-or-pinch-zooms = Touchpad: posun posouvá pohled, Ctrl+posun nebo sevření zvětšuje
+    .interface-scale = Měřítko rozhraní
     .zoom-factor = Faktor zoomu
     .how-far-one-wheel-notch-zooms-zoomfactor = O kolik přiblíží jeden zub kolečka (ZOOMFACTOR).
     .text-and-dimensions = Text a kóty
@@ -2505,6 +2508,12 @@ inquiry =
     .id-specify-point = ID Určete bod:
     .list-no-entities-selected-select-entities-firs = LIST: nebyly vybrány žádné entity. Nejprve vyberte entity.
     .massprop-no-entities-selected-select-entities = MASSPROP: nebyly vybrány žádné entity. Nejprve vyberte entity.
+    .massprop-has-no-closed-body-to-measure = MASSPROP: __ocs_fmt_0__ nemá žádné uzavřené těleso k měření.
+    .volume-4-centroid-4-4-4 = __ocs_fmt_0__  Objem=__ocs_fmt_1__  Těžiště=(__ocs_fmt_2__,__ocs_fmt_3__,__ocs_fmt_4__)
+    .moments-of-inertia-x-4-y-4-z-4 = Momenty setrvačnosti  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .products-of-inertia-xy-4-yz-4-zx-4 = Deviační momenty  XY=__ocs_fmt_0__  YZ=__ocs_fmt_1__  ZX=__ocs_fmt_2__
+    .radii-of-gyration-x-4-y-4-z-4 = Poloměry setrvačnosti  X=__ocs_fmt_0__  Y=__ocs_fmt_1__  Z=__ocs_fmt_2__
+    .principal-moments-about-centroid-i-4-j-4-k-4 = Hlavní momenty k těžišti  I=__ocs_fmt_0__  J=__ocs_fmt_1__  K=__ocs_fmt_2__
     .measure-select-object-to-measure = MEASURE Vyberte objekt k měření:
     .measure-specify-segment-length = MEASURE Zadejte délku segmentu:
     .measuregeom-enter-an-option-distance-radius-an = MEASUREGEOM Enter možnost [Vzdálenost/Poloměr/Úhel/Area]:

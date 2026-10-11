@@ -250,7 +250,11 @@ pub fn build(
     let (h, v) = spec.justify.alignment();
     let mut attdef = AttributeDefinition {
         tag: normalize_tag(&spec.tag),
-        prompt: if spec.constant() { String::new() } else { spec.prompt.clone() },
+        prompt: if spec.constant() {
+            String::new()
+        } else {
+            spec.prompt.clone()
+        },
         default_value: spec.value.clone(),
         insertion_point: point,
         height: spec.height,
@@ -330,8 +334,14 @@ pub fn build_below(spec: &AttdefSpec, previous: &AttributeDefinition) -> EntityT
     let mut spec = spec.clone();
     spec.height = previous.height;
     spec.rotation = previous.rotation;
-    spec.justify = Justify::from_alignment(previous.horizontal_alignment, previous.vertical_alignment);
-    let mut entity = build(&spec, WorkingPlane::default(), DVec3::new(point.x, point.y, point.z), None);
+    spec.justify =
+        Justify::from_alignment(previous.horizontal_alignment, previous.vertical_alignment);
+    let mut entity = build(
+        &spec,
+        WorkingPlane::default(),
+        DVec3::new(point.x, point.y, point.z),
+        None,
+    );
     if let EntityType::AttributeDefinition(a) = &mut entity {
         a.normal = previous.normal;
         if spec.justify.two_point() {
@@ -349,12 +359,22 @@ pub fn build_below(spec: &AttdefSpec, previous: &AttributeDefinition) -> EntityT
 /// Text height an Align definition gets from its baseline length.
 fn aligned_height(spec: &AttdefSpec, length: f64) -> f64 {
     let font = crate::entities::common::style_font(&spec.style);
-    let text = if spec.value.is_empty() { spec.tag.clone() } else { spec.value.clone() };
-    crate::entities::text_support::text_local_bounds(&font, &text, 1.0, spec.width_factor as f32, 0.0)
-        .map(|b| b.advance as f64)
-        .filter(|w| *w > 1.0e-9)
-        .map(|w| length / w)
-        .unwrap_or(spec.height)
+    let text = if spec.value.is_empty() {
+        spec.tag.clone()
+    } else {
+        spec.value.clone()
+    };
+    crate::entities::text_support::text_local_bounds(
+        &font,
+        &text,
+        1.0,
+        spec.width_factor as f32,
+        0.0,
+    )
+    .map(|b| b.advance as f64)
+    .filter(|w| *w > 1.0e-9)
+    .map(|w| length / w)
+    .unwrap_or(spec.height)
 }
 
 fn short(v: f64) -> String {
@@ -363,7 +383,11 @@ fn short(v: f64) -> String {
 }
 
 fn yn(on: bool) -> char {
-    if on { 'Y' } else { 'N' }
+    if on {
+        'Y'
+    } else {
+        'N'
+    }
 }
 
 fn modes_line(aflags: u8, annotative: bool) -> String {
@@ -381,7 +405,10 @@ fn modes_line(aflags: u8, annotative: bool) -> String {
 
 /// Output the reference prints before the modes prompt.
 pub fn modes_report(aflags: u8, annotative: bool) -> String {
-    format!("Current attribute modes:\n{}", modes_line(aflags, annotative))
+    format!(
+        "Current attribute modes:\n{}",
+        modes_line(aflags, annotative)
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -496,8 +523,15 @@ impl AttdefCommand {
 
     fn after_point(&mut self) -> CmdResult {
         if self.spec.justify == Justify::Align {
-            let (a, b) = (self.first.unwrap_or_default(), self.second.unwrap_or_default());
-            let length = self.plane.to_local(b).truncate().distance(self.plane.to_local(a).truncate());
+            let (a, b) = (
+                self.first.unwrap_or_default(),
+                self.second.unwrap_or_default(),
+            );
+            let length = self
+                .plane
+                .to_local(b)
+                .truncate()
+                .distance(self.plane.to_local(a).truncate());
             self.spec.height = aligned_height(&self.spec, length);
             return self.finish();
         }
@@ -559,7 +593,9 @@ impl CadCommand for AttdefCommand {
                     .to_string()
             }
             Step::MJustify => "Enter justification [TL/TC/TR/ML/MC/MR/BL/BC/BR] <TL>:".to_string(),
-            Step::MSpacingType => "Enter line spacing type [At least/Exactly] <At least>:".to_string(),
+            Step::MSpacingType => {
+                "Enter line spacing type [At least/Exactly] <At least>:".to_string()
+            }
             Step::MSpacing => format!(
                 "Enter line spacing factor or distance <{}x>:",
                 short(self.spec.line_spacing)
@@ -575,7 +611,12 @@ impl CadCommand for AttdefCommand {
     fn input_kind(&self) -> InputKind {
         match self.step {
             Step::Prompt | Step::Value | Step::NextLine => InputKind::FreeText,
-            Step::Modes | Step::Tag | Step::Justify | Step::Style | Step::MStyle | Step::MJustify
+            Step::Modes
+            | Step::Tag
+            | Step::Justify
+            | Step::Style
+            | Step::MStyle
+            | Step::MJustify
             | Step::MSpacingType => InputKind::SingleToken,
             _ => InputKind::Point,
         }
@@ -619,7 +660,11 @@ impl CadCommand for AttdefCommand {
                     return Some(CmdResult::ReportError("Tag cannot be null".into()));
                 }
                 self.spec.tag = normalize_tag(raw);
-                self.step = if self.spec.constant() { Step::Value } else { Step::Prompt };
+                self.step = if self.spec.constant() {
+                    Step::Value
+                } else {
+                    Step::Prompt
+                };
                 Some(CmdResult::NeedPoint)
             }
             Step::Prompt => {
@@ -660,7 +705,9 @@ impl CadCommand for AttdefCommand {
                     Some(CmdResult::NeedPoint)
                 }
                 "" => Some(self.on_enter()),
-                _ => Some(CmdResult::ReportError("Point or option keyword required.".into())),
+                _ => Some(CmdResult::ReportError(
+                    "Point or option keyword required.".into(),
+                )),
             },
             Step::Justify => match Justify::from_keyword(&word) {
                 Some(j) => {
@@ -671,7 +718,11 @@ impl CadCommand for AttdefCommand {
                 None => Some(CmdResult::ReportError("Invalid option keyword.".into())),
             },
             Step::Style | Step::MStyle => {
-                let back = if self.step == Step::Style { Step::Start } else { Step::Corner };
+                let back = if self.step == Step::Style {
+                    Step::Start
+                } else {
+                    Step::Corner
+                };
                 if raw.is_empty() {
                     self.step = back;
                     return Some(if back == Step::Start {
@@ -699,7 +750,9 @@ impl CadCommand for AttdefCommand {
                             CmdResult::NeedPoint
                         })
                     }
-                    None => Some(CmdResult::ReportError(format!("Cannot find text style \"{raw}\"."))),
+                    None => Some(CmdResult::ReportError(format!(
+                        "Cannot find text style \"{raw}\"."
+                    ))),
                 }
             }
             Step::Height | Step::MHeight => match raw.parse::<f64>() {
@@ -715,8 +768,12 @@ impl CadCommand for AttdefCommand {
                     self.step = Step::Rotation;
                     Some(CmdResult::NeedPoint)
                 }
-                Ok(_) => Some(CmdResult::ReportError("Value must be positive and nonzero.".into())),
-                Err(_) => Some(CmdResult::ReportError("Requires numeric distance or two points.".into())),
+                Ok(_) => Some(CmdResult::ReportError(
+                    "Value must be positive and nonzero.".into(),
+                )),
+                Err(_) => Some(CmdResult::ReportError(
+                    "Requires numeric distance or two points.".into(),
+                )),
             },
             Step::Rotation | Step::MRotation => match raw.parse::<f64>() {
                 Ok(v) => {
@@ -727,7 +784,9 @@ impl CadCommand for AttdefCommand {
                     }
                     Some(self.finish())
                 }
-                Err(_) => Some(CmdResult::ReportError("Requires valid numeric angle or second point.".into())),
+                Err(_) => Some(CmdResult::ReportError(
+                    "Requires valid numeric angle or second point.".into(),
+                )),
             },
             Step::Corner => match word.as_str() {
                 "H" | "HEIGHT" => {
@@ -754,13 +813,16 @@ impl CadCommand for AttdefCommand {
                     self.step = Step::MWidth;
                     Some(CmdResult::NeedPoint)
                 }
-                _ => Some(CmdResult::ReportError("2D point or option keyword required.".into())),
+                _ => Some(CmdResult::ReportError(
+                    "2D point or option keyword required.".into(),
+                )),
             },
             Step::MJustify => {
                 // Multi-line definitions keep their attachment in the embedded
                 // MText; only the keyword is validated here.
                 if word.is_empty()
-                    || ["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"].contains(&word.as_str())
+                    || ["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"]
+                        .contains(&word.as_str())
                 {
                     self.step = Step::Corner;
                     Some(CmdResult::NeedPoint)
@@ -788,7 +850,9 @@ impl CadCommand for AttdefCommand {
                         self.step = Step::Corner;
                         Some(CmdResult::NeedPoint)
                     }
-                    _ => Some(CmdResult::ReportError("Value must be positive and nonzero.".into())),
+                    _ => Some(CmdResult::ReportError(
+                        "Value must be positive and nonzero.".into(),
+                    )),
                 }
             }
             Step::MWidth => match raw.parse::<f64>() {
@@ -797,7 +861,9 @@ impl CadCommand for AttdefCommand {
                     self.spec.value = self.lines.join("\\P");
                     Some(self.finish())
                 }
-                _ => Some(CmdResult::ReportError("Requires numeric distance or second point.".into())),
+                _ => Some(CmdResult::ReportError(
+                    "Requires numeric distance or second point.".into(),
+                )),
             },
             _ => None,
         }
@@ -824,14 +890,20 @@ impl CadCommand for AttdefCommand {
             }
             Step::Height | Step::MHeight => {
                 let base = self.first.unwrap_or(pt);
-                let d = self.plane.to_local(pt).truncate().distance(self.plane.to_local(base).truncate());
-                self.on_text_input(&d.to_string()).unwrap_or(CmdResult::NeedPoint)
+                let d = self
+                    .plane
+                    .to_local(pt)
+                    .truncate()
+                    .distance(self.plane.to_local(base).truncate());
+                self.on_text_input(&d.to_string())
+                    .unwrap_or(CmdResult::NeedPoint)
             }
             Step::Rotation | Step::MRotation => {
                 let base = self.plane.to_local(self.first.unwrap_or(pt));
                 let p = self.plane.to_local(pt);
                 let angle = (p.y - base.y).atan2(p.x - base.x).to_degrees();
-                self.on_text_input(&angle.to_string()).unwrap_or(CmdResult::NeedPoint)
+                self.on_text_input(&angle.to_string())
+                    .unwrap_or(CmdResult::NeedPoint)
             }
             Step::Location => {
                 self.first = Some(pt);
@@ -858,10 +930,14 @@ impl CadCommand for AttdefCommand {
                 CmdResult::NeedPoint
             }
             Step::Tag => CmdResult::ReportError("Tag cannot be null".into()),
-            Step::Prompt | Step::Value | Step::NextLine | Step::Style | Step::MStyle
-            | Step::MSpacingType | Step::MSpacing | Step::MJustify => {
-                self.on_text_input("").unwrap_or(CmdResult::NeedPoint)
-            }
+            Step::Prompt
+            | Step::Value
+            | Step::NextLine
+            | Step::Style
+            | Step::MStyle
+            | Step::MSpacingType
+            | Step::MSpacing
+            | Step::MJustify => self.on_text_input("").unwrap_or(CmdResult::NeedPoint),
             Step::Start => match self.previous.clone() {
                 Some(previous) => {
                     let entity = build_below(&self.spec, &previous);
@@ -872,18 +948,23 @@ impl CadCommand for AttdefCommand {
             },
             Step::Height | Step::MHeight => {
                 let h = self.spec.height;
-                self.on_text_input(&h.to_string()).unwrap_or(CmdResult::NeedPoint)
+                self.on_text_input(&h.to_string())
+                    .unwrap_or(CmdResult::NeedPoint)
             }
             Step::Rotation | Step::MRotation => {
                 let r = self.spec.rotation.to_degrees();
-                self.on_text_input(&r.to_string()).unwrap_or(CmdResult::NeedPoint)
+                self.on_text_input(&r.to_string())
+                    .unwrap_or(CmdResult::NeedPoint)
             }
             _ => CmdResult::Cancel,
         }
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
-        if !matches!(self.step, Step::Start | Step::JustifiedPoint | Step::Location) {
+        if !matches!(
+            self.step,
+            Step::Start | Step::JustifiedPoint | Step::Location
+        ) {
             return None;
         }
         Some(cross_preview(pt, self.plane))
@@ -909,7 +990,11 @@ pub struct AttdefPlaceCommand {
 
 impl AttdefPlaceCommand {
     pub fn new(spec: AttdefSpec) -> Self {
-        Self { spec, plane: WorkingPlane::default(), first: None }
+        Self {
+            spec,
+            plane: WorkingPlane::default(),
+            first: None,
+        }
     }
 }
 
@@ -940,7 +1025,11 @@ impl CadCommand for AttdefPlaceCommand {
             None => (pt, None),
         };
         if self.spec.justify == Justify::Align {
-            let length = self.plane.to_local(pt).truncate().distance(self.plane.to_local(first).truncate());
+            let length = self
+                .plane
+                .to_local(pt)
+                .truncate()
+                .distance(self.plane.to_local(first).truncate());
             self.spec.height = aligned_height(&self.spec, length);
         }
         let entity = build(&self.spec, self.plane, first, second);
@@ -973,14 +1062,19 @@ fn cross_preview(pt: DVec3, plane: WorkingPlane) -> WireModel {
     ];
     WireModel::solid(
         "attdef_preview".into(),
-        points.iter().map(|point| point.as_vec3().to_array()).collect(),
+        points
+            .iter()
+            .map(|point| point.as_vec3().to_array())
+            .collect(),
         WireModel::CYAN,
         false,
     )
 }
 
 // ── Autocomplete registry ─────────────────────────────────
-inventory::submit!(crate::command::CommandRegistration { names: &["ATTDEF", "-ATTDEF", "AFLAGS"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["ATTDEF", "-ATTDEF", "AFLAGS"]
+});
 
 /// A value the ATTDEF dialog takes from the drawing (its ⌖ buttons): typed,
 /// or measured from two points. Hands the value back to reopen the dialog.
@@ -994,7 +1088,12 @@ pub struct AttdefPickCommand {
 
 impl AttdefPickCommand {
     pub fn new(kind: &'static str, current: String) -> Self {
-        Self { kind, current, first: None, plane: WorkingPlane::default() }
+        Self {
+            kind,
+            current,
+            first: None,
+            plane: WorkingPlane::default(),
+        }
     }
 
     fn back(&self, value: &str) -> CmdResult {
@@ -1031,8 +1130,12 @@ impl CadCommand for AttdefPickCommand {
         }
         match raw.parse::<f64>() {
             Ok(v) if self.kind == "R" || v > 0.0 => Some(self.back(&short(v))),
-            Ok(_) => Some(CmdResult::ReportError("Value must be positive and nonzero.".into())),
-            Err(_) => Some(CmdResult::ReportError("Requires numeric distance or two points.".into())),
+            Ok(_) => Some(CmdResult::ReportError(
+                "Value must be positive and nonzero.".into(),
+            )),
+            Err(_) => Some(CmdResult::ReportError(
+                "Requires numeric distance or two points.".into(),
+            )),
         }
     }
 
@@ -1070,7 +1173,9 @@ pub struct AttdispCommand {
 impl AttdispCommand {
     /// `mode` is ATTMODE: 0 OFF, 1 Normal, 2 ON.
     pub fn new(mode: i16) -> Self {
-        Self { current: attdisp_word(mode) }
+        Self {
+            current: attdisp_word(mode),
+        }
     }
 }
 
@@ -1089,7 +1194,10 @@ impl CadCommand for AttdispCommand {
     }
 
     fn prompt(&self) -> String {
-        format!("Enter attribute visibility setting [Normal/ON/OFF] <{}>:", self.current)
+        format!(
+            "Enter attribute visibility setting [Normal/ON/OFF] <{}>:",
+            self.current
+        )
     }
 
     fn input_kind(&self) -> InputKind {

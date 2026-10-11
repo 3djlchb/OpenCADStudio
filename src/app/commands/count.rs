@@ -6,14 +6,21 @@ use crate::app::{Message, OpenCADStudio};
 use crate::command::CadCommand;
 use crate::modules::annotate::count_cmd::{CountCommand, CountTableCommand, UpdateFieldCommand};
 use crate::modules::annotate::field_cmd::FieldPlaceCommand;
-use crate::ui::window::count_palette::{aci_rgba, CountMode, CountMsg, CountTarget, RowAction, AREA_LAYER};
+use crate::ui::window::count_palette::{
+    aci_rgba, CountMode, CountMsg, CountTarget, RowAction, AREA_LAYER,
+};
 use codec::count::{area_json, block_json, single_json, CountKey};
 use codec::{EntityType, Handle};
 use iced::Task;
 
 /// The variables this family answers for.
-pub(super) const COUNT_SYSVARS: &[&str] =
-    &["COUNTNUMBER", "COUNTSERVICE", "COUNTPALETTESTATE", "COUNTCOLOR", "COUNTERRORCOLOR"];
+pub(super) const COUNT_SYSVARS: &[&str] = &[
+    "COUNTNUMBER",
+    "COUNTSERVICE",
+    "COUNTPALETTESTATE",
+    "COUNTCOLOR",
+    "COUNTERRORCOLOR",
+];
 
 fn hex(h: Handle) -> String {
     format!("{:X}", h.value())
@@ -56,18 +63,27 @@ impl OpenCADStudio {
         match verb.as_str() {
             "COUNT" => {
                 let preselected = self.tabs[i].scene.selected_handles_in_order();
-                let current = matches!(rest.trim_start_matches('_').to_ascii_uppercase().as_str(), "C");
+                let current = matches!(
+                    rest.trim_start_matches('_').to_ascii_uppercase().as_str(),
+                    "C"
+                );
                 if current && !preselected.is_empty() {
                     // Count Selection: the selection is the target.
                     let found = preselected.len();
                     self.command_line.push_output(&crate::tf!("{found} found"));
                     let handles: Vec<String> = preselected.iter().map(|h| hex(*h)).collect();
                     self.tabs[i].scene.deselect_all();
-                    return Some(self.dispatch_command(&format!("_COUNTRUN C T {}", handles.join(","))));
+                    return Some(
+                        self.dispatch_command(&format!("_COUNTRUN C T {}", handles.join(","))),
+                    );
                 }
                 // Plain COUNT asks for its targets itself.
                 self.tabs[i].scene.deselect_all();
-                let command = if current { CountCommand::with_area("C") } else { CountCommand::new(false) };
+                let command = if current {
+                    CountCommand::with_area("C")
+                } else {
+                    CountCommand::new(false)
+                };
                 Some(self.start_count_command(i, Box::new(command)))
             }
             "COUNTAREA" => Some(self.start_count_command(i, Box::new(CountCommand::new(true)))),
@@ -92,9 +108,9 @@ impl OpenCADStudio {
                 match self.count_field_code(i) {
                     Some(code) => return Some(self.start_count_field(i, code)),
                     None if self.tabs[i].count.is_some() => {}
-                    None => self
-                        .command_line
-                        .push_error(&crate::t!("** COUNTFIELD command only available during Count. **")),
+                    None => self.command_line.push_error(&crate::t!(
+                        "** COUNTFIELD command only available during Count. **"
+                    )),
                 }
                 Some(Task::none())
             }
@@ -150,7 +166,8 @@ impl OpenCADStudio {
                     mode.cursor = None;
                     self.tabs[i].count = Some(mode);
                     self.apply_count_display(i);
-                    self.command_line.push_output(&crate::t!("count area is active."));
+                    self.command_line
+                        .push_output(&crate::t!("count area is active."));
                 }
                 Some(Task::none())
             }
@@ -158,7 +175,11 @@ impl OpenCADStudio {
                 let (point, names) = rest.split_once(' ').unwrap_or((rest, ""));
                 let p: Vec<f64> = point.split(',').filter_map(|v| v.parse().ok()).collect();
                 if p.len() == 3 {
-                    let names: Vec<String> = names.split('|').filter(|n| !n.is_empty()).map(str::to_string).collect();
+                    let names: Vec<String> = names
+                        .split('|')
+                        .filter(|n| !n.is_empty())
+                        .map(str::to_string)
+                        .collect();
                     self.place_count_table(i, [p[0], p[1], p[2]], names);
                 }
                 Some(Task::none())
@@ -193,7 +214,8 @@ impl OpenCADStudio {
             _ => None,
         };
         if let Some(v) = read_only {
-            self.command_line.push_output(&crate::tf!("{name} = {v} (read only)"));
+            self.command_line
+                .push_output(&crate::tf!("{name} = {v} (read only)"));
             return;
         }
         let (current, min, max) = match name {
@@ -202,7 +224,8 @@ impl OpenCADStudio {
             _ => (self.count_palette.error_color as i32, 1, 255),
         };
         let ask = |app: &mut Self| {
-            app.command_line.push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+            app.command_line
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
             app.pending_setvar = Some(name.to_string());
         };
         let Some(value) = value else {
@@ -237,7 +260,8 @@ impl OpenCADStudio {
         self.ribbon.set_count_palette(open);
         if open {
             if self.dock.location(id).is_none() {
-                self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
+                self.dock
+                    .dock(id, crate::app::config::DockSide::Right, usize::MAX);
             }
             self.dock_expanded = Some(id);
         } else if self.dock_expanded == Some(id) {
@@ -248,19 +272,26 @@ impl OpenCADStudio {
     /// Recolour the drawing for count mode: counted references, duplicates,
     /// the rest faded (nothing changes without a target).
     pub(in crate::app) fn apply_count_display(&mut self, i: usize) {
-        let computed = self.tabs[i].count.as_ref().map(|m| m.compute(&self.tabs[i].scene.document));
+        let computed = self.tabs[i]
+            .count
+            .as_ref()
+            .map(|m| m.compute(&self.tabs[i].scene.document));
         if let (Some(mode), Some(c)) = (self.tabs[i].count.as_mut(), computed) {
             mode.cache = Some(c);
         }
-        let display = self.tabs[i].count.as_ref().filter(|m| m.target.is_some()).map(|m| {
-            let r = m.result(&self.tabs[i].scene.document);
-            crate::scene::CountDisplay {
-                counted: r.counted.iter().copied().collect(),
-                errors: r.errors.iter().chain(&r.overlapped).copied().collect(),
-                color: aci_rgba(self.count_palette.color),
-                error_color: aci_rgba(self.count_palette.error_color),
-            }
-        });
+        let display = self.tabs[i]
+            .count
+            .as_ref()
+            .filter(|m| m.target.is_some())
+            .map(|m| {
+                let r = m.result(&self.tabs[i].scene.document);
+                crate::scene::CountDisplay {
+                    counted: r.counted.iter().copied().collect(),
+                    errors: r.errors.iter().chain(&r.overlapped).copied().collect(),
+                    color: aci_rgba(self.count_palette.color),
+                    error_color: aci_rgba(self.count_palette.error_color),
+                }
+            });
         self.tabs[i].scene.set_count_display(display);
         let epoch = self.tabs[i].scene.geometry_epoch;
         if let Some(mode) = self.tabs[i].count.as_mut() {
@@ -271,7 +302,11 @@ impl OpenCADStudio {
     /// After the drawing changes, count mode colours its references again.
     pub(in crate::app) fn refresh_count_if_stale(&mut self) {
         let i = self.active_tab;
-        let Some(mode) = self.tabs[i].count.as_ref().filter(|m| m.epoch != self.tabs[i].scene.geometry_epoch) else {
+        let Some(mode) = self.tabs[i]
+            .count
+            .as_ref()
+            .filter(|m| m.epoch != self.tabs[i].scene.geometry_epoch)
+        else {
             return;
         };
         if let Some((h, _)) = mode.boundary {
@@ -294,7 +329,11 @@ impl OpenCADStudio {
                 }
                 // An edited boundary moves the area with it.
                 Some(EntityType::LwPolyline(pl)) => {
-                    let ring: Vec<[f64; 2]> = pl.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
+                    let ring: Vec<[f64; 2]> = pl
+                        .vertices
+                        .iter()
+                        .map(|v| [v.location.x, v.location.y])
+                        .collect();
                     if let Some(mode) = self.tabs[i].count.as_mut() {
                         mode.area = Some(ring);
                     }
@@ -388,12 +427,20 @@ impl OpenCADStudio {
         tokens: &[&str],
     ) -> Option<(Option<Vec<[f64; 2]>>, Option<(Handle, bool)>)> {
         let kind = tokens.first().copied().unwrap_or("E");
-        let points = || tokens[1..].iter().map_while(|t| parse_xy(t)).collect::<Vec<_>>();
+        let points = || {
+            tokens[1..]
+                .iter()
+                .map_while(|t| parse_xy(t))
+                .collect::<Vec<_>>()
+        };
         match kind {
             "E" => Some((None, None)),
             "K" => {
                 let mode = self.tabs[i].count.as_ref();
-                Some((mode.and_then(|m| m.area.clone()), mode.and_then(|m| m.boundary)))
+                Some((
+                    mode.and_then(|m| m.area.clone()),
+                    mode.and_then(|m| m.boundary),
+                ))
             }
             // Current area counts all of model space (the view and an area
             // in use take no part).
@@ -450,7 +497,10 @@ impl OpenCADStudio {
     /// counts the targets and enters count mode.
     fn count_run(&mut self, i: usize, rest: &str) {
         let tokens: Vec<&str> = rest.split_whitespace().collect();
-        let split = tokens.iter().position(|t| *t == "L" || *t == "T").unwrap_or(tokens.len());
+        let split = tokens
+            .iter()
+            .position(|t| *t == "L" || *t == "T")
+            .unwrap_or(tokens.len());
         let (area_tokens, tail) = tokens.split_at(split);
         let targets: Vec<Handle> = match tail {
             ["T", handles, ..] => handles
@@ -479,9 +529,21 @@ impl OpenCADStudio {
             })
             .collect();
         let target = match blocks.first() {
-            Some(first) if blocks.len() == targets.len() && blocks.iter().all(|b| b.eq_ignore_ascii_case(first)) => {
-                let name = doc.block_records.get(first).map(|b| b.name.clone()).unwrap_or_else(|| first.to_string());
-                Some(CountTarget::Block { name, reference: targets.first().copied(), matching: [false; 3], picked: true })
+            Some(first)
+                if blocks.len() == targets.len()
+                    && blocks.iter().all(|b| b.eq_ignore_ascii_case(first)) =>
+            {
+                let name = doc
+                    .block_records
+                    .get(first)
+                    .map(|b| b.name.clone())
+                    .unwrap_or_else(|| first.to_string());
+                Some(CountTarget::Block {
+                    name,
+                    reference: targets.first().copied(),
+                    matching: [false; 3],
+                    picked: true,
+                })
             }
             None if targets.is_empty() => None,
             _ => Some(CountTarget::Group(targets.clone())),
@@ -492,10 +554,16 @@ impl OpenCADStudio {
         if let Some(old) = self.tabs[i].count.take().filter(|o| o.boundary != boundary) {
             self.drop_count_boundary(i, old.boundary);
         }
-        let mode = CountMode { area, boundary, target, ..CountMode::default() };
+        let mode = CountMode {
+            area,
+            boundary,
+            target,
+            ..CountMode::default()
+        };
         if let Some(name) = mode.target_name() {
             let n = mode.count(&self.tabs[i].scene.document);
-            self.command_line.push_output(&crate::tf!("{name} ...... {n}"));
+            self.command_line
+                .push_output(&crate::tf!("{name} ...... {n}"));
         }
         self.tabs[i].count = Some(mode);
         self.apply_count_display(i);
@@ -508,11 +576,12 @@ impl OpenCADStudio {
         let mode = self.tabs[i].count.as_ref()?;
         match mode.target.as_ref()? {
             CountTarget::Group(handles) => Some(format!("\\AcCount {}", single_json(handles))),
-            CountTarget::Block { reference: Some(r), matching: [false, false, false], picked: true, .. }
-                if mode.boundary.is_none() =>
-            {
-                Some(format!("\\AcCount {}", single_json(&[*r])))
-            }
+            CountTarget::Block {
+                reference: Some(r),
+                matching: [false, false, false],
+                picked: true,
+                ..
+            } if mode.boundary.is_none() => Some(format!("\\AcCount {}", single_json(&[*r]))),
             CountTarget::Block { name, .. } => {
                 let instances = mode.instances(&self.tabs[i].scene.document);
                 Some(self.block_field_code(i, name, &mode.key(&instances)))
@@ -531,13 +600,21 @@ impl OpenCADStudio {
     /// Place a count field as multi-line text (`Specify start point or [Height/Justify]:`).
     pub(in crate::app) fn start_count_field(&mut self, i: usize, code: String) -> Task<Message> {
         let doc = &self.tabs[i].scene.document;
-        let value = crate::entities::field::evaluate(doc, &code, &[], None).unwrap_or_else(|| "####".into());
+        let value = crate::entities::field::evaluate(doc, &code, &[], None)
+            .unwrap_or_else(|| "####".into());
         let defaults = crate::scene::creation_style::current_text_defaults(doc);
         self.command_line.push_output(&crate::tf!(
             "MTEXT Current text style:  \"{}\"  Text height:  {:.4}",
-            defaults.style_name, defaults.height
+            defaults.style_name,
+            defaults.height
         ));
-        let command = FieldPlaceCommand::new(value, (code, Vec::new()), defaults.style_name, defaults.height).named("MTEXT");
+        let command = FieldPlaceCommand::new(
+            value,
+            (code, Vec::new()),
+            defaults.style_name,
+            defaults.height,
+        )
+        .named("MTEXT");
         self.start_count_command(i, Box::new(command))
     }
 
@@ -563,7 +640,11 @@ impl OpenCADStudio {
                 Some(EntityType::Table(t)) => t
                     .block_record_handle
                     .and_then(|r| doc.block_records.iter().find(|b| b.handle == r))
-                    .or_else(|| doc.block_records.get(&t.block_name).filter(|_| !t.block_name.is_empty())),
+                    .or_else(|| {
+                        doc.block_records
+                            .get(&t.block_name)
+                            .filter(|_| !t.block_name.is_empty())
+                    }),
                 _ => None,
             };
             if let Some(record) = record {
@@ -573,7 +654,9 @@ impl OpenCADStudio {
         let attributes: Vec<&codec::entities::EntityCommon> = handles
             .iter()
             .filter_map(|h| match doc.get_entity(*h) {
-                Some(EntityType::Insert(insert)) => Some(insert.attributes.iter().map(|a| &a.common)),
+                Some(EntityType::Insert(insert)) => {
+                    Some(insert.attributes.iter().map(|a| &a.common))
+                }
                 _ => None,
             })
             .flatten()
@@ -585,8 +668,10 @@ impl OpenCADStudio {
             }),
         });
         if !hosting {
-            self.command_line.push_output(&crate::tf!("{found} field(s) found.", found = 0));
-            self.command_line.push_output(&crate::tf!("{updated} field(s) updated.", updated = 0));
+            self.command_line
+                .push_output(&crate::tf!("{found} field(s) found.", found = 0));
+            self.command_line
+                .push_output(&crate::tf!("{updated} field(s) updated.", updated = 0));
             return;
         }
         // The reference counts fields, not the texts holding them, and
@@ -595,8 +680,10 @@ impl OpenCADStudio {
         if changed > 0 {
             self.tabs[i].dirty = true;
         }
-        self.command_line.push_output(&crate::tf!("{found} field(s) found."));
-        self.command_line.push_output(&crate::tf!("{updated} field(s) updated.", updated = found));
+        self.command_line
+            .push_output(&crate::tf!("{found} field(s) found."));
+        self.command_line
+            .push_output(&crate::tf!("{updated} field(s) updated.", updated = found));
     }
 
     /// A count table at `point`: `Item` | `Count`, one row per block (all
@@ -607,11 +694,19 @@ impl OpenCADStudio {
         let area = self.tabs[i].count.as_ref().and_then(|m| m.area.clone());
         let instances = codec::count::block_instances(doc, area.as_deref());
         let mut names: Vec<String> = if names.is_empty() {
-            codec::count::block_counts(&instances).into_iter().map(|c| c.name).collect()
+            codec::count::block_counts(&instances)
+                .into_iter()
+                .map(|c| c.name)
+                .collect()
         } else {
             names
                 .iter()
-                .map(|n| doc.block_records.get(n).map(|b| b.name.clone()).unwrap_or_else(|| n.clone()))
+                .map(|n| {
+                    doc.block_records
+                        .get(n)
+                        .map(|b| b.name.clone())
+                        .unwrap_or_else(|| n.clone())
+                })
                 .collect()
         };
         names.sort_by_key(|n| n.to_ascii_uppercase());
@@ -659,8 +754,10 @@ impl OpenCADStudio {
                 }
             }
         }
-        let codes: Vec<String> =
-            names.iter().map(|n| self.block_field_code(i, n, &CountKey::default())).collect();
+        let codes: Vec<String> = names
+            .iter()
+            .map(|n| self.block_field_code(i, n, &CountKey::default()))
+            .collect();
         self.push_undo_snapshot(i, "COUNTTABLE");
         let Some(handle) = self.commit_entity_handle(EntityType::Table(Box::new(table))) else {
             return;
@@ -672,19 +769,29 @@ impl OpenCADStudio {
             .iter()
             .enumerate()
             .map(|(r, code)| {
-                let value = crate::entities::field::evaluate(doc, code, &[], None).unwrap_or_else(|| "####".into());
-                (r + 1, 1, r"%<\_FldIdx 0>%".to_string(), vec![codec::fields::NewField::new(code.clone(), value)])
+                let value = crate::entities::field::evaluate(doc, code, &[], None)
+                    .unwrap_or_else(|| "####".into());
+                (
+                    r + 1,
+                    1,
+                    r"%<\_FldIdx 0>%".to_string(),
+                    vec![codec::fields::NewField::new(code.clone(), value)],
+                )
             })
             .collect();
         doc.build_table_block(handle, fields);
-        self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+        self.tabs[i]
+            .scene
+            .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
         self.tabs[i].dirty = true;
     }
 
     /// Zoom to a counted object (← / →, an error of the report).
     fn zoom_to_insert(&mut self, i: usize, h: Handle) {
         let doc = &self.tabs[i].scene.document;
-        let Some(entity) = doc.get_entity(h) else { return };
+        let Some(entity) = doc.get_entity(h) else {
+            return;
+        };
         let outline = codec::count::entity_outline(doc, entity);
         if outline.is_empty() {
             return;
@@ -704,12 +811,20 @@ impl OpenCADStudio {
         let instances = mode.instances(&self.tabs[i].scene.document);
         let reference = instances
             .iter()
-            .find(|inst| inst.duplicate_of.is_none() && inst.name.eq_ignore_ascii_case(&name) && key.matches(inst))
+            .find(|inst| {
+                inst.duplicate_of.is_none()
+                    && inst.name.eq_ignore_ascii_case(&name)
+                    && key.matches(inst)
+            })
             .map(|inst| inst.handle);
         mode.target = Some(CountTarget::Block {
             name,
             reference,
-            matching: [key.layer.is_some(), key.scale.is_some(), key.mirror_state.is_some()],
+            matching: [
+                key.layer.is_some(),
+                key.scale.is_some(),
+                key.mirror_state.is_some(),
+            ],
             picked: false,
         });
         mode.cursor = None;
@@ -721,9 +836,15 @@ impl OpenCADStudio {
     /// expression counts.
     pub(in crate::app) fn show_count_instances(&mut self, i: usize, json: &str) {
         match codec::count::parse_query(json) {
-            Some(codec::count::CountQuery::Block { name, key, boundary }) => {
+            Some(codec::count::CountQuery::Block {
+                name,
+                key,
+                boundary,
+            }) => {
                 if let Some(b) = boundary {
-                    if let Some(ring) = codec::count::boundary_polygon(&self.tabs[i].scene.document, b) {
+                    if let Some(ring) =
+                        codec::count::boundary_polygon(&self.tabs[i].scene.document, b)
+                    {
                         let mut mode = self.tabs[i].count.take().unwrap_or_default();
                         if mode.boundary.map(|(h, _)| h) != Some(b) {
                             self.drop_count_boundary(i, mode.boundary);
@@ -737,7 +858,11 @@ impl OpenCADStudio {
             }
             Some(codec::count::CountQuery::Single(handles)) if !handles.is_empty() => {
                 let hexes: Vec<String> = handles.iter().map(|h| hex(*h)).collect();
-                let area = if self.tabs[i].count.is_some() { "K" } else { "E" };
+                let area = if self.tabs[i].count.is_some() {
+                    "K"
+                } else {
+                    "E"
+                };
                 self.count_run(i, &format!("{area} T {}", hexes.join(",")));
             }
             _ => {}
@@ -793,7 +918,10 @@ impl OpenCADStudio {
             CountMsg::TableAll(on) => {
                 let names: Vec<String> = if on {
                     let area = self.tabs[i].count.as_ref().and_then(|m| m.area.clone());
-                    let instances = codec::count::block_instances(&self.tabs[i].scene.document, area.as_deref());
+                    let instances = codec::count::block_instances(
+                        &self.tabs[i].scene.document,
+                        area.as_deref(),
+                    );
                     crate::ui::window::count_palette::rows(&instances, &self.count_palette)
                         .into_iter()
                         .map(|r| r.name.to_ascii_uppercase())
@@ -813,16 +941,26 @@ impl OpenCADStudio {
             }
             CountMsg::Back | CountMsg::Close => self.close_count(i),
             CountMsg::Match(k, on) => {
-                if let Some(CountMode { target: Some(CountTarget::Block { matching, .. }), .. }) = self.tabs[i].count.as_mut() {
+                if let Some(CountMode {
+                    target: Some(CountTarget::Block { matching, .. }),
+                    ..
+                }) = self.tabs[i].count.as_mut()
+                {
                     matching[k] = on;
                 }
                 self.apply_count_display(i);
             }
-            CountMsg::ToggleDetails => self.count_palette.details_closed = !self.count_palette.details_closed,
-            CountMsg::ToggleErrors => self.count_palette.errors_closed = !self.count_palette.errors_closed,
+            CountMsg::ToggleDetails => {
+                self.count_palette.details_closed = !self.count_palette.details_closed
+            }
+            CountMsg::ToggleErrors => {
+                self.count_palette.errors_closed = !self.count_palette.errors_closed
+            }
             CountMsg::ShowError(h) => self.zoom_to_insert(i, h),
             CountMsg::Prev | CountMsg::Next => {
-                let Some(mode) = self.tabs[i].count.as_ref() else { return Task::none() };
+                let Some(mode) = self.tabs[i].count.as_ref() else {
+                    return Task::none();
+                };
                 let result = mode.result(&self.tabs[i].scene.document);
                 let n = result.counted.len();
                 if n == 0 {
@@ -843,7 +981,11 @@ impl OpenCADStudio {
             CountMsg::Area => return self.dispatch_command("COUNTAREA"),
             CountMsg::Select => {
                 self.tabs[i].scene.deselect_all();
-                let command = CountCommand::with_area(if self.tabs[i].count.is_some() { "K" } else { "C" });
+                let command = CountCommand::with_area(if self.tabs[i].count.is_some() {
+                    "K"
+                } else {
+                    "C"
+                });
                 return self.start_count_command(i, Box::new(command));
             }
             CountMsg::Field => return self.dispatch_command("COUNTFIELD"),

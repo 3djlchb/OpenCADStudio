@@ -129,7 +129,10 @@ pub fn api_token() -> &'static str {
 /// is not echoed back.
 pub(crate) fn announce_token() {
     if std::env::var("OCS_API_TOKEN").map_or(true, |token| token.trim().is_empty()) {
-        eprintln!("API token (or set OCS_API_TOKEN before launch): {}", api_token());
+        eprintln!(
+            "API token (or set OCS_API_TOKEN before launch): {}",
+            api_token()
+        );
     }
 }
 
@@ -250,13 +253,7 @@ fn serve_connection(mut stream: TcpStream, jobs: std::sync::mpsc::Sender<Job>) {
         return;
     }
     let (reply, answer) = std::sync::mpsc::channel();
-    if jobs
-        .send(Job {
-            request,
-            reply,
-        })
-        .is_err()
-    {
+    if jobs.send(Job { request, reply }).is_err() {
         return;
     }
     if let Ok((status, mut body)) = answer.recv() {
@@ -388,7 +385,11 @@ fn percent_decode(raw: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-pub(crate) fn write_response(stream: &mut TcpStream, status: u16, body: &Value) -> std::io::Result<()> {
+pub(crate) fn write_response(
+    stream: &mut TcpStream,
+    status: u16,
+    body: &Value,
+) -> std::io::Result<()> {
     let body = if body.is_null() {
         Vec::new()
     } else {
@@ -436,7 +437,11 @@ pub(crate) enum Plan {
     /// the cached `document_id` when the caller omitted it, one state-refresh
     /// retry after a stale refusal, and the bulky `state` snapshot stripped
     /// from the answer.
-    Mutate { op: String, fields: Value, created: u16 },
+    Mutate {
+        op: String,
+        fields: Value,
+        created: u16,
+    },
 }
 
 impl Plan {
@@ -469,13 +474,24 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
         },
         ("POST", ["documents"]) => {
             if let Some(template) = body["template"].as_str() {
-                Plan::Mutate { op: "new".into(), fields: json!({"template": template}), created: 201 }
+                Plan::Mutate {
+                    op: "new".into(),
+                    fields: json!({"template": template}),
+                    created: 201,
+                }
             } else if let Some(path) = body["path"].as_str() {
-                Plan::Run { request: json!({"op":"open","path":path}), created: 201 }
+                Plan::Run {
+                    request: json!({"op":"open","path":path}),
+                    created: 201,
+                }
             } else {
                 // A fresh untitled document in
                 // its own tab, so cross-document operations have a target.
-                Plan::Mutate { op: "new".into(), fields: json!({}), created: 201 }
+                Plan::Mutate {
+                    op: "new".into(),
+                    fields: json!({}),
+                    created: 201,
+                }
             }
         }
         ("DELETE", ["documents", id]) => {
@@ -483,32 +499,67 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
             if let Some(id) = id.parse::<u64>().ok() {
                 fields["document_id"] = json!(id);
             }
-            if request.param("discard").is_some_and(|v| v == "true" || v == "1") {
+            if request
+                .param("discard")
+                .is_some_and(|v| v == "true" || v == "1")
+            {
                 fields["discard"] = json!(true);
             }
-            Plan::Mutate { op: "close".into(), fields, created: 200 }
+            Plan::Mutate {
+                op: "close".into(),
+                fields,
+                created: 200,
+            }
         }
         ("GET", ["sysvars"]) => {
             let names = request
                 .param("names")
                 .map(|csv| json!(csv.split(',').collect::<Vec<_>>()))
                 .unwrap_or_else(|| json!([]));
-            Plan::Mutate { op: "sysvar".into(), fields: json!({"get": names}), created: 200 }
+            Plan::Mutate {
+                op: "sysvar".into(),
+                fields: json!({"get": names}),
+                created: 200,
+            }
         }
-        ("POST", ["sysvars"]) => Plan::Mutate { op: "sysvar".into(), fields: body, created: 200 },
-        ("POST", ["layouts"]) => Plan::Mutate { op: "layout_create".into(), fields: body, created: 201 },
+        ("POST", ["sysvars"]) => Plan::Mutate {
+            op: "sysvar".into(),
+            fields: body,
+            created: 200,
+        },
+        ("POST", ["layouts"]) => Plan::Mutate {
+            op: "layout_create".into(),
+            fields: body,
+            created: 201,
+        },
         ("PUT", ["layouts", layout, "page-setup"]) => {
             let mut fields = body;
             fields["layout"] = json!(layout);
-            Plan::Mutate { op: "page_setup_set".into(), fields, created: 200 }
+            Plan::Mutate {
+                op: "page_setup_set".into(),
+                fields,
+                created: 200,
+            }
         }
-        ("POST", ["entities", "copy-to"]) =>
-            Plan::Mutate { op: "entities_copy_to".into(), fields: body, created: 201 },
-        ("POST", ["groups"]) => Plan::Mutate { op: "group_create".into(), fields: body, created: 201 },
-        ("POST", ["selection-sets"]) =>
-            Plan::Mutate { op: "selection_set_save".into(), fields: body, created: 201 },
+        ("POST", ["entities", "copy-to"]) => Plan::Mutate {
+            op: "entities_copy_to".into(),
+            fields: body,
+            created: 201,
+        },
+        ("POST", ["groups"]) => Plan::Mutate {
+            op: "group_create".into(),
+            fields: body,
+            created: 201,
+        },
+        ("POST", ["selection-sets"]) => Plan::Mutate {
+            op: "selection_set_save".into(),
+            fields: body,
+            created: 201,
+        },
         ("GET", ["selection-sets", name]) => {
-            let select = request.param("select").is_some_and(|v| v == "true" || v == "1");
+            let select = request
+                .param("select")
+                .is_some_and(|v| v == "true" || v == "1");
             Plan::Mutate {
                 op: "selection_set_load".into(),
                 fields: json!({"name": name, "select": select}),
@@ -517,11 +568,21 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
         }
         ("GET", ["entities"]) => {
             let mut request_json = json!({"op":"query"});
-            if let Some(v) = request.param("type") { request_json["type"] = json!(v); }
-            if let Some(v) = request.param("layer") { request_json["layer"] = json!(v); }
-            if let Some(v) = request.param("detail") { request_json["detail"] = json!(v); }
-            if let Some(v) = request.param("offset") { request_json["offset"] = json!(v); }
-            if let Some(v) = request.param("limit") { request_json["limit"] = json!(v); }
+            if let Some(v) = request.param("type") {
+                request_json["type"] = json!(v);
+            }
+            if let Some(v) = request.param("layer") {
+                request_json["layer"] = json!(v);
+            }
+            if let Some(v) = request.param("detail") {
+                request_json["detail"] = json!(v);
+            }
+            if let Some(v) = request.param("offset") {
+                request_json["offset"] = json!(v);
+            }
+            if let Some(v) = request.param("limit") {
+                request_json["limit"] = json!(v);
+            }
             if let Some(v) = request.param("fields") {
                 request_json["fields"] = json!(v.split(',').collect::<Vec<_>>());
             }
@@ -556,29 +617,45 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
                     }
                 }
             }
-            Plan::Run { request: request_json, created: 200 }
+            Plan::Run {
+                request: request_json,
+                created: 200,
+            }
         }
         ("GET", ["entities", handle]) => Plan::Run {
             request: json!({"op":"query","handles":[handle],"detail":"full"}),
             created: 200,
         },
-        ("POST", ["entities"]) =>
-            Plan::Mutate { op: "entities_create".into(), fields: body, created: 201 },
+        ("POST", ["entities"]) => Plan::Mutate {
+            op: "entities_create".into(),
+            fields: body,
+            created: 201,
+        },
         ("DELETE", ["entities"]) => {
             let handles = match request.param("handles") {
                 Some(csv) => json!(csv.split(',').collect::<Vec<_>>()),
                 None => body["handles"].clone(),
             };
-            Plan::Mutate { op: "entities_delete".into(), fields: json!({"handles": handles}), created: 200 }
+            Plan::Mutate {
+                op: "entities_delete".into(),
+                fields: json!({"handles": handles}),
+                created: 200,
+            }
         }
-        ("POST", ["entities", "transform"]) =>
-            Plan::Mutate { op: "entities_transform".into(), fields: body, created: 200 },
+        ("POST", ["entities", "transform"]) => Plan::Mutate {
+            op: "entities_transform".into(),
+            fields: body,
+            created: 200,
+        },
         ("GET", ["entities", handle, "xdata"]) => {
             let mut request_json = json!({"protocol":1,"op":"xdata_get","handles":[handle]});
             if let Some(app_name) = request.param("app") {
                 request_json["app"] = json!(app_name);
             }
-            Plan::Run { request: request_json, created: 200 }
+            Plan::Run {
+                request: request_json,
+                created: 200,
+            }
         }
         ("PUT", ["entities", handle, "xdata", app_name]) => {
             let data = request.json();
@@ -594,45 +671,93 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
             fields: json!({"handles":[handle], "app": app_name, "data": []}),
             created: 200,
         },
-        ("POST", ["blocks"]) => Plan::Mutate { op: "block_define".into(), fields: body, created: 201 },
-        ("DELETE", ["blocks", name]) =>
-            Plan::Mutate { op: "block_delete".into(), fields: json!({"name": name}), created: 200 },
-        ("POST", ["file-identity"]) =>
-            Plan::Mutate { op: "file_identity".into(), fields: body, created: 200 },
-        ("POST", ["plot"]) => Plan::Mutate { op: "plot".into(), fields: body, created: 200 },
-        ("POST", ["wblock"]) => Plan::Mutate { op: "wblock".into(), fields: body, created: 200 },
-        ("POST", ["images"]) => Plan::Mutate { op: "embed_image".into(), fields: body, created: 201 },
+        ("POST", ["blocks"]) => Plan::Mutate {
+            op: "block_define".into(),
+            fields: body,
+            created: 201,
+        },
+        ("DELETE", ["blocks", name]) => Plan::Mutate {
+            op: "block_delete".into(),
+            fields: json!({"name": name}),
+            created: 200,
+        },
+        ("POST", ["file-identity"]) => Plan::Mutate {
+            op: "file_identity".into(),
+            fields: body,
+            created: 200,
+        },
+        ("POST", ["plot"]) => Plan::Mutate {
+            op: "plot".into(),
+            fields: body,
+            created: 200,
+        },
+        ("POST", ["wblock"]) => Plan::Mutate {
+            op: "wblock".into(),
+            fields: body,
+            created: 200,
+        },
+        ("POST", ["images"]) => Plan::Mutate {
+            op: "embed_image".into(),
+            fields: body,
+            created: 201,
+        },
         ("POST", ["commands"]) => Plan::Run {
             request: json!({"op":"run","cmd":body["cmd"]}),
             created: 200,
         },
         ("POST", ["undo"]) | ("POST", ["redo"]) => {
             let op = if rest == ["undo"] { "undo" } else { "redo" };
-            Plan::Run { request: json!({"op":op}), created: 200 }
+            Plan::Run {
+                request: json!({"op":op}),
+                created: 200,
+            }
         }
         ("POST", ["save"]) => {
             let mut request_json = json!({"op":"save"});
             if let Some(path) = body["path"].as_str() {
                 request_json["path"] = json!(path);
             }
-            Plan::Run { request: request_json, created: 200 }
+            Plan::Run {
+                request: request_json,
+                created: 200,
+            }
         }
-        ("GET", ["layers"]) => Plan::Run { request: json!({"op":"layers"}), created: 200 },
-        ("GET", ["header"]) => Plan::Run { request: json!({"op":"header"}), created: 200 },
+        ("GET", ["layers"]) => Plan::Run {
+            request: json!({"op":"layers"}),
+            created: 200,
+        },
+        ("GET", ["header"]) => Plan::Run {
+            request: json!({"op":"header"}),
+            created: 200,
+        },
         ("GET", ["records"]) => {
             let mut request_json = json!({"op":"records"});
-            if let Some(v) = request.param("collection") { request_json["collection"] = json!(v); }
-            if let Some(v) = request.param("type") { request_json["type"] = json!(v); }
-            if let Some(v) = request.param("offset") { request_json["offset"] = json!(v); }
-            if let Some(v) = request.param("limit") { request_json["limit"] = json!(v); }
-            Plan::Run { request: request_json, created: 200 }
+            if let Some(v) = request.param("collection") {
+                request_json["collection"] = json!(v);
+            }
+            if let Some(v) = request.param("type") {
+                request_json["type"] = json!(v);
+            }
+            if let Some(v) = request.param("offset") {
+                request_json["offset"] = json!(v);
+            }
+            if let Some(v) = request.param("limit") {
+                request_json["limit"] = json!(v);
+            }
+            Plan::Run {
+                request: request_json,
+                created: 200,
+            }
         }
         ("GET", ["openapi"]) => Plan::Local(
             200,
             serde_json::from_str(include_str!("rest_openapi.json")).unwrap_or(json!({})),
         ),
-        ("POST", [op]) if ENVELOPE_OPS.contains(op) =>
-            Plan::Mutate { op: op.to_string(), fields: body, created: 200 },
+        ("POST", [op]) if ENVELOPE_OPS.contains(op) => Plan::Mutate {
+            op: op.to_string(),
+            fields: body,
+            created: 200,
+        },
         ("POST", [op]) => {
             let mut request_json = body;
             request_json["op"] = json!(op);
@@ -642,11 +767,17 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
             // `cancel`), and unstamped they die as "unknown op" on the
             // legacy path instead of answering with their real contract.
             request_json["protocol"] = json!(1);
-            if request_json["request_id"].as_str().is_none_or(str::is_empty) {
+            if request_json["request_id"]
+                .as_str()
+                .is_none_or(str::is_empty)
+            {
                 let serial = PASSTHROUGH_SERIAL.fetch_add(1, Ordering::Relaxed);
                 request_json["request_id"] = json!(format!("rest-{serial}"));
             }
-            Plan::Run { request: request_json, created: 200 }
+            Plan::Run {
+                request: request_json,
+                created: 200,
+            }
         }
         (method, _) if matches!(method, "GET" | "POST" | "PUT" | "DELETE") => {
             let path = request.path.trim_end_matches('/');
@@ -675,29 +806,37 @@ fn route(
     let path = if path.is_empty() { "/" } else { path };
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     if segments.first() != Some(&"api") || segments.get(1) != Some(&"v1") {
-        return (404, json!({"ok": false, "code": "unknown_route", "error": "Use /api/v1/…"}));
+        return (
+            404,
+            json!({"ok": false, "code": "unknown_route", "error": "Use /api/v1/…"}),
+        );
     }
     match plan(&request.method, &segments[2..], request) {
         Plan::Local(status, body) => (status, body),
         Plan::Ready => {
             let state = app.automation_op(r#"{"protocol":1,"op":"state"}"#);
             harvest(document_id, &state);
-            (200, json!({
-                "ok": true,
-                "ready": true,
-                "version": state["version"],
-                "session_id": state["session_id"],
-                "document_id": state["document_id"],
-            }))
+            (
+                200,
+                json!({
+                    "ok": true,
+                    "ready": true,
+                    "version": state["version"],
+                    "session_id": state["session_id"],
+                    "document_id": state["document_id"],
+                }),
+            )
         }
         Plan::Run { request, created } => {
             let response = app.automation_op(&request.to_string());
             harvest(document_id, &response);
             (map_status(response.clone(), created == 201), response)
         }
-        Plan::Mutate { op, fields, created } => {
-            run_mutation(app, &op, fields, document_id, counter, created)
-        }
+        Plan::Mutate {
+            op,
+            fields,
+            created,
+        } => run_mutation(app, &op, fields, document_id, counter, created),
     }
 }
 
@@ -866,10 +1005,19 @@ mod tests {
     fn failure_codes_map_to_http_statuses() {
         assert_eq!(map_status(json!({"ok": true}), false), 200);
         assert_eq!(map_status(json!({"ok": true}), true), 201);
-        assert_eq!(map_status(json!({"ok": false, "code": "entity_absent"}), false), 404);
-        assert_eq!(map_status(json!({"ok": false, "code": "stale_state"}), false), 409);
+        assert_eq!(
+            map_status(json!({"ok": false, "code": "entity_absent"}), false),
+            404
+        );
+        assert_eq!(
+            map_status(json!({"ok": false, "code": "stale_state"}), false),
+            409
+        );
         assert_eq!(map_status(json!({"ok": false, "code": "busy"}), false), 503);
-        assert_eq!(map_status(json!({"ok": false, "code": "invalid_point"}), false), 400);
+        assert_eq!(
+            map_status(json!({"ok": false, "code": "invalid_point"}), false),
+            400
+        );
     }
 
     /// The generic `POST /api/v1/{op}` passthrough must reach the protocol-1
@@ -883,7 +1031,11 @@ mod tests {
         let mut counter: u64 = 0;
         let (status, body) = route(
             &mut app,
-            &request("POST", "/api/v1/user_select", r#"{"request_id":"us-headless"}"#),
+            &request(
+                "POST",
+                "/api/v1/user_select",
+                r#"{"request_id":"us-headless"}"#,
+            ),
             &mut document_id,
             &mut counter,
         );
@@ -968,7 +1120,12 @@ mod tests {
         let mut counter = 0;
 
         // Readiness exposes the version and session.
-        let (status, body) = route(&mut app, &request("GET", "/api/v1/ready", ""), &mut document_id, &mut counter);
+        let (status, body) = route(
+            &mut app,
+            &request("GET", "/api/v1/ready", ""),
+            &mut document_id,
+            &mut counter,
+        );
         assert_eq!(status, 200);
         assert_eq!(body["ok"], true);
         assert!(body["session_id"].as_str().is_some());
@@ -995,7 +1152,10 @@ mod tests {
 
         // Query through plain GET with query parameters.
         let mut get = request("GET", "/api/v1/entities", "");
-        get.query = vec![("type".into(), "Line".into()), ("detail".into(), "full".into())];
+        get.query = vec![
+            ("type".into(), "Line".into()),
+            ("detail".into(), "full".into()),
+        ];
         let (status, body) = route(&mut app, &get, &mut document_id, &mut counter);
         assert_eq!(status, 200);
         assert_eq!(body["entities"][0]["start"], json!([0.0, 0.0, 0.0]));
@@ -1003,7 +1163,11 @@ mod tests {
         // One entity by handle.
         let (status, body) = route(
             &mut app,
-            &request("GET", &format!("/api/v1/entities/{}", handles[1].as_str().unwrap()), ""),
+            &request(
+                "GET",
+                &format!("/api/v1/entities/{}", handles[1].as_str().unwrap()),
+                "",
+            ),
             &mut document_id,
             &mut counter,
         );
@@ -1027,7 +1191,10 @@ mod tests {
         );
         assert_eq!(status, 200, "{body}");
         let mut get = request("GET", "/api/v1/entities", "");
-        get.query = vec![("type".into(), "Circle".into()), ("detail".into(), "full".into())];
+        get.query = vec![
+            ("type".into(), "Circle".into()),
+            ("detail".into(), "full".into()),
+        ];
         let (_, body) = route(&mut app, &get, &mut document_id, &mut counter);
         assert_eq!(body["entities"][0]["center"], json!([10.0, 5.0, 0.0]));
 
@@ -1058,12 +1225,22 @@ mod tests {
         assert_eq!(body["code"], "entity_absent");
 
         // The OpenAPI document is served and parses as JSON.
-        let (status, body) = route(&mut app, &request("GET", "/api/v1/openapi", ""), &mut document_id, &mut counter);
+        let (status, body) = route(
+            &mut app,
+            &request("GET", "/api/v1/openapi", ""),
+            &mut document_id,
+            &mut counter,
+        );
         assert_eq!(status, 200);
         assert_eq!(body["openapi"], "3.0.3");
 
         // Unknown routes are 404, not panics.
-        let (status, _) = route(&mut app, &request("GET", "/api/v1/nope", ""), &mut document_id, &mut counter);
+        let (status, _) = route(
+            &mut app,
+            &request("GET", "/api/v1/nope", ""),
+            &mut document_id,
+            &mut counter,
+        );
         assert_eq!(status, 404);
     }
 
@@ -1077,7 +1254,12 @@ mod tests {
         let mut counter = 0;
 
         // GET /state primes the document-id cache the mutations address.
-        let (status, body) = route(&mut app, &request("GET", "/api/v1/state", ""), &mut document_id, &mut counter);
+        let (status, body) = route(
+            &mut app,
+            &request("GET", "/api/v1/state", ""),
+            &mut document_id,
+            &mut counter,
+        );
         assert_eq!(status, 200);
         let doc = document_id.expect("state caches the document id");
         assert_eq!(body["document_id"].as_u64(), Some(doc));
@@ -1087,7 +1269,10 @@ mod tests {
         get.query = vec![
             ("type".into(), "Circle".into()),
             ("detail".into(), "geometry".into()),
-            ("where".into(), r#"[{"path":"/radius","op":"gt","value":2}]"#.into()),
+            (
+                "where".into(),
+                r#"[{"path":"/radius","op":"gt","value":2}]"#.into(),
+            ),
         ];
         let (status, body) = route(&mut app, &get, &mut document_id, &mut counter);
         assert_eq!(status, 200, "{body}");
@@ -1129,7 +1314,11 @@ mod tests {
             &mut counter,
         );
         assert_eq!(status, 201, "{body}");
-        assert!(body["result"]["layouts"].as_array().unwrap().iter().any(|n| n == "PLAN"));
+        assert!(body["result"]["layouts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n == "PLAN"));
         let (status, body) = route(
             &mut app,
             &request(
@@ -1157,7 +1346,11 @@ mod tests {
             .join(",");
         let (status, body) = route(
             &mut app,
-            &request("POST", "/api/v1/groups", &format!(r#"{{"name":"FRAME","handles":[{joined}]}}"#)),
+            &request(
+                "POST",
+                "/api/v1/groups",
+                &format!(r#"{{"name":"FRAME","handles":[{joined}]}}"#),
+            ),
             &mut document_id,
             &mut counter,
         );
@@ -1239,7 +1432,9 @@ mod tests {
             &request(
                 "POST",
                 "/api/v1/blocks",
-                &format!(r#"{{"name":"MARK","base":[0,0,0],"handles":["{fresh}"],"replace":true}}"#),
+                &format!(
+                    r#"{{"name":"MARK","base":[0,0,0],"handles":["{fresh}"],"replace":true}}"#
+                ),
             ),
             &mut document_id,
             &mut counter,
@@ -1326,8 +1521,8 @@ mod tests {
         payload.extend_from_slice(b" HTTP/1.1\r\n\r\n");
         let writer = spawn_writer(&client, payload);
 
-        let parsed = read_request(&mut server)
-            .expect("an over-cap line is a refusal, not an I/O error");
+        let parsed =
+            read_request(&mut server).expect("an over-cap line is a refusal, not an I/O error");
         assert!(
             parsed.is_none(),
             "over-cap request line must be refused, got a parsed request"

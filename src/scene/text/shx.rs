@@ -329,9 +329,8 @@ pub fn font_metrics(path: &str) -> Option<(f64, f64)> {
 
 fn glyph_cache(
 ) -> &'static Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>> {
-    static C: OnceLock<
-        Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>>,
-    > = OnceLock::new();
+    static C: OnceLock<Mutex<HashMap<(String, u16), Option<Arc<crate::scene::text::lff::Glyph>>>>> =
+        OnceLock::new();
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -663,7 +662,6 @@ fn interpret(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -737,7 +735,10 @@ mod tests {
         assert!((g.advance - 1.125).abs() < 1e-4, "advance {}", g.advance);
         assert_eq!(g.strokes.len(), 1);
         assert!(bigfont_glyph(&path, 'A').is_none());
-        assert!(bigfont_glyph(&path, '國').is_none(), "unknown code must miss, not alias");
+        assert!(
+            bigfont_glyph(&path, '國').is_none(),
+            "unknown code must miss, not alias"
+        );
     }
 
     #[test]
@@ -746,7 +747,11 @@ mod tests {
         assert!(!is_bigfont(&path));
         assert_eq!(font_metrics(&path), Some((6.0, 2.0)));
         let g = font_glyph(&path, 'A' as u16).expect("glyph for A");
-        assert!((g.advance - 9.0).abs() < 1e-4, "6 units at above 6 → 9: {}", g.advance);
+        assert!(
+            (g.advance - 9.0).abs() < 1e-4,
+            "6 units at above 6 → 9: {}",
+            g.advance
+        );
         assert!(font_glyph(&path, 'B' as u16).is_none());
     }
 }

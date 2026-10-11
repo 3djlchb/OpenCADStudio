@@ -37,13 +37,15 @@ fn resolve_extension_dictionary(doc: &CadDocument, owner: Handle) -> Option<Hand
             return Some(h);
         }
     }
-    doc.objects.iter().find_map(|(handle, object)| match object {
-        ObjectType::Dictionary(d) if d.owner == owner && !handle.is_null() => Some(*handle),
-        ObjectType::DictionaryWithDefault(d) if d.owner == owner && !handle.is_null() => {
-            Some(*handle)
-        }
-        _ => None,
-    })
+    doc.objects
+        .iter()
+        .find_map(|(handle, object)| match object {
+            ObjectType::Dictionary(d) if d.owner == owner && !handle.is_null() => Some(*handle),
+            ObjectType::DictionaryWithDefault(d) if d.owner == owner && !handle.is_null() => {
+                Some(*handle)
+            }
+            _ => None,
+        })
 }
 
 /// The INSERT's extension dictionary through its own link or the document's
@@ -63,17 +65,12 @@ fn linked_extension_dictionary(doc: &CadDocument, ins: &Insert) -> Option<Handle
 /// (dictionary) → SPATIAL (SpatialFilter)`. Returns `None` when there is no
 /// filter, it is disabled (code 71 = 0), or it has fewer than two boundary
 /// points.
-pub fn insert_spatial_filter<'a>(
-    doc: &'a CadDocument,
-    ins: &Insert,
-) -> Option<&'a SpatialFilter> {
+pub fn insert_spatial_filter<'a>(doc: &'a CadDocument, ins: &Insert) -> Option<&'a SpatialFilter> {
     let xdict = linked_extension_dictionary(doc, ins)?;
     let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
     let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
     match doc.objects.get(&spatial)? {
-        ObjectType::SpatialFilter(sf)
-            if sf.display_enabled && sf.boundary_points.len() >= 2 =>
-        {
+        ObjectType::SpatialFilter(sf) if sf.display_enabled && sf.boundary_points.len() >= 2 => {
             Some(sf)
         }
         _ => None,
@@ -90,7 +87,11 @@ pub fn filter_handle(doc: &CadDocument, insert: Handle) -> Option<Handle> {
     let xdict = linked_extension_dictionary(doc, ins)?;
     let acad_filter = dict_entry(doc, xdict, "ACAD_FILTER")?;
     let spatial = dict_entry(doc, acad_filter, "SPATIAL")?;
-    matches!(doc.objects.get(&spatial), Some(ObjectType::SpatialFilter(_))).then_some(spatial)
+    matches!(
+        doc.objects.get(&spatial),
+        Some(ObjectType::SpatialFilter(_))
+    )
+    .then_some(spatial)
 }
 
 const ROUNDTRIP: &str = "ACAD_XREC_ROUNDTRIP";
@@ -120,7 +121,11 @@ pub fn inverted_boundary(doc: &CadDocument, filter: &SpatialFilter) -> Option<Ve
 /// The inverted boundary drawn as the XCLIP frame and generated polyline,
 /// else the stored one; rectangles as four corners (WCS through the stored
 /// transforms).
-pub fn clip_outline_world(doc: &CadDocument, filter: &SpatialFilter, xform: &Transform) -> Vec<[f64; 2]> {
+pub fn clip_outline_world(
+    doc: &CadDocument,
+    filter: &SpatialFilter,
+    xform: &Transform,
+) -> Vec<[f64; 2]> {
     match inverted_boundary(doc, filter) {
         Some(points) => {
             let mut outline = filter.clone();
@@ -177,7 +182,9 @@ pub fn remove_insert_clip(doc: &mut CadDocument, insert: Handle) -> bool {
     if let Some(xdict) = doc.extension_dictionary_handle(spatial) {
         let children: Vec<Handle> = match doc.objects.get(&xdict) {
             Some(ObjectType::Dictionary(d)) => d.entries.iter().map(|(_, h)| *h).collect(),
-            Some(ObjectType::DictionaryWithDefault(d)) => d.entries.iter().map(|(_, h)| *h).collect(),
+            Some(ObjectType::DictionaryWithDefault(d)) => {
+                d.entries.iter().map(|(_, h)| *h).collect()
+            }
             _ => Vec::new(),
         };
         for child in children {
@@ -315,7 +322,8 @@ pub fn set_insert_clip(
     filter.boundary_points = stored.iter().map(|p| Vector2::new(p[0], p[1])).collect();
     filter.inverse_block_transform = inverse;
     filter.clip_bound_transform = Matrix4::identity();
-    doc.objects.insert(spatial, ObjectType::SpatialFilter(filter));
+    doc.objects
+        .insert(spatial, ObjectType::SpatialFilter(filter));
     match doc.objects.get_mut(&acad_filter) {
         Some(ObjectType::Dictionary(parent)) => parent.add_entry("SPATIAL", spatial),
         Some(ObjectType::DictionaryWithDefault(parent)) => {
@@ -372,10 +380,7 @@ fn dict_entry(doc: &CadDocument, dict: Handle, key: &str) -> Option<Handle> {
 /// Build the clip boundary in absolute f64 world coordinates so clipping at
 /// large coordinate values remains precise.
 #[cfg(test)]
-fn world_clip_polygon_f64(
-    sf: &SpatialFilter,
-    ins: &Insert,
-) -> Vec<[f64; 2]> {
+fn world_clip_polygon_f64(sf: &SpatialFilter, ins: &Insert) -> Vec<[f64; 2]> {
     world_clip_polygon_for_transform(sf, &ins.get_transform())
 }
 
@@ -385,10 +390,7 @@ fn world_clip_polygon_f64(
 ///
 /// The filter's `inverse_block_transform` is used as stored: the codec decodes
 /// the on-disk column-major 4x3 layout into row-major `Matrix4`.
-pub fn world_clip_polygon_for_transform(
-    sf: &SpatialFilter,
-    xform: &Transform,
-) -> Vec<[f64; 2]> {
+pub fn world_clip_polygon_for_transform(sf: &SpatialFilter, xform: &Transform) -> Vec<[f64; 2]> {
     let inv_block = &sf.inverse_block_transform;
     let local: Vec<[f64; 2]> = if sf.boundary_points.len() == 2 {
         let a = sf.boundary_points[0];
@@ -475,7 +477,9 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
                 &local,
                 &lpoly,
                 station_data.map(|(stations, _)| stations),
-                station_map.as_ref().map(|map| map.point_segments.as_slice()),
+                station_map
+                    .as_ref()
+                    .map(|map| map.point_segments.as_slice()),
             );
             // Local → absolute, re-split into double-single high/low.
             let mut hi = Vec::with_capacity(clipped.len());
@@ -499,7 +503,9 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
                     clipped_stations,
                     source_length,
                     &clipped_segments,
-                    station_map.as_ref().map_or(&[], |map| map.pieces.as_slice()),
+                    station_map
+                        .as_ref()
+                        .map_or(&[], |map| map.pieces.as_slice()),
                 );
             } else {
                 w.pattern_stations.clear();
@@ -574,9 +580,7 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
         }
         w.aabb = bb;
     }
-    wires.retain(|w| {
-        !w.points.is_empty() || !w.fill_tris.is_empty() || !w.text_verts.is_empty()
-    });
+    wires.retain(|w| !w.points.is_empty() || !w.fill_tris.is_empty() || !w.text_verts.is_empty());
 }
 
 /// Double-single split of an f64 into (high, low) f32 — mirrors
@@ -639,9 +643,9 @@ pub fn frame_wire(
         plinegen: true,
         fill_tris: vec![],
         fill_tris_low: Vec::new(),
-    
+
         ..Default::default()
-}
+    }
 }
 
 /// Clip a hatch fill boundary to `poly`.
@@ -670,10 +674,7 @@ pub fn clip_hatch_boundary(
             continue;
         }
         let start = i;
-        while i < boundary.len()
-            && boundary[i][0].is_finite()
-            && boundary[i][1].is_finite()
-        {
+        while i < boundary.len() && boundary[i][0].is_finite() && boundary[i][1].is_finite() {
             i += 1;
         }
         // Lift the loop into the clip polygon's world space.
@@ -817,9 +818,8 @@ fn clip_polyline_stationed(
                         a + (values[start + j + 1] - a) * t
                     })
                 };
-                let contiguous = last.is_some_and(|l| {
-                    (l[0] - a[0]).abs() <= 1e-4 && (l[1] - a[1]).abs() <= 1e-4
-                });
+                let contiguous = last
+                    .is_some_and(|l| (l[0] - a[0]).abs() <= 1e-4 && (l[1] - a[1]).abs() <= 1e-4);
                 if !contiguous {
                     if !out.is_empty() {
                         out.push(NAN3);
@@ -856,11 +856,7 @@ fn clip_polyline_stationed(
 /// Handles convex and concave boundaries by testing the midpoint of every
 /// interval between consecutive boundary crossings.
 #[cfg(test)]
-fn clip_segment(
-    p0: [f32; 3],
-    p1: [f32; 3],
-    poly: &[[f32; 2]],
-) -> Vec<([f32; 3], [f32; 3])> {
+fn clip_segment(p0: [f32; 3], p1: [f32; 3], poly: &[[f32; 2]]) -> Vec<([f32; 3], [f32; 3])> {
     let lerp = |t: f32| {
         [
             p0[0] + (p1[0] - p0[0]) * t,
@@ -1118,7 +1114,7 @@ mod tests {
             text_verts: Vec::new(),
             points: vec![[5.0, 5.0, 0.0], [15.0, 5.0, 0.0]],
             ..Default::default()
-}];
+        }];
         clip_wires(&mut wires, &poly);
 
         assert_eq!(wires.len(), 1);
@@ -1130,7 +1126,7 @@ mod tests {
     #[test]
     fn hatch_boundary_clipped_kept_and_dropped() {
         let clip = square(); // 0..10
-        // Hatch loop straddling the right edge → clipped to x<=10.
+                             // Hatch loop straddling the right edge → clipped to x<=10.
         let straddle = [[5.0, 5.0], [15.0, 5.0], [15.0, 8.0], [5.0, 8.0]];
         let out = clip_hatch_boundary(&straddle, [0.0, 0.0], &clip);
         assert!(!out.is_empty());
@@ -1151,7 +1147,12 @@ mod tests {
     fn hatch_boundary_respects_world_origin() {
         // Same geometry as the straddle case but expressed as offsets from a
         // large world_origin — clipping must account for the origin shift.
-        let clip = vec![[1000.0, 1000.0], [1010.0, 1000.0], [1010.0, 1010.0], [1000.0, 1010.0]];
+        let clip = vec![
+            [1000.0, 1000.0],
+            [1010.0, 1000.0],
+            [1010.0, 1010.0],
+            [1000.0, 1010.0],
+        ];
         let origin = [1000.0, 1000.0];
         let loop_off = [[5.0, 5.0], [15.0, 5.0], [15.0, 8.0], [5.0, 8.0]];
         let out = clip_hatch_boundary(&loop_off, origin, &clip);

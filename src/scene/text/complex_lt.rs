@@ -8,8 +8,8 @@
 
 use crate::entities::text_support::resolve_dxf_special_chars;
 use crate::io::linetypes::{ComplexLt, LtSegment};
-use crate::scene::text::lff;
 use crate::scene::model::wire_model::WireModel;
+use crate::scene::text::lff;
 
 // ── Public entry point ────────────────────────────────────────────────────
 
@@ -271,18 +271,12 @@ pub fn apply_along(
                     // layout_glyph_quads), collected for the text wire.
                     if let Ok(mut atlas) = crate::scene::text::sdf_atlas::text_atlas().lock() {
                         let (quads, pen_adv) = crate::scene::text::glyph_quads::layout_glyph_quads(
-                            &mut atlas,
-                            *tx_scale,
-                            fwd_angle,
-                            1.0, // width_factor
+                            &mut atlas, *tx_scale, fwd_angle, 1.0, // width_factor
                             0.0, // oblique
                             // tracking = 1.0 applies the font's natural
                             // letter_spacing; 0.0 zeroes it and cramps the glyphs
                             // (every other text path passes 1.0).
-                            1.0,
-                            style,
-                            false,
-                            &resolved,
+                            1.0, style, false, &resolved,
                         );
                         crate::scene::pipeline::text_gpu::push_glyph_vertices(
                             &mut text_verts,
@@ -300,11 +294,7 @@ pub fn apply_along(
                             if !visible.is_empty() {
                                 searchable.push(SearchableTextRun {
                                     text: visible,
-                                    origin: [
-                                        insert[0] as f64,
-                                        insert[1] as f64,
-                                        insert[2] as f64,
-                                    ],
+                                    origin: [insert[0] as f64, insert[1] as f64, insert[2] as f64],
                                     height: *tx_scale,
                                     rotation: fwd_angle,
                                     color,
@@ -365,9 +355,9 @@ pub fn apply_along(
             plinegen: true,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
-        
+
             ..Default::default()
-})
+        })
         .collect();
 
     // Embedded linetype text (SDF): one extra wire carrying the glyph quads,

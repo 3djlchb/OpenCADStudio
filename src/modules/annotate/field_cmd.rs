@@ -93,8 +93,16 @@ impl CadCommand for FieldPlaceCommand {
             Step::Point => match word.as_str() {
                 "H" | "HEIGHT" => self.step = Step::Height,
                 "J" | "JUSTIFY" => self.step = Step::Justify,
-                "" => return Some(CmdResult::ReportError("Point or option keyword required.".into())),
-                _ => return Some(CmdResult::ReportError("Point or option keyword required.".into())),
+                "" => {
+                    return Some(CmdResult::ReportError(
+                        "Point or option keyword required.".into(),
+                    ))
+                }
+                _ => {
+                    return Some(CmdResult::ReportError(
+                        "Point or option keyword required.".into(),
+                    ))
+                }
             },
             Step::Height => {
                 if word.is_empty() {
@@ -106,8 +114,16 @@ impl CadCommand for FieldPlaceCommand {
                         self.height = v;
                         self.step = Step::Point;
                     }
-                    Ok(_) => return Some(CmdResult::ReportError("Value must be positive and nonzero.".into())),
-                    Err(_) => return Some(CmdResult::ReportError("Requires numeric distance or two points.".into())),
+                    Ok(_) => {
+                        return Some(CmdResult::ReportError(
+                            "Value must be positive and nonzero.".into(),
+                        ))
+                    }
+                    Err(_) => {
+                        return Some(CmdResult::ReportError(
+                            "Requires numeric distance or two points.".into(),
+                        ))
+                    }
                 }
             }
             Step::Justify => {
@@ -208,7 +224,10 @@ pub struct FieldTablePickCommand {
 
 impl FieldTablePickCommand {
     pub fn new(function: &'static str) -> Self {
-        Self { function, first: None }
+        Self {
+            function,
+            first: None,
+        }
     }
 }
 

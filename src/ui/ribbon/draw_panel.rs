@@ -125,21 +125,50 @@ const REFERENCE_TOOLS: &[Tool] = &[Tool {
 pub(super) const REFERENCE_PANEL_ID: &str = "reference_extension";
 
 const fn icon_tool(command: &'static str, label: &'static str, icon: &'static [u8]) -> Tool {
-    Tool { command, label, icon, options: &[] }
+    Tool {
+        command,
+        label,
+        icon,
+        options: &[],
+    }
 }
 
 /// Home > Block slide-out.
 const HOME_BLOCK_TOOLS: &[Tool] = &[
-    icon_tool("ATTDEF", "Define Attributes", include_bytes!("../../../assets/icons/attdef.svg")),
-    icon_tool("ATTMAN", "Manage Attributes", include_bytes!("../../../assets/icons/attman.svg")),
-    icon_tool("ATTSYNC", "Synchronize", include_bytes!("../../../assets/icons/attsync.svg")),
-    icon_tool("BASE", "Set Base Point", include_bytes!("../../../assets/icons/base_point.svg")),
+    icon_tool(
+        "ATTDEF",
+        "Define Attributes",
+        include_bytes!("../../../assets/icons/attdef.svg"),
+    ),
+    icon_tool(
+        "ATTMAN",
+        "Manage Attributes",
+        include_bytes!("../../../assets/icons/attman.svg"),
+    ),
+    icon_tool(
+        "ATTSYNC",
+        "Synchronize",
+        include_bytes!("../../../assets/icons/attsync.svg"),
+    ),
+    icon_tool(
+        "BASE",
+        "Set Base Point",
+        include_bytes!("../../../assets/icons/base_point.svg"),
+    ),
 ];
 
 /// Insert > Block Definition slide-out.
 const BLOCK_DEFINITION_TOOLS: &[Tool] = &[
-    icon_tool("BASE", "Set Base Point", include_bytes!("../../../assets/icons/base_point.svg")),
-    icon_tool("ATTSYNC", "Synchronize", include_bytes!("../../../assets/icons/attsync.svg")),
+    icon_tool(
+        "BASE",
+        "Set Base Point",
+        include_bytes!("../../../assets/icons/base_point.svg"),
+    ),
+    icon_tool(
+        "ATTSYNC",
+        "Synchronize",
+        include_bytes!("../../../assets/icons/attsync.svg"),
+    ),
 ];
 
 const PANELS: &[Panel] = &[
@@ -213,7 +242,9 @@ fn panel_for_group(title: &str, group_ids: &[&'static str]) -> Option<Panel> {
     PANELS.iter().copied().find(|panel| {
         panel.title == title
             && !panel.tools.is_empty()
-            && panel.anchor.is_none_or(|anchor| group_ids.contains(&anchor))
+            && panel
+                .anchor
+                .is_none_or(|anchor| group_ids.contains(&anchor))
     })
 }
 
@@ -252,7 +283,11 @@ pub(super) fn group_title<'a>(
     let expanded = open.as_deref().and_then(parent_panel) == Some(panel.id);
     // A command running from the closed slide-out lights its title, the way a
     // dropdown lights while one of its items runs.
-    let lit = expanded || panel.tools.iter().any(|tool| tool_is_active(tool, active_tool));
+    let lit = expanded
+        || panel
+            .tools
+            .iter()
+            .any(|tool| tool_is_active(tool, active_tool));
     let arrow = if expanded {
         icons::themed_arrow_up(GROUP_TITLE_ARROW_SIZE)
     } else {
@@ -294,7 +329,11 @@ pub(super) fn group_title<'a>(
         })
         .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
         .padding([0, 3]),
-        make_tip(format!("{}\n{} EXTERNALREFERENCES", t!("External References"), t!("Command:"))),
+        make_tip(format!(
+            "{}\n{} EXTERNALREFERENCES",
+            t!("External References"),
+            t!("Command:")
+        )),
         tooltip::Position::Bottom,
     )
     .delay(Duration::from_millis(400))
@@ -377,7 +416,11 @@ fn reference_overlay<'a>(ribbon: &Ribbon, panel: Panel, win: (f32, f32)) -> Elem
     let fading = row![
         tooltip(
             switch,
-            make_tip(format!("{}\n{} XDWGFADECTL", t!("Xref fading"), t!("Command:"))),
+            make_tip(format!(
+                "{}\n{} XDWGFADECTL",
+                t!("Xref fading"),
+                t!("Command:")
+            )),
             tooltip::Position::Bottom
         )
         .delay(Duration::from_millis(400))

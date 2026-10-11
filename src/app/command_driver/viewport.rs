@@ -1,7 +1,11 @@
 use super::*;
 
 impl OpenCADStudio {
-    pub(super) fn handle_mview_create(&mut self, viewport: codec::entities::Viewport, preserve_view: bool) {
+    pub(super) fn handle_mview_create(
+        &mut self,
+        viewport: codec::entities::Viewport,
+        preserve_view: bool,
+    ) {
         let i = self.active_tab;
         let saved_view = preserve_view.then(|| {
             (
@@ -58,21 +62,25 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
-        let Some(codec::EntityType::Viewport(vp)) = self.tabs[i].scene.document.get_entity(viewport).cloned()
+        let Some(codec::EntityType::Viewport(vp)) =
+            self.tabs[i].scene.document.get_entity(viewport).cloned()
         else {
             return;
         };
         if boundary.is_none() && !boundary_handle.is_null() {
             let scene = &self.tabs[i].scene;
             let closed = scene.entity_belongs_to_current_layout(boundary_handle)
-                && scene.document.get_entity(boundary_handle).is_some_and(|entity| match entity {
-                    codec::EntityType::Circle(_) => true,
-                    codec::EntityType::Ellipse(ellipse) => ellipse.is_full(),
-                    codec::EntityType::LwPolyline(polyline) => polyline.is_closed,
-                    codec::EntityType::Polyline(polyline) => polyline.is_closed(),
-                    codec::EntityType::Polyline2D(polyline) => polyline.is_closed(),
-                    _ => false,
-                });
+                && scene
+                    .document
+                    .get_entity(boundary_handle)
+                    .is_some_and(|entity| match entity {
+                        codec::EntityType::Circle(_) => true,
+                        codec::EntityType::Ellipse(ellipse) => ellipse.is_full(),
+                        codec::EntityType::LwPolyline(polyline) => polyline.is_closed,
+                        codec::EntityType::Polyline(polyline) => polyline.is_closed(),
+                        codec::EntityType::Polyline2D(polyline) => polyline.is_closed(),
+                        _ => false,
+                    });
             if !closed {
                 self.command_line
                     .push_error(crate::t!("Object is not a closed curve.").as_ref());
@@ -100,13 +108,18 @@ impl OpenCADStudio {
                 if created {
                     scene.erase_entities(&[clip]);
                 }
-                self.command_line
-                    .push_error(crate::t!("MVIEW: the clipping boundary has no usable area.").as_ref());
+                self.command_line.push_error(
+                    crate::t!("MVIEW: the clipping boundary has no usable area.").as_ref(),
+                );
                 return;
             }
             // Model units per paper unit; the view centre follows the paper
             // centre so the model does not move on the sheet.
-            let scale = if vp.height.abs() > 1e-12 { vp.view_height / vp.height } else { 1.0 };
+            let scale = if vp.height.abs() > 1e-12 {
+                vp.view_height / vp.height
+            } else {
+                1.0
+            };
             let center = (lo + hi) * 0.5;
             let (dx, dy) = (center.x - vp.center.x, center.y - vp.center.y);
             let (s, c) = (-vp.twist_angle).sin_cos();
@@ -492,7 +505,10 @@ impl OpenCADStudio {
 
 /// Paper-space extents of a viewport clip boundary: exact for lines, arcs
 /// and circles (bulges included), else from its outline.
-fn clip_boundary_extents(scene: &crate::scene::Scene, clip: Handle) -> Option<([f64; 2], [f64; 2])> {
+fn clip_boundary_extents(
+    scene: &crate::scene::Scene,
+    clip: Handle,
+) -> Option<([f64; 2], [f64; 2])> {
     let exact = scene
         .document
         .get_entity(clip)

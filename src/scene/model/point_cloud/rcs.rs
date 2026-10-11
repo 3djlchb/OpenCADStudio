@@ -40,11 +40,15 @@ pub struct Scan {
 const NODE_RECORD: usize = 368;
 
 fn u32_at(b: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(b.get(at..at.checked_add(4)?)?.try_into().ok()?))
+    Some(u32::from_le_bytes(
+        b.get(at..at.checked_add(4)?)?.try_into().ok()?,
+    ))
 }
 
 fn u64_at(b: &[u8], at: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(b.get(at..at.checked_add(8)?)?.try_into().ok()?))
+    Some(u64::from_le_bytes(
+        b.get(at..at.checked_add(8)?)?.try_into().ok()?,
+    ))
 }
 
 fn f64_at(b: &[u8], at: usize) -> Option<f64> {
@@ -143,7 +147,11 @@ pub fn decode(b: &[u8]) -> Option<Scan> {
         for level in 0..32 {
             entries = entries.checked_add(u32_at(b, record + 108 + level * 4)? as usize)?;
         }
-        if entries.checked_mul(4)?.checked_add(points.checked_mul(16)?)? != size {
+        if entries
+            .checked_mul(4)?
+            .checked_add(points.checked_mul(16)?)?
+            != size
+        {
             return None;
         }
         let records = block + entries * 4;
@@ -155,10 +163,12 @@ pub fn decode(b: &[u8]) -> Option<Scan> {
         for rec in bytes.chunks_exact(16) {
             let v = u64::from_le_bytes(rec[0..8].try_into().ok()?);
             let q = |shift: u32| ((v >> shift) & 0x3FFFF) as f64 * 1e-3;
-            scan.local.push([cube_min[0] + q(0), cube_min[1] + q(18), cube_min[2] + q(36)]);
+            scan.local
+                .push([cube_min[0] + q(0), cube_min[1] + q(18), cube_min[2] + q(36)]);
             scan.intensity.push(rec[8]);
             scan.colors.push([rec[11], rec[10], rec[9]]);
-            scan.normals.push(normal(u16::from_le_bytes([rec[12], rec[13]])));
+            scan.normals
+                .push(normal(u16::from_le_bytes([rec[12], rec[13]])));
         }
         block = end;
     }

@@ -48,8 +48,15 @@ pub fn gizmo_screen_axes(
     project: impl Fn(DVec3) -> Option<Vec2>,
 ) -> [Option<Vec2>; 3] {
     let spans = [0, 1, 2].map(|k| project(world + gizmo_axis(k)).map(|p| p - center));
-    let longest = spans.iter().flatten().map(|v| v.length()).fold(0.0, f32::max);
-    spans.map(|span| span.filter(|v| longest > 0.0 && v.length() > 0.15 * longest).map(|v| v.normalize()))
+    let longest = spans
+        .iter()
+        .flatten()
+        .map(|v| v.length())
+        .fold(0.0, f32::max);
+    spans.map(|span| {
+        span.filter(|v| longest > 0.0 && v.length() > 0.15 * longest)
+            .map(|v| v.normalize())
+    })
 }
 
 /// Marker position (and direction) of a grip whose centre projects to
@@ -72,7 +79,9 @@ fn placed_marker(
             Some((p + (a + b) * 0.3 * GIZMO_AXIS_PX, None))
         }
         _ => {
-            let dir = g.dir.and_then(|dir| Some(marker_direction(p, project(g.world + dir)?)));
+            let dir = g
+                .dir
+                .and_then(|dir| Some(marker_direction(p, project(g.world + dir)?)));
             let s = marker_screen_position(Point::new(p.x, p.y), g.shape);
             Some((Vec2::new(s.x, s.y), dir))
         }
@@ -159,12 +168,7 @@ pub struct GripTarget {
 }
 
 impl GripEdit {
-    pub fn single(
-        handle: Handle,
-        grip_id: usize,
-        is_translate: bool,
-        world: DVec3,
-    ) -> Self {
+    pub fn single(handle: Handle, grip_id: usize, is_translate: bool, world: DVec3) -> Self {
         Self {
             handle,
             grip_id,
@@ -360,7 +364,12 @@ pub fn find_hit_grip(
 /// (see `Scene::composed_viewport_view`) instead of a real camera. `pub(crate)`
 /// so any other single-point world→screen projection (e.g. constraint-glyph
 /// anchors) can reuse it instead of re-deriving the same NDC math.
-pub(crate) fn project_rte(world: DVec3, view_rot: Mat4, eye: DVec3, bounds: Rectangle) -> Option<Vec2> {
+pub(crate) fn project_rte(
+    world: DVec3,
+    view_rot: Mat4,
+    eye: DVec3,
+    bounds: Rectangle,
+) -> Option<Vec2> {
     let rel = (world - eye).as_vec3();
     let clip = view_rot * rel.extend(1.0);
     if clip.w.abs() < 1e-9 {

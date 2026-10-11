@@ -322,7 +322,8 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
+        let isolines =
+            crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         let mesh_seed = if matches!(
             &entity,
             EntityType::Solid3D(_)
@@ -606,7 +607,8 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
+        let isolines =
+            crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         let mesh_seed = if matches!(
             &entity,
             EntityType::Solid3D(_)
@@ -843,7 +845,8 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
+        let isolines =
+            crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         use crate::par::prelude::*;
         let built: Vec<(Handle, MeshLodSet, bool)> = entries
             .into_par_iter()
@@ -1969,9 +1972,7 @@ impl Scene {
     /// Compute the 2D (XY) boundary polygon for a Wipeout entity.
     /// Wipeout fill boundary as small f32 offsets from the returned world_origin
     /// (the insertion point, kept in f64).
-    pub(super) fn wipeout_boundary_2d(
-        wo: &codec::entities::Wipeout,
-    ) -> ([f64; 2], Vec<[f32; 2]>) {
+    pub(super) fn wipeout_boundary_2d(wo: &codec::entities::Wipeout) -> ([f64; 2], Vec<[f32; 2]>) {
         let origin = [wo.insertion_point.x, wo.insertion_point.y];
         let plane = kernel::space::Plane::from_axes(
             [
@@ -2161,9 +2162,11 @@ impl Scene {
             let range = boundary.len()..boundary.len() + ring.len();
             boundary.extend(ring);
             local_boundary.extend(local_ring.iter().map(|&[x, y]| [x as f32, y as f32]));
-            if path.edges.iter().any(|edge| {
-                matches!(edge, codec::entities::BoundaryEdge::Spline(_))
-            }) {
+            if path
+                .edges
+                .iter()
+                .any(|edge| matches!(edge, codec::entities::BoundaryEdge::Spline(_)))
+            {
                 spline_paths.push((path, local_ring, range));
             }
             boundary_exterior.push(depth == 0);
@@ -2369,21 +2372,30 @@ impl Scene {
         }
         let project = |point: [f64; 2]| {
             let [x, y] = to_xy(point[0], point[1]);
-            [(x - world_origin[0]) as f32 as f64, (y - world_origin[1]) as f32 as f64]
+            [
+                (x - world_origin[0]) as f32 as f64,
+                (y - world_origin[1]) as f32 as f64,
+            ]
         };
         for (path, ring, range) in spline_paths.into_iter().rev() {
             if range.end > boundary.len() {
                 continue;
             }
-            let curves = || path.edges.iter().filter_map(crate::entities::hatch::edge_curve).collect();
-            if let Some(refined) =
-                kernel::geom2d::refine_spline_boundary(&ring, curves, &project)
-            {
+            let curves = || {
+                path.edges
+                    .iter()
+                    .filter_map(crate::entities::hatch::edge_curve)
+                    .collect()
+            };
+            if let Some(refined) = kernel::geom2d::refine_spline_boundary(&ring, curves, &project) {
                 if boundary.len() - range.len() + refined.len() > MAX_HATCH_MODEL_VERTS {
                     continue;
                 }
                 boundary.splice(range.clone(), refined.iter().map(|p| to_xy(p[0], p[1])));
-                local_boundary.splice(range, refined.into_iter().map(|[x, y]| [x as f32, y as f32]));
+                local_boundary.splice(
+                    range,
+                    refined.into_iter().map(|[x, y]| [x as f32, y as f32]),
+                );
             }
         }
 
@@ -2550,7 +2562,8 @@ impl Scene {
                 Some(codec::objects::ObjectType::UnderlayDefinition(def)) => {
                     // A paper-space underlay adjusts to the sheet, not the canvas.
                     let owner = u.common.owner_handle;
-                    let background = if owner.is_null() || owner == self.model_space_block_handle() {
+                    let background = if owner.is_null() || owner == self.model_space_block_handle()
+                    {
                         self.bg_color
                     } else {
                         self.paper_bg_color
@@ -2640,7 +2653,8 @@ impl Scene {
         let facet_res = self.document.header.facet_resolution;
         let chordal_deflection =
             crate::entities::solid3d::display_deflection(&self.document.header, facet_res);
-        let isolines = crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
+        let isolines =
+            crate::entities::solid3d::clamp_header_isolines(self.document.header.isolines);
         // Top-level solids: offset into the render frame, drawn flat.
         // Block-definition solids: keep block-local coords for per-INSERT
         // instancing (no offset applied here).

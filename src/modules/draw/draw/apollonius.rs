@@ -140,7 +140,7 @@ fn point_circle_tangent_lines(pt: DVec2, circle: Circle2D) -> Vec<(DVec2, f64)> 
 /// Solve Apollonius CCP: circle passing through point `p` and tangent to circles `c1` and `c2`.
 pub fn solve_ccp(c1: Circle2D, c2: Circle2D, p: DVec2) -> Vec<ApolloniusSolution> {
     let k = 100.0; // Inversion radius
-    // Translate origin to p
+                   // Translate origin to p
     let c1_local = Circle2D {
         center: c1.center - p,
         radius: c1.radius,
@@ -263,10 +263,7 @@ pub fn best_ccp(
 }
 
 /// Choose the best PPC candidate closest to pick hint `hint1`.
-pub fn best_ppc(
-    candidates: &[ApolloniusSolution],
-    hint1: DVec2,
-) -> Option<ApolloniusSolution> {
+pub fn best_ppc(candidates: &[ApolloniusSolution], hint1: DVec2) -> Option<ApolloniusSolution> {
     candidates
         .iter()
         .filter(|sol| sol.radius.is_finite() && sol.radius > 1e-4)
@@ -306,7 +303,10 @@ mod tests {
         let best = best_ccp(&sols, DVec2::new(-20.0, 10.0), DVec2::new(20.0, 10.0)).unwrap();
         // Check that distance to c1 center is radius +- 10
         let d1 = (best.center - c1.center).length();
-        assert!((d1 - (best.radius + c1.radius)).abs() < 1e-3 || (d1 - (best.radius - c1.radius).abs()).abs() < 1e-3);
+        assert!(
+            (d1 - (best.radius + c1.radius)).abs() < 1e-3
+                || (d1 - (best.radius - c1.radius).abs()).abs() < 1e-3
+        );
         // Check that point P is on the circle
         assert!(((best.center - p).length() - best.radius).abs() < 1e-3);
     }

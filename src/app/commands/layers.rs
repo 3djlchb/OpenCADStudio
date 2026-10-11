@@ -41,7 +41,8 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
-                    self.command_line.push_info(crate::t!("Layer(s) turned off.").as_ref());
+                    self.command_line
+                        .push_info(crate::t!("Layer(s) turned off.").as_ref());
                 }
             }
 
@@ -78,7 +79,8 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
-                    self.command_line.push_info(crate::t!("Layer(s) frozen.").as_ref());
+                    self.command_line
+                        .push_info(crate::t!("Layer(s) frozen.").as_ref());
                 }
             }
 
@@ -95,7 +97,9 @@ impl OpenCADStudio {
                     .filter(|&(code, _)| code != 0)
                     .map(|(code, label)| (label, units::short(code), None))
                     .collect();
-                let current = crate::t!(units::label(self.tabs[i].scene.document.header.insertion_units));
+                let current = crate::t!(units::label(
+                    self.tabs[i].scene.document.header.insertion_units
+                ));
                 self.command_line
                     .push_info(crate::tf!("DWGUNITS  current unit: {current}").as_ref());
                 let c = KeywordCommand::new("DWGUNITS", "DWGUNITS  Convert drawing to:", choices);
@@ -128,7 +132,8 @@ impl OpenCADStudio {
             cmd if cmd.starts_with("LAYDEL ") => {
                 let name = cmd.trim_start_matches("LAYDEL").trim();
                 if name.is_empty() {
-                    self.command_line.push_info(crate::t!("Usage: LAYDEL <layer name>").as_ref());
+                    self.command_line
+                        .push_info(crate::t!("Usage: LAYDEL <layer name>").as_ref());
                     return Some(Task::none());
                 }
                 let resolved = self.tabs[i]
@@ -170,9 +175,9 @@ impl OpenCADStudio {
                 self.tabs[i].scene.bump_geometry();
                 self.tabs[i].dirty = true;
                 self.refresh_layer_panel();
-                self.command_line.push_output(crate::tf!(
-                    "LAYDEL: deleted layer \"{layer}\" and {n} object(s)."
-                ).as_ref());
+                self.command_line.push_output(
+                    crate::tf!("LAYDEL: deleted layer \"{layer}\" and {n} object(s).").as_ref(),
+                );
             }
 
             // LAYMRG <source> <target> — move every object from <source> onto
@@ -191,8 +196,9 @@ impl OpenCADStudio {
                 let rest = cmd.trim_start_matches("LAYMRG").trim();
                 let parts: Vec<&str> = rest.split_whitespace().collect();
                 if parts.len() != 2 {
-                    self.command_line
-                        .push_info(crate::t!("Usage: LAYMRG <source layer> <target layer>").as_ref());
+                    self.command_line.push_info(
+                        crate::t!("Usage: LAYMRG <source layer> <target layer>").as_ref(),
+                    );
                     return Some(Task::none());
                 }
                 let keys: Vec<String> = self.tabs[i]
@@ -211,18 +217,21 @@ impl OpenCADStudio {
                     .find(|k| k.eq_ignore_ascii_case(parts[1]))
                     .cloned();
                 let (Some(src), Some(dst)) = (src, dst) else {
-                    self.command_line
-                        .push_error(crate::t!("LAYMRG: source and target layers must both exist.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("LAYMRG: source and target layers must both exist.").as_ref(),
+                    );
                     return Some(Task::none());
                 };
                 if src == dst {
-                    self.command_line
-                        .push_error(crate::t!("LAYMRG: source and target are the same layer.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("LAYMRG: source and target are the same layer.").as_ref(),
+                    );
                     return Some(Task::none());
                 }
                 if src == "0" {
-                    self.command_line
-                        .push_error(crate::t!("LAYMRG: layer \"0\" cannot be merged away.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("LAYMRG: layer \"0\" cannot be merged away.").as_ref(),
+                    );
                     return Some(Task::none());
                 }
                 if src.eq_ignore_ascii_case(&self.tabs[i].active_layer) {
@@ -245,9 +254,10 @@ impl OpenCADStudio {
                     .invalidate_layer_dependencies(std::slice::from_ref(&dst));
                 self.tabs[i].dirty = true;
                 self.refresh_layer_panel();
-                self.command_line.push_output(crate::tf!(
-                    "LAYMRG: merged \"{src}\" into \"{dst}\" ({moved} object(s))."
-                ).as_ref());
+                self.command_line.push_output(
+                    crate::tf!("LAYMRG: merged \"{src}\" into \"{dst}\" ({moved} object(s)).")
+                        .as_ref(),
+                );
             }
 
             // LAYERSTATE — save / restore named snapshots of all layer states
@@ -273,19 +283,24 @@ impl OpenCADStudio {
                         let states = self.tabs[i].scene.document.layer_states();
                         if states.is_empty() {
                             self.command_line.push_info(
-                                crate::t!("LAYERSTATE: no saved states. Use LAYERSTATE SAVE <name>.").as_ref(),
+                                crate::t!(
+                                    "LAYERSTATE: no saved states. Use LAYERSTATE SAVE <name>."
+                                )
+                                .as_ref(),
                             );
                         } else {
                             let mut names: Vec<&str> =
                                 states.iter().map(|state| state.name.as_str()).collect();
                             names.sort_unstable();
-                            self.command_line
-                                .push_output(crate::tf!("Saved layer states: {}", names.join(", ")).as_ref());
+                            self.command_line.push_output(
+                                crate::tf!("Saved layer states: {}", names.join(", ")).as_ref(),
+                            );
                         }
                     }
                     "SAVE" | "S" => {
                         if arg.is_empty() {
-                            self.command_line.push_info(crate::t!("Usage: LAYERSTATE SAVE <name>").as_ref());
+                            self.command_line
+                                .push_info(crate::t!("Usage: LAYERSTATE SAVE <name>").as_ref());
                         } else {
                             let description = self.tabs[i]
                                 .scene
@@ -308,9 +323,9 @@ impl OpenCADStudio {
                             self.command_line
                                 .push_info(crate::t!("Usage: LAYERSTATE RESTORE <name>").as_ref());
                         } else if self.tabs[i].scene.document.layer_state(arg).is_none() {
-                            self.command_line.push_error(crate::tf!(
-                                "LAYERSTATE: no saved state named \"{arg}\"."
-                            ).as_ref());
+                            self.command_line.push_error(
+                                crate::tf!("LAYERSTATE: no saved state named \"{arg}\".").as_ref(),
+                            );
                         } else {
                             let names: Vec<String> = self.tabs[i]
                                 .scene
@@ -334,9 +349,10 @@ impl OpenCADStudio {
                             self.tabs[i].scene.invalidate_layer_dependencies(&names);
                             self.tabs[i].dirty = true;
                             self.refresh_layer_panel();
-                            self.command_line.push_output(crate::tf!(
-                                "LAYERSTATE: restored \"{arg}\" ({n} layer(s))."
-                            ).as_ref());
+                            self.command_line.push_output(
+                                crate::tf!("LAYERSTATE: restored \"{arg}\" ({n} layer(s)).")
+                                    .as_ref(),
+                            );
                         }
                     }
                     "DELETE" | "D" => {
@@ -344,9 +360,9 @@ impl OpenCADStudio {
                             self.command_line
                                 .push_info(crate::t!("Usage: LAYERSTATE DELETE <name>").as_ref());
                         } else if self.tabs[i].scene.document.layer_state(arg).is_none() {
-                            self.command_line.push_error(crate::tf!(
-                                "LAYERSTATE: no saved state named \"{arg}\"."
-                            ).as_ref());
+                            self.command_line.push_error(
+                                crate::tf!("LAYERSTATE: no saved state named \"{arg}\".").as_ref(),
+                            );
                         } else {
                             self.push_undo_snapshot(i, "LAYERSTATE DELETE");
                             self.tabs[i].scene.document.delete_layer_state(arg);
@@ -356,8 +372,10 @@ impl OpenCADStudio {
                         }
                     }
                     _ => {
-                        self.command_line
-                            .push_info(crate::t!("Usage: LAYERSTATE SAVE|RESTORE|DELETE <name> | ? (list)").as_ref());
+                        self.command_line.push_info(
+                            crate::t!("Usage: LAYERSTATE SAVE|RESTORE|DELETE <name> | ? (list)")
+                                .as_ref(),
+                        );
                     }
                 }
             }
@@ -393,7 +411,8 @@ impl OpenCADStudio {
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
                     self.refresh_properties();
-                    self.command_line.push_info(crate::t!("Layer(s) locked.").as_ref());
+                    self.command_line
+                        .push_info(crate::t!("Layer(s) locked.").as_ref());
                 }
             }
 
@@ -448,7 +467,8 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
                 self.commit_layer_undo(i, undo);
                 self.refresh_layer_panel();
-                self.command_line.push_info(crate::t!("All layers turned on.").as_ref());
+                self.command_line
+                    .push_info(crate::t!("All layers turned on.").as_ref());
             }
 
             "LAYTHW" => {
@@ -469,7 +489,8 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
                 self.commit_layer_undo(i, undo);
                 self.refresh_layer_panel();
-                self.command_line.push_info(crate::t!("All layers thawed.").as_ref());
+                self.command_line
+                    .push_info(crate::t!("All layers thawed.").as_ref());
             }
 
             "LAYULK" => {
@@ -503,7 +524,8 @@ impl OpenCADStudio {
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
                     self.refresh_properties();
-                    self.command_line.push_info(crate::t!("Layer(s) unlocked.").as_ref());
+                    self.command_line
+                        .push_info(crate::t!("Layer(s) unlocked.").as_ref());
                 }
             }
 
@@ -516,8 +538,10 @@ impl OpenCADStudio {
                     .map(|(_, e)| e.common().layer.clone())
                     .collect();
                 if sel_layers.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("LAYISO: select entities on the layers to isolate first.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("LAYISO: select entities on the layers to isolate first.")
+                            .as_ref(),
+                    );
                 } else {
                     let names: Vec<String> = self.tabs[i]
                         .scene
@@ -538,21 +562,22 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                     self.commit_layer_undo(i, undo);
                     self.refresh_layer_panel();
-                    self.command_line
-                        .push_info(crate::tf!("LAYISO: isolated {} layer(s).", sel_layers.len()).as_ref());
+                    self.command_line.push_info(
+                        crate::tf!("LAYISO: isolated {} layer(s).", sel_layers.len()).as_ref(),
+                    );
                 }
             }
 
             // ISOLATEOBJECTS — hide every object except the current selection
             "ISOLATEOBJECTS" => {
                 if self.tabs[i].scene.selected.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("ISOLATEOBJECTS: select the objects to isolate first.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("ISOLATEOBJECTS: select the objects to isolate first.").as_ref(),
+                    );
                 } else {
                     let n = self.tabs[i].scene.selected.len();
                     let before = self.tabs[i].scene.object_isolation.clone();
-                    let selected_before =
-                        self.tabs[i].scene.selected.iter().copied().collect();
+                    let selected_before = self.tabs[i].scene.selected.iter().copied().collect();
                     self.tabs[i].scene.isolate_selected();
                     self.push_object_visibility_history(
                         i,
@@ -560,32 +585,28 @@ impl OpenCADStudio {
                         before,
                         selected_before,
                     );
-                    self.command_line.push_info(crate::tf!(
-                        "Isolated {n} object(s). UNISOLATEOBJECTS to restore."
-                    ).as_ref());
+                    self.command_line.push_info(
+                        crate::tf!("Isolated {n} object(s). UNISOLATEOBJECTS to restore.").as_ref(),
+                    );
                 }
             }
 
             // HIDEOBJECTS — hide the current selection
             "HIDEOBJECTS" => {
                 if self.tabs[i].scene.selected.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("HIDEOBJECTS: select the objects to hide first.").as_ref());
+                    self.command_line.push_error(
+                        crate::t!("HIDEOBJECTS: select the objects to hide first.").as_ref(),
+                    );
                 } else {
                     let n = self.tabs[i].scene.selected.len();
                     let before = self.tabs[i].scene.object_isolation.clone();
-                    let selected_before =
-                        self.tabs[i].scene.selected.iter().copied().collect();
+                    let selected_before = self.tabs[i].scene.selected.iter().copied().collect();
                     self.tabs[i].scene.hide_selected();
-                    self.push_object_visibility_history(
-                        i,
-                        "HIDEOBJECTS",
-                        before,
-                        selected_before,
-                    );
+                    self.push_object_visibility_history(i, "HIDEOBJECTS", before, selected_before);
                     self.refresh_properties();
-                    self.command_line
-                        .push_info(crate::tf!("Hid {n} object(s). UNISOLATEOBJECTS to restore.").as_ref());
+                    self.command_line.push_info(
+                        crate::tf!("Hid {n} object(s). UNISOLATEOBJECTS to restore.").as_ref(),
+                    );
                 }
             }
 
@@ -593,8 +614,7 @@ impl OpenCADStudio {
             "UNISOLATEOBJECTS" => {
                 if self.tabs[i].scene.is_isolation_active() {
                     let before = self.tabs[i].scene.object_isolation.clone();
-                    let selected_before =
-                        self.tabs[i].scene.selected.iter().copied().collect();
+                    let selected_before = self.tabs[i].scene.selected.iter().copied().collect();
                     self.tabs[i].scene.end_isolation();
                     self.push_object_visibility_history(
                         i,
@@ -605,7 +625,8 @@ impl OpenCADStudio {
                     self.command_line
                         .push_info(crate::t!("Isolation ended — all objects shown.").as_ref());
                 } else {
-                    self.command_line.push_info(crate::t!("No hidden objects.").as_ref());
+                    self.command_line
+                        .push_info(crate::t!("No hidden objects.").as_ref());
                 }
             }
 
@@ -630,6 +651,102 @@ impl OpenCADStudio {
                 self.refresh_layer_panel();
                 self.command_line
                     .push_info(crate::t!("LAYUNISO: all layers restored.").as_ref());
+            }
+
+            "QLAYER" => {
+                use crate::modules::draw::layers::quick_layer::{
+                    QuickLayerCommand, QuickLayerEntry,
+                };
+
+                let layers: Vec<QuickLayerEntry> = self.tabs[i]
+                    .layers
+                    .layers
+                    .iter()
+                    .filter(|layer| !layer.name.starts_with('*'))
+                    .map(|layer| {
+                        QuickLayerEntry::new(
+                            layer.name.clone(),
+                            layer.color.clone(),
+                            layer.visible,
+                            layer.frozen,
+                            layer.locked,
+                        )
+                    })
+                    .collect();
+
+                let selected: Vec<codec::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(handle, _)| handle)
+                    .collect();
+
+                let command = QuickLayerCommand::new_with_entries(layers, selected);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+
+            cmd if cmd.starts_with("QLAYER_APPLY_HEX ") => {
+                use crate::modules::draw::layers::quick_layer::QuickLayerCommand;
+
+                let encoded = cmd.trim_start_matches("QLAYER_APPLY_HEX").trim();
+
+                let Some(requested) = QuickLayerCommand::decode_layer_name(encoded) else {
+                    self.command_line
+                        .push_error(crate::t!("QLAYER: invalid encoded layer name.").as_ref());
+                    return Some(Task::none());
+                };
+
+                let resolved = self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .names()
+                    .find(|name| name.eq_ignore_ascii_case(&requested))
+                    .map(|name| name.to_string());
+
+                let Some(layer) = resolved else {
+                    self.command_line
+                        .push_error(crate::tf!("QLAYER: no layer named \"{requested}\".").as_ref());
+                    return Some(Task::none());
+                };
+
+                let handles: Vec<codec::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(handle, _)| handle)
+                    .collect();
+
+                if handles.is_empty() {
+                    match self.set_current_layer_name(i, &layer) {
+                        Ok(()) => {
+                            self.command_line.push_info(
+                                crate::tf!("QLAYER: current layer set to \"{layer}\".").as_ref(),
+                            );
+                        }
+                        Err(error) => {
+                            self.command_line.push_error(&error);
+                        }
+                    }
+                } else {
+                    let count = handles.len();
+
+                    self.apply_property_op(i, "QLAYER", &handles, |app, handle| {
+                        if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                            crate::scene::view::dispatch::apply_common_prop(
+                                entity, "layer", &layer,
+                            );
+                        }
+                    });
+
+                    self.ribbon.active_layer = layer.clone();
+
+                    self.command_line.push_info(
+                        crate::tf!("QLAYER: moved {count} object(s) to layer \"{layer}\".")
+                            .as_ref(),
+                    );
+                }
             }
 
             "LAYMATCH" | "LAYMCH" => {
@@ -731,8 +848,10 @@ impl OpenCADStudio {
         let mappings = laytrans::map_same(&sources, &targets);
         if mappings.is_empty() {
             self.command_line.push_info(
-                crate::t!("LAYTRANS: no layer names in common — use LAYTRANS with no file to map them.")
-                    .as_ref(),
+                crate::t!(
+                    "LAYTRANS: no layer names in common — use LAYTRANS with no file to map them."
+                )
+                .as_ref(),
             );
             return Task::none();
         }
@@ -859,11 +978,7 @@ impl OpenCADStudio {
             .abs()
             > 1.0e-12
         {
-            self.tabs[i]
-                .scene
-                .document
-                .header
-                .annotation_scale_value /= factor;
+            self.tabs[i].scene.document.header.annotation_scale_value /= factor;
         }
         // Sizes the drawing keeps as settings rather than as geometry: dash
         // lengths, default heights and widths, the radii the fillet and chamfer
@@ -918,8 +1033,7 @@ impl OpenCADStudio {
         &mut self,
         preload: Option<std::path::PathBuf>,
     ) -> Task<Message> {
-        self.layer_translator
-            .get_or_insert_with(Default::default);
+        self.layer_translator.get_or_insert_with(Default::default);
         self.active_modal = Some(crate::app::ModalKind::LayerTranslator);
         match preload {
             Some(path) => Task::done(Message::LayerTranslatorLoaded(path)),
@@ -933,7 +1047,11 @@ impl OpenCADStudio {
     /// there would mean inventing a place inside the DWG for something no other
     /// application reads back. A small text file beside the drawing carries the
     /// same information without touching the drawing's own structure.
-    pub(in crate::app) fn layer_translator_mappings_file(&mut self, path: &std::path::Path, save: bool) {
+    pub(in crate::app) fn layer_translator_mappings_file(
+        &mut self,
+        path: &std::path::Path,
+        save: bool,
+    ) {
         use crate::modules::draw::layers::laytrans::Mapping;
         if save {
             let Some(state) = self.layer_translator.as_ref() else {

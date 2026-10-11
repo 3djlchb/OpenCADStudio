@@ -5,13 +5,15 @@ use codec::entities::{AttributeDefinition, AttributeEntity};
 use codec::types::Vector3;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
+use crate::entities::common::{
+    edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
+};
 use crate::entities::text_support::{
     layout_mtext, resolve_dxf_special_chars, resolve_text_style, text_local_bounds,
     MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
 };
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, RenderConvertible};
-use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke, RenderEntity, RenderObject};
+use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::scene::convert::acad_to_render::{GlyphRun, RenderEntity, RenderObject, TextStroke};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;
 use crate::scene::text::lff;
@@ -265,7 +267,11 @@ fn build_attr_layout(
             want_glyph_boxes: cells.is_some(),
         });
         if let Some(out) = cells.as_deref_mut() {
-            *out = Some((layout.glyph_boxes.clone(), [anchor_pt.x, anchor_pt.y], rotation));
+            *out = Some((
+                layout.glyph_boxes.clone(),
+                [anchor_pt.x, anchor_pt.y],
+                rotation,
+            ));
         }
         let _ = input.line_count;
         let _ = input.is_multiline;
@@ -313,25 +319,24 @@ fn build_attr_layout(
             width_factor,
             oblique_angle,
         );
-        let (anchor_local_x, anchor_local_y) =
-            if let Some(b) = bounds {
-                // Horizontal anchor uses the pen advance box so leading /
-                // trailing spaces keep their width.
-                let ax = match input.horizontal_alignment {
-                    AHA::Left => 0.0,
-                    AHA::Center | AHA::Middle => b.advance * 0.5,
-                    AHA::Right | AHA::Aligned | AHA::Fit => b.advance,
-                };
-                let ay = match input.vertical_alignment {
-                    AVA::Baseline => 0.0,
-                    AVA::Bottom => b.ink_min[1],
-                    AVA::Middle => (b.ink_min[1] + b.ink_max[1]) * 0.5,
-                    AVA::Top => b.ink_max[1],
-                };
-                (ax, ay)
-            } else {
-                (0.0, 0.0)
+        let (anchor_local_x, anchor_local_y) = if let Some(b) = bounds {
+            // Horizontal anchor uses the pen advance box so leading /
+            // trailing spaces keep their width.
+            let ax = match input.horizontal_alignment {
+                AHA::Left => 0.0,
+                AHA::Center | AHA::Middle => b.advance * 0.5,
+                AHA::Right | AHA::Aligned | AHA::Fit => b.advance,
             };
+            let ay = match input.vertical_alignment {
+                AVA::Baseline => 0.0,
+                AVA::Bottom => b.ink_min[1],
+                AVA::Middle => (b.ink_min[1] + b.ink_max[1]) * 0.5,
+                AVA::Top => b.ink_max[1],
+            };
+            (ax, ay)
+        } else {
+            (0.0, 0.0)
+        };
         let line_offset_y = -(i as f32) * line_height;
         let local_y_for_line = anchor_local_y - line_offset_y;
         let origin: [f64; 2] = [
@@ -448,10 +453,16 @@ impl Grippable for AttributeDefinition {
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        let current = if grip_id == 1 { self.alignment_point } else { self.insertion_point };
+        let current = if grip_id == 1 {
+            self.alignment_point
+        } else {
+            self.insertion_point
+        };
         let d = match apply {
             GripApply::Translate(d) => glam::DVec3::new(d.x as f64, d.y as f64, d.z as f64),
-            GripApply::Absolute(p) => glam::DVec3::new(p.x as f64, p.y as f64, p.z as f64) - dv(current),
+            GripApply::Absolute(p) => {
+                glam::DVec3::new(p.x as f64, p.y as f64, p.z as f64) - dv(current)
+            }
         };
         // A two-point definition stretches the moved endpoint; any other
         // grip moves the whole text.
@@ -582,7 +593,11 @@ fn is_yes(value: &str) -> bool {
 }
 
 fn row(label: &str, field: &'static str, value: PropValue) -> Property {
-    Property { label: label.into(), field, value }
+    Property {
+        label: label.into(),
+        field,
+        value,
+    }
 }
 
 fn set_bit(flags: i16, bit: i16, on: bool) -> i16 {
@@ -647,14 +662,30 @@ impl PropertyEditable for AttributeDefinition {
             }
         };
         let text_props = vec![
-            row(t!("Tag").as_ref(), "att_tag", PropValue::PlainText(self.tag.clone())),
-            row(t!("Annotative").as_ref(), "att_annotative", yes_no(self.flags.annotative)),
+            row(
+                t!("Tag").as_ref(),
+                "att_tag",
+                PropValue::PlainText(self.tag.clone()),
+            ),
+            row(
+                t!("Annotative").as_ref(),
+                "att_annotative",
+                yes_no(self.flags.annotative),
+            ),
             if self.flags.constant {
                 ro(t!("Prompt").as_ref(), "att_prompt", self.prompt.clone())
             } else {
-                row(t!("Prompt").as_ref(), "att_prompt", PropValue::PlainText(self.prompt.clone()))
+                row(
+                    t!("Prompt").as_ref(),
+                    "att_prompt",
+                    PropValue::PlainText(self.prompt.clone()),
+                )
             },
-            row(t!("Value").as_ref(), "att_default", PropValue::PlainText(self.default_value.clone())),
+            row(
+                t!("Value").as_ref(),
+                "att_default",
+                PropValue::PlainText(self.default_value.clone()),
+            ),
             row(
                 t!("Style").as_ref(),
                 "att_style",
@@ -668,7 +699,11 @@ impl PropertyEditable for AttributeDefinition {
                 },
             ),
             if self.is_multiline {
-                ro(t!("Justify").as_ref(), "att_justify", t!(justify_label(self)).into_owned())
+                ro(
+                    t!("Justify").as_ref(),
+                    "att_justify",
+                    t!(justify_label(self)).into_owned(),
+                )
             } else {
                 row(
                     t!("Justify").as_ref(),
@@ -686,15 +721,29 @@ impl PropertyEditable for AttributeDefinition {
                 self.height,
                 crate::entities::common::style_fixed_height(&self.text_style).is_none(),
             ),
-            edit_angle(t!("Rotation").as_ref(), "att_rot", self.rotation.to_degrees()),
+            edit_angle(
+                t!("Rotation").as_ref(),
+                "att_rot",
+                self.rotation.to_degrees(),
+            ),
             edit(t!("Width factor").as_ref(), "att_wf", self.width_factor),
-            edit_angle(t!("Obliquing").as_ref(), "att_ob", self.oblique_angle.to_degrees()),
-            ro(t!("Direction").as_ref(), "att_direction", t!("By style").into_owned()),
+            edit_angle(
+                t!("Obliquing").as_ref(),
+                "att_ob",
+                self.oblique_angle.to_degrees(),
+            ),
+            ro(
+                t!("Direction").as_ref(),
+                "att_direction",
+                t!("By style").into_owned(),
+            ),
             if self.is_multiline {
                 edit(
                     t!("Boundary width").as_ref(),
                     "att_bwidth",
-                    self.embedded_mtext.as_ref().map_or(0.0, |m| m.rectangle_width),
+                    self.embedded_mtext
+                        .as_ref()
+                        .map_or(0.0, |m| m.rectangle_width),
                 )
             } else {
                 ro(t!("Boundary width").as_ref(), "att_bwidth", String::new())
@@ -704,17 +753,48 @@ impl PropertyEditable for AttributeDefinition {
             alignment(t!("Text alignment Z"), "att_az", self.alignment_point.z),
         ];
         vec![
-            PropSection { title: t!("Text").into_owned(), props: text_props },
+            PropSection {
+                title: t!("Text").into_owned(),
+                props: text_props,
+            },
             PropSection {
                 title: t!("Misc").into_owned(),
                 props: vec![
-                    row(t!("Upside down").as_ref(), "att_upside_down", yes_no(self.text_generation_flags & 0x4 != 0)),
-                    row(t!("Backward").as_ref(), "att_backward", yes_no(self.text_generation_flags & 0x2 != 0)),
-                    row(t!("Invisible").as_ref(), "att_invisible", yes_no(self.flags.invisible)),
-                    row(t!("Constant").as_ref(), "att_constant", yes_no(self.flags.constant)),
-                    row(t!("Verify").as_ref(), "att_verify", yes_no(self.flags.verify)),
-                    row(t!("Preset").as_ref(), "att_preset", yes_no(self.flags.preset)),
-                    row(t!("Multiple lines").as_ref(), "att_multiline", yes_no(self.is_multiline)),
+                    row(
+                        t!("Upside down").as_ref(),
+                        "att_upside_down",
+                        yes_no(self.text_generation_flags & 0x4 != 0),
+                    ),
+                    row(
+                        t!("Backward").as_ref(),
+                        "att_backward",
+                        yes_no(self.text_generation_flags & 0x2 != 0),
+                    ),
+                    row(
+                        t!("Invisible").as_ref(),
+                        "att_invisible",
+                        yes_no(self.flags.invisible),
+                    ),
+                    row(
+                        t!("Constant").as_ref(),
+                        "att_constant",
+                        yes_no(self.flags.constant),
+                    ),
+                    row(
+                        t!("Verify").as_ref(),
+                        "att_verify",
+                        yes_no(self.flags.verify),
+                    ),
+                    row(
+                        t!("Preset").as_ref(),
+                        "att_preset",
+                        yes_no(self.flags.preset),
+                    ),
+                    row(
+                        t!("Multiple lines").as_ref(),
+                        "att_multiline",
+                        yes_no(self.is_multiline),
+                    ),
                     row(
                         t!("Lock position").as_ref(),
                         "att_lock_pos",
@@ -859,7 +939,10 @@ impl Transformable for AttributeDefinition {
 /// The laid-out character cells of a multi-line (MTEXT) attribute, the
 /// point they are relative to and the layout rotation; `None` for a
 /// single-line attribute.
-pub(crate) fn attribute_cells(a: &AttributeEntity, document: &codec::CadDocument) -> Option<AttrCells> {
+pub(crate) fn attribute_cells(
+    a: &AttributeEntity,
+    document: &codec::CadDocument,
+) -> Option<AttrCells> {
     let mut out = None;
     build_attr_layout(attr_inputs(a), document, Some(&mut out));
     out
@@ -1015,12 +1098,32 @@ impl PropertyEditable for AttributeEntity {
                         self.height,
                         crate::entities::common::style_fixed_height(&self.text_style).is_none(),
                     ),
-                    edit_angle(t!("Rotation").as_ref(), "atte_rot", self.rotation.to_degrees()),
+                    edit_angle(
+                        t!("Rotation").as_ref(),
+                        "atte_rot",
+                        self.rotation.to_degrees(),
+                    ),
                     edit(t!("Width factor").as_ref(), "atte_wf", self.width_factor),
-                    edit_angle(t!("Obliquing").as_ref(), "atte_ob", self.oblique_angle.to_degrees()),
-                    edit(t!("Text alignment X").as_ref(), "atte_ax", self.alignment_point.x),
-                    edit(t!("Text alignment Y").as_ref(), "atte_ay", self.alignment_point.y),
-                    edit(t!("Text alignment Z").as_ref(), "atte_az", self.alignment_point.z),
+                    edit_angle(
+                        t!("Obliquing").as_ref(),
+                        "atte_ob",
+                        self.oblique_angle.to_degrees(),
+                    ),
+                    edit(
+                        t!("Text alignment X").as_ref(),
+                        "atte_ax",
+                        self.alignment_point.x,
+                    ),
+                    edit(
+                        t!("Text alignment Y").as_ref(),
+                        "atte_ay",
+                        self.alignment_point.y,
+                    ),
+                    edit(
+                        t!("Text alignment Z").as_ref(),
+                        "atte_az",
+                        self.alignment_point.z,
+                    ),
                     ro(
                         t!("Boundary width").as_ref(),
                         "atte_field_len",
@@ -1049,15 +1152,31 @@ impl PropertyEditable for AttributeEntity {
                         "atte_backward",
                         bool_yn(self.text_generation_flags & 0x2 != 0),
                     ),
-                    ro(t!("Invisible").as_ref(), "atte_invisible", bool_yn(self.flags.invisible)),
+                    ro(
+                        t!("Invisible").as_ref(),
+                        "atte_invisible",
+                        bool_yn(self.flags.invisible),
+                    ),
                     ro(
                         t!("Multiple lines").as_ref(),
                         "atte_mtext_flag",
                         mtext_flag_str(self.mtext_flag),
                     ),
-                    ro(t!("Constant").as_ref(), "atte_constant", bool_yn(self.flags.constant)),
-                    ro(t!("Verify").as_ref(), "atte_verify", bool_yn(self.flags.verify)),
-                    ro(t!("Preset").as_ref(), "atte_preset", bool_yn(self.flags.preset)),
+                    ro(
+                        t!("Constant").as_ref(),
+                        "atte_constant",
+                        bool_yn(self.flags.constant),
+                    ),
+                    ro(
+                        t!("Verify").as_ref(),
+                        "atte_verify",
+                        bool_yn(self.flags.verify),
+                    ),
+                    ro(
+                        t!("Preset").as_ref(),
+                        "atte_preset",
+                        bool_yn(self.flags.preset),
+                    ),
                     ro(
                         t!("Lock position").as_ref(),
                         "atte_lock_pos",

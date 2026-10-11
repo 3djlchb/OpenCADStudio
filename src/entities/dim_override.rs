@@ -374,7 +374,9 @@ fn inherited_int(doc: &CadDocument, handle: Handle, code: i16) -> i16 {
         return value;
     }
     let Some(style) = doc.dim_styles.iter().find(|style| {
-        style.name.eq_ignore_ascii_case(&dimension.base().style_name)
+        style
+            .name
+            .eq_ignore_ascii_case(&dimension.base().style_name)
             || (dimension.base().style_name.trim().is_empty()
                 && style.name.eq_ignore_ascii_case("Standard"))
     }) else {
@@ -410,7 +412,9 @@ fn inherited_real(doc: &CadDocument, handle: Handle, code: i16) -> f64 {
         return value;
     }
     let Some(style) = doc.dim_styles.iter().find(|style| {
-        style.name.eq_ignore_ascii_case(&dimension.base().style_name)
+        style
+            .name
+            .eq_ignore_ascii_case(&dimension.base().style_name)
             || (dimension.base().style_name.trim().is_empty()
                 && style.name.eq_ignore_ascii_case("Standard"))
     }) else {
@@ -433,7 +437,9 @@ fn inherited_string(doc: &CadDocument, handle: Handle, code: i16) -> String {
         return value;
     }
     let Some(style) = doc.dim_styles.iter().find(|style| {
-        style.name.eq_ignore_ascii_case(&dimension.base().style_name)
+        style
+            .name
+            .eq_ignore_ascii_case(&dimension.base().style_name)
             || (dimension.base().style_name.trim().is_empty()
                 && style.name.eq_ignore_ascii_case("Standard"))
     }) else {
@@ -452,12 +458,7 @@ fn split_template(value: &str) -> (&str, &str) {
 
 /// Apply a dimension override row. A changed override lays automatic text
 /// out afresh, so e.g. a new DIMTAD moves it off the stored position.
-pub fn set_property(
-    doc: &mut CadDocument,
-    handle: Handle,
-    field: &str,
-    value: &str,
-) -> bool {
+pub fn set_property(doc: &mut CadDocument, handle: Handle, field: &str, value: &str) -> bool {
     let applied = apply_property(doc, handle, field, value);
     if applied {
         if let Some(EntityType::Dimension(dimension)) = doc.get_entity_mut(handle) {
@@ -467,12 +468,7 @@ pub fn set_property(
     applied
 }
 
-fn apply_property(
-    doc: &mut CadDocument,
-    handle: Handle,
-    field: &str,
-    value: &str,
-) -> bool {
+fn apply_property(doc: &mut CadDocument, handle: Handle, field: &str, value: &str) -> bool {
     let trimmed = value.trim();
     if field == "dim_center_type" {
         let current = inherited_real(doc, handle, DIMCEN);
@@ -548,7 +544,12 @@ fn apply_property(
         let Some(visible) = yes(trimmed) else {
             return false;
         };
-        set(doc, handle, code, Some(XDataValue::Integer16((visible == 0) as i16)));
+        set(
+            doc,
+            handle,
+            code,
+            Some(XDataValue::Integer16((visible == 0) as i16)),
+        );
         return true;
     }
     let bit_field = match field {
@@ -660,12 +661,7 @@ fn apply_property(
             "deviation" => {
                 if (upper - lower).abs() <= 1e-12 {
                     let distinct_lower = if upper.abs() > 1e-12 { 0.0 } else { 0.0001 };
-                    set(
-                        doc,
-                        handle,
-                        DIMTM,
-                        Some(XDataValue::Real(distinct_lower)),
-                    );
+                    set(doc, handle, DIMTM, Some(XDataValue::Real(distinct_lower)));
                 }
                 (1, 0, false)
             }
@@ -688,8 +684,7 @@ fn apply_property(
         if trimmed.is_empty() {
             set(doc, handle, code, None);
         } else if let Ok(number) = trimmed.parse::<f64>() {
-            let number = if field == "dim_text_offset"
-                && inherited_real(doc, handle, DIMGAP) < 0.0
+            let number = if field == "dim_text_offset" && inherited_real(doc, handle, DIMGAP) < 0.0
             {
                 -number.abs()
             } else {
@@ -712,9 +707,7 @@ fn apply_property(
     }
     if let Some(code) = property_int_code(field) {
         let parsed = match field {
-            "dim_line_lineweight" | "dim_ext_line_lineweight" => {
-                parse_lineweight_label(trimmed)
-            }
+            "dim_line_lineweight" | "dim_ext_line_lineweight" => parse_lineweight_label(trimmed),
             "dim_precision"
             | "dim_alt_precision"
             | "dim_tolerance_precision"
@@ -724,14 +717,10 @@ fn apply_property(
             "dim_text_outside_align" | "dim_text_inside_align" | "dim_line_inside" => {
                 yes(trimmed).map(|value| i16::from(value == 0))
             }
-            "dim_ext_line_fixed"
-            | "dim_text_inside"
-            | "dim_line_forced"
-            | "dim_alt_enabled" => yes(trimmed),
-            "dim_decimal_separator" => trimmed
-                .chars()
-                .next()
-                .map(|character| character as i16),
+            "dim_ext_line_fixed" | "dim_text_inside" | "dim_line_forced" | "dim_alt_enabled" => {
+                yes(trimmed)
+            }
+            "dim_decimal_separator" => trimmed.chars().next().map(|character| character as i16),
             "dim_units" => match trimmed.to_ascii_lowercase().as_str() {
                 "scientific" => Some(1),
                 "decimal" => Some(2),

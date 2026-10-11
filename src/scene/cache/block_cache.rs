@@ -385,11 +385,7 @@ impl BlockCache {
         result
     }
 
-    fn defn_metrics_recursive(
-        &self,
-        block_name: &str,
-        visited: &mut Vec<String>,
-    ) -> BlockMetrics {
+    fn defn_metrics_recursive(&self, block_name: &str, visited: &mut Vec<String>) -> BlockMetrics {
         // Same depth guard as `defn_inline_point_cost_recursive`: cycle-only
         // guarding let acyclic chains recurse until the stack overflowed.
         if visited.len() > MAX_NESTING_DEPTH || visited.iter().any(|name| name == block_name) {
@@ -432,11 +428,7 @@ impl BlockCache {
     }
 }
 
-fn block_object_names(
-    doc: &CadDocument,
-    entity: &EntityType,
-    anno_scale: f32,
-) -> Vec<String> {
+fn block_object_names(doc: &CadDocument, entity: &EntityType, anno_scale: f32) -> Vec<String> {
     crate::scene::render_graph::entity_render_block_uses(doc, entity, anno_scale)
         .into_iter()
         .filter(|block_use| !block_use.block.is_null())
@@ -508,8 +500,7 @@ fn nested_instance_transform(nref: &NestedRef, offset: [f64; 3]) -> Transform {
     if offset == [0.0; 3] {
         nref.xform.clone()
     } else {
-        Transform::from_translation(Vector3::new(offset[0], offset[1], offset[2]))
-            .then(&nref.xform)
+        Transform::from_translation(Vector3::new(offset[0], offset[1], offset[2])).then(&nref.xform)
     }
 }
 
@@ -533,7 +524,6 @@ fn build_defn(
         Some(br) => br,
         None => return BlockDefn::default(),
     };
-
 
     // ── Pass 2: tessellate each sub with the chosen offset so stored
     // coordinates fit into f32 without precision loss.
@@ -575,14 +565,11 @@ fn build_defn(
         ) {
             continue;
         }
-        let block_uses: Vec<_> = crate::scene::render_graph::entity_render_block_uses(
-            doc,
-            entity,
-            anno_scale,
-        )
-        .into_iter()
-        .filter(|block_use| block_use.active)
-        .collect();
+        let block_uses: Vec<_> =
+            crate::scene::render_graph::entity_render_block_uses(doc, entity, anno_scale)
+                .into_iter()
+                .filter(|block_use| block_use.active)
+                .collect();
         let replaces_host = block_uses
             .iter()
             .any(|block_use| block_use.replaces_host_wire);
@@ -691,12 +678,8 @@ fn build_nested_ref(
         scale_policy,
     );
     let clip_poly = crate::scene::pick::xclip::insert_spatial_filter(doc, nested_ins)
-        .map(|filter| {
-            crate::scene::pick::xclip::world_clip_polygon_for_transform(filter, &xform)
-        });
-    let plot_l0 = crate::scene::view::render::is_effective_layer_zero(
-        &nested_ins.common.layer,
-    );
+        .map(|filter| crate::scene::pick::xclip::world_clip_polygon_for_transform(filter, &xform));
+    let plot_l0 = crate::scene::view::render::is_effective_layer_zero(&nested_ins.common.layer);
     let plot_visible = doc
         .layers
         .get(&nested_ins.common.layer)
@@ -708,19 +691,11 @@ fn build_nested_ref(
         anno_scale,
         scale_policy,
     )
-        .into_iter()
-        .flat_map(|attribute| {
-            tessellate_sub_local(
-                doc,
-                &attribute,
-                1.0,
-                None,
-                bg_color,
-                viewport,
-                depth_map,
-            )
-        })
-        .collect();
+    .into_iter()
+    .flat_map(|attribute| {
+        tessellate_sub_local(doc, &attribute, 1.0, None, bg_color, viewport, depth_map)
+    })
+    .collect();
 
     NestedRef {
         block_name: nested_ins.block_name.clone(),
@@ -765,10 +740,8 @@ fn tessellate_sub_local(
         crate::scene::view::render::render_style_for_viewport(doc, sub, viewport);
     let _ = bg_color;
 
-    let has_book_color =
-        crate::scene::view::render::has_resolved_book_color(doc, sub);
-    let color_is_byblock =
-        !has_book_color && sub.common().color == AcadColor::ByBlock;
+    let has_book_color = crate::scene::view::render::has_resolved_book_color(doc, sub);
+    let color_is_byblock = !has_book_color && sub.common().color == AcadColor::ByBlock;
     let lt_is_byblock = sub.common().linetype.eq_ignore_ascii_case("byblock");
     let lw_is_byblock = matches!(sub.common().line_weight, LineWeight::ByBlock);
 
@@ -781,8 +754,7 @@ fn tessellate_sub_local(
         .get(&sub.common().layer)
         .map(|layer| layer.is_plottable)
         .unwrap_or(true);
-    let color_l0 =
-        !has_book_color && on_l0 && sub.common().color == AcadColor::ByLayer;
+    let color_l0 = !has_book_color && on_l0 && sub.common().color == AcadColor::ByLayer;
     let transparency_is_byblock = sub.common().transparency.is_by_block();
     let transparency_l0 = on_l0 && sub.common().transparency.is_by_layer();
     let lt_l0 = on_l0 && {
@@ -834,8 +806,8 @@ fn tessellate_sub_local(
         return vec![];
     }
 
-    let frame_mode = crate::scene::frame::entity_kind(sub)
-        .map(|kind| crate::scene::frame::mode(doc, kind));
+    let frame_mode =
+        crate::scene::frame::entity_kind(sub).map(|kind| crate::scene::frame::mode(doc, kind));
     let mut result = Vec::with_capacity(wires_out.len());
     for wire in wires_out {
         // Per-wire point-count cap: a single wire that exceeds this is skipped
@@ -873,13 +845,12 @@ fn tessellate_sub_local(
                 sub,
                 EntityType::MText(text) if text.background_fill_flags & 0x02 != 0
             );
-        let contrast_bg = if !preserve_color
-            && (!wire.text_verts.is_empty() || !wire.points.is_empty())
-        {
-            tessellate::explicit_mtext_background(sub)
-        } else {
-            None
-        };
+        let contrast_bg =
+            if !preserve_color && (!wire.text_verts.is_empty() || !wire.points.is_empty()) {
+                tessellate::explicit_mtext_background(sub)
+            } else {
+                None
+            };
         // A wire whose colour differs from the entity's resolved base colour
         // carries an explicit per-segment override (e.g. an MTEXT `\C1;` inline
         // colour). ByBlock / layer-0 inheritance applies only to wires still on
@@ -915,8 +886,7 @@ fn tessellate_sub_local(
             pattern_stations: wire.pattern_stations,
             world_width: wire.world_width,
             plinegen: wire.plinegen,
-            plot_visible: frame_mode.is_none_or(|mode| mode == 1)
-                && (on_l0 || layer_plottable),
+            plot_visible: frame_mode.is_none_or(|mode| mode == 1) && (on_l0 || layer_plottable),
             plot_l0: on_l0,
             hide_unselected: frame_mode == Some(0),
             is_fill_only,
@@ -1006,7 +976,12 @@ fn aabb_union(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     if b == [0.0, 0.0, 0.0, 0.0] {
         return a;
     }
-    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
+    [
+        a[0].min(b[0]),
+        a[1].min(b[1]),
+        a[2].max(b[2]),
+        a[3].max(b[3]),
+    ]
 }
 
 pub fn aabb_disjoint_xy(a: [f32; 4], b: [f32; 4]) -> bool {
@@ -1063,9 +1038,7 @@ pub fn expand_insert(
         scale_policy,
     );
     let name = ins_handle.value().to_string();
-    let prototype_key = if !ins.is_array()
-        && cache.prototype_blocks.contains(&ins.block_name)
-    {
+    let prototype_key = if !ins.is_array() && cache.prototype_blocks.contains(&ins.block_name) {
         Some(expansion_prototype_key(
             ins,
             &xform,
@@ -1193,12 +1166,10 @@ pub fn expand_insert(
         let mut first = first_batches.finalize(&name, selected, bg_color);
         for wire in &mut first {
             if !is_standalone_analytical_curve(wire) && wire.render_instance.is_none() {
-                wire.render_instance = Some(
-                    crate::scene::model::instance_model::RenderInstance {
-                        source_id: crate::scene::model::instance_model::next_source_id(),
-                        translation: first_translation,
-                    },
-                );
+                wire.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
+                    source_id: crate::scene::model::instance_model::next_source_id(),
+                    translation: first_translation,
+                });
             }
         }
         let mut result = first.clone();
@@ -1209,9 +1180,11 @@ pub fn expand_insert(
                 translation[1] - first_translation[1],
                 translation[2] - first_translation[2],
             ];
-            result.extend(first.iter().map(|wire| {
-                translated_prototype_wire(wire, &name, delta)
-            }));
+            result.extend(
+                first
+                    .iter()
+                    .map(|wire| translated_prototype_wire(wire, &name, delta)),
+            );
         }
         return Some(result);
     }
@@ -1309,11 +1282,7 @@ fn expansion_prototype_key(
     }
 }
 
-fn translated_prototype_wire(
-    source: &WireModel,
-    name: &str,
-    delta: [f64; 3],
-) -> WireModel {
+fn translated_prototype_wire(source: &WireModel, name: &str, delta: [f64; 3]) -> WireModel {
     let mut wire = source.clone();
     wire.name = name.to_string();
     if let Some(instance) = wire.render_instance.as_mut() {
@@ -1446,9 +1415,15 @@ fn nested_prototype_key(
 ) -> NestedPrototypeKey {
     let matrix = &transform.matrix.m;
     let linear = [
-        matrix[0][0].to_bits(), matrix[0][1].to_bits(), matrix[0][2].to_bits(),
-        matrix[1][0].to_bits(), matrix[1][1].to_bits(), matrix[1][2].to_bits(),
-        matrix[2][0].to_bits(), matrix[2][1].to_bits(), matrix[2][2].to_bits(),
+        matrix[0][0].to_bits(),
+        matrix[0][1].to_bits(),
+        matrix[0][2].to_bits(),
+        matrix[1][0].to_bits(),
+        matrix[1][1].to_bits(),
+        matrix[1][2].to_bits(),
+        matrix[2][0].to_bits(),
+        matrix[2][1].to_bits(),
+        matrix[2][2].to_bits(),
     ];
     let mut style = Vec::with_capacity(32);
     style.extend(ctx.ins_color.map(f32::to_bits));
@@ -1741,10 +1716,8 @@ impl Batches {
                 };
                 if !b.preserve_color {
                     for vertex in &mut b.text_verts {
-                        vertex.color = crate::scene::view::render::adapt_to_bg(
-                            vertex.color,
-                            contrast_bg,
-                        );
+                        vertex.color =
+                            crate::scene::view::render::adapt_to_bg(vertex.color, contrast_bg);
                     }
                 }
                 // Glyph quads stay at neutral depth on purpose: the per-wire
@@ -1960,16 +1933,10 @@ fn expand_defn(
                     bg_color: ctx.bg_color,
                 };
                 for offset in &nref.instance_offsets {
-                    let attachment_transform = nested_attachment_transform(nref, *offset)
-                        .then(accum_xform);
+                    let attachment_transform =
+                        nested_attachment_transform(nref, *offset).then(accum_xform);
                     for attachment in &nref.attachments {
-                        emit_wire(
-                            attachment,
-                            &attachment_transform,
-                            &inner_ctx,
-                            out,
-                            d_range,
-                        );
+                        emit_wire(attachment, &attachment_transform, &inner_ctx, out, d_range);
                     }
                 }
                 if visited.iter().any(|n| n == &nref.block_name) {
@@ -1978,17 +1945,16 @@ fn expand_defn(
                 let Some(nested_defn) = ctx.cache.defn(&nref.block_name) else {
                     continue;
                 };
-                let world = nref.instance_offsets.iter().fold(
-                    [0.0_f32; 4],
-                    |aabb, offset| {
-                        let composed = nested_instance_transform(nref, *offset)
-                            .then(accum_xform);
+                let world = nref
+                    .instance_offsets
+                    .iter()
+                    .fold([0.0_f32; 4], |aabb, offset| {
+                        let composed = nested_instance_transform(nref, *offset).then(accum_xform);
                         aabb_union(
                             aabb,
                             transform_aabb_xy(nested_defn.metrics.aabb_local, &composed),
                         )
-                    },
-                );
+                    });
                 let local = [
                     world[0] as f32,
                     world[1] as f32,
@@ -2012,9 +1978,8 @@ fn expand_defn(
                     d_range.0 + nref.local_rank * d_range.1,
                     d_range.1 / (nested_defn.child_count.max(1) as f32 + 1.0),
                 );
-                let composed_for = |offset: &[f64; 3]| {
-                    nested_instance_transform(nref, *offset).then(accum_xform)
-                };
+                let composed_for =
+                    |offset: &[f64; 3]| nested_instance_transform(nref, *offset).then(accum_xform);
                 if nested_defn.inline_point_cost.is_some() && nref.clip_poly.is_none() {
                     for offset in &nref.instance_offsets {
                         expand_defn(
@@ -2048,9 +2013,11 @@ fn expand_defn(
                                 translation[1] - source_translation[1],
                                 translation[2] - source_translation[2],
                             ];
-                            out.extra_wires.extend(source.iter().map(|wire| {
-                                translated_prototype_wire(wire, "", delta)
-                            }));
+                            out.extra_wires.extend(
+                                source
+                                    .iter()
+                                    .map(|wire| translated_prototype_wire(wire, "", delta)),
+                            );
                             continue;
                         }
                         let mut sub = Batches::default();
@@ -2076,12 +2043,12 @@ fn expand_defn(
                         crate::scene::pick::xclip::clip_wires(&mut wires, &world_poly);
                         for wire in &mut wires {
                             if !is_standalone_analytical_curve(wire) {
-                                wire.render_instance = Some(
-                                    crate::scene::model::instance_model::RenderInstance {
-                                        source_id: crate::scene::model::instance_model::next_source_id(),
+                                wire.render_instance =
+                                    Some(crate::scene::model::instance_model::RenderInstance {
+                                        source_id:
+                                            crate::scene::model::instance_model::next_source_id(),
                                         translation,
-                                    },
-                                );
+                                    });
                             }
                         }
                         out.extra_wires.extend(wires.iter().cloned());
@@ -2106,11 +2073,7 @@ fn expand_defn(
                             ];
                             let depth_delta = nested_range.0 - cached.depth_base;
                             out.extra_wires.extend(cached.wires.iter().map(|wire| {
-                                let mut wire = translated_prototype_wire(
-                                    wire,
-                                    "",
-                                    delta,
-                                );
+                                let mut wire = translated_prototype_wire(wire, "", delta);
                                 if let Some(depth) = wire.depth_override.as_mut() {
                                     *depth += depth_delta;
                                 }
@@ -2130,13 +2093,16 @@ fn expand_defn(
                             );
                             let mut wires = sub.finalize("", ctx.selected, ctx.bg_color);
                             for wire in &mut wires {
-                                if !is_standalone_analytical_curve(wire) && wire.render_instance.is_none() {
-                                    wire.render_instance = Some(
-                                        crate::scene::model::instance_model::RenderInstance {
-                                            source_id: crate::scene::model::instance_model::next_source_id(),
+                                if !is_standalone_analytical_curve(wire)
+                                    && wire.render_instance.is_none()
+                                {
+                                    wire.render_instance =
+                                        Some(crate::scene::model::instance_model::RenderInstance {
+                                            source_id:
+                                                crate::scene::model::instance_model::next_source_id(
+                                                ),
                                             translation,
-                                        },
-                                    );
+                                        });
                                 }
                             }
                             out.extra_wires.extend(wires.iter().cloned());
@@ -2341,13 +2307,16 @@ fn transformed_station_data(
 }
 
 fn transformed_point_marker(marker: PointMarker, xform: &Transform) -> (PointMarker, f64) {
-    let origin = xform.apply(Vector3::new(marker.origin.x, marker.origin.y, marker.origin.z));
+    let origin = xform.apply(Vector3::new(
+        marker.origin.x,
+        marker.origin.y,
+        marker.origin.z,
+    ));
     let map_direction = |direction: glam::DVec3| {
-        let mapped = xform.matrix.transform_direction(Vector3::new(
-            direction.x,
-            direction.y,
-            direction.z,
-        ));
+        let mapped =
+            xform
+                .matrix
+                .transform_direction(Vector3::new(direction.x, direction.y, direction.z));
         KernelVec3::new(mapped.x, mapped.y, mapped.z)
     };
     let mapped_normal = map_direction(marker.normal);
@@ -2422,12 +2391,12 @@ fn emit_wire(
     // before we hash it into a batch.
     let final_color = resolve_wire_color(lw, ctx);
     let final_aci = if lw.color_is_byblock {
-            ctx.ins_aci
-        } else if lw.color_l0 {
-            ctx.l0_aci
-        } else {
-            lw.aci
-        };
+        ctx.ins_aci
+    } else if lw.color_l0 {
+        ctx.l0_aci
+    } else {
+        lw.aci
+    };
     let (final_pat_len, final_pat) = if lw.lt_is_byblock {
         (ctx.ins_pat_len, ctx.ins_pat)
     } else if lw.lt_l0 {
@@ -2503,10 +2472,18 @@ fn emit_wire(
                     let (hx, lx) = WireModel::split_ds(point.x);
                     let (hy, ly) = WireModel::split_ds(point.y);
                     let (hz, lz) = WireModel::split_ds(point.z);
-                    if hx < min_x { min_x = hx; }
-                    if hy < min_y { min_y = hy; }
-                    if hx > max_x { max_x = hx; }
-                    if hy > max_y { max_y = hy; }
+                    if hx < min_x {
+                        min_x = hx;
+                    }
+                    if hy < min_y {
+                        min_y = hy;
+                    }
+                    if hx > max_x {
+                        max_x = hx;
+                    }
+                    if hy > max_y {
+                        max_y = hy;
+                    }
                     points.push([hx, hy, hz]);
                     points_low.push([lx, ly, lz]);
                 }
@@ -2565,9 +2542,9 @@ fn emit_wire(
                     plinegen: lw.plinegen,
                     fill_tris: Vec::new(),
                     fill_tris_low: Vec::new(),
-                
+
                     ..Default::default()
-};
+                };
                 out.extra_wires.push(wire);
                 return;
             }
@@ -2577,9 +2554,9 @@ fn emit_wire(
     let station_values = pattern_station_values(&lw.pattern_stations, lw.points.len());
     let station_map = decode_pattern_station_map(&lw.pattern_stations, lw.points.len());
     let transformed_stations = station_values.and_then(|(values, _)| {
-        station_map.as_ref().and_then(|map| {
-            transformed_station_data(values, map, lw.plinegen, accum_xform)
-        })
+        station_map
+            .as_ref()
+            .and_then(|map| transformed_station_data(values, map, lw.plinegen, accum_xform))
     });
     let has_stations = station_values.is_some();
     let pattern_scale = transformed_stations.as_ref().map_or_else(
@@ -2643,9 +2620,7 @@ fn emit_wire(
     // below zero.
     let local_depth = (lw.world_width > 0.0 || lw.is_fill_only || !lw.text_verts.is_empty())
         .then(|| d_range.0 + lw.local_rank * d_range.1);
-    let plot_visible = ctx.plot_visible
-        && lw.plot_visible
-        && (!lw.plot_l0 || ctx.l0_plottable);
+    let plot_visible = ctx.plot_visible && lw.plot_visible && (!lw.plot_l0 || ctx.l0_plottable);
 
     // Batched wires share one dash distance, which runs on across the NaN
     // joins only for plinegen wires. PLINEGEN is about a wire's own breaks;
@@ -2720,8 +2695,8 @@ fn emit_wire(
 
     // NaN separator between previously-appended geometry and this wire so the
     // GPU shader treats them as disconnected polylines within one buffer.
-    let needs_sep = !entry.points.is_empty()
-        && !entry.points.last().map(|p| p[0].is_nan()).unwrap_or(false);
+    let needs_sep =
+        !entry.points.is_empty() && !entry.points.last().map(|p| p[0].is_nan()).unwrap_or(false);
 
     if !lw.points.is_empty() {
         if needs_sep {
@@ -2804,23 +2779,14 @@ fn emit_wire(
     }
 
     for p in &lw.key_vertices {
-        let v = accum_xform.apply(Vector3::new(
-            p[0] as f64,
-            p[1] as f64,
-            p[2] as f64,
-        ));
+        let v = accum_xform.apply(Vector3::new(p[0] as f64, p[1] as f64, p[2] as f64));
         entry.key_vertices.push([v.x, v.y, v.z]);
     }
     for (p, hint) in &lw.snap_pts {
-        let v = accum_xform.apply(Vector3::new(
-            p.x as f64,
-            p.y as f64,
-            p.z as f64,
-        ));
-        entry.snap_pts.push((
-            glam::DVec3::new(v.x, v.y, v.z),
-            *hint,
-        ));
+        let v = accum_xform.apply(Vector3::new(p.x as f64, p.y as f64, p.z as f64));
+        entry
+            .snap_pts
+            .push((glam::DVec3::new(v.x, v.y, v.z), *hint));
     }
     for tg in &lw.tangent_geoms {
         if let Some(tangent) = transform_tangent(tg, accum_xform) {
@@ -2908,20 +2874,21 @@ fn emit_wire(
         // carrying an inline `\C` / `\c` override — colour differs from the
         // wire's base — keeps it, so block-nested colour-split MTEXT stays
         // multi-colour. Per-vertex analogue of PR #301's wire-level gate.
-        let rgb = if [tv.color[0], tv.color[1], tv.color[2]]
-            == [lw.color[0], lw.color[1], lw.color[2]]
-        {
-            [final_color[0], final_color[1], final_color[2]]
-        } else {
-            [tv.color[0], tv.color[1], tv.color[2]]
-        };
-        entry.text_verts.push(crate::scene::pipeline::text_gpu::TextVertex {
-            pos: [hx, hy, hz],
-            pos_low: [lx, ly, lz],
-            uv: tv.uv,
-            color: [rgb[0], rgb[1], rgb[2], final_color[3]],
-            draw_depth: tv.draw_depth,
-        });
+        let rgb =
+            if [tv.color[0], tv.color[1], tv.color[2]] == [lw.color[0], lw.color[1], lw.color[2]] {
+                [final_color[0], final_color[1], final_color[2]]
+            } else {
+                [tv.color[0], tv.color[1], tv.color[2]]
+            };
+        entry
+            .text_verts
+            .push(crate::scene::pipeline::text_gpu::TextVertex {
+                pos: [hx, hy, hz],
+                pos_low: [lx, ly, lz],
+                uv: tv.uv,
+                color: [rgb[0], rgb[1], rgb[2], final_color[3]],
+                draw_depth: tv.draw_depth,
+            });
     }
     // Searchable runs follow the same insert transform: origin via the full
     // matrix, cap height by the mean XY scale, rotation by the transformed
@@ -2944,7 +2911,9 @@ fn emit_wire(
         let mean_scale = ((sx + sy) * 0.5).max(1e-6);
         let rot_delta = (x_axis.y).atan2(x_axis.x);
         let base_len = entry.searchable_text.len();
-        entry.searchable_text.extend(lw.searchable_text.iter().cloned());
+        entry
+            .searchable_text
+            .extend(lw.searchable_text.iter().cloned());
         crate::scene::model::wire_model::map_searchable_runs(
             &mut entry.searchable_text[base_len..],
             &|p| {
@@ -2960,22 +2929,11 @@ fn emit_wire(
     }
 }
 
-fn transform_tangent(
-    tg: &TangentGeom,
-    t: &Transform,
-) -> Option<TangentGeom> {
+fn transform_tangent(tg: &TangentGeom, t: &Transform) -> Option<TangentGeom> {
     match tg {
         TangentGeom::Line { p1, p2 } => {
-            let q1 = t.apply(Vector3::new(
-                p1[0] as f64,
-                p1[1] as f64,
-                p1[2] as f64,
-            ));
-            let q2 = t.apply(Vector3::new(
-                p2[0] as f64,
-                p2[1] as f64,
-                p2[2] as f64,
-            ));
+            let q1 = t.apply(Vector3::new(p1[0] as f64, p1[1] as f64, p1[2] as f64));
+            let q2 = t.apply(Vector3::new(p2[0] as f64, p2[1] as f64, p2[2] as f64));
             Some(TangentGeom::Line {
                 p1: [(q1.x) as f32, (q1.y) as f32, (q1.z) as f32],
                 p2: [(q2.x) as f32, (q2.y) as f32, (q2.z) as f32],
@@ -3010,10 +2968,7 @@ fn transform_tangent(
             let sx = x.length();
             let sy = y.length();
             let scale = sx.max(sy);
-            if !scale.is_finite()
-                || scale <= 1.0e-12
-                || (sx - sy).abs() > scale * 1.0e-9
-            {
+            if !scale.is_finite() || scale <= 1.0e-12 || (sx - sy).abs() > scale * 1.0e-9 {
                 return None;
             }
             let x = x / sx;
@@ -3042,10 +2997,7 @@ fn transform_tangent(
             let sx = x.length();
             let sy = y.length();
             let scale = sx.max(sy);
-            if !scale.is_finite()
-                || scale <= 1.0e-12
-                || (sx - sy).abs() > scale * 1.0e-9
-            {
+            if !scale.is_finite() || scale <= 1.0e-12 || (sx - sy).abs() > scale * 1.0e-9 {
                 return None;
             }
             let x = x / sx;
@@ -3213,8 +3165,14 @@ mod bg_resolution_tests {
     /// value on any background. (#1500)
     #[test]
     fn only_colour_seven_swaps_with_the_background() {
-        assert_eq!(adapt_to_bg([1.0, 1.0, 1.0, 1.0], LIGHT), [0.0, 0.0, 0.0, 1.0]);
-        assert_eq!(adapt_to_bg([0.0, 0.0, 0.0, 1.0], DARK), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(
+            adapt_to_bg([1.0, 1.0, 1.0, 1.0], LIGHT),
+            [0.0, 0.0, 0.0, 1.0]
+        );
+        assert_eq!(
+            adapt_to_bg([0.0, 0.0, 0.0, 1.0], DARK),
+            [1.0, 1.0, 1.0, 1.0]
+        );
         assert_eq!(adapt_to_bg(NEAR_WHITE, LIGHT), NEAR_WHITE);
         let mask = crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::Rgb {
             r: 255,
@@ -3267,10 +3225,7 @@ mod compact_nested_tests {
             add_owned(
                 &mut document,
                 twig,
-                EntityType::Insert(Insert::new(
-                    "LEAF",
-                    Vector3::new(x as f64 * 2.0, 0.0, 0.0),
-                )),
+                EntityType::Insert(Insert::new("LEAF", Vector3::new(x as f64 * 2.0, 0.0, 0.0))),
             );
         }
 
@@ -3279,10 +3234,7 @@ mod compact_nested_tests {
             add_owned(
                 &mut document,
                 root,
-                EntityType::Insert(Insert::new(
-                    "TWIG",
-                    Vector3::new(x as f64 * 20.0, 0.0, 0.0),
-                )),
+                EntityType::Insert(Insert::new("TWIG", Vector3::new(x as f64 * 20.0, 0.0, 0.0))),
             );
         }
 
@@ -3352,10 +3304,16 @@ mod compact_nested_tests {
 
         // Negative scale (-1, -1, 1), negative rotation -45 deg, distant translation (7000, 5000, 0)
         let t = Transform::from_scaling(Vector3::new(-1.0, -1.0, 1.0))
-            .then(&Transform::from_rotation(Vector3::UNIT_Z, -std::f64::consts::FRAC_PI_4))
-            .then(&Transform::from_translation(Vector3::new(7000.0, 5000.0, 0.0)));
+            .then(&Transform::from_rotation(
+                Vector3::UNIT_Z,
+                -std::f64::consts::FRAC_PI_4,
+            ))
+            .then(&Transform::from_translation(Vector3::new(
+                7000.0, 5000.0, 0.0,
+            )));
 
-        let transformed = transform_tangent(&ellipse_geom, &t).expect("transform_tangent should succeed");
+        let transformed =
+            transform_tangent(&ellipse_geom, &t).expect("transform_tangent should succeed");
         let TangentGeom::PlanarEllipse {
             center: c,
             major_axis: m,
@@ -3363,7 +3321,8 @@ mod compact_nested_tests {
             minor_axis_ratio: ratio,
             start_param: s,
             end_param: _e,
-        } = transformed else {
+        } = transformed
+        else {
             panic!("Expected PlanarEllipse");
         };
 
@@ -3385,9 +3344,7 @@ mod compact_nested_tests {
         let expected_start_pt = t.apply(orig_start_pt);
 
         let new_v = Vector3::new(n[0], n[1], n[2]).cross(&m_vec) * ratio;
-        let actual_start_pt = Vector3::new(c[0], c[1], c[2])
-            + m_vec * s.cos()
-            + new_v * s.sin();
+        let actual_start_pt = Vector3::new(c[0], c[1], c[2]) + m_vec * s.cos() + new_v * s.sin();
 
         assert!(
             (actual_start_pt - expected_start_pt).length() < 1e-9,
@@ -3437,7 +3394,10 @@ mod metrics_depth_tests {
         add_owned(
             &mut document,
             prev,
-            EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0))),
+            EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(1.0, 0.0, 0.0),
+            )),
         );
         document
             .add_entity(EntityType::Insert(Insert::new("B0", Vector3::ZERO)))
@@ -3480,7 +3440,10 @@ mod metrics_depth_tests {
         add_owned(
             &mut document,
             prev,
-            EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0))),
+            EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(1.0, 0.0, 0.0),
+            )),
         );
         document
             .add_entity(EntityType::Insert(Insert::new("B0", Vector3::ZERO)))
@@ -3496,7 +3459,10 @@ mod metrics_depth_tests {
             &HashMap::default(),
         );
         let root = cache.defns.get("B0").expect("root block built");
-        let tail = cache.defns.get(&format!("B{DEPTH}")).expect("tail block built");
+        let tail = cache
+            .defns
+            .get(&format!("B{DEPTH}"))
+            .expect("tail block built");
         assert_ne!(root.metrics.aabb_local, [0.0; 4]);
         assert_eq!(root.metrics.aabb_local, tail.metrics.aabb_local);
     }

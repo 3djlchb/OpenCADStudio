@@ -42,7 +42,8 @@ impl OpenCADStudio {
         match name.as_str() {
             "BLOCKSTATE" => {
                 let state = self.tabs[i].refedit_session.is_some() as u8;
-                self.command_line.push_output(&format!("BLOCKSTATE = {state} (read only)"));
+                self.command_line
+                    .push_output(&format!("BLOCKSTATE = {state} (read only)"));
             }
             "INSNAME" | "BLOCKNAVIGATE" => {
                 let current = if name == "INSNAME" {
@@ -52,7 +53,11 @@ impl OpenCADStudio {
                 };
                 match value {
                     Some(v) => {
-                        let v = if v == "." { String::new() } else { v.trim_matches('"').to_string() };
+                        let v = if v == "." {
+                            String::new()
+                        } else {
+                            v.trim_matches('"').to_string()
+                        };
                         if name == "INSNAME" {
                             self.insname = v;
                         } else {

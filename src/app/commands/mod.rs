@@ -5,29 +5,29 @@ use iced::Task;
 use std::path::PathBuf;
 
 mod attdef;
-mod field;
-mod count;
 mod blocks;
-mod xref_attach;
+mod blockvars;
+mod count;
 mod dim;
 pub(crate) mod display;
 mod draw;
+mod field;
 mod fileops;
 mod inquiry;
 mod layerprops;
 mod layers;
-pub(crate) mod pdf_import;
-mod point_cloud;
 mod pc_colormap;
 mod pc_extract;
-mod pdf_underlay;
 mod pdf_dialogs;
-pub(crate) mod sheet_set;
-mod xclip;
-mod blockvars;
+pub(crate) mod pdf_import;
+mod pdf_underlay;
 mod plotvars;
+mod point_cloud;
+pub(crate) mod sheet_set;
 mod styleprops;
 mod view;
+mod xclip;
+mod xref_attach;
 
 // `DrawOrderRefCommand` lives in the `view` family file but is referenced by
 // path (`commands::DrawOrderRefCommand`) from `update.rs`, so re-export it at
@@ -80,7 +80,8 @@ impl OpenCADStudio {
             .scene
             .selection
             .borrow_mut()
-            .input.right_click_entered = false;
+            .input
+            .right_click_entered = false;
         // A fresh command starts at the polar/cartesian default — clear
         // any `,`-driven reshape and locked dynamic-input values from a
         // previous command. Otherwise a bare Enter on the first point prompt
@@ -212,8 +213,9 @@ impl OpenCADStudio {
         // the single place that decides; `on_ribbon_tool_click` defers to it
         // rather than keeping a second, blunter copy (#388, #389).
         if self.tabs[i].is_start && !start_allowed(strip_command_prefixes(cmd).unwrap_or(cmd)) {
-            self.command_line
-                .push_info(crate::t!("No drawing open. Use NEW or OPEN to start a drawing.").as_ref());
+            self.command_line.push_info(
+                crate::t!("No drawing open. Use NEW or OPEN to start a drawing.").as_ref(),
+            );
             return Task::none();
         }
 
@@ -377,7 +379,13 @@ impl OpenCADStudio {
 /// Commands that may run transparently (`'PAN`, `'ZOOM …`): the navigation
 /// set, which never edits the drawing.
 fn is_transparent_capable(cmd: &str) -> bool {
-    cmd == "PAN" || cmd == "ZOOM" || cmd.starts_with("ZOOM ") || matches!(cmd, "ZW" | "ZE" | "ZA" | "ZP" | "ZI" | "ZO" | "ZD" | "ZEA" | "ZOBJ")
+    cmd == "PAN"
+        || cmd == "ZOOM"
+        || cmd.starts_with("ZOOM ")
+        || matches!(
+            cmd,
+            "ZW" | "ZE" | "ZA" | "ZP" | "ZI" | "ZO" | "ZD" | "ZEA" | "ZOBJ"
+        )
 }
 
 /// ZOOM forms that install an interactive prompt (window corners, object
@@ -414,9 +422,10 @@ fn is_spacemouse_command(cmd: &str) -> bool {
 /// source of truth: the dispatch gate refuses everything else, and the ribbon
 /// dims the tools this rejects.
 pub fn start_allowed(cmd: &str) -> bool {
-    is_spacemouse_command(cmd) || matches!(
-        cmd,
-        "NEW"
+    is_spacemouse_command(cmd)
+        || matches!(
+            cmd,
+            "NEW"
             | "OPEN"
             | "EXIT"
             | "QUIT"
@@ -437,7 +446,7 @@ pub fn start_allowed(cmd: &str) -> bool {
             // command that opens the same dialog belongs here too.
             | "OPTIONS"
             | "OP"
-    )
+        )
 }
 
 // ── Autocomplete registry — one-shot commands ──────────────────────────────
@@ -698,6 +707,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFOSNAP",
         "UOSNAP",
         "FIELDDISPLAY",
+        "SURFACEASSOCIATIVITY",
         "FIELDEVAL",
         "PDFIMPORTMODE",
         "PDFIMPORTFILTER",
@@ -971,10 +981,7 @@ mod marquee_cancel_tests {
         sel.input.left_press_time = Some(Instant::now());
         sel.input.left_dragging = true;
         sel.gesture.poly_active = true;
-        sel.gesture.poly_points = vec![
-            iced::Point::new(10.0, 10.0),
-            iced::Point::new(20.0, 30.0),
-        ];
+        sel.gesture.poly_points = vec![iced::Point::new(10.0, 10.0), iced::Point::new(20.0, 30.0)];
         sel.gesture.poly_crossing = true;
     }
 
@@ -1058,11 +1065,8 @@ mod marquee_cancel_tests {
         let mut app = fresh();
         let i = app.active_tab;
         let handle = Handle::new(42);
-        app.tabs[i].active_grip = Some(GripEdit::radius(
-            handle,
-            1,
-            glam::DVec3::new(2.0, 0.0, 0.0),
-        ));
+        app.tabs[i].active_grip =
+            Some(GripEdit::radius(handle, 1, glam::DVec3::new(2.0, 0.0, 0.0)));
         app.grip_pending = Some(GripPendingValue {
             handle,
             grip_id: 1,

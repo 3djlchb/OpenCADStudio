@@ -2,8 +2,8 @@
 //! selection, their buttons edit it.
 
 use super::*;
-use codec::entities::{Underlay, UnderlayDisplayFlags};
 use crate::ui::ribbon::UnderlayContext;
+use codec::entities::{Underlay, UnderlayDisplayFlags};
 
 impl OpenCADStudio {
     /// The selected underlays when they are all of one kind, or nothing
@@ -13,7 +13,9 @@ impl OpenCADStudio {
         for (handle, entity) in self.tabs[i].scene.selected_entities() {
             match entity {
                 codec::EntityType::Underlay(u)
-                    if out.first().is_none_or(|(_, first)| first.underlay_type == u.underlay_type) =>
+                    if out
+                        .first()
+                        .is_none_or(|(_, first)| first.underlay_type == u.underlay_type) =>
                 {
                     out.push((handle, u.clone()));
                 }
@@ -52,27 +54,37 @@ impl OpenCADStudio {
         let context = if self.tabs[i].is_start {
             None
         } else {
-            self.selected_pdf_underlays(i).first().map(|(_, u)| {
-                UnderlayContext {
+            self.selected_pdf_underlays(i)
+                .first()
+                .map(|(_, u)| UnderlayContext {
                     kind: u.underlay_type,
                     monochrome: u.flags.contains(UnderlayDisplayFlags::MONOCHROME),
                     shown: u.flags.contains(UnderlayDisplayFlags::ON),
                     snap: crate::scene::model::pdf_vector::underlay_osnap(u.underlay_type),
-                }
-            })
+                })
         };
         self.ribbon.set_underlay_context(context, xref);
-        let clouds = if self.tabs[i].is_start { Vec::new() } else { self.selected_point_clouds(i) };
-        self.ribbon.set_point_cloud_context(clouds.first().map(|(_, data)| data.show_cropping));
+        let clouds = if self.tabs[i].is_start {
+            Vec::new()
+        } else {
+            self.selected_point_clouds(i)
+        };
+        self.ribbon
+            .set_point_cloud_context(clouds.first().map(|(_, data)| data.show_cropping));
     }
 
     /// The selected point clouds, or nothing when anything else is selected.
-    fn selected_point_clouds(&self, i: usize) -> Vec<(codec::Handle, codec::entities::PointCloudExData)> {
+    fn selected_point_clouds(
+        &self,
+        i: usize,
+    ) -> Vec<(codec::Handle, codec::entities::PointCloudExData)> {
         let mut out = Vec::new();
         for (handle, entity) in self.tabs[i].scene.selected_entities() {
             match entity {
                 codec::EntityType::Extended(extended) => match &extended.data {
-                    codec::entities::ExtendedEntityData::PointCloudEx(data) => out.push((handle, data.clone())),
+                    codec::entities::ExtendedEntityData::PointCloudEx(data) => {
+                        out.push((handle, data.clone()))
+                    }
                     _ => return Vec::new(),
                 },
                 _ => return Vec::new(),
@@ -118,18 +130,26 @@ impl OpenCADStudio {
         if !done.is_empty() {
             self.push_undo_snapshot(i, "POINTCLOUDSTYLIZE");
             for handle in &done {
-                if let Some(codec::EntityType::Extended(extended)) = self.tabs[i].scene.document.get_entity_mut(*handle) {
-                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
+                if let Some(codec::EntityType::Extended(extended)) =
+                    self.tabs[i].scene.document.get_entity_mut(*handle)
+                {
+                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) =
+                        &mut extended.data
+                    {
                         crate::entities::extended::set_point_cloud_stylization(data, stylization);
                     }
                 }
             }
-            let changes: Vec<_> = done.iter().map(|h| (*h, crate::scene::ChangeKind::Modified)).collect();
+            let changes: Vec<_> = done
+                .iter()
+                .map(|h| (*h, crate::scene::ChangeKind::Modified))
+                .collect();
             self.tabs[i].scene.bump_entities(&changes);
             self.tabs[i].dirty = true;
             self.refresh_properties();
         }
-        self.command_line.push_output(&format!("{} point cloud(s) stylized", done.len()));
+        self.command_line
+            .push_output(&format!("{} point cloud(s) stylized", done.len()));
     }
 
     /// One undo step that edits every selected point cloud not locked.
@@ -150,13 +170,19 @@ impl OpenCADStudio {
         }
         self.push_undo_snapshot(i, label);
         for handle in &handles {
-            if let Some(codec::EntityType::Extended(extended)) = self.tabs[i].scene.document.get_entity_mut(*handle) {
-                if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
+            if let Some(codec::EntityType::Extended(extended)) =
+                self.tabs[i].scene.document.get_entity_mut(*handle)
+            {
+                if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data
+                {
                     edit(data);
                 }
             }
         }
-        let changes: Vec<_> = handles.iter().map(|h| (*h, crate::scene::ChangeKind::Modified)).collect();
+        let changes: Vec<_> = handles
+            .iter()
+            .map(|h| (*h, crate::scene::ChangeKind::Modified))
+            .collect();
         self.tabs[i].scene.bump_entities(&changes);
         self.tabs[i].dirty = true;
         self.refresh_properties();
@@ -164,14 +190,18 @@ impl OpenCADStudio {
 
     /// A Point Cloud Manager click: a switch writes the cloud's hidden scans
     /// and regions as one undo step; the rest is palette state.
-    pub(in crate::app) fn update_pc_manager(&mut self, message: crate::ui::window::pc_manager::PcManagerMsg) -> Task<Message> {
+    pub(in crate::app) fn update_pc_manager(
+        &mut self,
+        message: crate::ui::window::pc_manager::PcManagerMsg,
+    ) -> Task<Message> {
         use crate::scene::model::point_cloud::UNASSIGNED_OFF;
         use crate::ui::window::pc_manager::{self, PcManagerMsg, Row};
         let i = self.active_tab;
         match message {
             PcManagerMsg::Toggle(handle, row) => {
-                let Some(cloud) =
-                    pc_manager::clouds(&self.tabs[i].scene.document, &[]).into_iter().find(|c| c.handle == handle)
+                let Some(cloud) = pc_manager::clouds(&self.tabs[i].scene.document, &[])
+                    .into_iter()
+                    .find(|c| c.handle == handle)
                 else {
                     return Task::none();
                 };
@@ -181,19 +211,34 @@ impl OpenCADStudio {
                 // A scan named by its file name (automation) is the scan with that name.
                 let row = match row {
                     Row::Scan(key) => Row::Scan(
-                        cloud.scans.iter().find(|(name, _)| *name == key).map_or(key, |(_, id)| id.clone()),
+                        cloud
+                            .scans
+                            .iter()
+                            .find(|(name, _)| *name == key)
+                            .map_or(key, |(_, id)| id.clone()),
                     ),
                     row => row,
                 };
                 let hidden = pc_manager::toggled(&cloud.hidden, &cloud.scans, &row);
                 self.push_undo_snapshot(i, "POINTCLOUDMANAGER");
-                if let Some(codec::EntityType::Extended(extended)) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
-                        data.hidden_regions = if hidden.iter().any(|h| h == UNASSIGNED_OFF) { vec![0] } else { Vec::new() };
-                        data.hidden_scans = hidden.into_iter().filter(|h| h != UNASSIGNED_OFF).collect();
+                if let Some(codec::EntityType::Extended(extended)) =
+                    self.tabs[i].scene.document.get_entity_mut(handle)
+                {
+                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) =
+                        &mut extended.data
+                    {
+                        data.hidden_regions = if hidden.iter().any(|h| h == UNASSIGNED_OFF) {
+                            vec![0]
+                        } else {
+                            Vec::new()
+                        };
+                        data.hidden_scans =
+                            hidden.into_iter().filter(|h| h != UNASSIGNED_OFF).collect();
                     }
                 }
-                self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                self.tabs[i]
+                    .scene
+                    .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
                 self.tabs[i].dirty = true;
             }
             PcManagerMsg::Expand(key) => {
@@ -205,7 +250,9 @@ impl OpenCADStudio {
             PcManagerMsg::Search(text) => self.pc_manager.search = text,
             PcManagerMsg::CollapseAll => {
                 let clouds = pc_manager::clouds(&self.tabs[i].scene.document, &[]);
-                self.pc_manager.collapsed.extend(pc_manager::folding_keys(&clouds));
+                self.pc_manager
+                    .collapsed
+                    .extend(pc_manager::folding_keys(&clouds));
             }
             PcManagerMsg::ExpandAll => self.pc_manager.collapsed.clear(),
         }
@@ -276,7 +323,11 @@ impl OpenCADStudio {
                 };
                 self.tabs[i].scene.deselect_all();
                 self.tabs[i].scene.select_entity(handle, true);
-                let command = if cmd == "_XREFEDIT" { "REFEDIT" } else { "XOPEN" };
+                let command = if cmd == "_XREFEDIT" {
+                    "REFEDIT"
+                } else {
+                    "XOPEN"
+                };
                 return Some(self.dispatch_command(command));
             }
             "_XREFCLIP" => {
@@ -286,10 +337,13 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 let clipped = inserts.iter().any(|h| {
-                    crate::scene::pick::xclip::filter_handle(&self.tabs[i].scene.document, *h).is_some()
+                    crate::scene::pick::xclip::filter_handle(&self.tabs[i].scene.document, *h)
+                        .is_some()
                 });
                 let (command, first) =
-                    crate::modules::insert::xclip::XclipCommand::start_new_boundary(inserts, clipped);
+                    crate::modules::insert::xclip::XclipCommand::start_new_boundary(
+                        inserts, clipped,
+                    );
                 if let crate::command::CmdResult::ReportMeasurement(text) = first {
                     for line in text.lines() {
                         self.command_line.push_output(line);
@@ -301,7 +355,11 @@ impl OpenCADStudio {
             "_XREFUNCLIP" => {
                 let inserts = self.selected_xrefs(i);
                 if !inserts.is_empty() {
-                    self.apply_xclip(i, inserts, crate::modules::insert::xclip::XclipAction::Delete);
+                    self.apply_xclip(
+                        i,
+                        inserts,
+                        crate::modules::insert::xclip::XclipAction::Delete,
+                    );
                 }
             }
             // Point cloud tools: a crop of the first selected cloud, or the
@@ -314,7 +372,9 @@ impl OpenCADStudio {
                 if self.tabs[i].scene.is_layer_locked(handle) {
                     return Some(Task::none());
                 }
-                let Some(codec::EntityType::Extended(cloud)) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
+                let Some(codec::EntityType::Extended(cloud)) =
+                    self.tabs[i].scene.document.get_entity(handle).cloned()
+                else {
                     return Some(Task::none());
                 };
                 let option = match cmd {
@@ -322,7 +382,9 @@ impl OpenCADStudio {
                     "_PCCROPCIRC" => "C",
                     _ => "",
                 };
-                let command = crate::modules::insert::pc_crop::PointCloudCropCommand::for_cloud(handle, *cloud, option);
+                let command = crate::modules::insert::pc_crop::PointCloudCropCommand::for_cloud(
+                    handle, *cloud, option,
+                );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
@@ -349,20 +411,28 @@ impl OpenCADStudio {
                 if handles.is_empty() {
                     return Some(self.finish_dispatch(cmd));
                 }
-                let command = crate::modules::insert::pc_stylize::PointCloudStylizeCommand::new(handles);
+                let command =
+                    crate::modules::insert::pc_stylize::PointCloudStylizeCommand::new(handles);
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
             c if c.starts_with("_PCSTYLIZEAPPLY ") => {
                 let mut parts = c.split_whitespace().skip(1);
                 let stylization: i16 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(1);
-                let handles: Vec<codec::Handle> =
-                    parts.filter_map(|h| u64::from_str_radix(h, 16).ok()).map(codec::Handle::new).collect();
+                let handles: Vec<codec::Handle> = parts
+                    .filter_map(|h| u64::from_str_radix(h, 16).ok())
+                    .map(codec::Handle::new)
+                    .collect();
                 self.stylize_point_clouds(i, &handles, stylization);
             }
             "_PCCROPSHOW" => {
-                let on = !self.selected_point_clouds(i).first().is_some_and(|(_, data)| data.show_cropping);
-                self.edit_selected_point_clouds(i, "POINTCLOUDCROP", |data| data.show_cropping = on);
+                let on = !self
+                    .selected_point_clouds(i)
+                    .first()
+                    .is_some_and(|(_, data)| data.show_cropping);
+                self.edit_selected_point_clouds(i, "POINTCLOUDCROP", |data| {
+                    data.show_cropping = on
+                });
             }
             "_PCCROPINVERT" => self.edit_selected_point_clouds(i, "POINTCLOUDCROP", |data| {
                 for crop in &mut data.croppings {
@@ -375,7 +445,8 @@ impl OpenCADStudio {
                 let id = crate::ui::dock::PanelId::PointCloudManager;
                 self.pc_manager.show = true;
                 if self.dock.location(id).is_none() {
-                    self.dock.dock(id, crate::app::config::DockSide::Right, usize::MAX);
+                    self.dock
+                        .dock(id, crate::app::config::DockSide::Right, usize::MAX);
                 }
                 self.dock_expanded = Some(id);
             }
@@ -385,7 +456,8 @@ impl OpenCADStudio {
                     self.dock_expanded = None;
                 }
             }
-            "_PCUNCROP" =>self.edit_selected_point_clouds(i, "POINTCLOUDUNCROP", |data| data.croppings.clear()),
+            "_PCUNCROP" => self
+                .edit_selected_point_clouds(i, "POINTCLOUDUNCROP", |data| data.croppings.clear()),
             "_PDFULUNCLIP" => {
                 self.edit_selected_underlays(i, "PDFCLIP", |u| {
                     u.clip_boundary_vertices.clear();
@@ -400,7 +472,9 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 };
                 let (command, first) =
-                    crate::modules::insert::pdf_clip::PdfClipCommand::new_boundary(handle, underlay);
+                    crate::modules::insert::pdf_clip::PdfClipCommand::new_boundary(
+                        handle, underlay,
+                    );
                 if let crate::command::CmdResult::ReportMeasurement(text) = first {
                     for line in text.lines() {
                         self.command_line.push_output(line);
@@ -414,7 +488,8 @@ impl OpenCADStudio {
                 let Some((handle, _)) = self.selected_pdf_underlays(i).into_iter().next() else {
                     return Some(Task::none());
                 };
-                let command = crate::modules::insert::pdf_import::PdfImportCommand::for_underlay(handle);
+                let command =
+                    crate::modules::insert::pdf_import::PdfImportCommand::for_underlay(handle);
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }

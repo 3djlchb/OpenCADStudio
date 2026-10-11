@@ -25,7 +25,10 @@ fn definitions_dictionary(document: &mut codec::CadDocument) -> Option<Handle> {
         return None;
     };
     if let Some(existing) = root_dictionary.get(DEFINITIONS) {
-        if matches!(document.objects.get(&existing), Some(ObjectType::Dictionary(_))) {
+        if matches!(
+            document.objects.get(&existing),
+            Some(ObjectType::Dictionary(_))
+        ) {
             return Some(existing);
         }
     }
@@ -33,7 +36,9 @@ fn definitions_dictionary(document: &mut codec::CadDocument) -> Option<Handle> {
     let mut dictionary = Dictionary::new();
     dictionary.handle = handle;
     dictionary.owner = root;
-    document.objects.insert(handle, ObjectType::Dictionary(dictionary));
+    document
+        .objects
+        .insert(handle, ObjectType::Dictionary(dictionary));
     if let Some(ObjectType::Dictionary(root_dictionary)) = document.objects.get_mut(&root) {
         root_dictionary.add_entry(DEFINITIONS, handle);
     }
@@ -50,27 +55,41 @@ fn ensure_definition(
     points: &crate::scene::model::point_cloud::CloudPoints,
 ) -> (Handle, Vector3, Vector3) {
     let [lo, hi] = points.bounds.unwrap_or_default();
-    let (min, max) = (Vector3::new(lo[0], lo[1], lo[2]), Vector3::new(hi[0], hi[1], hi[2]));
-    let same = |stored: &str| stored.replace('/', "\\").eq_ignore_ascii_case(&path.replace('/', "\\"));
-    let existing = document.objects.iter().find_map(|(handle, object)| match object {
-        ObjectType::ClassObject(object) => match &object.data {
-            ClassObjectData::PointCloudDefinitionEx(def) if same(&def.source_filename) => Some(*handle),
+    let (min, max) = (
+        Vector3::new(lo[0], lo[1], lo[2]),
+        Vector3::new(hi[0], hi[1], hi[2]),
+    );
+    let same = |stored: &str| {
+        stored
+            .replace('/', "\\")
+            .eq_ignore_ascii_case(&path.replace('/', "\\"))
+    };
+    let existing = document
+        .objects
+        .iter()
+        .find_map(|(handle, object)| match object {
+            ObjectType::ClassObject(object) => match &object.data {
+                ClassObjectData::PointCloudDefinitionEx(def) if same(&def.source_filename) => {
+                    Some(*handle)
+                }
+                _ => None,
+            },
             _ => None,
-        },
-        _ => None,
-    });
+        });
     if let Some(handle) = existing {
         return (handle, min, max);
     }
     let handle = document.allocate_handle();
-    let mut definition = ClassObject::new(ClassObjectData::PointCloudDefinitionEx(PointCloudDefinition {
-        class_version: 1,
-        source_filename: path.to_string(),
-        is_loaded: true,
-        point_count: points.positions.len() as i64,
-        extents_min: min,
-        extents_max: max,
-    }));
+    let mut definition = ClassObject::new(ClassObjectData::PointCloudDefinitionEx(
+        PointCloudDefinition {
+            class_version: 1,
+            source_filename: path.to_string(),
+            is_loaded: true,
+            point_count: points.positions.len() as i64,
+            extents_min: min,
+            extents_max: max,
+        },
+    ));
     definition.handle = handle;
     if let Some(dictionary) = definitions_dictionary(document) {
         definition.owner = dictionary;
@@ -85,14 +104,22 @@ fn ensure_definition(
             entries.add_entry(key, handle);
         }
     }
-    document.objects.insert(handle, ObjectType::ClassObject(definition));
+    document
+        .objects
+        .insert(handle, ObjectType::ClassObject(definition));
     (handle, min, max)
 }
 
 impl OpenCADStudio {
-    pub(crate) fn attach_point_cloud(&mut self, i: usize, label: String, placement: PointCloudPlacement) {
+    pub(crate) fn attach_point_cloud(
+        &mut self,
+        i: usize,
+        label: String,
+        placement: PointCloudPlacement,
+    ) {
         let Some(points) = crate::scene::model::point_cloud::load(&placement.path) else {
-            self.command_line.push_error("All scans are not found or invalid.");
+            self.command_line
+                .push_error("All scans are not found or invalid.");
             self.command_line.push_error("Attach point cloud failed");
             return;
         };
@@ -106,7 +133,12 @@ impl OpenCADStudio {
             None if options.relative => host
                 .as_deref()
                 .and_then(|host| {
-                    crate::io::xref_model::to_pathtype_result(&path, host, crate::io::xref_model::Pathtype::Relative).ok()
+                    crate::io::xref_model::to_pathtype_result(
+                        &path,
+                        host,
+                        crate::io::xref_model::Pathtype::Relative,
+                    )
+                    .ok()
                 })
                 .map(|relative| relative.replace('/', "\\"))
                 .unwrap_or_else(|| path.clone()),
@@ -125,10 +157,12 @@ impl OpenCADStudio {
         let document = &mut self.tabs[i].scene.document;
         // POINTCLOUDLOCK 1 attaches clouds locked.
         let locked = options.locked.unwrap_or_else(|| {
-            crate::scene::model::point_cloud::setting("POINTCLOUDLOCK")
-                .is_some_and(|setting| crate::scene::model::point_cloud::setting_value(document, setting) == 1)
+            crate::scene::model::point_cloud::setting("POINTCLOUDLOCK").is_some_and(|setting| {
+                crate::scene::model::point_cloud::setting_value(document, setting) == 1
+            })
         });
-        let (definition, extents_min, extents_max) = ensure_definition(document, &stored, &name, &points);
+        let (definition, extents_min, extents_max) =
+            ensure_definition(document, &stored, &name, &points);
         let [x, y, z] = placement.axes;
         // As the reference creates a cloud: scan colours, the intensity
         // range 0–100 as a gradient, crops shown.
@@ -176,18 +210,26 @@ impl OpenCADStudio {
             ));
             object.handle = reactor;
             object.owner = cloud;
-            document.objects.insert(reactor, ObjectType::ClassObject(object));
-            if let Some(ObjectType::ClassObject(definition)) = document.objects.get_mut(&definition) {
+            document
+                .objects
+                .insert(reactor, ObjectType::ClassObject(object));
+            if let Some(ObjectType::ClassObject(definition)) = document.objects.get_mut(&definition)
+            {
                 definition.reactors.push(reactor);
             }
             if let Some(codec::EntityType::Extended(extended)) = document.get_entity_mut(cloud) {
-                if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
+                if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data
+                {
                     data.reactor_handle = reactor;
                 }
             }
             self.command_line.push_output("1 point cloud attached");
             if relative_later {
-                self.tabs[i].xref_relative_on_save.insert(format!("{}{:X}", crate::io::xref::POINT_CLOUD_KEY, definition.value()));
+                self.tabs[i].xref_relative_on_save.insert(format!(
+                    "{}{:X}",
+                    crate::io::xref::POINT_CLOUD_KEY,
+                    definition.value()
+                ));
             }
             if options.zoom {
                 self.tabs[i].scene.zoom_to_entities(&[cloud]);

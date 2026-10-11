@@ -178,7 +178,11 @@ pub fn page_thumbs(path: &str) -> Vec<PageThumb> {
             let image = page_size_inches(path, &label).and_then(|(w, h)| {
                 let dpi = (220.0 / w.max(h).max(0.1)) as f32;
                 let page = rasterize_page_at_dpi(path, &label, dpi)?;
-                Some(image::Handle::from_rgba(page.width, page.height, page.pixels.to_vec()))
+                Some(image::Handle::from_rgba(
+                    page.width,
+                    page.height,
+                    page.pixels.to_vec(),
+                ))
             });
             PageThumb { label, image }
         })
@@ -195,9 +199,14 @@ pub fn item_thumbs(kind: codec::entities::UnderlayType, path: &str) -> Vec<PageT
         .unwrap_or_default()
         .into_iter()
         .map(|label| {
-            let backdrop = underlay_vector::Backdrop { max_channel: 0, light: false };
+            let backdrop = underlay_vector::Backdrop {
+                max_channel: 0,
+                light: false,
+            };
             let image = underlay_vector::display_raster(kind, path, &label, &[], 220.0, backdrop)
-                .map(|page| image::Handle::from_rgba(page.width, page.height, page.pixels.to_vec()));
+                .map(|page| {
+                    image::Handle::from_rgba(page.width, page.height, page.pixels.to_vec())
+                });
             PageThumb { label, image }
         })
         .collect()
@@ -205,9 +214,19 @@ pub fn item_thumbs(kind: codec::entities::UnderlayType, path: &str) -> Vec<PageT
 
 /// Ctrl adds or removes a page, Shift takes the range from the last click,
 /// a plain click selects that page alone.
-pub fn click_page(selected: &mut Vec<usize>, anchor: &mut usize, page: usize, ctrl: bool, shift: bool) {
+pub fn click_page(
+    selected: &mut Vec<usize>,
+    anchor: &mut usize,
+    page: usize,
+    ctrl: bool,
+    shift: bool,
+) {
     if shift {
-        let (a, b) = if *anchor <= page { (*anchor, page) } else { (page, *anchor) };
+        let (a, b) = if *anchor <= page {
+            (*anchor, page)
+        } else {
+            (page, *anchor)
+        };
         *selected = (a..=b).collect();
     } else if ctrl {
         match selected.iter().position(|p| *p == page) {
@@ -266,7 +285,11 @@ pub(crate) fn well_style(theme: &Theme) -> container::Style {
 /// A titled card.
 fn card<'a>(title: String, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(
-        column![text(title.to_uppercase()).size(10).style(accent_text), content.into()].spacing(8),
+        column![
+            text(title.to_uppercase()).size(10).style(accent_text),
+            content.into()
+        ]
+        .spacing(8),
     )
     .padding([10, 12])
     .width(Fill)
@@ -333,7 +356,10 @@ fn field<'a>(
         input = input.on_input(on_input);
     }
     row![
-        text(label).size(11).style(muted_style).width(Length::Fixed(label_width)),
+        text(label)
+            .size(11)
+            .style(muted_style)
+            .width(Length::Fixed(label_width)),
         input
     ]
     .spacing(6)
@@ -346,13 +372,22 @@ fn info_line<'a>(label: String, value: &'a str) -> Element<'a, Message> {
     const MAX: usize = 70;
     let count = value.chars().count();
     let shown = if count > MAX {
-        format!("…{}", value.chars().skip(count - (MAX - 1)).collect::<String>())
+        format!(
+            "…{}",
+            value.chars().skip(count - (MAX - 1)).collect::<String>()
+        )
     } else {
         value.to_string()
     };
     row![
-        text(label).size(11).style(muted_style).width(Length::Fixed(96.0)),
-        text(shown).size(11).width(Fill).wrapping(iced::advanced::text::Wrapping::None),
+        text(label)
+            .size(11)
+            .style(muted_style)
+            .width(Length::Fixed(96.0)),
+        text(shown)
+            .size(11)
+            .width(Fill)
+            .wrapping(iced::advanced::text::Wrapping::None),
     ]
     .spacing(6)
     .into()
@@ -420,13 +455,15 @@ fn page_tiles<'a>(
             container(
                 row![
                     tick,
-                    text(page.label.clone()).size(11).style(move |theme: &Theme| text::Style {
-                        color: Some(if chosen {
-                            theme.palette().primary.base.color
-                        } else {
-                            theme.palette().background.base.text.scale_alpha(0.68)
-                        }),
-                    })
+                    text(page.label.clone())
+                        .size(11)
+                        .style(move |theme: &Theme| text::Style {
+                            color: Some(if chosen {
+                                theme.palette().primary.base.color
+                            } else {
+                                theme.palette().background.base.text.scale_alpha(0.68)
+                            }),
+                        })
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -586,8 +623,8 @@ pub fn view_attach<'a>(
         UnderlayType::Dgn => crate::tf!("{count} models", count = state.pages.len()),
     };
     let count = container(text(count_text).size(11).style(accent_text))
-    .padding([4, 10])
-    .style(well_style);
+        .padding([4, 10])
+        .style(well_style);
     let file = row![
         name_combo,
         count,
@@ -602,18 +639,34 @@ pub fn view_attach<'a>(
     // Pages: the thumbnails, then which ones are chosen.
     let chosen = state.page_labels().join(", ");
     let (items_title, chosen_text, size_label) = match state.kind {
-        UnderlayType::Pdf => (t!("Pages"), crate::tf!("Selected pages: {pages}", pages = chosen), t!("Page size:")),
-        UnderlayType::Dwf => (t!("Sheets"), crate::tf!("Selected sheet: {sheet}", sheet = chosen), t!("Sheet size:")),
-        UnderlayType::Dgn => (t!("Models"), crate::tf!("Selected model: {model}", model = chosen), t!("Model size:")),
+        UnderlayType::Pdf => (
+            t!("Pages"),
+            crate::tf!("Selected pages: {pages}", pages = chosen),
+            t!("Page size:"),
+        ),
+        UnderlayType::Dwf => (
+            t!("Sheets"),
+            crate::tf!("Selected sheet: {sheet}", sheet = chosen),
+            t!("Sheet size:"),
+        ),
+        UnderlayType::Dgn => (
+            t!("Models"),
+            crate::tf!("Selected model: {model}", model = chosen),
+            t!("Model size:"),
+        ),
     };
     let pages = card(
         items_title.into_owned(),
         column![
-            container(page_tiles(&state.pages, &state.selected, PdfDialogMsg::AttachPage))
-                .padding(6)
-                .height(Length::Fixed(226.0))
-                .width(Fill)
-                .style(well_style),
+            container(page_tiles(
+                &state.pages,
+                &state.selected,
+                PdfDialogMsg::AttachPage
+            ))
+            .padding(6)
+            .height(Length::Fixed(226.0))
+            .width(Fill)
+            .style(well_style),
             text(chosen_text).size(11).style(muted_style),
         ]
         .spacing(6),
@@ -624,9 +677,15 @@ pub fn view_attach<'a>(
     let on_screen = t!("On screen").into_owned();
     let insert_enabled = !state.insert_on_screen;
     let xyz = row![
-        field("X".into(), &state.insert[0], insert_enabled, 12.0, |v| msg(PdfDialogMsg::AttachInsert(0, v))),
-        field("Y".into(), &state.insert[1], insert_enabled, 12.0, |v| msg(PdfDialogMsg::AttachInsert(1, v))),
-        field("Z".into(), &state.insert[2], insert_enabled, 12.0, |v| msg(PdfDialogMsg::AttachInsert(2, v))),
+        field("X".into(), &state.insert[0], insert_enabled, 12.0, |v| msg(
+            PdfDialogMsg::AttachInsert(0, v)
+        )),
+        field("Y".into(), &state.insert[1], insert_enabled, 12.0, |v| msg(
+            PdfDialogMsg::AttachInsert(1, v)
+        )),
+        field("Z".into(), &state.insert[2], insert_enabled, 12.0, |v| msg(
+            PdfDialogMsg::AttachInsert(2, v)
+        )),
     ]
     .spacing(8);
     let heading = |label: std::borrow::Cow<'static, str>, on: bool, message: Message| {
@@ -650,13 +709,27 @@ pub fn view_attach<'a>(
                 state.scale_on_screen,
                 msg(PdfDialogMsg::AttachScaleOnScreen(!state.scale_on_screen))
             ),
-            field(String::new(), &state.scale, !state.scale_on_screen, 0.0, |v| msg(PdfDialogMsg::AttachScale(v))),
+            field(
+                String::new(),
+                &state.scale,
+                !state.scale_on_screen,
+                0.0,
+                |v| msg(PdfDialogMsg::AttachScale(v))
+            ),
             heading(
                 t!("Rotation"),
                 state.rotation_on_screen,
-                msg(PdfDialogMsg::AttachRotationOnScreen(!state.rotation_on_screen))
+                msg(PdfDialogMsg::AttachRotationOnScreen(
+                    !state.rotation_on_screen
+                ))
             ),
-            field(String::new(), &state.rotation, !state.rotation_on_screen, 0.0, |v| msg(PdfDialogMsg::AttachRotation(v))),
+            field(
+                String::new(),
+                &state.rotation,
+                !state.rotation_on_screen,
+                0.0,
+                |v| msg(PdfDialogMsg::AttachRotation(v))
+            ),
         ]
         .spacing(6),
     );
@@ -664,7 +737,10 @@ pub fn view_attach<'a>(
     let path = card(
         t!("Path type").into_owned(),
         segmented(
-            PathTypeChoice::ALL.iter().map(|c| (*c, c.to_string())).collect(),
+            PathTypeChoice::ALL
+                .iter()
+                .map(|c| (*c, c.to_string()))
+                .collect(),
             state.path_type,
             PdfDialogMsg::AttachPathType,
         ),
@@ -680,14 +756,19 @@ pub fn view_attach<'a>(
         .spacing(4),
     );
 
-    let mut right = column![placement, path].spacing(8).width(Length::FillPortion(2));
+    let mut right = column![placement, path]
+        .spacing(8)
+        .width(Length::FillPortion(2));
     // A DGN model is attached in its master or its sub units.
     if state.kind == UnderlayType::Dgn {
         right = right.push(card(
             t!("Conversion units").into_owned(),
             column![
                 segmented(
-                    vec![(false, t!("Master units").into_owned()), (true, t!("Sub units").into_owned())],
+                    vec![
+                        (false, t!("Master units").into_owned()),
+                        (true, t!("Sub units").into_owned())
+                    ],
                     state.sub_units,
                     PdfDialogMsg::AttachSubUnits,
                 ),
@@ -702,16 +783,22 @@ pub fn view_attach<'a>(
         ));
     }
     let body = row![
-        column![pages, details].spacing(8).width(Length::FillPortion(3)),
+        column![pages, details]
+            .spacing(8)
+            .width(Length::FillPortion(3)),
         right,
     ]
     .spacing(10);
 
-    column![file, body, footer("attach", None, t!("Attach"), PdfDialogMsg::AttachOk)]
-        .spacing(10)
-        .padding([10, 12])
-        .width(sizing.width)
-        .into()
+    column![
+        file,
+        body,
+        footer("attach", None, t!("Attach"), PdfDialogMsg::AttachOk)
+    ]
+    .spacing(10)
+    .padding([10, 12])
+    .width(sizing.width)
+    .into()
 }
 
 // ── Attach Point Cloud ─────────────────────────────────────────────────────
@@ -747,7 +834,9 @@ pub struct PointCloudAttachState {
 
 /// A switch that cannot be used here: dimmed, not pressable.
 fn off_chip<'a>(label: String) -> Element<'a, Message> {
-    container(text(label).size(11).style(muted_style)).padding([4, 10]).into()
+    container(text(label).size(11).style(muted_style))
+        .padding([4, 10])
+        .into()
 }
 
 pub fn view_point_cloud_attach<'a>(
@@ -755,8 +844,14 @@ pub fn view_point_cloud_attach<'a>(
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let file = row![
-        text_input("", &state.name).size(12).padding([5, 8]).width(Fill).style(field_style),
-        container(text(state.summary.clone()).size(11).style(accent_text)).padding([4, 10]).style(well_style),
+        text_input("", &state.name)
+            .size(12)
+            .padding([5, 8])
+            .width(Fill)
+            .style(field_style),
+        container(text(state.summary.clone()).size(11).style(accent_text))
+            .padding([4, 10])
+            .style(well_style),
         button(text(t!("Browse...")).size(11))
             .on_press(msg(PdfDialogMsg::CloudBrowse))
             .style(button_style(false))
@@ -771,7 +866,11 @@ pub fn view_point_cloud_attach<'a>(
     };
     let preview = card(
         t!("Preview").into_owned(),
-        container(picture).padding(6).height(Length::Fixed(226.0)).width(Fill).style(well_style),
+        container(picture)
+            .padding(6)
+            .height(Length::Fixed(226.0))
+            .width(Fill)
+            .style(well_style),
     );
 
     let details = card(
@@ -789,13 +888,23 @@ pub fn view_point_cloud_attach<'a>(
 
     let on_screen = t!("On screen").into_owned();
     let heading = |label: std::borrow::Cow<'static, str>, on: bool, message: Message| {
-        row![text(label).size(11).width(Fill), chip(on_screen.clone(), on, message)].align_y(iced::Center)
+        row![
+            text(label).size(11).width(Fill),
+            chip(on_screen.clone(), on, message)
+        ]
+        .align_y(iced::Center)
     };
     let insert_enabled = !state.insert_on_screen;
     let xyz = row![
-        field("X".into(), &state.insert[0], insert_enabled, 12.0, |v| msg(PdfDialogMsg::CloudInsert(0, v))),
-        field("Y".into(), &state.insert[1], insert_enabled, 12.0, |v| msg(PdfDialogMsg::CloudInsert(1, v))),
-        field("Z".into(), &state.insert[2], insert_enabled, 12.0, |v| msg(PdfDialogMsg::CloudInsert(2, v))),
+        field("X".into(), &state.insert[0], insert_enabled, 12.0, |v| msg(
+            PdfDialogMsg::CloudInsert(0, v)
+        )),
+        field("Y".into(), &state.insert[1], insert_enabled, 12.0, |v| msg(
+            PdfDialogMsg::CloudInsert(1, v)
+        )),
+        field("Z".into(), &state.insert[2], insert_enabled, 12.0, |v| msg(
+            PdfDialogMsg::CloudInsert(2, v)
+        )),
     ]
     .spacing(8);
     let placement = card(
@@ -807,21 +916,42 @@ pub fn view_point_cloud_attach<'a>(
                 msg(PdfDialogMsg::CloudInsertOnScreen(!state.insert_on_screen))
             ),
             xyz,
-            heading(t!("Scale"), state.scale_on_screen, msg(PdfDialogMsg::CloudScaleOnScreen(!state.scale_on_screen))),
-            field(String::new(), &state.scale, !state.scale_on_screen, 0.0, |v| msg(PdfDialogMsg::CloudScale(v))),
+            heading(
+                t!("Scale"),
+                state.scale_on_screen,
+                msg(PdfDialogMsg::CloudScaleOnScreen(!state.scale_on_screen))
+            ),
+            field(
+                String::new(),
+                &state.scale,
+                !state.scale_on_screen,
+                0.0,
+                |v| msg(PdfDialogMsg::CloudScale(v))
+            ),
             heading(
                 t!("Rotation"),
                 state.rotation_on_screen,
-                msg(PdfDialogMsg::CloudRotationOnScreen(!state.rotation_on_screen))
+                msg(PdfDialogMsg::CloudRotationOnScreen(
+                    !state.rotation_on_screen
+                ))
             ),
-            field(String::new(), &state.rotation, !state.rotation_on_screen, 0.0, |v| msg(PdfDialogMsg::CloudRotation(v))),
+            field(
+                String::new(),
+                &state.rotation,
+                !state.rotation_on_screen,
+                0.0,
+                |v| msg(PdfDialogMsg::CloudRotation(v))
+            ),
         ]
         .spacing(6),
     );
     let path = card(
         t!("Path type").into_owned(),
         segmented(
-            PathTypeChoice::ALL.iter().map(|c| (*c, c.to_string())).collect(),
+            PathTypeChoice::ALL
+                .iter()
+                .map(|c| (*c, c.to_string()))
+                .collect(),
             state.path_type,
             PdfDialogMsg::CloudPathType,
         ),
@@ -830,22 +960,38 @@ pub fn view_point_cloud_attach<'a>(
         t!("Options").into_owned(),
         column![
             off_chip(t!("Use geographic location").into_owned()),
-            chip(t!("Lock point cloud").into_owned(), state.lock, msg(PdfDialogMsg::CloudLock(!state.lock))),
-            chip(t!("Zoom to point cloud").into_owned(), state.zoom, msg(PdfDialogMsg::CloudZoom(!state.zoom))),
+            chip(
+                t!("Lock point cloud").into_owned(),
+                state.lock,
+                msg(PdfDialogMsg::CloudLock(!state.lock))
+            ),
+            chip(
+                t!("Zoom to point cloud").into_owned(),
+                state.zoom,
+                msg(PdfDialogMsg::CloudZoom(!state.zoom))
+            ),
         ]
         .spacing(6),
     );
 
     let body = row![
-        column![preview, details].spacing(8).width(Length::FillPortion(3)),
-        column![placement, path, options].spacing(8).width(Length::FillPortion(2)),
+        column![preview, details]
+            .spacing(8)
+            .width(Length::FillPortion(3)),
+        column![placement, path, options]
+            .spacing(8)
+            .width(Length::FillPortion(2)),
     ]
     .spacing(10);
-    column![file, body, footer("pointcloud", None, t!("Attach"), PdfDialogMsg::CloudOk)]
-        .spacing(10)
-        .padding([10, 12])
-        .width(sizing.width)
-        .into()
+    column![
+        file,
+        body,
+        footer("pointcloud", None, t!("Attach"), PdfDialogMsg::CloudOk)
+    ]
+    .spacing(10)
+    .padding([10, 12])
+    .width(sizing.width)
+    .into()
 }
 
 // ── Underlay Layers ────────────────────────────────────────────────────────
@@ -872,11 +1018,13 @@ pub fn view_layers<'a>(
 ) -> Element<'a, Message> {
     let names: Vec<String> = state.targets.iter().map(|t| t.name.clone()).collect();
     let target = state.targets.get(state.current);
-    let underlay = pick_list(target.map(|t| t.name.clone()), names, |n: &String| n.clone())
-        .on_select(|n| msg(PdfDialogMsg::LayersUnderlay(n)))
-        .text_size(12)
-        .padding([5, 8])
-        .width(Fill);
+    let underlay = pick_list(target.map(|t| t.name.clone()), names, |n: &String| {
+        n.clone()
+    })
+    .on_select(|n| msg(PdfDialogMsg::LayersUnderlay(n)))
+    .text_size(12)
+    .padding([5, 8])
+    .width(Fill);
     let search = text_input(t!("Search for layer").as_ref(), &state.search)
         .on_input(|s| msg(PdfDialogMsg::LayersSearch(s)))
         .size(11)
@@ -885,9 +1033,13 @@ pub fn view_layers<'a>(
         .style(field_style);
 
     let (total, hidden) = target.map_or((0, 0), |t| (t.layers.len(), t.hidden.len()));
-    let summary = text(crate::tf!("{count} layers, {hidden} hidden", count = total, hidden = hidden))
-        .size(11)
-        .style(muted_style);
+    let summary = text(crate::tf!(
+        "{count} layers, {hidden} hidden",
+        count = total,
+        hidden = hidden
+    ))
+    .size(11)
+    .style(muted_style);
 
     // Each layer: its name and an On / Off switch.
     let body: Element<'a, Message> = match target {
@@ -910,8 +1062,7 @@ pub fn view_layers<'a>(
                     .padding([3, 6])
                     .width(Length::Fixed(64.0));
                     container(
-                        row![text(name.clone()).size(12).width(Fill), switch]
-                            .align_y(iced::Center),
+                        row![text(name.clone()).size(12).width(Fill), switch].align_y(iced::Center),
                     )
                     .padding([5, 10])
                     .style(well_style)
@@ -921,19 +1072,28 @@ pub fn view_layers<'a>(
                 .height(Fill)
                 .into()
         }
-        _ => container(text(t!("This file does not contain any layers")).size(11).style(muted_style))
-            .width(Fill)
-            .height(Fill)
-            .align_x(iced::Center)
-            .align_y(iced::Center)
-            .into(),
+        _ => container(
+            text(t!("This file does not contain any layers"))
+                .size(11)
+                .style(muted_style),
+        )
+        .width(Fill)
+        .height(Fill)
+        .align_x(iced::Center)
+        .align_y(iced::Center)
+        .into(),
     };
 
     column![
         card(t!("Underlay").into_owned(), underlay),
         card(
             t!("Layers").into_owned(),
-            column![search, summary, container(body).height(Length::Fixed(250.0))].spacing(6)
+            column![
+                search,
+                summary,
+                container(body).height(Length::Fixed(250.0))
+            ]
+            .spacing(6)
         ),
         footer("layers", None, t!("Apply"), PdfDialogMsg::LayersOk),
     ]
@@ -946,19 +1106,41 @@ pub fn view_layers<'a>(
 // ── PDF Import Settings ────────────────────────────────────────────────────
 
 /// Content as chips, layers as a segmented choice, options as chips.
-fn settings_cards<'a>(s: &'a PdfImportSettings) -> (Element<'a, Message>, Element<'a, Message>, Element<'a, Message>) {
+fn settings_cards<'a>(
+    s: &'a PdfImportSettings,
+) -> (
+    Element<'a, Message>,
+    Element<'a, Message>,
+    Element<'a, Message>,
+) {
     let fills = if s.vector {
-        chip(t!("Solid fills").into_owned(), s.fills, msg(PdfDialogMsg::Fills(!s.fills)))
+        chip(
+            t!("Solid fills").into_owned(),
+            s.fills,
+            msg(PdfDialogMsg::Fills(!s.fills)),
+        )
     } else {
         chip(t!("Solid fills").into_owned(), s.fills, Message::Noop)
     };
     let content = card(
         t!("PDF data to import").into_owned(),
         row![
-            chip(t!("Vector geometry").into_owned(), s.vector, msg(PdfDialogMsg::Vector(!s.vector))),
+            chip(
+                t!("Vector geometry").into_owned(),
+                s.vector,
+                msg(PdfDialogMsg::Vector(!s.vector))
+            ),
             fills,
-            chip(t!("TrueType text").into_owned(), s.text, msg(PdfDialogMsg::Text(!s.text))),
-            chip(t!("Raster images").into_owned(), s.raster, msg(PdfDialogMsg::Raster(!s.raster))),
+            chip(
+                t!("TrueType text").into_owned(),
+                s.text,
+                msg(PdfDialogMsg::Text(!s.text))
+            ),
+            chip(
+                t!("Raster images").into_owned(),
+                s.raster,
+                msg(PdfDialogMsg::Raster(!s.raster))
+            ),
         ]
         .spacing(6)
         .wrap()
@@ -969,7 +1151,10 @@ fn settings_cards<'a>(s: &'a PdfImportSettings) -> (Element<'a, Message>, Elemen
         segmented(
             vec![
                 (ImportLayers::Pdf, t!("Use PDF layers").into_owned()),
-                (ImportLayers::Object, t!("Create object layers").into_owned()),
+                (
+                    ImportLayers::Object,
+                    t!("Create object layers").into_owned(),
+                ),
                 (ImportLayers::Current, t!("Current layer").into_owned()),
             ],
             s.layers,
@@ -979,11 +1164,31 @@ fn settings_cards<'a>(s: &'a PdfImportSettings) -> (Element<'a, Message>, Elemen
     let options = card(
         t!("Import options").into_owned(),
         row![
-            chip(t!("Import as block").into_owned(), s.as_block, msg(PdfDialogMsg::AsBlock(!s.as_block))),
-            chip(t!("Join line and arc segments").into_owned(), s.join, msg(PdfDialogMsg::Join(!s.join))),
-            chip(t!("Convert solid fills to hatches").into_owned(), s.hatches, msg(PdfDialogMsg::Hatches(!s.hatches))),
-            chip(t!("Apply lineweight properties").into_owned(), s.lineweights, msg(PdfDialogMsg::Lineweights(!s.lineweights))),
-            chip(t!("Infer linetypes from collinear dashes").into_owned(), s.linetypes, msg(PdfDialogMsg::Linetypes(!s.linetypes))),
+            chip(
+                t!("Import as block").into_owned(),
+                s.as_block,
+                msg(PdfDialogMsg::AsBlock(!s.as_block))
+            ),
+            chip(
+                t!("Join line and arc segments").into_owned(),
+                s.join,
+                msg(PdfDialogMsg::Join(!s.join))
+            ),
+            chip(
+                t!("Convert solid fills to hatches").into_owned(),
+                s.hatches,
+                msg(PdfDialogMsg::Hatches(!s.hatches))
+            ),
+            chip(
+                t!("Apply lineweight properties").into_owned(),
+                s.lineweights,
+                msg(PdfDialogMsg::Lineweights(!s.lineweights))
+            ),
+            chip(
+                t!("Infer linetypes from collinear dashes").into_owned(),
+                s.linetypes,
+                msg(PdfDialogMsg::Linetypes(!s.linetypes))
+            ),
         ]
         .spacing(6)
         .wrap()
@@ -1005,7 +1210,12 @@ pub fn view_import_settings<'a>(
         content,
         layers,
         options,
-        footer("settings", Some(more.into()), t!("Save"), PdfDialogMsg::SettingsOk),
+        footer(
+            "settings",
+            Some(more.into()),
+            t!("Save"),
+            PdfDialogMsg::SettingsOk
+        ),
     ]
     .spacing(10)
     .padding([10, 12])
@@ -1050,7 +1260,11 @@ pub fn view_import_file<'a>(
 
     // One page at a time: a large preview with previous / next.
     let count = state.pages.len();
-    let preview: Element<'a, Message> = match state.pages.get(state.selected).and_then(|p| p.image.clone()) {
+    let preview: Element<'a, Message> = match state
+        .pages
+        .get(state.selected)
+        .and_then(|p| p.image.clone())
+    {
         Some(handle) => image(handle).width(Fill).height(Fill).into(),
         None => Space::new().width(Fill).height(Fill).into(),
     };
@@ -1061,7 +1275,10 @@ pub fn view_import_file<'a>(
             .padding([2, 12])
     };
     let navigator = row![
-        step(crate::ui::icons::themed_arrow_left(12.0), state.selected.checked_sub(1)),
+        step(
+            crate::ui::icons::themed_arrow_left(12.0),
+            state.selected.checked_sub(1)
+        ),
         Space::new().width(Fill),
         text_input("", &state.page_text)
             .on_input(|s| msg(PdfDialogMsg::ImportPageText(s)))
@@ -1087,14 +1304,28 @@ pub fn view_import_file<'a>(
                 .width(Fill)
                 .style(|_: &Theme| container::Style {
                     background: Some(Background::Color(iced::Color::WHITE)),
-                    border: Border { width: 0.0, radius: 6.0.into(), color: iced::Color::TRANSPARENT },
+                    border: Border {
+                        width: 0.0,
+                        radius: 6.0.into(),
+                        color: iced::Color::TRANSPARENT
+                    },
                     ..Default::default()
                 }),
             navigator,
             row![
-                text(crate::tf!("Page size: {size}", size = state.page_size.clone())).size(11).style(muted_style),
+                text(crate::tf!(
+                    "Page size: {size}",
+                    size = state.page_size.clone()
+                ))
+                .size(11)
+                .style(muted_style),
                 Space::new().width(Fill),
-                text(crate::tf!("PDF scale: {scale}:1", scale = state.scale.trim())).size(11).style(muted_style),
+                text(crate::tf!(
+                    "PDF scale: {scale}:1",
+                    scale = state.scale.trim()
+                ))
+                .size(11)
+                .style(muted_style),
             ],
         ]
         .spacing(8),
@@ -1112,11 +1343,19 @@ pub fn view_import_file<'a>(
                 ),
             ]
             .align_y(iced::Center),
-            field(t!("Scale").into_owned(), &state.scale, true, 60.0, |s| msg(PdfDialogMsg::ImportScale(s))),
+            field(t!("Scale").into_owned(), &state.scale, true, 60.0, |s| msg(
+                PdfDialogMsg::ImportScale(s)
+            )),
             row![
-                text(t!("Rotation")).size(11).style(muted_style).width(Length::Fixed(60.0)),
+                text(t!("Rotation"))
+                    .size(11)
+                    .style(muted_style)
+                    .width(Length::Fixed(60.0)),
                 segmented(
-                    RotationChoice::ALL.iter().map(|r| (*r, format!("{}\u{b0}", r.0))).collect(),
+                    RotationChoice::ALL
+                        .iter()
+                        .map(|r| (*r, format!("{}\u{b0}", r.0)))
+                        .collect(),
                     state.rotation,
                     PdfDialogMsg::ImportRotation,
                 ),
@@ -1139,11 +1378,20 @@ pub fn view_import_file<'a>(
         .on_press(msg(PdfDialogMsg::Options))
         .style(button_style(false))
         .padding([5, 12]);
-    column![file, body, footer("import", Some(more.into()), t!("Import"), PdfDialogMsg::ImportOk)]
-        .spacing(10)
-        .padding([10, 12])
-        .width(sizing.width)
-        .into()
+    column![
+        file,
+        body,
+        footer(
+            "import",
+            Some(more.into()),
+            t!("Import"),
+            PdfDialogMsg::ImportOk
+        )
+    ]
+    .spacing(10)
+    .padding([10, 12])
+    .width(sizing.width)
+    .into()
 }
 
 // ── Point Cloud Color Map ──────────────────────────────────────────────────
@@ -1209,21 +1457,36 @@ pub struct PointCloudColorMapState {
 
 impl PointCloudColorMapState {
     pub fn slot(&self) -> &MapSlot {
-        if self.elevation_tab { &self.elevation } else { &self.intensity }
+        if self.elevation_tab {
+            &self.elevation
+        } else {
+            &self.intensity
+        }
     }
 
     pub fn slot_mut(&mut self) -> &mut MapSlot {
-        if self.elevation_tab { &mut self.elevation } else { &mut self.intensity }
+        if self.elevation_tab {
+            &mut self.elevation
+        } else {
+            &mut self.intensity
+        }
     }
 
     pub fn ramp(&self) -> Option<&MapRamp> {
         let id = &self.slot().scheme;
-        self.ramps.iter().find(|r| r.id.eq_ignore_ascii_case(id)).or(self.ramps.first())
+        self.ramps
+            .iter()
+            .find(|r| r.id.eq_ignore_ascii_case(id))
+            .or(self.ramps.first())
     }
 
     pub fn ramp_mut(&mut self) -> Option<&mut MapRamp> {
         let id = self.slot().scheme.clone();
-        let at = self.ramps.iter().position(|r| r.id.eq_ignore_ascii_case(&id)).unwrap_or(0);
+        let at = self
+            .ramps
+            .iter()
+            .position(|r| r.id.eq_ignore_ascii_case(&id))
+            .unwrap_or(0);
         self.ramps.get_mut(at)
     }
 
@@ -1262,7 +1525,11 @@ fn swatch<'a>(color: [u8; 3], width: f32, height: f32) -> Element<'a, Message> {
     container(Space::new().width(width).height(height))
         .style(move |_: &Theme| container::Style {
             background: Some(Background::Color(color)),
-            border: Border { width: 1.0, radius: 3.0.into(), color: iced::Color::from_rgb8(0x77, 0x77, 0x77) },
+            border: Border {
+                width: 1.0,
+                radius: 3.0.into(),
+                color: iced::Color::from_rgb8(0x77, 0x77, 0x77),
+            },
             ..Default::default()
         })
         .into()
@@ -1270,32 +1537,42 @@ fn swatch<'a>(color: [u8; 3], width: f32, height: f32) -> Element<'a, Message> {
 
 /// The ramp as a bar, high end on top, blended or in bands, with the values
 /// where the bands meet (blended: the ends and the inner band centres).
-fn ramp_bar<'a>(colors: &[[u8; 3]], gradient: bool, range: Option<(f64, f64)>, percent: bool) -> Element<'a, Message> {
+fn ramp_bar<'a>(
+    colors: &[[u8; 3]],
+    gradient: bool,
+    range: Option<(f64, f64)>,
+    percent: bool,
+) -> Element<'a, Message> {
     const HEIGHT: f32 = 360.0;
     let n = colors.len().max(1);
     let strips: Vec<Element<'a, Message>> = if gradient {
-        (0..72).map(|k| {
-            let c = blend(colors, (k as f64 + 0.5) / 72.0);
-            let color = iced::Color::from_rgb8(c[0], c[1], c[2]);
-            container(Space::new().width(Fill).height(Fill))
-                .height(Length::FillPortion(1))
-                .style(move |_: &Theme| container::Style {
-                    background: Some(Background::Color(color)),
-                    ..Default::default()
-                })
-                .into()
-        }).collect()
+        (0..72)
+            .map(|k| {
+                let c = blend(colors, (k as f64 + 0.5) / 72.0);
+                let color = iced::Color::from_rgb8(c[0], c[1], c[2]);
+                container(Space::new().width(Fill).height(Fill))
+                    .height(Length::FillPortion(1))
+                    .style(move |_: &Theme| container::Style {
+                        background: Some(Background::Color(color)),
+                        ..Default::default()
+                    })
+                    .into()
+            })
+            .collect()
     } else {
-        colors.iter().map(|c| {
-            let color = iced::Color::from_rgb8(c[0], c[1], c[2]);
-            container(Space::new().width(Fill).height(Fill))
-                .height(Length::FillPortion(1))
-                .style(move |_: &Theme| container::Style {
-                    background: Some(Background::Color(color)),
-                    ..Default::default()
-                })
-                .into()
-        }).collect()
+        colors
+            .iter()
+            .map(|c| {
+                let color = iced::Color::from_rgb8(c[0], c[1], c[2]);
+                container(Space::new().width(Fill).height(Fill))
+                    .height(Length::FillPortion(1))
+                    .style(move |_: &Theme| container::Style {
+                        background: Some(Background::Color(color)),
+                        ..Default::default()
+                    })
+                    .into()
+            })
+            .collect()
     };
     let bar = container(iced::widget::Column::with_children(strips))
         .width(Length::Fixed(56.0))
@@ -1315,20 +1592,31 @@ fn ramp_bar<'a>(colors: &[[u8; 3]], gradient: bool, range: Option<(f64, f64)>, p
         let mut used = 0.0;
         for mark in marks {
             let value = high - (high - low) * mark;
-            let label = if percent { format!("{}%", value.round()) } else { short(value) };
+            let label = if percent {
+                format!("{}%", value.round())
+            } else {
+                short(value)
+            };
             let top = (mark * f64::from(HEIGHT) - 7.0).clamp(0.0, f64::from(HEIGHT) - 14.0);
-            labels = labels.push(Space::new().height((top - used).max(0.0) as f32)).push(text(label).size(10).height(14.0));
+            labels = labels
+                .push(Space::new().height((top - used).max(0.0) as f32))
+                .push(text(label).size(10).height(14.0));
             used = top.max(used) + 14.0;
         }
     }
-    row![bar, labels.width(Length::Fixed(44.0))].spacing(4).into()
+    row![bar, labels.width(Length::Fixed(44.0))]
+        .spacing(4)
+        .into()
 }
 
 pub fn view_point_cloud_color_map<'a>(
     state: &'a PointCloudColorMapState,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    let tab = |label: std::borrow::Cow<'static, str>, on: bool, message: Option<Message>| -> Element<'a, Message> {
+    let tab = |label: std::borrow::Cow<'static, str>,
+               on: bool,
+               message: Option<Message>|
+     -> Element<'a, Message> {
         let mut b = button(text(label).size(11).width(Fill).align_x(iced::Center))
             .style(button_style(on))
             .padding([5, 6])
@@ -1340,8 +1628,16 @@ pub fn view_point_cloud_color_map<'a>(
     };
     let tabs = container(
         row![
-            tab(t!("Intensity"), !state.elevation_tab, Some(msg(PdfDialogMsg::MapTab(false)))),
-            tab(t!("Elevation"), state.elevation_tab, Some(msg(PdfDialogMsg::MapTab(true)))),
+            tab(
+                t!("Intensity"),
+                !state.elevation_tab,
+                Some(msg(PdfDialogMsg::MapTab(false)))
+            ),
+            tab(
+                t!("Elevation"),
+                state.elevation_tab,
+                Some(msg(PdfDialogMsg::MapTab(true)))
+            ),
             tab(t!("Classification"), false, None),
         ]
         .spacing(2),
@@ -1354,7 +1650,12 @@ pub fn view_point_cloud_color_map<'a>(
     let colors: Vec<[u8; 3]> = ramp.map(|r| r.colors.clone()).unwrap_or_default();
     let ramp_card = card(
         t!("Color ramp").into_owned(),
-        ramp_bar(&colors, slot.gradient, state.cloud.and(state.range()), !state.elevation_tab),
+        ramp_bar(
+            &colors,
+            slot.gradient,
+            state.cloud.and(state.range()),
+            !state.elevation_tab,
+        ),
     );
 
     // Listed by name, as the reference lists them.
@@ -1379,21 +1680,33 @@ pub fn view_point_cloud_color_map<'a>(
         .padding([4, 8])
         .width(Length::Fixed(70.0));
     // Blend: a strip from the first colour to the last.
-    let ends = [colors.first().copied().unwrap_or([255; 3]), colors.last().copied().unwrap_or([255; 3])];
+    let ends = [
+        colors.first().copied().unwrap_or([255; 3]),
+        colors.last().copied().unwrap_or([255; 3]),
+    ];
     let blend_strip = row((0..6).map(|k| swatch(blend(&ends, k as f64 / 5.0), 3.0, 14.0)));
-    let even = button(blend_strip).on_press(msg(PdfDialogMsg::MapEven)).style(button_style(false)).padding([5, 6]);
+    let even = button(blend_strip)
+        .on_press(msg(PdfDialogMsg::MapEven))
+        .style(button_style(false))
+        .padding([5, 6]);
     let reverse = button(
-        iced::widget::svg(crate::ui::icons::themed_handle(include_bytes!("../../../assets/icons/modify_reverse.svg")))
-            .width(16.0)
-            .height(16.0),
+        iced::widget::svg(crate::ui::icons::themed_handle(include_bytes!(
+            "../../../assets/icons/modify_reverse.svg"
+        )))
+        .width(16.0)
+        .height(16.0),
     )
     .on_press(msg(PdfDialogMsg::MapReverse))
     .style(button_style(false))
     .padding([4, 6]);
     let mut scheme_rows = column![
-        row![scheme, small(t!("New"), PdfDialogMsg::MapNew)].spacing(8).align_y(iced::Center),
+        row![scheme, small(t!("New"), PdfDialogMsg::MapNew)]
+            .spacing(8)
+            .align_y(iced::Center),
         row![
-            text(t!("Number of colors")).size(11).width(Length::Fixed(110.0)),
+            text(t!("Number of colors"))
+                .size(11)
+                .width(Length::Fixed(110.0)),
             count,
             even,
             reverse,
@@ -1403,7 +1716,11 @@ pub fn view_point_cloud_color_map<'a>(
         .spacing(8)
         .align_y(iced::Center),
         row![
-            chip(t!("Display as gradient").into_owned(), slot.gradient, msg(PdfDialogMsg::MapGradient(!slot.gradient))),
+            chip(
+                t!("Display as gradient").into_owned(),
+                slot.gradient,
+                msg(PdfDialogMsg::MapGradient(!slot.gradient))
+            ),
             Space::new().width(Fill),
             small(t!("Rename"), PdfDialogMsg::MapRename)
         ]
@@ -1413,7 +1730,10 @@ pub fn view_point_cloud_color_map<'a>(
     if let Some((_, name)) = &state.naming {
         scheme_rows = scheme_rows.push(
             row![
-                text(t!("Scheme name")).size(11).style(muted_style).width(Length::Fixed(110.0)),
+                text(t!("Scheme name"))
+                    .size(11)
+                    .style(muted_style)
+                    .width(Length::Fixed(110.0)),
                 text_input("", name)
                     .on_input(|v| msg(PdfDialogMsg::MapNameInput(v)))
                     .on_submit(msg(PdfDialogMsg::MapNameOk))
@@ -1435,37 +1755,101 @@ pub fn view_point_cloud_color_map<'a>(
     let bottom = colors.last().copied().unwrap_or([255; 3]);
     let editable = has_cloud && !(state.elevation_tab && state.extents);
     let with_swatch = |field: Element<'a, Message>, color: [u8; 3]| -> Element<'a, Message> {
-        row![field, swatch(color, 22.0, 22.0)].spacing(8).align_y(iced::Center).into()
+        row![field, swatch(color, 22.0, 22.0)]
+            .spacing(8)
+            .align_y(iced::Center)
+            .into()
     };
     let out_of_range = {
-        let list = pick_list(Some(slot.out_of_range), OutOfRange::ALL.to_vec(), |o: &OutOfRange| o.to_string())
-            .text_size(12)
-            .padding([4, 8])
-            .width(Fill);
-        let list = if editable { list.on_select(|o| msg(PdfDialogMsg::MapOutOfRange(o))) } else { list };
-        row![text(t!("Out of range points")).size(11).style(muted_style).width(Length::Fixed(150.0)), list]
-            .spacing(6)
-            .align_y(iced::Center)
+        let list = pick_list(
+            Some(slot.out_of_range),
+            OutOfRange::ALL.to_vec(),
+            |o: &OutOfRange| o.to_string(),
+        )
+        .text_size(12)
+        .padding([4, 8])
+        .width(Fill);
+        let list = if editable {
+            list.on_select(|o| msg(PdfDialogMsg::MapOutOfRange(o)))
+        } else {
+            list
+        };
+        row![
+            text(t!("Out of range points"))
+                .size(11)
+                .style(muted_style)
+                .width(Length::Fixed(150.0)),
+            list
+        ]
+        .spacing(6)
+        .align_y(iced::Center)
     };
     let range_rows = if state.elevation_tab {
         let (low, high) = state.height;
         let interval = state.interval.as_str();
         column![
             chip(
-                format!("{} ({} ~ {})", t!("Apply to extents of point cloud"), short(low), short(high)),
+                format!(
+                    "{} ({} ~ {})",
+                    t!("Apply to extents of point cloud"),
+                    short(low),
+                    short(high)
+                ),
                 state.extents,
                 msg(PdfDialogMsg::MapExtents(!state.extents))
             ),
-            field(t!("Interval height").into_owned(), interval, editable, 150.0, |v| msg(PdfDialogMsg::MapInterval(v))),
-            with_swatch(field(t!("Maximum elevation").into_owned(), &slot.max, editable, 150.0, |v| msg(PdfDialogMsg::MapMax(v))), top),
-            with_swatch(field(t!("Minimum elevation").into_owned(), &slot.min, editable, 150.0, |v| msg(PdfDialogMsg::MapMin(v))), bottom),
+            field(
+                t!("Interval height").into_owned(),
+                interval,
+                editable,
+                150.0,
+                |v| msg(PdfDialogMsg::MapInterval(v))
+            ),
+            with_swatch(
+                field(
+                    t!("Maximum elevation").into_owned(),
+                    &slot.max,
+                    editable,
+                    150.0,
+                    |v| msg(PdfDialogMsg::MapMax(v))
+                ),
+                top
+            ),
+            with_swatch(
+                field(
+                    t!("Minimum elevation").into_owned(),
+                    &slot.min,
+                    editable,
+                    150.0,
+                    |v| msg(PdfDialogMsg::MapMin(v))
+                ),
+                bottom
+            ),
             out_of_range,
         ]
         .spacing(8)
     } else {
         column![
-            with_swatch(field(t!("Maximum intensity").into_owned(), &slot.max, editable, 150.0, |v| msg(PdfDialogMsg::MapMax(v))), top),
-            with_swatch(field(t!("Minimum intensity").into_owned(), &slot.min, editable, 150.0, |v| msg(PdfDialogMsg::MapMin(v))), bottom),
+            with_swatch(
+                field(
+                    t!("Maximum intensity").into_owned(),
+                    &slot.max,
+                    editable,
+                    150.0,
+                    |v| msg(PdfDialogMsg::MapMax(v))
+                ),
+                top
+            ),
+            with_swatch(
+                field(
+                    t!("Minimum intensity").into_owned(),
+                    &slot.min,
+                    editable,
+                    150.0,
+                    |v| msg(PdfDialogMsg::MapMin(v))
+                ),
+                bottom
+            ),
             out_of_range,
         ]
         .spacing(8)
@@ -1500,7 +1884,11 @@ pub fn view_point_cloud_color_map<'a>(
     ]
     .spacing(6)
     .align_y(iced::Center);
-    column![tabs, body, footer].spacing(10).padding([10, 12]).width(sizing.width).into()
+    column![tabs, body, footer]
+        .spacing(10)
+        .padding([10, 12])
+        .width(sizing.width)
+        .into()
 }
 
 // ── Extract Section Lines from Point Cloud ─────────────────────────────────
@@ -1556,16 +1944,27 @@ pub struct PcSectionState {
     pub preview: bool,
 }
 
-pub fn view_pc_section<'a>(state: &'a PcSectionState, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+pub fn view_pc_section<'a>(
+    state: &'a PcSectionState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
     let extract = card(
         t!("Extract").into_owned(),
         segmented(
-            vec![(false, t!("Entire cross section").into_owned()), (true, t!("Perimeter only").into_owned())],
+            vec![
+                (false, t!("Entire cross section").into_owned()),
+                (true, t!("Perimeter only").into_owned()),
+            ],
             state.perimeter,
             PdfDialogMsg::SecPerimeter,
         ),
     );
-    let points = state.max_points.trim().parse::<f32>().unwrap_or(18_000.0).clamp(1_000.0, 200_000.0);
+    let points = state
+        .max_points
+        .trim()
+        .parse::<f32>()
+        .unwrap_or(18_000.0)
+        .clamp(1_000.0, 200_000.0);
     // ponytail: the time shown scales with the points (18000 ≈ 1 minute, as
     // the reference shows it); the real rate depends on the machine.
     let minutes = (points / 18_000.0).ceil().max(1.0) as u32;
@@ -1573,9 +1972,9 @@ pub fn view_pc_section<'a>(state: &'a PcSectionState, sizing: crate::ui::modal::
         t!("Maximum points to process").into_owned(),
         column![
             row![
-                iced::widget::slider(1_000.0..=200_000.0, points, |v| msg(PdfDialogMsg::SecMaxPoints(
-                    ((v / 1_000.0).round() * 1_000.0).to_string()
-                )))
+                iced::widget::slider(1_000.0..=200_000.0, points, |v| msg(
+                    PdfDialogMsg::SecMaxPoints(((v / 1_000.0).round() * 1_000.0).to_string())
+                ))
                 .step(1_000.0)
                 .width(Fill),
                 text_input("", &state.max_points)
@@ -1592,26 +1991,47 @@ pub fn view_pc_section<'a>(state: &'a PcSectionState, sizing: crate::ui::modal::
                 Space::new().width(Fill),
                 text(t!("More accurate")).size(10).style(muted_style),
                 Space::new().width(Fill),
-                text(crate::tf!("Estimated time: {count} minutes", count = minutes)).size(10).style(muted_style),
+                text(crate::tf!(
+                    "Estimated time: {count} minutes",
+                    count = minutes
+                ))
+                .size(10)
+                .style(muted_style),
             ],
         ]
         .spacing(6),
     );
-    let layer = pick_list(Some(state.layer.clone()), state.layers.clone(), |n: &String| n.clone())
-        .on_select(|n| msg(PdfDialogMsg::SecLayer(n)))
-        .text_size(12)
-        .padding([4, 8])
-        .width(Fill);
-    let color = pick_list(Some(state.color), LineColor::ALL.to_vec(), |c: &LineColor| c.to_string())
-        .on_select(|c| msg(PdfDialogMsg::SecColor(c)))
-        .text_size(12)
-        .padding([4, 8])
-        .width(Fill);
-    let labelled = |label: std::borrow::Cow<'static, str>, control: Element<'a, Message>| -> Element<'a, Message> {
-        row![text(label).size(11).style(muted_style).width(Length::Fixed(70.0)), control]
-            .spacing(6)
-            .align_y(iced::Center)
-            .into()
+    let layer = pick_list(
+        Some(state.layer.clone()),
+        state.layers.clone(),
+        |n: &String| n.clone(),
+    )
+    .on_select(|n| msg(PdfDialogMsg::SecLayer(n)))
+    .text_size(12)
+    .padding([4, 8])
+    .width(Fill);
+    let color = pick_list(
+        Some(state.color),
+        LineColor::ALL.to_vec(),
+        |c: &LineColor| c.to_string(),
+    )
+    .on_select(|c| msg(PdfDialogMsg::SecColor(c)))
+    .text_size(12)
+    .padding([4, 8])
+    .width(Fill);
+    let labelled = |label: std::borrow::Cow<'static, str>,
+                    control: Element<'a, Message>|
+     -> Element<'a, Message> {
+        row![
+            text(label)
+                .size(11)
+                .style(muted_style)
+                .width(Length::Fixed(70.0)),
+            control
+        ]
+        .spacing(6)
+        .align_y(iced::Center)
+        .into()
     };
     let output = card(
         t!("Output geometry").into_owned(),
@@ -1619,11 +2039,20 @@ pub fn view_pc_section<'a>(state: &'a PcSectionState, sizing: crate::ui::modal::
             labelled(t!("Layer"), layer.into()),
             labelled(t!("Color"), color.into()),
             segmented(
-                vec![(false, t!("Lines").into_owned()), (true, t!("2D Polylines").into_owned())],
+                vec![
+                    (false, t!("Lines").into_owned()),
+                    (true, t!("2D Polylines").into_owned())
+                ],
                 state.polylines,
                 PdfDialogMsg::SecPolylines,
             ),
-            field(t!("Polyline width").into_owned(), &state.width, state.polylines, 150.0, |v| msg(PdfDialogMsg::SecWidth(v))),
+            field(
+                t!("Polyline width").into_owned(),
+                &state.width,
+                state.polylines,
+                150.0,
+                |v| msg(PdfDialogMsg::SecWidth(v))
+            ),
         ]
         .spacing(8),
     );
@@ -1636,14 +2065,38 @@ pub fn view_pc_section<'a>(state: &'a PcSectionState, sizing: crate::ui::modal::
     let tolerances = card(
         t!("Extraction tolerances").into_owned(),
         column![
-            row![field(t!("Minimum line length").into_owned(), &state.min_length, true, 170.0, |v| msg(PdfDialogMsg::SecMinLength(v))), pick(false)]
-                .spacing(6)
-                .align_y(iced::Center),
-            row![field(t!("Connect lines tolerance").into_owned(), &state.connect, true, 170.0, |v| msg(PdfDialogMsg::SecConnect(v))), pick(true)]
-                .spacing(6)
-                .align_y(iced::Center),
             row![
-                field(t!("Collinear angle tolerance").into_owned(), &state.angle, true, 170.0, |v| msg(PdfDialogMsg::SecAngle(v))),
+                field(
+                    t!("Minimum line length").into_owned(),
+                    &state.min_length,
+                    true,
+                    170.0,
+                    |v| msg(PdfDialogMsg::SecMinLength(v))
+                ),
+                pick(false)
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
+            row![
+                field(
+                    t!("Connect lines tolerance").into_owned(),
+                    &state.connect,
+                    true,
+                    170.0,
+                    |v| msg(PdfDialogMsg::SecConnect(v))
+                ),
+                pick(true)
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
+            row![
+                field(
+                    t!("Collinear angle tolerance").into_owned(),
+                    &state.angle,
+                    true,
+                    170.0,
+                    |v| msg(PdfDialogMsg::SecAngle(v))
+                ),
                 text("0–10°").size(10).style(muted_style)
             ]
             .spacing(6)
@@ -1661,12 +2114,20 @@ pub fn view_pc_section<'a>(state: &'a PcSectionState, sizing: crate::ui::modal::
             .on_press(msg(PdfDialogMsg::Help("pcsection")))
             .style(button_style(false))
             .padding([5, 11]),
-        chip(t!("Preview result").into_owned(), state.preview, msg(PdfDialogMsg::SecPreview(!state.preview))),
+        chip(
+            t!("Preview result").into_owned(),
+            state.preview,
+            msg(PdfDialogMsg::SecPreview(!state.preview))
+        ),
         Space::new().width(Fill),
         dialog_button(t!("Cancel"), Message::CloseModal, false),
         dialog_button(t!("Create"), msg(PdfDialogMsg::SecCreate), true),
     ]
     .spacing(8)
     .align_y(iced::Center);
-    column![body, footer].spacing(10).padding([10, 12]).width(sizing.width).into()
+    column![body, footer]
+        .spacing(10)
+        .padding([10, 12])
+        .width(sizing.width)
+        .into()
 }

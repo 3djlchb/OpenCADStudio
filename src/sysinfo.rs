@@ -85,9 +85,7 @@ fn read() -> SystemInfo {
 
 #[cfg(target_os = "windows")]
 fn platform() -> (String, u64, u64, String) {
-    use windows_sys::Win32::System::Registry::{
-        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ,
-    };
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
     use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
     fn wide(s: &str) -> Vec<u16> {

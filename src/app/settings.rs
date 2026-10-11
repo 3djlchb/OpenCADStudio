@@ -84,12 +84,7 @@ impl Default for AutoConstrainSettings {
 impl AutoConstrainSettings {
     pub fn sanitize(&mut self) {
         let mut priority = Vec::with_capacity(AutoConstraintKind::ALL.len());
-        for kind in self
-            .priority
-            .iter()
-            .copied()
-            .chain(AutoConstraintKind::ALL)
-        {
+        for kind in self.priority.iter().copied().chain(AutoConstraintKind::ALL) {
             if !priority.contains(&kind) {
                 priority.push(kind);
             }
@@ -183,6 +178,11 @@ pub const ZOOM_FACTOR_MAX: i32 = 500;
 /// Hold a ZOOMFACTOR inside the range the application can store, wherever it
 /// arrives from — the slider, the Options field, or a configuration file
 /// written by hand or by an older build.
+/// Interface scale in percent, kept to the range the Options slider offers.
+pub fn clamp_ui_scale(percent: u16) -> u16 {
+    percent.clamp(75, 200)
+}
+
 pub fn clamp_zoom_factor(v: i32) -> i32 {
     v.clamp(ZOOM_FACTOR_MIN, ZOOM_FACTOR_MAX)
 }
@@ -388,6 +388,11 @@ pub struct UserSettings {
     pub polar: bool,
     pub polar_increment_deg: f32,
     pub zoom_wheel_reversed: bool,
+    /// Scrolling pans and Ctrl+scroll (a touchpad pinch) zooms, for a
+    /// touchpad that reports two-finger drags as wheel scrolls.
+    pub touchpad_pan: bool,
+    /// Interface scale in percent, on top of the display's own scale.
+    pub ui_scale_percent: u16,
     pub zoom_factor: i32,
     /// CURSORSIZE: normalized crosshair reach; 5 retains the original 60 px arms.
     pub cursor_size: i32,
@@ -412,6 +417,8 @@ pub struct UserSettings {
     pub attdef_on_screen: bool,
     /// FIELDDISPLAY: fields show on a gray background.
     pub field_display: bool,
+    /// SURFACEASSOCIATIVITY: new surfaces stay associative to their sources.
+    pub surface_associativity: bool,
     /// Nested-copy symbol handling: false inserts, true binds.
     pub ncopy_bind: bool,
     /// Last Options page; unknown saved names fall back without rejecting the config.
@@ -559,7 +566,10 @@ pub struct UserSettings {
     pub language: crate::i18n::Language,
     /// CLIPROMPTLINES: how many temporary prompt lines for a single command
     /// are displayed above the command window (0–50, Registry, default 3).
-    #[serde(default = "default_clipromptlines", deserialize_with = "deserialize_clipromptlines")]
+    #[serde(
+        default = "default_clipromptlines",
+        deserialize_with = "deserialize_clipromptlines"
+    )]
     pub cliprompt_lines: i32,
     /// COMMANDLINEFADETIME: how long command-line overlay history lines stay
     /// visible, in milliseconds (0–60000, default 3000). 0 skips transient lines.
@@ -807,6 +817,8 @@ impl Default for UserSettings {
             polar: false,
             polar_increment_deg: 45.0,
             zoom_wheel_reversed: false,
+            touchpad_pan: false,
+            ui_scale_percent: 100,
             zoom_factor: 60,
             cursor_size: 5,
             pick_box: 3,
@@ -823,6 +835,7 @@ impl Default for UserSettings {
             image_frame: 1,
             attdef_on_screen: true,
             field_display: true,
+            surface_associativity: true,
             ncopy_bind: false,
             cursor_type: CursorType::Crosshair,
             crosshair_color: None,
@@ -952,7 +965,10 @@ mod tests {
             SnapType::Center,
             SnapType::Intersection,
         ] {
-            assert!(modes.contains(&expected), "{expected:?} is not in the default set");
+            assert!(
+                modes.contains(&expected),
+                "{expected:?} is not in the default set"
+            );
         }
 
         // The Snapper and the persisted default have to agree, or the running
@@ -963,12 +979,19 @@ mod tests {
     #[test]
     fn osmode_encodes_bits_and_suppress() {
         // Endpoint(1) + Midpoint(2) + Intersection(32) = 35, master on.
-        let on = [SnapType::Endpoint, SnapType::Midpoint, SnapType::Intersection];
+        let on = [
+            SnapType::Endpoint,
+            SnapType::Midpoint,
+            SnapType::Intersection,
+        ];
         assert_eq!(osmode_from_snaps(on.iter(), true), 35);
         // Master off sets the suppress bit (16384).
         assert_eq!(osmode_from_snaps(on.iter(), false), 35 | 16384);
         // OCS-only snaps carry no bit and are dropped.
-        assert_eq!(osmode_from_snaps([SnapType::Grid, SnapType::ObjectPick].iter(), true), 0);
+        assert_eq!(
+            osmode_from_snaps([SnapType::Grid, SnapType::ObjectPick].iter(), true),
+            0
+        );
     }
 
     #[test]
@@ -1020,7 +1043,10 @@ mod tests {
     fn script_commands_default_on_and_survive_a_round_trip() {
         let missing: crate::app::config::AppConfig =
             serde_json::from_str(r#"{"settings": {"pick_add": false}}"#).unwrap();
-        assert!(missing.settings.script_commands, "an old config keeps scripts allowed");
+        assert!(
+            missing.settings.script_commands,
+            "an old config keeps scripts allowed"
+        );
         let off: crate::app::config::AppConfig =
             serde_json::from_str(r#"{"settings": {"script_commands": false}}"#).unwrap();
         assert!(!off.settings.script_commands);
