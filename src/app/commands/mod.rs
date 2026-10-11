@@ -468,6 +468,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "DSETTINGS",
         "PARAMETERS",
         "GRID",
+        "GRAPHICATTRIBUTES",
         "ISODRAFT",
         "ISOPLANE",
         "OSNAP",

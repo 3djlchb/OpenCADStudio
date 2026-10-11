@@ -13,6 +13,7 @@ use crate::scene::pick::grip::{find_hit_grip, find_hit_grip_paper, find_hit_grip
 use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
+use crate::ui::window::graphic_attributes::GraphicAttributesMsg;
 use crate::ui::PropertiesPanel;
 use codec::types::Color as AcadColor;
 use codec::{EntityType as AcadEntityType, Handle};
@@ -1156,6 +1157,17 @@ impl OpenCADStudio {
         }
         let s = crate::ui::color_select::color_to_aci_string(color);
         let edit = match self.color_pick_target.take().map(|(target, _)| target) {
+            Some(crate::app::ColorPickTarget::Gradient(index)) => {
+                Some(Message::GraphicAttributes(GraphicAttributesMsg::Gradient(
+                    crate::ui::window::gradient_editor::GradientMsg::Color(index, color),
+                )))
+            }
+            Some(crate::app::ColorPickTarget::GraphicAttributesLine) => Some(
+                Message::GraphicAttributes(GraphicAttributesMsg::LineColor(color)),
+            ),
+            Some(crate::app::ColorPickTarget::GraphicAttributesSolid) => Some(
+                Message::GraphicAttributes(GraphicAttributesMsg::FillColor(color)),
+            ),
             Some(crate::app::ColorPickTarget::DimStyle(f)) => Some(Message::DsEdit(f, s)),
             Some(crate::app::ColorPickTarget::MLeader(f)) => {
                 Some(Message::MLeaderStyleEdit { field: f, value: s })

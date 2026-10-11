@@ -104,6 +104,7 @@ pub const DOCK_HOVER_DELAY: std::time::Duration = std::time::Duration::from_mill
 #[serde(rename_all = "snake_case")]
 pub enum PanelId {
     Properties,
+    GraphicAttributes,
     BlockPalette,
     ExternalReferences,
     /// Outline of the drawing's origin planes, open sketch and solid bodies.
@@ -122,8 +123,9 @@ pub enum PanelId {
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 9] = [
+    pub const ALL: [PanelId; 10] = [
         PanelId::Properties,
+        PanelId::GraphicAttributes,
         PanelId::BlockPalette,
         PanelId::ExternalReferences,
         PanelId::Browser,
@@ -138,6 +140,7 @@ impl PanelId {
     pub fn title(self) -> &'static str {
         match self {
             PanelId::Properties => "Properties",
+            PanelId::GraphicAttributes => "Graphic Attributes",
             PanelId::BlockPalette => "Block Palette",
             PanelId::ExternalReferences => "External References",
             PanelId::Browser => "Browser",
@@ -153,6 +156,7 @@ impl PanelId {
     pub fn icon(self) -> &'static [u8] {
         match self {
             PanelId::Properties => include_bytes!("../../assets/icons/properties.svg"),
+            PanelId::GraphicAttributes => include_bytes!("../../assets/icons/graphic_attributes.svg"),
             PanelId::BlockPalette => include_bytes!("../../assets/icons/blocks/insert.svg"),
             PanelId::ExternalReferences => crate::ui::icons::FOLDER_OPEN,
             PanelId::Browser => include_bytes!("../../assets/icons/content_browser.svg"),
@@ -168,6 +172,7 @@ impl PanelId {
     fn default_width(self) -> f32 {
         match self {
             PanelId::Properties => 250.0,
+            PanelId::GraphicAttributes => 250.0,
             PanelId::BlockPalette => 260.0,
             PanelId::ExternalReferences => 460.0,
             PanelId::Browser => 230.0,
@@ -516,6 +521,23 @@ impl DockState {
         }
         self.floating.retain(|f| seen.insert(f.id));
         self.floating.iter_mut().for_each(FloatPanel::heal);
+    }
+
+    /// Stack `id` under Properties in its group (or dock it at the end of
+    /// the left edge) unless it already has a place, which is then kept.
+    pub fn dock_below_properties(&mut self, id: PanelId) {
+        if self.is_placed(id) {
+            return;
+        }
+        match self.location(PanelId::Properties) {
+            Some((side, group)) => {
+                let index = self.groups(side)[group].panels.len();
+                self.join_group(id, side, group, index);
+            }
+            None => {
+                self.dock(id, DockSide::Left, usize::MAX);
+            }
+        }
     }
 
     /// Where (if anywhere) a panel is docked: its side and group index.
@@ -1054,8 +1076,25 @@ pub struct Chrome {
 /// and close. Pressing the row starts re-docking the panel. A floating panel
 /// gets nothing here: its frame draws a vertical title bar beside it.
 pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, Message> {
+    title_bar_with(id, title, chrome, None)
+}
+
+/// [`title_bar`] with a pallet's own control (a menu button) before the pin
+/// and close. A floating pallet has no title bar, so the control then sits
+/// alone at the top right.
+pub fn title_bar_with<'a>(
+    id: PanelId,
+    title: String,
+    chrome: Chrome,
+    extra: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
     if chrome.floating {
-        return Space::new().width(0).height(0).into();
+        return match extra {
+            Some(extra) => row![Space::new().width(Length::Fill), extra]
+                .padding([3, 6])
+                .into(),
+            None => Space::new().width(0).height(0).into(),
+        };
     }
     // The pin and close only show while the pointer is over the bar; the
     // fixed height keeps the bar from jumping when they appear.
@@ -1063,6 +1102,9 @@ pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, 
         .spacing(3)
         .height(Length::Fixed(TITLE_BUTTON_H))
         .align_y(iced::Center);
+    if let Some(extra) = extra {
+        bar = bar.push(extra);
+    }
     if chrome.title_hovered {
         bar = bar
             .push(pin_button(
@@ -1230,6 +1272,7 @@ mod tests {
         let mut state = DockState::default();
         state.ensure_settings();
         assert_eq!(state.width(PanelId::Properties, 1600.0), 250.0);
+        assert_eq!(state.width(PanelId::GraphicAttributes, 1600.0), 250.0);
         assert_eq!(state.width(PanelId::BlockPalette, 1600.0), 260.0);
         assert!(!state.auto_collapse(PanelId::Properties));
     }

@@ -442,6 +442,11 @@ impl OpenCADStudio {
                         self.show_properties = true;
                         self.ribbon.set_properties(true);
                     }
+                    PanelId::GraphicAttributes => {
+                        self.show_graphic_attributes = true;
+                        self.ribbon.set_graphic_attributes(true);
+                        self.save_config();
+                    }
                     PanelId::BlockPalette => self.open_blocks_palette(None),
                     PanelId::ExternalReferences => {
                         self.show_external_references = true;
@@ -487,6 +492,12 @@ impl OpenCADStudio {
             PanelId::Layers => {
                 self.show_layers = false;
                 self.ribbon.deactivate_tool_if("LAYERS");
+            }
+            PanelId::GraphicAttributes => {
+                self.show_graphic_attributes = false;
+                self.ribbon.set_graphic_attributes(false);
+                self.graphic_attributes.close_popups();
+                self.save_config();
             }
         }
         self.dock_unpeek(id);
@@ -555,6 +566,7 @@ impl OpenCADStudio {
             PanelId::Count => self.count_palette.show,
             PanelId::SheetSetManager => self.sheet_set.show,
             PanelId::Layers => self.show_layers,
+            PanelId::GraphicAttributes => self.show_graphic_attributes,
         }
     }
 

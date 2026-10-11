@@ -37,6 +37,7 @@ pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_mar
 mod dwg_native_constraints;
 mod entity;
 pub use camera_ops::named_view_center;
+pub(crate) use entity::gradient_tint_color;
 pub use entity::CreateBlockOptions;
 mod group_layer;
 #[cfg(test)]
