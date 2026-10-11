@@ -685,6 +685,32 @@ pub fn embedded_revolve_profile(entity: &EntityType) -> Option<(EmbeddedEntity, 
     embedded_planar_entity(entity)
 }
 
+/// Extrusion records set group 295 (see `extrusion_history`): their embedded
+/// entities stand where they are and the matrices only name their frames. A
+/// planar fallback profile stored in its plane's local frame is therefore
+/// re-expressed in its own OCS.
+fn embedded_in_place(entity: EmbeddedEntity, transform: &[f64; 16]) -> EmbeddedEntity {
+    let frame = glam::DMat4::from_cols_array(transform);
+    let EmbeddedEntity::LwPolyline(mut polyline) = entity else {
+        return entity;
+    };
+    if frame == glam::DMat4::IDENTITY {
+        return EmbeddedEntity::LwPolyline(polyline);
+    }
+    let normal = frame.z_axis.truncate().normalize();
+    let (x, y) = crate::scene::view::transform::ocs_axes((normal.x, normal.y, normal.z));
+    let x_axis = glam::DVec3::new(x.0, x.1, x.2);
+    let y_axis = glam::DVec3::new(y.0, y.1, y.2);
+    for vertex in &mut polyline.vertices {
+        let local = glam::DVec3::new(vertex.location.x, vertex.location.y, 0.0);
+        let world = frame.transform_point3(local);
+        vertex.location = Vector2::new(world.dot(x_axis), world.dot(y_axis));
+        polyline.elevation = world.dot(normal);
+    }
+    polyline.normal = Vector3::new(normal.x, normal.y, normal.z);
+    EmbeddedEntity::LwPolyline(polyline)
+}
+
 pub fn extrusion_history(
     profile: &EntityType,
     path: Option<&EntityType>,
@@ -703,6 +729,8 @@ pub fn extrusion_history(
         }
         None => (None, glam::DMat4::IDENTITY.to_cols_array()),
     };
+    let sweep_entity = embedded_in_place(sweep_entity, &sweep_entity_transform);
+    let path_entity = path_entity.map(|entity| embedded_in_place(entity, &path_entity_transform));
     Some(SolidHistoryOperation::Extrusion(SolidHistorySweep {
         base,
         operation_major: 1,
