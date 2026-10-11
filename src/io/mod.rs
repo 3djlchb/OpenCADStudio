@@ -24,6 +24,7 @@ pub mod step;
 pub mod stl;
 pub mod thumbnail;
 pub mod update_check;
+pub mod visual_styles;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_recent;
 #[cfg(target_arch = "wasm32")]

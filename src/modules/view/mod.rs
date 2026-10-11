@@ -17,6 +17,7 @@ mod tile_horiz;
 mod tile_vert;
 mod tool_palettes;
 pub mod ucs_cmd;
+pub mod view_cmd;
 mod ucs_icon;
 mod view_front;
 mod view_iso;

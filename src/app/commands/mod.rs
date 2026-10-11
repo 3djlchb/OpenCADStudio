@@ -26,6 +26,7 @@ mod point_cloud;
 pub(crate) mod sheet_set;
 mod styleprops;
 mod view;
+mod view_presets;
 mod xclip;
 mod xref_attach;
 
@@ -925,6 +926,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "USERI",
         "USERR",
         "VIEW",
+        "-VIEW",
         "VPORTS",
         "VS",
         "VW",
