@@ -6165,3 +6165,12 @@ count-feature =
     .invalid-boundary = ວັດຖຸຂອບເຂດພື້ນທີ່ການນັບບໍ່ຖືກຕ້ອງ. ກະລຸນາເລືອກເສັ້ນ polyline ແບບປິດທີ່ປະກອບດ້ວຍສ່ວນເສັ້ນຊື່ ແລະ ບໍ່ຕັດກັນເອງ.
     .block-not-found = ບໍ່ພົບເຫັນບລັອກ "__ocs_fmt_0__".
     .invalid-point = ຈຸດບໍ່ຖືກຕ້ອງ.
+
+dock =
+    .allow-docking = ອະນຸຍາດການຕິດຂອບ
+    .auto-hide = ເຊື່ອງອັດຕະໂນມັດ
+    .dock-left = ຕິດຂອບຊ້າຍ
+    .dock-right = ຕິດຂອບຂວາ
+    .new-group = ກຸ່ມໃໝ່
+    .browser = ບຣາວເຊີ
+    .node-graph = ກຣາຟໂນດ

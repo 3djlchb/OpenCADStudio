@@ -1153,12 +1153,12 @@ fn heading(label: &str) -> Element<'static, Message> {
 pub fn view<'a>(
     state: &'a SheetSetManager,
     width: f32,
-    auto_collapse: bool,
+    chrome: crate::ui::dock::Chrome,
 ) -> Element<'a, Message> {
     let title_bar = crate::ui::dock::title_bar(
         PanelId::SheetSetManager,
         t!("Sheet Set Manager").into_owned(),
-        auto_collapse,
+        chrome,
     );
     let mut picks: Vec<Pick> = state
         .sets
@@ -1305,7 +1305,8 @@ pub fn view<'a>(
         .size(10)
         .style(muted_style);
     crate::ui::dock::frame(
-        column![title_bar, combo, tabs, card, hint].spacing(6),
+        title_bar,
+        column![combo, tabs, card, hint].spacing(6),
         width,
     )
 }
