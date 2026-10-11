@@ -117,5 +117,39 @@ pub fn handle_plugin_request(
             PluginResponse::TableResult(host.table_operation(operation))
         }
         RunCommand { request } => PluginResponse::CommandResult(host.run_command(request)),
+        CreateXRecord {
+            dictionary_path,
+            name,
+            entries,
+        } => {
+            let path: Vec<&str> = dictionary_path.iter().map(String::as_str).collect();
+            PluginResponse::XRecordCreateResult(host.create_xrecord(&path, &name, entries))
+        }
+        ReadXRecord {
+            dictionary_path,
+            name,
+        } => {
+            let path: Vec<&str> = dictionary_path.iter().map(String::as_str).collect();
+            PluginResponse::XRecordEntries(host.read_xrecord(&path, &name))
+        }
+        UpdateXRecord {
+            dictionary_path,
+            name,
+            entries,
+        } => {
+            let path: Vec<&str> = dictionary_path.iter().map(String::as_str).collect();
+            PluginResponse::XRecordUpdateResult(host.update_xrecord(&path, &name, entries))
+        }
+        DeleteXRecord {
+            dictionary_path,
+            name,
+        } => {
+            let path: Vec<&str> = dictionary_path.iter().map(String::as_str).collect();
+            PluginResponse::XRecordDeleteResult(host.delete_xrecord(&path, &name))
+        }
+        ListXRecords { dictionary_path } => {
+            let path: Vec<&str> = dictionary_path.iter().map(String::as_str).collect();
+            PluginResponse::XRecordNames(host.list_xrecords(&path))
+        }
     }
 }

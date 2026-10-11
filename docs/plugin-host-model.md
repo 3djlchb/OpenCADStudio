@@ -26,6 +26,7 @@ without it keeps working, and the default `HostApi` methods refuse.
 | Selection | `selection`, `set_selection` | Ordered, tab-scoped, exact (missing or duplicate handles reject the request). |
 | Solids | `solid_operation` | Kernel-backed create, transform, booleans, extrude, region and surface from a profile, picture embedding. Every result is verified to lift back from its ACIS payload without loss; a refusal leaves the operands untouched. |
 | Tables | `table_operation` | Layers, text and dimension styles, blocks and their contents, linetypes, layouts (see below). |
+| Objects | `create_xrecord`, `read_xrecord`, `update_xrecord`, `delete_xrecord`, `list_xrecords` | Name-addressed XRecords under the drawing's named-object dictionary (API v8, see below): a non-graphical record carrier with strict create-vs-update semantics and one undo step per change. |
 | Commands | `run_command` | Drives the real OCS command one step at a time (see below). |
 | Settings | `system_variable`, `set_system_variable` | `CLAYER`, `SNAPANG`, and a read-only `CTAB` (the current layout). |
 
@@ -84,6 +85,25 @@ recorded, so a failure changes nothing and leaves the history alone.
 
 Style and layout operations act on the active document, because they use the
 application's shared style and view machinery.
+
+## XRecords (API v8)
+
+`create_xrecord`, `read_xrecord`, `update_xrecord`, `delete_xrecord` and
+`list_xrecords` address XRecords by name under a dictionary path walked from the
+named-object dictionary root (an empty path is the root itself); missing
+dictionaries are created on create only, so the first call seeds a plugin's
+namespace. The payload is the codec's typed `XRecordEntry` pairs — the host puts
+no opinion on the content. Names and path fragments are symbol-validated, and
+dictionary addressing follows the codec's case-insensitive lookup. Create never
+overwrites and update never creates; each refusal is decided before the undo
+scope is touched, so a failure changes nothing, and each change joins a
+plugin-opened `push_undo` scope — the entity-write contract — so an operation
+composed of several writes (entities and XRecords) is a single undo step; with
+no scope open a change is one undo step of its own, whose undo restores the
+objects map byte-exactly, the auto-created dictionaries included.
+`list_xrecords` reports only the keys that address XRecords, in the
+dictionary's own order, so audits need no prior knowledge. Not yet mapped to
+Python.
 
 ## Commands
 

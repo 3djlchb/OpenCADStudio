@@ -200,6 +200,32 @@ pub enum PluginRequest {
     RunCommand {
         request: crate::host::CommandRequest,
     },
+    /// V8 (additive): create an XRecord under a named-object-dictionary path.
+    CreateXRecord {
+        dictionary_path: Vec<String>,
+        name: String,
+        entries: Vec<crate::host::XRecordEntry>,
+    },
+    /// V8 (additive): read the entries of an existing XRecord.
+    ReadXRecord {
+        dictionary_path: Vec<String>,
+        name: String,
+    },
+    /// V8 (additive): replace the entries of an existing XRecord.
+    UpdateXRecord {
+        dictionary_path: Vec<String>,
+        name: String,
+        entries: Vec<crate::host::XRecordEntry>,
+    },
+    /// V8 (additive): delete an XRecord and its dictionary entry.
+    DeleteXRecord {
+        dictionary_path: Vec<String>,
+        name: String,
+    },
+    /// V8 (additive): list the XRecord names under a dictionary path.
+    ListXRecords {
+        dictionary_path: Vec<String>,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -236,6 +262,16 @@ pub enum PluginResponse {
     SolidResult(Result<Handle, String>),
     TableResult(Result<Handle, String>),
     CommandResult(Result<crate::host::CommandOutcome, String>),
+    /// V8 (additive): handle of a created XRecord.
+    XRecordCreateResult(Result<Handle, String>),
+    /// V8 (additive): entries of a read XRecord.
+    XRecordEntries(Result<Vec<crate::host::XRecordEntry>, String>),
+    /// V8 (additive): handle of an updated XRecord.
+    XRecordUpdateResult(Result<Handle, String>),
+    /// V8 (additive): the removed XRecord, with its prior content.
+    XRecordDeleteResult(Result<crate::host::XRecord, String>),
+    /// V8 (additive): XRecord names under a dictionary path.
+    XRecordNames(Result<Vec<String>, String>),
 }
 
 /// Messages sent from the host to the plugin runner.

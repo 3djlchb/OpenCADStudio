@@ -4707,7 +4707,7 @@ mod tests {
         );
 
         // 1. External tangency: Test across multiple angles and slight epsilons
-        for angle in [0.0f64, 0.5, 1.0, 1.57, 2.5, 3.14, 4.0, 5.0] {
+        for angle in [0.0f64, 0.5, 1.0, 1.57, 2.5, std::f64::consts::PI, 4.0, 5.0] {
             for eps in [-1e-8, 0.0, 1e-8] {
                 let dist = 20.0 + eps;
                 let dx = dist * angle.cos();

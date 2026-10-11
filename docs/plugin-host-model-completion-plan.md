@@ -339,3 +339,26 @@ plugin gate (60 real-IPC host tests, 115 plugin API, 20 plugin crate, 16 Python 
 `--no-fail-fast` (1,805 passed, 1 failed: `fonts_parse_and_resolve`, which fails on pristine `main` on this Mac too; `arc_grips_drive_center_start_and_end_but_not_midpoint`
 now passes, fixed upstream). The change is 72 files, +30,705 / -178 against current `main` (fork-only workflow excluded).
 
+### 2026-10-11: XRecord objects (API v8, no Python surface yet)
+
+New additive v8 requests `CreateXRecord` / `ReadXRecord` / `UpdateXRecord` / `DeleteXRecord` / `ListXRecords`
+give plugins a non-graphical record carrier: name-addressed typed `XRecordEntry` pairs under the drawing's
+named-object dictionary, with no carrier entity. `dictionary_path` is walked from the NOD root (an empty path
+is the root), creating missing dictionaries on create only — the `ensure_image_dictionary` bootstrap — so the
+first call seeds a namespace; `create` refuses an existing name and `update` refuses a missing one, so neither
+can silently overwrite or create. Names and path fragments are symbol-validated, entry group codes are checked
+(1..=369, never the handle codes 5/105), and every refusal is decided before the undo step is recorded. Update
+replaces the entries atomically (handle, owner and name stay, the record's verbatim raw payloads are dropped, so
+saves emit the new content); delete returns the removed record; list reports only the keys that address
+XRecords, in dictionary order. Undo: objects-map mutations are captured by the pending history's full structure
+snapshot, so each mutating call is one undo step whose undo restores the objects map byte-exactly, the
+auto-created dictionaries included. Undo composition follows the entity-write contract: a mutation inside a
+plugin-opened `push_undo` scope joins that scope (a multi-write operation — entities and XRecords — is a single
+undo step under the plugin's label); only a scope-less mutation opens its own step. Evidence:
+`xrecord_crud_round_trips_refusals_and_list`,
+`xrecord_mutations_are_single_undo_steps_that_restore_objects` (four steps, refusal paths record none),
+`xrecord_writes_join_a_plugin_initiated_undo_scope` (3 creates + update + delete + a refusal + an entity write
+in one scope = one step, undone and redone whole),
+`xrecords_survive_dxf_and_dwg_round_trips` (typed entries reload from both writers), the IPC round-trips
+`xrecord_request_and_response_roundtrip` and `xrecord_requests_await_their_typed_responses`. The API is
+host-level and stands on its own; a Python mapping (`doc.xrecords`-style) is future work.

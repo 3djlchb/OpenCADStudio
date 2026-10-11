@@ -21,8 +21,11 @@
 /// adds the `BuiltinPlugin::on_load` lifecycle callback and
 /// `HostApi::document_path`. v6 appends generic host system-variable access
 /// (`HostApi::system_variable` / `set_system_variable`). v7 appends atomic,
-/// undoable replacement of a set of existing entities.
-pub const API_VERSION: u32 = 7;
+/// undoable replacement of a set of existing entities. v8 appends name-addressed
+/// XRecord object CRUD under named-object-dictionary paths
+/// (`HostApi::create_xrecord` / `read_xrecord` / `update_xrecord` /
+/// `delete_xrecord` / `list_xrecords`).
+pub const API_VERSION: u32 = 8;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the
