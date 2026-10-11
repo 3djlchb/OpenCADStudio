@@ -7,9 +7,11 @@ use codec::objects::{SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryN
 use codec::{EntityType, Handle};
 use kernel::brep::Body;
 
-fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
+pub(crate) fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
     match entity {
-        EntityType::Region(region) => Some(EmbeddedEntity::Region(region.clone())),
+        // A region as the curve round it, as the reference records it.
+        EntityType::Region(region) => Some(super::sweep_model::region_boundary_entity(entity)
+            .map_or_else(|| EmbeddedEntity::Region(region.clone()), |(curve, _)| curve)),
         EntityType::Point(point) => Some(EmbeddedEntity::Point(point.clone())),
         _ => embedded_path(entity),
     }

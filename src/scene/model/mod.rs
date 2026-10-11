@@ -15,6 +15,7 @@ pub mod point_cloud;
 pub mod presspull_model;
 pub mod solid_history;
 pub mod solid_model;
+pub mod surface_sources;
 mod sweep_command_model;
 pub mod sweep_model;
 pub mod underlay_vector;

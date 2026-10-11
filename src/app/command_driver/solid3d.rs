@@ -42,6 +42,7 @@ impl OpenCADStudio {
         }
         let pending = self.begin_undo(i, "EXTRUDE", handles.len(), true);
         let mut created_handles = Vec::new();
+        let mut associative_sources = Vec::new();
         let mut consumed = Vec::new();
         let mut failed = 0usize;
         for handle in &handles {
@@ -112,10 +113,27 @@ impl OpenCADStudio {
                         entity.surface_data = data;
                     }
                 }
-                match history {
-                    Some(history) => self.add_surface_model_with_history(surface, body, history),
+                let created = match history {
+                    Some(history) => {
+                        self.add_surface_model_with_history(surface, body, history)
+                    }
                     None => self.add_surface_model(surface, body),
+                };
+                // An associative surface keeps reading its profile.
+                if sweep_model::surface_associativity() && path.is_none() && !created.is_null() {
+                    use crate::scene::model::surface_sources::{link_surface_sources, SurfaceSources};
+                    let (height, given) = match extent {
+                        ExtrudeExtent::Height(height) => (height, None),
+                        _ => (direction.length(), Some(direction)),
+                    };
+                    link_surface_sources(
+                        &mut self.tabs[i].scene.document,
+                        created,
+                        &SurfaceSources::Extrude { profile: *handle, height, direction: given, taper: taper_angle },
+                    );
+                    associative_sources.push(*handle);
                 }
+                created
             } else {
                 let direction = direction.unwrap_or(glam::DVec3::ZERO);
                 let history = path
@@ -139,7 +157,7 @@ impl OpenCADStudio {
                 failed += 1;
             } else {
                 created_handles.push(created);
-                if delete_sources {
+                if delete_sources && !associative_sources.contains(handle) {
                     consumed.push(*handle);
                 }
             }
@@ -310,6 +328,7 @@ impl OpenCADStudio {
             handles,
             axis_start,
             axis_end,
+            axis_object,
             angle,
             start_angle,
             mode,
@@ -346,6 +365,7 @@ impl OpenCADStudio {
             self.begin_undo(i, "REVOLVE", editable_handles.len(), true)
         };
         let mut created_handles = Vec::new();
+        let mut associative_sources = Vec::new();
         let mut consumed = Vec::new();
         for handle in &editable_handles {
             let Some(entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
@@ -364,10 +384,34 @@ impl OpenCADStudio {
                     failed += 1;
                     continue;
                 };
-                self.add_surface_model(
-                    empty_revolved_surface(&entity, axis_start, axis_end, angle, start_angle),
+                let created = self.add_surface_model(
+                    empty_revolved_surface(
+                        &entity,
+                        axis_start,
+                        axis_end,
+                        angle,
+                        start_angle,
+                    ),
                     body,
-                )
+                );
+                // An associative surface keeps reading its profile and axis.
+                if sweep_model::surface_associativity() && !created.is_null() {
+                    use crate::scene::model::surface_sources::{link_surface_sources, SurfaceSources};
+                    link_surface_sources(
+                        &mut self.tabs[i].scene.document,
+                        created,
+                        &SurfaceSources::Revolve {
+                            profile: *handle,
+                            axis: axis_object,
+                            start: axis_start,
+                            end: axis_end,
+                            angle,
+                            start_angle,
+                        },
+                    );
+                    associative_sources.push(*handle);
+                }
+                created
             } else {
                 let result = sweep_model::revolve_history(&entity, from, to, angle, start_angle)
                     .and_then(|history| {
@@ -391,7 +435,7 @@ impl OpenCADStudio {
                 failed += 1;
             } else {
                 created_handles.push(created);
-                if delete_sources {
+                if delete_sources && !associative_sources.contains(handle) {
                     consumed.push(*handle);
                 }
             }
@@ -688,6 +732,7 @@ impl OpenCADStudio {
                 }
                 let dirty_before = self.tabs[i].dirty;
                 let pending = self.begin_undo(i, "LOFT", 1, true);
+                let mut associative = false;
                 let created = if surface {
                     let handle =
                         self.add_surface_model(loft_command_model::surface_entity(&record), body);
@@ -696,6 +741,27 @@ impl OpenCADStudio {
                             handle,
                             codec::objects::SolidHistoryOperation::Loft(record),
                         );
+                        // An associative surface keeps reading its cross
+                        // sections (each section a single object).
+                        let single: Option<Vec<Handle>> = sections
+                            .iter()
+                            .map(|section| match section {
+                                LoftSectionSelection::Entity(handle) => Some(*handle),
+                                _ => None,
+                            })
+                            .collect();
+                        if let Some(single) = single.filter(|_| {
+                            crate::scene::model::sweep_model::surface_associativity()
+                                && guides.is_empty()
+                                && path.is_none()
+                        }) {
+                            crate::scene::model::surface_sources::link_surface_sources(
+                                &mut self.tabs[i].scene.document,
+                                handle,
+                                &crate::scene::model::surface_sources::SurfaceSources::Loft { sections: single },
+                            );
+                            associative = true;
+                        }
                     }
                     handle
                 } else {
@@ -713,7 +779,7 @@ impl OpenCADStudio {
                     self.command_line.push_error(crate::t!("LOFT could not create a complete display. The source sections were preserved.").as_ref());
                     return Some(Task::none());
                 } else {
-                    let mut consumed = if delete_sections {
+                    let mut consumed = if delete_sections && !associative {
                         sources.clone()
                     } else {
                         Vec::new()
