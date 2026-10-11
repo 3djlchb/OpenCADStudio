@@ -4823,6 +4823,9 @@ impl Scene {
             let view = |x: f32, y: f32, z: f32| {
                 (inst.camera.rotation * glam::Vec3::new(x, y, z)).normalize_or(glam::Vec3::Z)
             };
+            // Hand-tuned light-direction fixture: the `0.318` component only
+            // looks like 1/π, so keep the tuned value verbatim.
+            #[allow(clippy::approx_constant)]
             let (first, second) = if source > 0.5 {
                 (view(-0.034, 0.987, 0.158), glam::Vec3::ZERO)
             } else {
