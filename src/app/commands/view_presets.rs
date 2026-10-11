@@ -270,11 +270,11 @@ impl OpenCADStudio {
 
     /// One setting of -VIEW's sEttings option on the named view.
     fn apply_view_setting(&mut self, i: usize, setting: &str, name: &str, value: &str) {
-        self.push_undo_snapshot(i, "-VIEW");
-        let document = &mut self.tabs[i].scene.document;
-        let Some(mut view) = document.views.get(name).cloned() else {
+        let Some(mut view) = self.tabs[i].scene.document.views.get(name).cloned() else {
             return;
         };
+        self.push_undo_snapshot(i, "-VIEW");
+        let document = &mut self.tabs[i].scene.document;
         if view.handle.is_null() {
             view.handle = document.allocate_handle();
         }
