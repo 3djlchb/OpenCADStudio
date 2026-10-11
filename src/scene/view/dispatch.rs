@@ -34,12 +34,12 @@ pub fn prop_current_vertex() -> usize {
 /// through untouched. Per-entity grip code works in raw field space, so the
 /// dispatch layer converts: display grips OCS→WCS, incoming edits WCS→OCS.
 fn planar_ocs_normal(entity: &EntityType) -> Option<(f64, f64, f64)> {
+    // Arc, Circle and Solid grips are already world-space (their grip code
+    // places them through the OCS itself); converting them again mirrors
+    // them for a flipped normal.
     let n = match entity {
-        EntityType::Arc(e) => e.normal,
-        EntityType::Circle(e) => e.normal,
         EntityType::LwPolyline(e) => e.normal,
         EntityType::Polyline2D(e) => e.normal,
-        EntityType::Solid(e) => e.normal,
         EntityType::Text(e) => e.normal,
         EntityType::AttributeDefinition(e) => e.normal,
         EntityType::Hatch(e) => e.normal,
