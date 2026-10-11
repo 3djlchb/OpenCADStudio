@@ -389,6 +389,111 @@ mod tests {
     }
 
     #[test]
+    fn xrecord_request_and_response_roundtrip() {
+        // The five XRecord request variants (API v8) serialize with their
+        // dictionary paths and typed entries, and the responses answer with
+        // handles, entries, records and names.
+        let entries = vec![
+            crate::host::XRecordEntry::string(1, "{\"k\":\"road\"}"),
+            crate::host::XRecordEntry::int16(70, 3),
+        ];
+        let bytes = bincode::serialize(&PluginRequest::CreateXRecord {
+            dictionary_path: vec!["CVIFC".to_owned()],
+            name: "alpha".to_owned(),
+            entries: entries.clone(),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::CreateXRecord { dictionary_path, name, entries: decoded } if
+                dictionary_path == vec!["CVIFC".to_owned()] && name == "alpha" && decoded == entries)
+        );
+        let bytes = bincode::serialize(&PluginRequest::ReadXRecord {
+            dictionary_path: vec!["CVIFC".to_owned()],
+            name: "alpha".to_owned(),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::ReadXRecord { dictionary_path, name } if
+                dictionary_path == vec!["CVIFC".to_owned()] && name == "alpha")
+        );
+        let bytes = bincode::serialize(&PluginRequest::UpdateXRecord {
+            dictionary_path: vec!["CVIFC".to_owned()],
+            name: "alpha".to_owned(),
+            entries: entries.clone(),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::UpdateXRecord { dictionary_path, name, entries: decoded } if
+                dictionary_path == vec!["CVIFC".to_owned()] && name == "alpha" && decoded == entries)
+        );
+        let bytes = bincode::serialize(&PluginRequest::DeleteXRecord {
+            dictionary_path: vec!["CVIFC".to_owned()],
+            name: "alpha".to_owned(),
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::DeleteXRecord { dictionary_path, name } if
+                dictionary_path == vec!["CVIFC".to_owned()] && name == "alpha")
+        );
+        let bytes = bincode::serialize(&PluginRequest::ListXRecords {
+            dictionary_path: vec!["CVIFC".to_owned()],
+        })
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
+            PluginRequest::ListXRecords { dictionary_path } if
+                dictionary_path == vec!["CVIFC".to_owned()])
+        );
+        let bytes = bincode::serialize(&PluginResponse::XRecordCreateResult(Ok(
+            codec::Handle::new(42),
+        )))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::XRecordCreateResult(Ok(handle)) if handle == codec::Handle::new(42))
+        );
+        let bytes =
+            bincode::serialize(&PluginResponse::XRecordEntries(Ok(entries.clone()))).unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::XRecordEntries(Ok(decoded)) if decoded == entries)
+        );
+        let bytes = bincode::serialize(&PluginResponse::XRecordUpdateResult(Ok(
+            codec::Handle::new(42),
+        )))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::XRecordUpdateResult(Ok(handle)) if handle == codec::Handle::new(42))
+        );
+        let bytes = bincode::serialize(&PluginResponse::XRecordNames(Ok(vec!["alpha".to_owned()])))
+            .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::XRecordNames(Ok(names)) if names == vec!["alpha".to_owned()])
+        );
+        let deleted = crate::host::XRecord::named("alpha");
+        let bytes =
+            bincode::serialize(&PluginResponse::XRecordDeleteResult(Ok(deleted.clone()))).unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::XRecordDeleteResult(Ok(record)) if record == deleted)
+        );
+        let bytes = bincode::serialize(&PluginResponse::XRecordEntries(Err(
+            "XRecord reads are not supported by this host".to_owned(),
+        )))
+        .unwrap();
+        assert!(
+            matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
+            PluginResponse::XRecordEntries(Err(error)) if error.contains("not supported"))
+        );
+    }
+
+    #[test]
     fn plugin_notification_roundtrip() {
         let frame = PluginToHostV4::Notification(NotificationEnvelope {
             command_id: None,

@@ -603,6 +603,95 @@ impl HostApi for PluginHostApi {
             }
         }
     }
+
+    fn create_xrecord(
+        &mut self,
+        dictionary_path: &[&str],
+        name: &str,
+        entries: Vec<crate::host::XRecordEntry>,
+    ) -> Result<Handle, String> {
+        match self.client.request(PluginRequest::CreateXRecord {
+            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
+            name: name.to_string(),
+            entries,
+        }) {
+            Ok(PluginResponse::XRecordCreateResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected XRecord create response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn read_xrecord(
+        &self,
+        dictionary_path: &[&str],
+        name: &str,
+    ) -> Result<Vec<crate::host::XRecordEntry>, String> {
+        match self.client.request(PluginRequest::ReadXRecord {
+            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
+            name: name.to_string(),
+        }) {
+            Ok(PluginResponse::XRecordEntries(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected XRecord read response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn update_xrecord(
+        &mut self,
+        dictionary_path: &[&str],
+        name: &str,
+        entries: Vec<crate::host::XRecordEntry>,
+    ) -> Result<Handle, String> {
+        match self.client.request(PluginRequest::UpdateXRecord {
+            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
+            name: name.to_string(),
+            entries,
+        }) {
+            Ok(PluginResponse::XRecordUpdateResult(result)) => {
+                if result.is_ok() {
+                    self.document_cache = OnceCell::new();
+                }
+                result
+            }
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected XRecord update response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn delete_xrecord(
+        &mut self,
+        dictionary_path: &[&str],
+        name: &str,
+    ) -> Result<crate::host::XRecord, String> {
+        match self.client.request(PluginRequest::DeleteXRecord {
+            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
+            name: name.to_string(),
+        }) {
+            Ok(PluginResponse::XRecordDeleteResult(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected XRecord delete response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn list_xrecords(&self, dictionary_path: &[&str]) -> Result<Vec<String>, String> {
+        match self.client.request(PluginRequest::ListXRecords {
+            dictionary_path: dictionary_path.iter().map(|s| s.to_string()).collect(),
+        }) {
+            Ok(PluginResponse::XRecordNames(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected XRecord list response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
 }
 
 /// Sentinel reader used when the shared-memory view could not be initialized.
@@ -808,6 +897,70 @@ mod tests {
             .unwrap();
         });
         assert!(api.remove_entity(Handle::new(7)));
+        peer_handle.join().unwrap();
+    }
+
+    #[test]
+    fn xrecord_requests_await_their_typed_responses() {
+        let (mut api, mut peer) = make_client();
+        let peer_handle = thread::spawn(move || {
+            let msg = recv::<PluginToHost>(&mut peer).unwrap();
+            match msg {
+                PluginToHost::Request(req) => match *req {
+                    PluginRequest::CreateXRecord {
+                        dictionary_path,
+                        name,
+                        entries,
+                    } => {
+                        assert_eq!(dictionary_path, vec!["CVIFC".to_owned()]);
+                        assert_eq!(name, "alpha");
+                        assert_eq!(
+                            entries,
+                            vec![crate::host::XRecordEntry::string(1, "{\"k\":\"road\"}")]
+                        );
+                    }
+                    other => panic!("unexpected: {other:?}"),
+                },
+                other => panic!("unexpected: {other:?}"),
+            }
+            send(
+                &mut peer,
+                &HostToPlugin::Response(Box::new(PluginResponse::XRecordCreateResult(Ok(
+                    Handle::new(21),
+                )))),
+            )
+            .unwrap();
+            let msg = recv::<PluginToHost>(&mut peer).unwrap();
+            match msg {
+                PluginToHost::Request(req) => match *req {
+                    PluginRequest::ListXRecords { dictionary_path } => {
+                        assert_eq!(dictionary_path, vec!["CVIFC".to_owned()]);
+                    }
+                    other => panic!("unexpected: {other:?}"),
+                },
+                other => panic!("unexpected: {other:?}"),
+            }
+            send(
+                &mut peer,
+                &HostToPlugin::Response(Box::new(PluginResponse::XRecordNames(Ok(vec![
+                    "alpha".to_owned()
+                ])))),
+            )
+            .unwrap();
+        });
+        assert_eq!(
+            api.create_xrecord(
+                &["CVIFC"],
+                "alpha",
+                vec![crate::host::XRecordEntry::string(1, "{\"k\":\"road\"}")]
+            )
+            .unwrap(),
+            Handle::new(21)
+        );
+        assert_eq!(
+            api.list_xrecords(&["CVIFC"]).unwrap(),
+            vec!["alpha".to_owned()]
+        );
         peer_handle.join().unwrap();
     }
 }

@@ -1085,6 +1085,85 @@ pub trait HostApi {
         let _ = cmd;
         false
     }
+
+    // ── XRecord objects (added in API v8; appended at the end to keep vtable
+    // indices stable for older plugins) ────────────────────────────────────────
+
+    /// Create an XRecord named `name` under the dictionary addressed by
+    /// `dictionary_path`, storing `entries` (API v8, additive).
+    ///
+    /// The path is walked from the drawing's named-object dictionary root: an
+    /// empty path addresses the root itself, and missing intermediate
+    /// dictionaries are created, so the first call seeds a plugin's namespace.
+    /// Every refusal (empty or invalid names, a path fragment that names a
+    /// non-dictionary object, a name already in use — comparison is
+    /// case-insensitive like dictionary lookups) happens **before** any change,
+    /// so a failure leaves the drawing untouched. The record is registered in
+    /// its dictionary and owned by it; the returned handle stays stable across
+    /// updates. The change is one undo step.
+    fn create_xrecord(
+        &mut self,
+        _dictionary_path: &[&str],
+        _name: &str,
+        _entries: Vec<XRecordEntry>,
+    ) -> Result<Handle, String> {
+        Err("XRecord creation is not supported by this host".to_owned())
+    }
+
+    /// Read the entries of an existing XRecord by name (API v8, additive).
+    ///
+    /// Resolves `dictionary_path` under the named-object dictionary root and
+    /// returns the record's entries verbatim. Fails when the path, the name or
+    /// the record is missing, or when the name addresses a different object
+    /// kind.
+    fn read_xrecord(
+        &self,
+        _dictionary_path: &[&str],
+        _name: &str,
+    ) -> Result<Vec<XRecordEntry>, String> {
+        Err("XRecord reads are not supported by this host".to_owned())
+    }
+
+    /// Atomically replace the entries of an existing XRecord (API v8,
+    /// additive). Returns the record's handle.
+    ///
+    /// Neither the path nor its dictionaries are created: an update must never
+    /// create anything silently. Identity (handle, owning dictionary) stays;
+    /// the entries and their DWG handle-reference stream are replaced and the
+    /// record's verbatim raw payloads are dropped, so subsequent saves emit the
+    /// new content. A refusal leaves the drawing untouched; a successful change
+    /// is one undo step whose undo restores the previous entries byte-exactly.
+    fn update_xrecord(
+        &mut self,
+        _dictionary_path: &[&str],
+        _name: &str,
+        _entries: Vec<XRecordEntry>,
+    ) -> Result<Handle, String> {
+        Err("XRecord updates are not supported by this host".to_owned())
+    }
+
+    /// Delete the XRecord named `name` and its dictionary entry (API v8,
+    /// additive). Returns the removed record, so audits keep the prior
+    /// content. A refusal leaves the drawing untouched; a successful delete is
+    /// one undo step.
+    fn delete_xrecord(
+        &mut self,
+        _dictionary_path: &[&str],
+        _name: &str,
+    ) -> Result<XRecord, String> {
+        Err("XRecord deletes are not supported by this host".to_owned())
+    }
+
+    /// List the XRecord names under the dictionary addressed by
+    /// `dictionary_path` (API v8, additive).
+    ///
+    /// Returns only the dictionary keys that address XRecord objects, in the
+    /// dictionary's own order, so consumers can audit and export without
+    /// knowing names in advance. Fails when the path does not address a
+    /// dictionary.
+    fn list_xrecords(&self, _dictionary_path: &[&str]) -> Result<Vec<String>, String> {
+        Err("XRecord listing is not supported by this host".to_owned())
+    }
 }
 
 /// Configuration properties for creating or modifying a layer.
