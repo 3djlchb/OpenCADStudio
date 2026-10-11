@@ -1133,3 +1133,339 @@ mod dispatched_command_task_tests {
         );
     }
 }
+
+/// PW-1 BEDIT characterization tests.
+///
+/// Two groups:
+/// - `locked_*`: behavior Phase 1 must preserve (save keeps edits, discard
+///   restores the definition, refusals stay refused).
+/// - `documenting_*`: today's questionable behavior, pinned so the refactor
+///   cannot change it silently. Each one is expected to flip in Phase 1.
+#[cfg(test)]
+mod bedit_characterization_tests {
+    use super::super::*;
+    use codec::entities::{Circle, Insert, Line};
+    use codec::types::Vector3;
+    use codec::EntityType;
+
+    /// Fresh document with one block definition `BLK` (one line) and one
+    /// model-space INSERT referencing it. Returns the INSERT handle and the
+    /// definition's member handles.
+    fn setup_block_and_insert(app: &mut OpenCADStudio) -> (Handle, Vec<Handle>) {
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let tab = app.active_tab;
+        app.tabs[tab].scene.define_block_raw(
+            "BLK",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let insert = app.tabs[tab]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new(
+                "BLK",
+                Vector3::new(100.0, 0.0, 0.0),
+            )))
+            .expect("insert");
+        let members = block_members(app, "BLK");
+        (insert, members)
+    }
+
+    fn block_members(app: &OpenCADStudio, name: &str) -> Vec<Handle> {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .block_records
+            .get(name)
+            .map(|br| br.entity_handles.clone())
+            .unwrap_or_default()
+    }
+
+    /// Definition state as (handle, Debug form) in member order. The Debug
+    /// form stands in for PartialEq, which EntityType does not provide.
+    fn definition_state(app: &OpenCADStudio, name: &str) -> Vec<(Handle, String)> {
+        let tab = app.active_tab;
+        block_members(app, name)
+            .into_iter()
+            .map(|h| {
+                let e = app.tabs[tab].scene.document.get_entity(h);
+                (h, format!("{e:?}"))
+            })
+            .collect()
+    }
+
+    fn undo_depth(app: &OpenCADStudio) -> usize {
+        app.tabs[app.active_tab].history.undo_stack.len()
+    }
+
+    fn begin_bedit(app: &mut OpenCADStudio, insert: Handle) {
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", insert.value()));
+        assert!(
+            app.tabs[app.active_tab].active_block_edit.is_some(),
+            "setup: BEDIT_BEGIN should open a block-edit session"
+        );
+    }
+
+    fn add_circle_in_bedit(app: &mut OpenCADStudio) -> Handle {
+        let tab = app.active_tab;
+        app.tabs[tab].scene.add_entity(EntityType::Circle(Circle::from_coords(
+            0.0, 0.0, 0.0, 2.0,
+        )))
+    }
+
+    // ---- locked: must survive Phase 1 ----
+
+    /// Locked: save keeps the entity added inside the session.
+    #[test]
+    fn locked_save_keeps_entity_added_in_session() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        begin_bedit(&mut app, insert);
+        add_circle_in_bedit(&mut app);
+        let _ = app.dispatch_command("BEDIT_SAVE");
+
+        assert!(app.tabs[app.active_tab].active_block_edit.is_none());
+        assert_eq!(block_members(&app, "BLK").len(), 2, "save keeps the new entity");
+    }
+
+    /// Locked: discard restores the definition to its entry state exactly
+    /// (same handles, same geometry, same order).
+    #[test]
+    fn locked_discard_restores_definition_to_entry_state() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        let entry = definition_state(&app, "BLK");
+        begin_bedit(&mut app, insert);
+        add_circle_in_bedit(&mut app);
+        let _ = app.dispatch_command("BEDIT_DISCARD");
+
+        assert!(app.tabs[app.active_tab].active_block_edit.is_none());
+        assert_eq!(definition_state(&app, "BLK"), entry);
+    }
+
+    /// Locked: refusals. A non-INSERT is rejected and no session opens.
+    #[test]
+    fn locked_bedit_refuses_non_insert_object() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let tab = app.active_tab;
+        let line = app.tabs[tab]
+            .scene
+            .document
+            .add_entity(EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(1.0, 0.0, 0.0),
+            )))
+            .expect("line");
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", line.value()));
+        assert!(app.tabs[tab].active_block_edit.is_none());
+        assert!(app.tabs[tab].block_edits.is_empty());
+    }
+
+    /// Locked: refusal. The `BEDIT` picker command is rejected while a
+    /// REFEDIT session is active and no BEDIT session opens.
+    #[test]
+    fn locked_bedit_picker_refused_while_refedit_active() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        let tab = app.active_tab;
+        let _ = app.dispatch_command(&format!("REFEDIT_BEGIN:{}", insert.value()));
+        assert!(
+            app.tabs[tab].refedit_session.is_some(),
+            "setup: REFEDIT_BEGIN should open a REFEDIT session"
+        );
+        let _ = app.dispatch_command("BEDIT");
+        assert!(app.tabs[tab].active_block_edit.is_none());
+        assert!(app.tabs[tab].block_edits.is_empty());
+    }
+
+    /// Documenting: the REFEDIT guard lives only in the `BEDIT` picker arm.
+    /// `BEDIT_BEGIN:<handle>` (used by the palette "Edit" action) has no
+    /// REFEDIT check and opens a session while REFEDIT is active. Expected to
+    /// flip in Phase 1 once the guard moves into the begin path.
+    #[test]
+    fn documenting_bedit_begin_bypasses_refedit_guard() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        let tab = app.active_tab;
+        let _ = app.dispatch_command(&format!("REFEDIT_BEGIN:{}", insert.value()));
+        assert!(app.tabs[tab].refedit_session.is_some());
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", insert.value()));
+        assert!(
+            app.tabs[tab].active_block_edit.is_some(),
+            "documenting: BEDIT_BEGIN opens a session despite an active REFEDIT"
+        );
+    }
+
+    /// Locked: refusal. An xref definition cannot be edited.
+    #[test]
+    fn locked_bedit_refuses_xref_definition() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        let tab = app.active_tab;
+        app.tabs[tab]
+            .scene
+            .document
+            .block_records
+            .get_mut("BLK")
+            .expect("block record")
+            .flags
+            .is_xref = true;
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", insert.value()));
+        assert!(app.tabs[tab].active_block_edit.is_none());
+        assert!(app.tabs[tab].block_edits.is_empty());
+    }
+
+    // ---- documenting: today's behavior, expected to flip in Phase 1 ----
+
+    /// Documenting: modify an existing member, discard, then undo once. The
+    /// undo target is the BEDIT_BEGIN entry. Records whatever the stack does
+    /// with the stale before-image (ISS-02). The assertion pins the current
+    /// result; Phase 1 must justify any change.
+    #[test]
+    fn documenting_modify_discard_then_undo_probes_stale_before_image() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, members) = setup_block_and_insert(&mut app);
+        let line = members[0];
+        let entry = definition_state(&app, "BLK");
+        begin_bedit(&mut app, insert);
+
+        let tab = app.active_tab;
+        // Record the undo step before the mutation so the recorder captures it.
+        app.push_undo_snapshot(tab, "modify inside BEDIT");
+        app.tabs[tab]
+            .scene
+            .document
+            .get_entity_mut(line)
+            .map(|e| {
+                if let EntityType::Line(l) = e {
+                    l.end = Vector3::new(99.0, 0.0, 0.0);
+                }
+            })
+            .expect("line in definition");
+        app.finish_pending_history(tab);
+
+        let _ = app.dispatch_command("BEDIT_DISCARD");
+        app.finish_pending_history(tab);
+        assert_eq!(definition_state(&app, "BLK"), entry, "discard restores entry");
+
+        app.undo_steps(1);
+        // Pinned: the state after one undo, observed on current code.
+        assert_eq!(
+            definition_state(&app, "BLK"),
+            entry,
+            "documenting: undo after discard restores the entry state (ISS-02 not reproduced here)"
+        );
+    }
+
+    /// Documenting: undo during a session crosses the entry boundary. A
+    /// single undo after an in-session edit may revert the BEDIT_BEGIN step.
+    #[test]
+    fn documenting_undo_inside_session_crosses_entry_boundary() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        begin_bedit(&mut app, insert);
+        let tab = app.active_tab;
+        app.push_undo_snapshot(tab, "add circle in BEDIT");
+        add_circle_in_bedit(&mut app);
+        app.finish_pending_history(tab);
+        assert_eq!(block_members(&app, "BLK").len(), 2);
+
+        app.undo_steps(1);
+        // Documenting: undo removes the circle from the entity store but leaves
+        // its handle in the block record, so the definition holds a dangling
+        // member. Expected to flip in Phase 1 (members should match the store).
+        let members = block_members(&app, "BLK");
+        assert_eq!(members.len(), 2, "documenting: block record keeps the undone handle");
+        let dangling = members
+            .iter()
+            .filter(|h| app.tabs[tab].scene.document.get_entity(**h).is_none())
+            .count();
+        assert_eq!(dangling, 1, "documenting: one member handle has no entity");
+        assert!(
+            app.tabs[tab].active_block_edit.is_some(),
+            "documenting: undo does not close the session"
+        );
+    }
+
+    /// Documenting: undoing the BEDIT_BEGIN step itself, while the session is
+    /// still open, leaves the editor open. Records whether the undo reaches
+    /// across the entry boundary.
+    #[test]
+    fn documenting_undo_across_entry_leaves_session_open() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        let tab = app.active_tab;
+        begin_bedit(&mut app, insert);
+        app.finish_pending_history(tab);
+        let depth_after_begin = undo_depth(&app);
+        assert!(depth_after_begin >= 1, "BEDIT_BEGIN recorded an undo step");
+
+        app.undo_steps(1);
+        assert!(
+            app.tabs[tab].active_block_edit.is_some(),
+            "documenting: undoing BEDIT_BEGIN does not close the open session"
+        );
+    }
+
+    /// Documenting: BEDIT on a block while another block is open nests a
+    /// second session. Records the resulting stack.
+    #[test]
+    fn documenting_nested_bedit_opens_second_session() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        let tab = app.active_tab;
+        app.tabs[tab].scene.define_block_raw(
+            "OTHER",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(5.0, 0.0, 0.0),
+            ))],
+        );
+        let other_insert = app.tabs[tab]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new(
+                "OTHER",
+                Vector3::new(200.0, 0.0, 0.0),
+            )))
+            .expect("insert");
+        begin_bedit(&mut app, insert);
+        begin_bedit(&mut app, other_insert);
+        assert_eq!(
+            app.tabs[tab].block_edits.len(),
+            2,
+            "documenting: a second BEDIT pushes a nested session"
+        );
+    }
+
+    /// Documenting: BEDIT_BEGIN pushes an undo entry, and BEDIT_SAVE and
+    /// BEDIT_DISCARD push none. Phase 1 may change this.
+    #[test]
+    fn documenting_save_and_discard_push_no_undo_entry() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (insert, _) = setup_block_and_insert(&mut app);
+        begin_bedit(&mut app, insert);
+        app.finish_pending_history(app.active_tab);
+        let after_begin = undo_depth(&app);
+
+        let _ = app.dispatch_command("BEDIT_SAVE");
+        app.finish_pending_history(app.active_tab);
+        assert_eq!(undo_depth(&app), after_begin, "save pushes no undo entry");
+
+        begin_bedit(&mut app, insert);
+        app.finish_pending_history(app.active_tab);
+        let before_discard = undo_depth(&app);
+        let _ = app.dispatch_command("BEDIT_DISCARD");
+        app.finish_pending_history(app.active_tab);
+        assert_eq!(
+            undo_depth(&app),
+            before_discard,
+            "discard pushes no undo entry (not undoable)"
+        );
+    }
+}
